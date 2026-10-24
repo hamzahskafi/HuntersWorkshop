@@ -75,7 +75,7 @@ namespace BloodborneLauncher.Core
             ["exp_thread_priority"] = true,
             ["exp_sleep_spin"] = true,
             ["exp_async_pipelines"] = true,
-            ["exp_fast_loading"] = true,
+            ["exp_fast_loading"] = false,
             ["exp_hot_pages"] = true,
             ["exp_guest_in_place"] = true,
             ["exp_native_calls"] = true,
@@ -148,6 +148,12 @@ namespace BloodborneLauncher.Core
                     if (!saved.ContainsKey(PerfDefaultsMarker))
                         foreach (var (key, value) in PerfDefaults)
                             _data[key] = value;
+                    // After 0.1.0: fast loading off once (0.1.0 saved it on as the default). Holding loading
+                    // screens to 30 FPS switches the game's frame pace twice a load, which shows in the
+                    // frame statistics, for a gain only ever measured against uncapped (never against
+                    // 60). On again only by choice.
+                    if (!saved.ContainsKey("fast_loading_default_off"))
+                        _data["exp_fast_loading"] = false;
                     // Older launchers kept the shadNet password in plain text: encrypted now, and
                     // the file rewritten without it.
                     if (Str("online_password") is { Length: > 0 } plain && !Secret.IsProtected(plain))
@@ -169,6 +175,7 @@ namespace BloodborneLauncher.Core
             }
             _data["legacy_shaders_default_98"] = true;
             _data["occlusion_off_99"] = true;
+            _data["fast_loading_default_off"] = true;
             _data[PerfDefaultsMarker] = true;
         }
 
@@ -178,7 +185,7 @@ namespace BloodborneLauncher.Core
         private static readonly (string Key, bool Value)[] PerfDefaults =
         {
             ("exp_frame_pacing", true), ("exp_thread_priority", true), ("exp_sleep_spin", true),
-            ("exp_fast_loading", true), ("exp_hot_pages", true), ("exp_guest_in_place", true),
+            ("exp_hot_pages", true), ("exp_guest_in_place", true),
             ("exp_native_calls", true), ("legacy_shaders", false),
         };
 
