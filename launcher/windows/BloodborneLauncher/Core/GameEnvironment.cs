@@ -181,6 +181,7 @@ namespace BloodborneLauncher.Core
             if (output.StartsWith("directsound")) env["SDL_AUDIO_DRIVER"] = "directsound";
             if (output == "directsound_large") env["SDL_AUDIO_DEVICE_SAMPLE_FRAMES"] = "2048";
             if (s.Bool("exp_fast_loading")) env["BB_FAST_LOADING"] = "1";
+            if (!s.Bool("exp_frame_fixes")) env["BB_FRAME_FIXES"] = "0";
             if (s.Bool("exp_hot_pages")) env["BB_HOT_PAGES"] = "2";
             // The PC memory model (the GPU reads the game's memory in place; the engine checks the
             // GPU first and keeps copying where it cannot) and the game's draw calls handed over
@@ -208,6 +209,7 @@ namespace BloodborneLauncher.Core
             {
                 // Safe mode (after a crash, one run): every experimental engine option and the mods off.
                 env.Remove("BB_FAST_LOADING");
+                env["BB_FRAME_FIXES"] = "0";
                 env.Remove("BB_HOT_PAGES");
                 env.Remove("BB_GUEST_IN_PLACE");
                 env.Remove("BB_NATIVE_CALLS");
