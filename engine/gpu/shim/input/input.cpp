@@ -227,7 +227,8 @@ extern "C" int bbgpu_pc_input(BbPcPad* d,const bool* keys,int nkeys,int gamepad_
                 if((navigating||free_move) && scroll>0)p.buttons|=0x10;if((navigating||free_move) && scroll<0)p.buttons|=0x40;
                 p.buttons|=menu_pointer_take_press();
             }
-            const uint32_t closing=menu_confirm_button()|menu_back_button();
+            // Options (Escape) closes a menu as well: W held through it was a d-pad up in the world.
+            const uint32_t closing=menu_confirm_button()|menu_back_button()|0x8u;
             if(p.buttons&~last_buttons&closing){dpad_blocked|=dpad_held;settle_until=SDL_GetTicks()+250;}
         }else {
             bool mh[kBindCount]={};host_bindings_mouse_held(buttons|edges|(scroll>0?32:scroll<0?64:0),mh);

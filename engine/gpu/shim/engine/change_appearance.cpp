@@ -142,6 +142,13 @@ void change_appearance_tick() {
             if (g_opened++ < 4) Log("change appearance: the editor's frame opened (ChrMake_BG, preview of the hunter)");
         }
     }
+    // Out of the world (quit to the title, a disconnect) with the editor open: its frame belongs
+    // to the world that went, so it goes with it.
+    if (g_desc && !world_player_block(nullptr)) {
+        close_frame();
+        if (g_list) release_list();
+        Log("change appearance: the editor's frame closed on leaving the world");
+    }
     if (g_desc) {
         const std::uint64_t ctl = rd64(g_desc + 0x60);
         if (ctl) Call(rd64(rd64(ctl) + 0x18), ctl, &g_active);
