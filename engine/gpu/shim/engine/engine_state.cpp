@@ -137,5 +137,7 @@ void menu_steps_notify(const std::uint64_t* saved) {
     }
 }
 std::uint64_t menu_steps_take(int w) { return w>=0 && w<count?watches[w].made.exchange(0,std::memory_order_acq_rel):0; }
-void menu_step_release(std::uint64_t step) { if (--*menu_step_count(step)==0) Call(Pointer(Pointer(step)),step); }
+void menu_step_release(std::uint64_t step) {
+    if (__atomic_sub_fetch(menu_step_count(step),1,__ATOMIC_ACQ_REL)==0) Call(Pointer(Pointer(step)),step);
+}
 }

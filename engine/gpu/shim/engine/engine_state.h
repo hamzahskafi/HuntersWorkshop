@@ -30,7 +30,8 @@ int menu_steps_watch(std::uint64_t type,const char16_t* name);
 void menu_steps_notify(const std::uint64_t* saved);
 std::uint64_t menu_steps_take(int watch);
 inline std::int32_t* menu_step_count(std::uint64_t step) { return reinterpret_cast<std::int32_t*>(step+8); }
-inline void menu_step_hold(std::uint64_t step) { ++*menu_step_count(step); }
+// The count is the game's, which its own threads change too: held and released atomically.
+inline void menu_step_hold(std::uint64_t step) { __atomic_add_fetch(menu_step_count(step),1,__ATOMIC_ACQ_REL); }
 void menu_step_release(std::uint64_t step);
 template<typename T,typename... A> T hle_call_guest(void* fn,A... a) { return static_cast<T>(Call(reinterpret_cast<std::uint64_t>(fn),a...)); }
 }
