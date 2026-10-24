@@ -14,11 +14,11 @@ internal static class Program
     public static void Main(string[] args) => BuildAvaloniaApp().StartWithClassicDesktopLifetime(args, ShutdownMode.OnMainWindowClose);
 
     public static AppBuilder BuildAvaloniaApp() =>
-        AppBuilder.Configure<LanternApp>().UsePlatformDetect();
+        AppBuilder.Configure<WorkshopApp>().UsePlatformDetect();
 }
 
 /// <summary>The application: theme, the checks made once at start, and the crash log (App.xaml.cs in WPF).</summary>
-internal sealed class LanternApp : Application
+internal sealed class WorkshopApp : Application
 {
     private static readonly string CrashLog = Path.Combine(Core.Paths.ConfigDir, "crash.log");
 

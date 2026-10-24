@@ -286,7 +286,7 @@ namespace BloodborneLauncher.Core
             var folder = Path.GetDirectoryName(self)!;
             // A folder of its own each time: one an antivirus still holds a file in (from an earlier
             // attempt) cannot be deleted, and must not stop this one.
-            var parent = Path.Combine(Path.GetTempPath(), "lantern-engine-update");
+            var parent = Path.Combine(Path.GetTempPath(), "hunters-workshop-update");
             if (Directory.Exists(parent))
             {
                 foreach (var old in Directory.GetDirectories(parent).Append(parent))

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The GPUs, drivers and CPUs in a folder of players' logs (docs/COMPATIBILITY.md, "Who plays"), and
 # the Vulkan extensions each GPU's driver lacks ("Extension ... unavailable").
-#   tools/hardware_census.sh <folder of lantern-*.log / last_session.log / message.txt>
+#   tools/hardware_census.sh <folder of players' *.log / last_session.log / message.txt>
 set -uo pipefail
 folder=${1:?a folder of logs}
 mapfile -t logs < <(grep -rl --include='*.log' --include='*.txt' -e '^GPU: ' -e '^CPU: ' "$folder")

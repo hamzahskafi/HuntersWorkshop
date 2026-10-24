@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Linux package of the Hunter's Workshop: builds the engine (engine/build.sh) in the Ubuntu 24.04
+# Linux package of Hunter's Workshop: builds the engine (engine/build.sh) in the Ubuntu 24.04
 # environment of setup-ubuntu.sh (or the Dockerfile) and writes
-# engine/out/package/LanternEngine-v<version>-linux-x64.tar.gz.
+# engine/out/package/HuntersWorkshop-v<version>-linux-x64.tar.gz.
 #
 #   packaging/linux/build.sh <version> [package-template folder] [launcher folder]
 #
@@ -24,7 +24,7 @@ export LDFLAGS=${LDFLAGS:--fuse-ld=lld}
 # The profiles in pgo/ come from Windows runs: built without one.
 BB_PGO=${BB_PGO:-off} bash build.sh
 
-root=out/package/LanternEngine
+root=out/package/HuntersWorkshop
 bin=$root/engine/out
 rm -rf out/package
 mkdir -p "$bin/gpu"
@@ -69,10 +69,10 @@ find "$root" -type f \( -name '*.sh' -o -name '*.py' -o -name '*.ini' -o -name '
     -o -name bb-start \) -exec sed -i 's/\r$//' {} +
 # The engine id is the Windows launcher's (Updater.EngineId), as build.ps1 writes it; BB_ENGINE_ID
 # when the launcher's source is not beside the engine.
-engine_id=${BB_ENGINE_ID:-$(sed -n 's/.*EngineId = "\([^"]*\)".*/\1/p' "$engine/../launcher/BloodborneLauncher/Core/Updater.cs" 2>/dev/null || true)}
+engine_id=${BB_ENGINE_ID:-$(sed -n 's/.*EngineId = "\([^"]*\)".*/\1/p' "$engine/../launcher/windows/BloodborneLauncher/Core/Updater.cs" 2>/dev/null || true)}
 printf '{ "version": "%s", "engine": "%s", "platform": "linux-x64" }\n' "$version" "${engine_id:-unknown}" \
     > "$root/package.json"
 
-archive=out/package/LanternEngine-v$version-linux-x64.tar.gz
-tar -C out/package -czf "$archive" LanternEngine
+archive=out/package/HuntersWorkshop-v$version-linux-x64.tar.gz
+tar -C out/package -czf "$archive" HuntersWorkshop
 echo "Package: $engine/$archive ($(du -h "$archive" | cut -f1))"

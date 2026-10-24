@@ -31,12 +31,12 @@ namespace BloodborneLauncher.Core
                 var file = customFile.Length > 0 && File.Exists(customFile) ? customFile : null;
                 if (file != null && Scaled(file, volume / 100.0) is { } scaled)
                 {
-                    file = Path.Combine(Path.GetTempPath(), "lantern-chime-custom.wav");
+                    file = Path.Combine(Path.GetTempPath(), "hunters-workshop-chime-custom.wav");
                     File.WriteAllBytes(file, scaled);
                 }
                 if (file == null)
                 {
-                    file = Path.Combine(Path.GetTempPath(), $"lantern-chime-{volume}.wav");
+                    file = Path.Combine(Path.GetTempPath(), $"hunters-workshop-chime-{volume}.wav");
                     if (!File.Exists(file)) File.WriteAllBytes(file, Wave(volume / 100.0));
                 }
                 // MP3, MP4/M4A: a media player that decodes them, at the volume; a .wav (ours, or

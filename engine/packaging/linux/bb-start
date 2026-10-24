@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The Linux package's start program (engine/out/bb-start), as engine\out\bb-start.exe is on
 # Windows: the launcher runs it with --game-dir and its environment (BB_DATA_DIR, BB_CONFIG, the
-# settings as BB_* variables); lantern.sh runs it from a terminal. It runs the engine's run.sh,
+# settings as BB_* variables); play.sh runs it from a terminal. It runs the engine's run.sh,
 # which prepares the boot image, mods and patches and starts out/bb-probe.
 #
 #   bb-start [--game-dir DIR] [bb-probe options...]
@@ -15,8 +15,8 @@ if [[ ${1:-} == --game-dir ]]; then
 fi
 export BB_PREBUILT=1
 export BB_DATA_DIR=${BB_DATA_DIR:-$package}
-export BB_CONFIG=${BB_CONFIG:-$BB_DATA_DIR/lantern.ini}
-[[ -f $BB_CONFIG ]] || cp "$engine/lantern.default.ini" "$BB_CONFIG"
+export BB_CONFIG=${BB_CONFIG:-$BB_DATA_DIR/config.ini}
+[[ -f $BB_CONFIG ]] || cp "$engine/config.default.ini" "$BB_CONFIG"
 # The shader and pipeline caches in user/cache, as bb-start.exe keeps them on Windows.
 export BB_GPU_USER_DIR=${BB_GPU_USER_DIR:-$BB_DATA_DIR/user}
 mkdir -p "$BB_GPU_USER_DIR"

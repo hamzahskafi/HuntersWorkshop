@@ -14,7 +14,7 @@ from paths import ROOT
 
 class LinuxOnlineStartupTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix='lantern online ')
+        self.temp = tempfile.TemporaryDirectory(prefix='hunters workshop online ')
         self.addCleanup(self.temp.cleanup)
         self.data = Path(self.temp.name)
         self.engine = self.data / 'engine'
@@ -28,7 +28,7 @@ class LinuxOnlineStartupTests(unittest.TestCase):
         for name in ('prepare.py', 'link_libc.py', 'link_modules.py', 'content_profile.py',
                      'engine_features.py', 'patches.py'):
             (scripts / name).touch()
-        self.config = self.data / 'lantern.ini'
+        self.config = self.data / 'config.ini'
         self.game = self.data / 'game'
         self.game.mkdir()
         (self.game / 'eboot.bin').touch()

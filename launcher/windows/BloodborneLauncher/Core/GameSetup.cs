@@ -196,7 +196,7 @@ namespace BloodborneLauncher.Core
                 var target = Path.Combine(gameDir, Path.GetRelativePath(update, file));
                 Directory.CreateDirectory(Path.GetDirectoryName(target)!);
                 // Through a temporary file: a copy stopped half way never leaves a cut eboot.bin.
-                var part = target + ".lantern-part";
+                var part = target + ".part";
                 using (var from = File.OpenRead(file))
                 using (var to = File.Create(part))
                 {

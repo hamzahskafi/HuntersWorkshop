@@ -901,7 +901,7 @@ namespace BloodborneLauncher
                 _sidebar.BorderThickness = new Thickness(1);
                 _sidebar.SetResourceReference(Border.BackgroundProperty, "PillTrackBrush");
                 _sidebar.SetResourceReference(Border.BorderBrushProperty, "GlassPaneStrokeBrush");
-                // Settings once, in the LANTERN group (Classic has it at the bottom too).
+                // Settings once, in the ENGINE group (Classic has it at the bottom too).
                 _classicSettingsBottom.IsVisible = false;
                 foreach (var item in _classic)
                     item.Classes.Add("Glass");
@@ -1283,7 +1283,7 @@ namespace BloodborneLauncher
                         string.Join("\n", skipped.Take(5)) +
                         L.T("\n\nThe game runs without them; online play may need ") +
                         L.F($"them. Allow the Hunter's Workshop folder in the antivirus and update again, or take them from {Updater.ReleasesPage}"));
-                LanternApp.Quit();
+                WorkshopApp.Quit();
             }
             catch (Exception ex)
             {

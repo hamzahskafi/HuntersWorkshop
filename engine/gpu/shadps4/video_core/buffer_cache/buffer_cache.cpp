@@ -2418,7 +2418,7 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::GuestChunkSource(VAddr
     if (!buffer) {
         buffer = std::make_unique<Buffer>(instance, chunk->size, chunk->memory,
                                           BbGuestMemory::ChunkHandleType(), BbGuestMemory::ChunkUsage,
-                                          fmt::format("lantern guest memory {:#x}", chunk->phys));
+                                          fmt::format("guest memory {:#x}", chunk->phys));
     }
     return std::pair<const Buffer*, u64>{buffer.get(), phys - chunk->phys};
 }
@@ -2486,7 +2486,7 @@ void BufferCache::VerifyChunkRoute(const Buffer* arena, VAddr addr, u64 size,
     ++verify_in_second;
     if (!verify_buffer) {
         verify_buffer = std::make_unique<Buffer>(instance, 0, u64{VerifySlots} * 3 * VerifyBytes,
-                                                 MemoryType::HostCached, "lantern chunk verify");
+                                                 MemoryType::HostCached, "chunk verify");
     }
     const u32 slot = static_cast<u32>(std::countr_zero(verify_free_slots));
     verify_free_slots &= ~(u64{1} << slot);

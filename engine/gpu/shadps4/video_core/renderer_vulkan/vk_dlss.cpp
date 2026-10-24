@@ -376,7 +376,7 @@ struct DlssUpscaler::Impl {
             return;
         }
         std::error_code ec;
-        const auto data_dir = std::filesystem::temp_directory_path(ec) / "lantern-ngx";
+        const auto data_dir = std::filesystem::temp_directory_path(ec) / "hunters-workshop-ngx";
         std::filesystem::create_directories(data_dir, ec);
         const std::wstring data_path = data_dir.wstring();
         const auto paths = SearchPaths();
