@@ -42,7 +42,7 @@ Hunter's Workshop started from [Lantern Engine](https://github.com/Awakenchan/La
 | Engine starting point | [DarkIzuku/bloodborne_pc](https://github.com/DarkIzuku/bloodborne_pc), built on [bbport](https://github.com/deadinside28/bloodborne_pc) and [shadPS4](https://github.com/shadps4-emu/shadPS4) |
 | VRAM cleanup and frame pacing | adapted from [IFreemz/shadPS4-Bloodborne-DLSS-FSR](https://github.com/IFreemz/shadPS4-Bloodborne-DLSS-FSR) |
 | Crash and controller fixes | adapted from [AwesomeObserver](https://github.com/AwesomeObserver/bloodborne_pc), [Supermedo](https://github.com/Supermedo/bloodborne_pc) and [deadinside28](https://github.com/deadinside28/bloodborne_pc) |
-| PC controls, camera, menus, cheats, online sign-in, occlusion culling and trophy research | [droogie/bbhost](https://github.com/droogie/bbhost) |
+| PC controls, camera, menus, cheats, online sign-in, occlusion culling, trophy research and the frame-rate corrections (with findings from Kyo's later FPS++ lists and yogesh1239) | [droogie/bbhost](https://github.com/droogie/bbhost) |
 | Linux online start and the bound on runaway particle work | [Lena Różalska](https://github.com/DecayingEagle) |
 | Online servers | [The Hunter's Dream](https://thehuntersdream.com) |
 | FSR 3.1 and FSR 4 on Vulkan | [FireBurn/FSR-Vulkan](https://github.com/FireBurn/FSR-Vulkan) and the AMD FidelityFX SDK |
