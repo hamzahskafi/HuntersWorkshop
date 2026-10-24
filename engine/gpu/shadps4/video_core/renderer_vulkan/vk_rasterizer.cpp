@@ -2466,7 +2466,7 @@ std::pair<vk::Buffer, u64> Rasterizer::ClampDispatchArgs(const VideoCore::Buffer
         const auto& counts = instance.GetPhysicalDevice().getProperties().limits.maxComputeWorkGroupCount;
         p.limit = {counts[0], counts[1], counts[2]};
         std::printf("GPU: indirect dispatches read their group counts clamped to %u x %u x %u "
-                    "(BB_INDIRECT_CLAMP=0: as the game wrote them)\n",
+                    "(BB_INDIRECT_CLAMP=1)\n",
                     p.limit[0], p.limit[1], p.limit[2]);
         return p;
     }();
@@ -2531,10 +2531,13 @@ void Rasterizer::DispatchIndirectRecord(const ComputePipeline* pipeline, VAddr a
 
     scheduler.EndRendering();
     // bbport: the counts clamped before the game's pipeline and descriptors are bound (the clamp
-    // binds its own); the crash report keeps reading the game's counts (CopyArgs).
+    // binds its own); the crash report keeps reading the game's counts (CopyArgs). Off unless
+    // BB_INDIRECT_CLAMP=1 (the launcher's "Particle work safety cap"): the clamp's dispatch and the
+    // full barrier after it, before every indirect dispatch, cost smoothness in effect-heavy scenes,
+    // and only a GPU fed a wrong count (a device lost on RADV) needs it.
     static const bool clamp = [] {
         const char* env = std::getenv("BB_INDIRECT_CLAMP");
-        return !(env && env[0] == '0');
+        return env && env[0] == '1';
     }();
     const std::pair<vk::Buffer, u64> dispatch =
         clamp ? ClampDispatchArgs(buffer, base) : std::pair<vk::Buffer, u64>{buffer->Handle(), base};

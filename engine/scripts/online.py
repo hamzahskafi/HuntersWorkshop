@@ -66,7 +66,7 @@ def game_overrides(game_api):
     overrides.update({h: f'{urlsplit(game_api).scheme}://{urlsplit(game_api).hostname}:{GAME_API_PORT}' for h in PLAY_LOG_HOSTS})
     return overrides
 
-# BB_ONLINE_PAUSED=1 keeps the game offline whatever lantern.ini says.
+# BB_ONLINE_PAUSED=1 keeps the game offline whatever config.ini says.
 ONLINE_PAUSED = os.environ.get('BB_ONLINE_PAUSED', '0') == '1'
 
 

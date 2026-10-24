@@ -7,7 +7,8 @@
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <AssemblyName>Lantern Engine</AssemblyName>
+    <AssemblyName>Hunters Workshop</AssemblyName>
+    <Version>0.1.0</Version>
     <RootNamespace>BloodborneLauncher</RootNamespace>
     <DefineConstants>$(DefineConstants);AVALONIA</DefineConstants>
     <ApplicationIcon>..\BloodborneLauncher\app.ico</ApplicationIcon>
@@ -35,7 +36,6 @@
     <EmbeddedResource Include="..\BloodborneLauncher\lantern-j3loo.ico" LogicalName="lantern-j3loo.ico" />
     <EmbeddedResource Include="..\BloodborneLauncher\Localization\*.json" LogicalName="BloodborneLauncher.Localization.%(Filename)%(Extension)" />
     <!-- The Discord status preview's picture (Settings › Community). -->
-    <AvaloniaResource Include="..\BloodborneLauncher\Assets\discord-logo.png" Link="Assets\discord-logo.png" />
     <!-- Fluent System Icons (Microsoft, MIT licence), the icon fonts WPF-UI carries: the same icons
          as the WPF launcher, on every platform. -->
     <AvaloniaResource Include="Assets\Fonts\*.ttf" />

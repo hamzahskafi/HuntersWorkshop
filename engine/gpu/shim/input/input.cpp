@@ -77,7 +77,7 @@ bool Install(uint8_t* base,size_t size) {
     if(!BbSettings::Get().pc_controls)return false;
     image={{reinterpret_cast<uint64_t>(base),size},kEboot109Sha256};
     host_bindings_load_defaults();
-    if(FILE* f=std::fopen((std::getenv("BB_CONFIG")?std::getenv("BB_CONFIG"):"lantern.ini"),"r")) {
+    if(FILE* f=std::fopen((std::getenv("BB_CONFIG")?std::getenv("BB_CONFIG"):"config.ini"),"r")) {
         char line[512];
         while(std::fgets(line,sizeof line,f)) {
             char* eq=std::strchr(line,'=');if(!eq)continue;*eq++=0;

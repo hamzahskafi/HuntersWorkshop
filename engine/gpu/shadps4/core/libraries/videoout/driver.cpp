@@ -1171,7 +1171,7 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
         main_port.vblank_cv.notify_all();
     };
 
-    // Lantern Engine pacing for immediate flips (lantern_pacing.h; BB_PRECISE_PACING, on by
+    // Hunter's Workshop pacing for immediate flips (lantern_pacing.h; BB_PRECISE_PACING, on by
     // default on Windows). Vblank ticks and flips each follow a cadence of their own: ticks one
     // vblank period apart, flips one pace period apart (the frame limit's, or the vblank period
     // without one). A flip may take its slot a sixteenth of a period early; one that comes more
@@ -1201,8 +1201,8 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
         // 480 ticks a second took a core from the game's threads on 6-8 core CPUs.
         const auto max_spin = std::min<std::chrono::nanoseconds>(std::chrono::microseconds(1500),
                                                                  vblank_period / 8);
-        // Flips locked to the display's vblanks (LanternPacing::VblankPacing; BB_VBLANK_PACING=0
-        // turns it off): on a fixed refresh display whose refresh is a whole number N of frame
+        // Flips locked to the display's vblanks (LanternPacing::VblankPacing; off unless
+        // BB_VBLANK_PACING=1): on a fixed refresh display whose refresh is a whole number N of frame
         // limits (60 FPS on 60, 120, 180 or 240 Hz), the flip period is N measured refreshes and
         // each slot sits just past a vblank, so every frame is shown for exactly N refreshes. A
         // cadence of its own drifts against the display's clock and its flips cross vblanks now

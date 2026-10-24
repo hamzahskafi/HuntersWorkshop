@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// bbport_settings.cpp: the menu saves its keys into lantern.ini and keeps the launcher's (controls).
+// bbport_settings.cpp: the menu saves its keys into config.ini and keeps the launcher's (controls).
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>

@@ -199,7 +199,7 @@ static void report_guest_heap(void) {
                m.in_use/1048576.0,m.max_in_use/1048576.0,m.system/1048576.0,m.max_system/1048576.0);
     }
 }
-/* Controls: what each PS4 input is bound to. Defaults below; lantern.ini (BB_CONFIG) lines
+/* Controls: what each PS4 input is bound to. Defaults below; config.ini (BB_CONFIG) lines
  * key.<input>=<SDL key names> and pad.<input>=<SDL gamepad button names>, comma-separated,
  * replace an input's binding (empty: unbound). Inputs: the buttons (cross ... right, touchpad =
  * a left-side click, touchpad_right), and on the keyboard the sticks: move_* (left), look_*
@@ -227,7 +227,7 @@ enum { PAD_LEFT_TRIGGER=SDL_GAMEPAD_BUTTON_COUNT, PAD_RIGHT_TRIGGER }; /* trigge
 typedef struct { int key_count, pad_count; SDL_Scancode keys[MAX_BIND]; int pad[MAX_BIND]; } Binding;
 static Binding bindings[IN_COUNT];
 static int bindings_ready;
-/* bbport: stick options (lantern.ini): pad_swap_sticks=1 moves with the right stick and looks with
+/* bbport: stick options (config.ini): pad_swap_sticks=1 moves with the right stick and looks with
  * the left; pad_invert_look_x / pad_invert_look_y=1 invert the camera stick; pad_deadzone=N
  * (percent, 0-50) ignores small stick movement (worn sticks that drift). */
 static int pad_swap_sticks, pad_invert_look_x, pad_invert_look_y, pad_deadzone;

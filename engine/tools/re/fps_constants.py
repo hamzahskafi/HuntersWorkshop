@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Lantern Engine: where the game's code still assumes 30 frames a second.
+"""Hunter's Workshop: where the game's code still assumes 30 frames a second.
 
 Usage: fps_constants.py out/eboot.elf [patched-addresses.txt]
 

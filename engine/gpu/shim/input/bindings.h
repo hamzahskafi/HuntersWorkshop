@@ -12,7 +12,7 @@
 // Key Bindings screen lists them in: pages of seven
 // (engine/option_menu.cpp), the last one short.
 //
-// Defaults are overridden by bind.<action> records in lantern.ini, which both
+// Defaults are overridden by bind.<action> records in config.ini, which both
 // the WPF launcher and the native Key Bindings page write. A value names
 // the whole binding: E, Mouse2, X, Mouse2, or none. bbport: up to five inputs,
 // each a key or mouse input with Ctrl+, Shift+ or Alt+ before it: E, Shift+Q,

@@ -26,9 +26,9 @@ internal sealed class LanternApp : Application
     {
         RequestedThemeVariant = ThemeVariant.Dark;
         Styles.Add(new Avalonia.Themes.Fluent.FluentTheme());
-        Styles.Add(new StyleInclude(new Uri("avares://Lantern Engine/"))
+        Styles.Add(new StyleInclude(new Uri("avares://Hunters Workshop/"))
         {
-            Source = new Uri("avares://Lantern Engine/Themes/Styles.axaml"),
+            Source = new Uri("avares://Hunters Workshop/Themes/Styles.axaml"),
         });
     }
 
@@ -60,12 +60,6 @@ internal sealed class LanternApp : Application
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             var args = desktop.Args ?? Array.Empty<string>();
-            // The launcher's new name (0.9.34 beta 8): once, before anything else (Windows packages only).
-            if (Core.LanternRename.Run(args))
-            {
-                desktop.Shutdown();
-                return;
-            }
             string[] failed = Array.Empty<string>();
             // An update to the engine\ layout: the old top-level engine folders go first.
             if (Core.Paths.DetectPortDir() is { } package)
@@ -77,7 +71,7 @@ internal sealed class LanternApp : Application
             desktop.MainWindow = window;
             if (failed.Length > 0)
                 window.Opened += (_, _) => Dispatcher.UIThread.Post(() =>
-                    Views.Prompt.Tell("Lantern Engine", "These old files could not be removed (in use?) and can be deleted by hand:\n\n" +
+                    Views.Prompt.Tell("Hunter's Workshop", "These old files could not be removed (in use?) and can be deleted by hand:\n\n" +
                                                         string.Join("\n", failed)), DispatcherPriority.Background);
         }
         base.OnFrameworkInitializationCompleted();
@@ -99,7 +93,7 @@ internal sealed class LanternApp : Application
     {
         try
         {
-            var ini = Path.Combine(package, "lantern.ini");
+            var ini = Path.Combine(package, "config.ini");
             if (!File.Exists(ini)) return;
             var lines = File.ReadAllLines(ini);
             var lockOn = Array.FindIndex(lines, l => l.Trim() == "bind.lock_on=Mouse3");

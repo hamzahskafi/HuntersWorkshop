@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// bbport: frame generation (frame_gen in lantern.ini, BB_FRAME_GEN=fsr3). FSR 3.1 frame
+// bbport: frame generation (frame_gen in config.ini, BB_FRAME_GEN=fsr3). FSR 3.1 frame
 // interpolation (the vendored FireBurn/FSR-Vulkan 3.1.6 C API) makes one frame between two of the
 // game's own: 2x the frames shown, at the cost of holding each real frame back by half a frame.
 //
@@ -49,7 +49,7 @@ public:
     FrameGenerator(const Instance& instance, Scheduler& draw_scheduler);
     ~FrameGenerator();
 
-    /// FSR 3.1 chosen in the menu or lantern.ini, not failed, and not paused by the overload guard.
+    /// FSR 3.1 chosen in the menu or config.ini, not failed, and not paused by the overload guard.
     [[nodiscard]] bool Enabled() const;
     /// bbport: DLSS Frame Generation chosen, and Streamline runs it on this GPU (vk_streamline.h).
     [[nodiscard]] static bool DlssWanted();

@@ -9,7 +9,7 @@ Source: https://github.com/droogie/bbhost/tree/7c790536c2c27ad7bb5115e3b1a12d7ff
 `dream_mirror_layout.cpp` and `gcn/container.cpp` (DCX).
 `gpu/shim/engine/camera.cpp` adapts `engine/camera.cpp` and the typed repository
 lookup in `engine/params.cpp`. Its sliders and the WPF launcher share the existing
-`lantern.ini`; no bbhost renderer or second configuration store is introduced.
+`config.ini`; no bbhost renderer or second configuration store is introduced.
 `gpu/shim/engine/option_menu.cpp` adapts the native row, caption, section opener and
 System builder from `engine/option_menu.cpp`. `menu_memory.cpp` adapts bbhost's
 Scaleform heap sizes. `tools/engine/menu_assets.cpp` adapts the independent GFX,

@@ -894,7 +894,7 @@ void runtime_memory_set_cpu_write_hook(GpuRange hook) {
         void *bits=mmap(NULL,WATCH_LIMIT>>15,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS|MAP_NORESERVE,-1,0);
         if (bits==MAP_FAILED)
 #endif
-        { perror("Lantern Engine: write watch bitmap"); return; }
+        { perror("Hunter's Workshop: write watch bitmap"); return; }
         write_watch=bits;
     }
     hook_cpu_write=hook;

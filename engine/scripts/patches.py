@@ -157,11 +157,11 @@ def frame_rate_fixes(writes, fps, elf=None):
     return out
 
 
-# Upscaler presets (lantern.ini "preset", the in-game menu): output / render size ratio. The game
+# Upscaler presets (config.ini "preset", the in-game menu): output / render size ratio. The game
 # then renders at 1920x1080 / ratio and the port's temporal upscaler restores the output size.
 OUTPUT_SIZE=(1920,1080)
 PRESET_SCALES=[1.0,1.5,1.7,2.0,3.0]
-# Preset 5 (Custom): lantern.ini render_scale, 1.0-3.0.
+# Preset 5 (Custom): config.ini render_scale, 1.0-3.0.
 PRESET_CUSTOM=len(PRESET_SCALES)
 
 
@@ -177,7 +177,7 @@ def preset_scale(settings):
 # and the UI movie viewport. Keep the latter at native size so glyph rasterisation and
 # vector tessellation do not inherit the scene's FSR resolution.
 RESOLUTION_TEMPLATE='Resolution Patch 1280x720 (16:9)'
-# Effect switches (lantern.ini, in-game menu, launcher): key -> (patch when the key is 0, patch
+# Effect switches (config.ini, in-game menu, launcher): key -> (patch when the key is 0, patch
 # when it is 1). The game reads these at start; a change applies after a restart.
 EFFECTS={
     'effect_chromatic_aberration':('Disable Chromatic Aberration',None),
@@ -258,10 +258,10 @@ def validate_patch_requirements(names, game):
                              + (' The installed mod has the font unpacked (a DbgFont14h-tpf-dcx folder): '
                                 'repack it with WitchyBND, or use the packed files' if unpacked else '')
                              + '. The fonts: https://www.nexusmods.com/bloodborne/mods/253; or turn the '
-                             'debug menu off (debug_menu in lantern.ini)')
+                             'debug menu off (debug_menu in config.ini)')
 
 
-# A key lantern.ini doesn't have takes the engine's default (bbport_settings.h Effects): these start off.
+# A key config.ini doesn't have takes the engine's default (bbport_settings.h Effects): these start off.
 DEFAULT_OFF=('effect_chromatic_aberration','effect_dof','effect_motion_blur','effect_game_aa')
 def effect_patches(settings):
     names=[]
@@ -302,7 +302,7 @@ def render_size(settings,override=''):
 
 
 def output_size(settings):
-    """Output (UI) size from lantern.ini output_res, e.g. 3840x2160; "auto" is the display's own
+    """Output (UI) size from config.ini output_res, e.g. 3840x2160; "auto" is the display's own
     (BB_DISPLAY_SIZE, from run_windows.py); 1920x1080 by default."""
     value=settings.get('output_res','').lower()
     if value=='auto': value=os.environ.get('BB_DISPLAY_SIZE','')
@@ -338,7 +338,7 @@ def scaled_sizes(settings):
 
 def ui_size(settings, out):
     """The game's UI movie viewport for an output of `out`: 1920x1080, or with Widescreen on
-    (lantern.ini widescreen, on by default) a screen of another shape, that shape around it -
+    (config.ini widescreen, on by default) a screen of another shape, that shape around it -
     2520x1080 at 21:9, 3840x1080 at 32:9, 1920x1200 at 16:10. Scaleform shows its 1920x1080
     stage whole and centred in it (the HUD stays 16:9 in the middle, as in bbhost), and what the
     game places past the stage - enemy gauges, co-op names, the lock-on marker at the screen's
@@ -690,13 +690,13 @@ def main():
     p.add_argument('--extra',default='',help='additional patch names, separated by ";"')
     p.add_argument('--app-version',default='01.09')
     p.add_argument('--out',type=Path,default=Path(__file__).resolve().parent.parent/'out')
-    p.add_argument('--settings',type=Path,default=Path(__file__).resolve().parent.parent/'lantern.ini')
+    p.add_argument('--settings',type=Path,default=Path(__file__).resolve().parent.parent/'config.ini')
     p.add_argument('--game-dir',type=Path,default=Path(os.environ.get('BB_GAME_DIR','../CUSA03173')))
     p.add_argument('--render-res',default='',help='render resolution WxH (overrides the preset)')
     p.add_argument('--print-preset-size',action='store_true',help='print the selected preset size, if reduced')
     p.add_argument('--output-res',default='',help='output resolution WxH (the upscaler\'s; the UI stays 1920x1080)')
     p.add_argument('--print-scaled',action='store_true',
-                   help='print "RENDER OUTPUT" (WxH) when lantern.ini selects an output other than 1080p')
+                   help='print "RENDER OUTPUT" (WxH) when config.ini selects an output other than 1080p')
     p.add_argument('--write-site-table',type=Path,metavar='EBOOT_ELF',
                    help='write the standard 1.09 site table next to the XML from a verified eboot.elf')
     a=p.parse_args()

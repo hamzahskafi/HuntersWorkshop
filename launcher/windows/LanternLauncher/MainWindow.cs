@@ -76,7 +76,7 @@ namespace BloodborneLauncher
 
         public MainWindow()
         {
-            Title = "Lantern Engine";
+            Title = "Hunter's Workshop";
             Width = 1040;
             Height = 780;
             MinWidth = 820;
@@ -100,7 +100,7 @@ namespace BloodborneLauncher
             // Layout, read once at start (Settings › Layout restarts the launcher to switch).
             var args = Environment.GetCommandLineArgs();
             var forced = Array.IndexOf(args, "--layout") is var at and >= 0 && at + 1 < args.Length ? args[at + 1] : null;
-            SettingRow.Classic = (forced ?? ws.Settings.Str("ui_layout")) == "classic";
+            SettingRow.Classic = (forced ?? ws.Settings.Str("ui_layout")) != "modern";
             LauncherTheme.Install(glass: !SettingRow.Classic);
 
             Content = Build();
@@ -114,7 +114,6 @@ namespace BloodborneLauncher
             ws.Logged += OnLogged;
             ws.Saved += () => _savedText.Text = L.F($"Saved {DateTime.Now:HH:mm:ss}");
             ws.GameStateChanged += UpdatePlayButton;
-            ws.GameStateChanged += UpdateDiscord;
             ws.GameCrashed += OnGameCrashed;
             ws.SignInRefused += OnSignInRefused;
             ws.Initialise();
@@ -179,8 +178,8 @@ namespace BloodborneLauncher
             if (args.Contains("--test-trophy"))
                 TrophyToast.Announce(TrophyTracker.ById[14]);
             ws.Log(Paths.IsPortDir(Paths.PortDir)
-                    ? L.F($"Lantern Engine ready. Engine: {Paths.PortDir}")
-                    : L.T("Lantern Engine ready. Choose the engine folder in Settings."),
+                    ? L.F($"Hunter's Workshop ready. Engine: {Paths.PortDir}")
+                    : L.T("Hunter's Workshop ready. Choose the engine folder in Settings."),
                 Paths.IsPortDir(Paths.PortDir) ? LogLevel.Good : LogLevel.Warn);
             Dispatcher.UIThread.Post(() =>
             {
@@ -446,7 +445,7 @@ namespace BloodborneLauncher
             grid.Children.Add(_searchArea);
 
             var title = new TextBlock { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, FontSize = 12, IsHitTestVisible = false };
-            var name = new Run("Lantern Engine") { FontWeight = FontWeight.SemiBold };
+            var name = new Run("Hunter's Workshop") { FontWeight = FontWeight.SemiBold };
             name.Bind(TextElement.ForegroundProperty, this.GetResourceObservable("TextFillColorPrimaryBrush"));
             _titlePage.Bind(TextElement.ForegroundProperty, this.GetResourceObservable("TextFillColorTertiaryBrush"));
             title.Inlines = new InlineCollection { name, _titlePage };
@@ -542,7 +541,7 @@ namespace BloodborneLauncher
             _classicSettingsBottom = Item(SymbolRegular.Settings24, L.T("Settings"), typeof(SettingsPage), bottom);
             dock.Children.Add(bottom);
 
-            // The hunt, how it looks, the workshop's mods and cheats, the Lantern Engine itself.
+            // The hunt, how it looks, the workshop's mods and cheats, the Hunter's Workshop itself.
             Header(L.T("HUNT"));
             _classicPlay = Item(SymbolRegular.Play24, L.T("Play"), typeof(PlayPage));
             _classicControls = Item(SymbolRegular.XboxController24, L.T("Controls"), typeof(ControlsPage));
@@ -556,7 +555,7 @@ namespace BloodborneLauncher
             // Cheats beside Mods & patches, once the engine applies them (as More's Cheats tab).
             if (CheatsPage.Supported)
                 _classicCheats = Item(SymbolRegular.Beaker24, L.T("Cheats"), typeof(CheatsPage));
-            Header(L.T("LANTERN"), new Thickness(18, 18, 0, 6));
+            Header(L.T("ENGINE"), new Thickness(18, 18, 0, 6));
             _classicSettings = Item(SymbolRegular.Settings24, L.T("Settings"), typeof(SettingsPage));
             _classicEngine = Item(SymbolRegular.Wrench24, L.T("Engine switches"), typeof(EnginePage));
             _classicOutput = Item(SymbolRegular.WindowConsole20, L.T("Game output"), typeof(OutputPage));
@@ -854,31 +853,17 @@ namespace BloodborneLauncher
         private void ToggleMaximize() =>
             WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
 
-        private DateTime? _gameStartedUtc;
-
-        /// <summary>Discord status: shown while the game runs (Core/DiscordPresence).</summary>
-        public void UpdateDiscord()
-        {
-            var running = Workspace.Current.Game.Running;
-            if (running && _gameStartedUtc == null) _gameStartedUtc = DateTime.UtcNow;
-            if (!running) _gameStartedUtc = null;
-            DiscordPresence.Update(Workspace.Current.Settings, running, _gameStartedUtc);
-        }
-
         private void OnClosing(object? sender, WindowClosingEventArgs e)
         {
             Workspace.Current.SaveNow();
             if (_closing || !Workspace.Current.Game.Running)
-            {
-                DiscordPresence.Stop();
                 return;
-            }
             e.Cancel = true;
             // After this event: the question needs the window on screen.
             Dispatcher.UIThread.Post(async () =>
             {
                 if (!IsVisible) ShowLauncher();
-                var answer = Prompt.Choose("Lantern Engine", L.T("The game is still running. Stop it and close the launcher?"),
+                var answer = Prompt.Choose("Hunter's Workshop", L.T("The game is still running. Stop it and close the launcher?"),
                     L.T("Cancel"), L.T("Keep it running"), L.T("Stop and close"));
                 if (answer <= 0) return;
                 _closing = true;
@@ -1297,7 +1282,7 @@ namespace BloodborneLauncher
                         L.T("Windows or an antivirus would not let these through, so the old ones were kept:\n") +
                         string.Join("\n", skipped.Take(5)) +
                         L.T("\n\nThe game runs without them; online play may need ") +
-                        L.F($"them. Allow the Lantern Engine folder in the antivirus and update again, or take them from {Updater.ReleasesPage}"));
+                        L.F($"them. Allow the Hunter's Workshop folder in the antivirus and update again, or take them from {Updater.ReleasesPage}"));
                 LanternApp.Quit();
             }
             catch (Exception ex)
@@ -1358,7 +1343,7 @@ namespace BloodborneLauncher
                 if (!Paths.IsPortDir(Paths.PortDir))
                 {
                     if (!Prompt.Confirm(L.T("Where is the engine?"),
-                            L.T("The launcher needs the Lantern Engine (the folder with run.py and bin\\bb-probe.exe). ") +
+                            L.T("The launcher needs the engine (the folder with run.py and bin\\bb-probe.exe). ") +
                             L.T("It is normally the folder the launcher came in."), L.T("Choose folder")))
                         return;
                     var folder = Ui.PickFolder(L.T("Port folder (with Bloodborne.exe and run.py)"));

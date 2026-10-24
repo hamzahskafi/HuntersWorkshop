@@ -27,7 +27,7 @@ protocol v1 and the required APIs can be updated without rebuilding this
 client. A future incompatible wire protocol still requires a client update.
 
 Remembering the account is optional and uses Windows DPAPI. Passwords and tokens
-never enter `lantern.ini` or `launcher-settings.json`. Copying a portable build to
+never enter `config.ini` or `launcher-settings.json`. Copying a portable build to
 another Windows account requires reentering the credentials. Offline mode clears
 inherited online settings before starting the runtime.
 

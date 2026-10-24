@@ -176,7 +176,7 @@ Presenter::Presenter(Frontend::WindowSDL& window_, AmdGpu::Liverpool* liverpool_
     // bbport: + 2: frame generation presents up to twice per game frame, and adds a swapchain
     // image; the menu's vertex buffers rotate over this many.
     BbOverlay::Init(instance, swapchain.GetSurfaceFormat().format, num_images + 2);
-    // bbport: HDR output (hdr in lantern.ini): frames, passes and the menu stay SDR; the encode
+    // bbport: HDR output (hdr in config.ini): frames, passes and the menu stay SDR; the encode
     // pass writes the HDR swapchain format chosen at start.
     if (const vk::Format hdr_format = swapchain.GetHdrFormat().format;
         hdr_format != vk::Format::eUndefined) {
@@ -1232,7 +1232,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
         });
     }
 
-    // bbport: HDR output (hdr in lantern.ini) while the swapchain has the HDR format.
+    // bbport: HDR output (hdr in config.ini) while the swapchain has the HDR format.
     const bool hdr_output = swapchain.IsHdrOutput() && hdr_pass.IsCreated();
     BbSettings::Get().hdr_output.store(
         !hdr_output ? BbSettings::HdrOutputOff

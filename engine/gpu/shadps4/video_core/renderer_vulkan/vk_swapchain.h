@@ -111,7 +111,7 @@ public:
         return needs_hdr;
     }
 
-    /// bbport: HDR output (hdr in lantern.ini): the HDR format chosen at start (format
+    /// bbport: HDR output (hdr in config.ini): the HDR format chosen at start (format
     /// eUndefined: none, SDR only). The frame images, passes and overlay keep the SDR format
     /// (GetSurfaceFormat); the presenter encodes into this one.
     vk::SurfaceFormatKHR GetHdrFormat() const {

@@ -20,7 +20,7 @@ namespace BloodborneLauncher.Build
         public const string SharedFolder = "Shared";
         public const string AppFolder = "LauncherApp";
         public const string StampName = "build-stamp.json";
-        public const string LauncherExe = "Bloodborne Launcher.exe";
+        public const string LauncherExe = "Hunters Workshop.exe";
         public const string BuilderExe = "Build Launcher.exe";
 
         private static readonly HashSet<string> SkippedFolders = new(StringComparer.OrdinalIgnoreCase)

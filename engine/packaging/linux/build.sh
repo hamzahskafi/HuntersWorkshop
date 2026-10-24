@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# Linux package of the Lantern Engine: builds the engine (engine/build.sh) in the Ubuntu 24.04
+# Linux package of the Hunter's Workshop: builds the engine (engine/build.sh) in the Ubuntu 24.04
 # environment of setup-ubuntu.sh (or the Dockerfile) and writes
 # engine/out/package/LanternEngine-v<version>-linux-x64.tar.gz.
 #
 #   packaging/linux/build.sh <version> [package-template folder] [launcher folder]
 #
-# The package mirrors the Windows one: the launcher ("Lantern Engine", the Avalonia launcher
-# published for linux-x64, when its folder is given), lantern.sh (starts the game from a terminal),
-# lantern.ini (shipped settings, also kept as engine/lantern.default.ini), and engine/ with run.sh,
+# The package mirrors the Windows one: the launcher ("Hunter's Workshop", the Avalonia launcher
+# published for linux-x64, when its folder is given), play.sh (starts the game from a terminal),
+# config.ini (shipped settings, also kept as engine/config.default.ini), and engine/ with run.sh,
 # its Python start scripts, the patches and FSR 4 shaders, and engine/out with bb-start, bb-probe,
 # its GPU library and SDL3. The player's system gives Vulkan, X11 or Wayland, Python 3 and
-# OpenSSL 3; saves, mods and logs stay next to lantern.sh.
+# OpenSSL 3; saves, mods and logs stay next to play.sh.
 set -euo pipefail
 engine=$(cd -- "$(dirname -- "$0")/../.." && pwd)
 version=${1:?usage: packaging/linux/build.sh <version> [package-template folder] [launcher folder]}
@@ -52,10 +52,9 @@ cp -r scripts patches data licenses "$root/engine/"
 for item in fsr4_shaders shader-catalog gamecontrollerdb.txt; do
     [[ ! -e $template/engine/$item ]] || cp -r "$template/engine/$item" "$root/engine/"
 done
-cp "$template/lantern.ini" "$root/engine/lantern.default.ini"
-cp "$template/lantern.ini" "$template/LICENSE" "$root/"
-install -m755 packaging/linux/lantern.sh "$root/lantern.sh"
-cp packaging/linux/README-linux.txt "$root/README.txt"
+cp "$template/config.ini" "$root/engine/config.default.ini"
+cp "$template/config.ini" "$template/LICENSE" "$root/"
+install -m755 packaging/linux/play.sh "$root/play.sh"
 if [[ -n $launcher ]]; then
     cp -r "$launcher"/. "$root/"
 fi
@@ -63,8 +62,8 @@ find "$root" -name __pycache__ -prune -exec rm -rf {} +
 # Files copied from a Windows drive come executable: only the programs and scripts are.
 find "$root" -type d -exec chmod 755 {} +
 find "$root" -type f -exec chmod 644 {} +
-chmod 755 "$root/lantern.sh" "$root/engine/run.sh" "$bin"/bb-* "$bin"/gpu/*.so* "$root"/engine/scripts/*.py
-[[ ! -f "$root/Lantern Engine" ]] || chmod 755 "$root/Lantern Engine"
+chmod 755 "$root/play.sh" "$root/engine/run.sh" "$bin"/bb-* "$bin"/gpu/*.so* "$root"/engine/scripts/*.py
+[[ ! -f "$root/Hunters Workshop" ]] || chmod 755 "$root/Hunters Workshop"
 # Files checked out on Windows: the scripts need Unix line ends.
 find "$root" -type f \( -name '*.sh' -o -name '*.py' -o -name '*.ini' -o -name '*.txt' -o -name '*.json' \
     -o -name bb-start \) -exec sed -i 's/\r$//' {} +

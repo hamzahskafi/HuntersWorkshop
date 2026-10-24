@@ -10,9 +10,9 @@ namespace BloodborneLauncher.Core
     public enum LogLevel { Info, Step, Good, Warn, Bad }
 
     /// <summary>
-    /// The launcher's shared state: settings, lantern.ini, the game process and its output, and the
+    /// The launcher's shared state: settings, config.ini, the game process and its output, and the
     /// activity log. Every edit calls SaveSoon, so nothing waits for the window to close and an
-    /// in-game change to lantern.ini is only overwritten by a change made here.
+    /// in-game change to config.ini is only overwritten by a change made here.
     /// </summary>
     public sealed class Workspace
     {
@@ -45,6 +45,8 @@ namespace BloodborneLauncher.Core
         public event Action? PortChanged;
 
         private DispatcherTimer? _saveTimer;
+        private DispatcherTimer? _inGameBackupTimer;
+        private int _inGameBackupBusy;
         private bool _iniWarned;
 
         /// <summary>The session being played, then the last one played (null before the first).</summary>
@@ -83,6 +85,11 @@ namespace BloodborneLauncher.Core
             _outputTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
             _outputTimer.Tick += (_, _) => FlushOutput();
             _outputTimer.Start();
+
+            // Save backups while the game runs (SaveBackups.CreateInGame), on a worker thread.
+            _inGameBackupTimer = new DispatcherTimer { Interval = SaveBackups.InGameEvery };
+            _inGameBackupTimer.Tick += (_, _) => BackUpInGame();
+            _inGameBackupTimer.Start();
             Game.Exited += code => Dispatch(() =>
             {
                 Log(code == 0 ? L.T("The game exited normally.") : L.F($"The game exited with code {code}."),
@@ -149,7 +156,7 @@ namespace BloodborneLauncher.Core
             }
 
             Ini.Load();
-            // The DLSS model moved from the launcher's settings to lantern.ini (dlss_preset), where the
+            // The DLSS model moved from the launcher's settings to config.ini (dlss_preset), where the
             // in-game menu changes it live: an older launcher's choice is carried over once.
             if (Paths.IsPortDir(Paths.PortDir) && Settings.Str("dlss_preset") is { Length: > 0 } dlss && dlss != "k")
             {
@@ -245,7 +252,7 @@ namespace BloodborneLauncher.Core
                 else if (!_iniWarned)
                 {
                     _iniWarned = true;
-                    Log("lantern.ini not written: the engine folder is not set (Settings › Lantern Engine).", LogLevel.Warn);
+                    Log("config.ini not written: the engine folder is not set (Settings › Engine).", LogLevel.Warn);
                 }
                 Saved?.Invoke();
             }
@@ -267,6 +274,29 @@ namespace BloodborneLauncher.Core
             {
                 if (SaveGuard.Secure(root) > 0)
                     Log(L.F($"Saves: safety copy made in {SaveGuard.VaultDir}."), LogLevel.Info);
+            });
+        }
+
+        private void BackUpInGame()
+        {
+            if (!Game.Running || !Settings.Bool("save_backups")) return;
+            if (System.Threading.Interlocked.Exchange(ref _inGameBackupBusy, 1) == 1) return;
+            var settings = Settings;
+            System.Threading.Tasks.Task.Run(() =>
+            {
+                try
+                {
+                    if (SaveBackups.CreateInGame(settings) != null)
+                        Log(L.F($"Saves backed up while playing (the newest {SaveBackups.InGameKeep} of these are kept)."), LogLevel.Step);
+                }
+                catch (Exception e)
+                {
+                    Log(L.T("Could not back up the saves: ") + e.Message, LogLevel.Warn);
+                }
+                finally
+                {
+                    System.Threading.Interlocked.Exchange(ref _inGameBackupBusy, 0);
+                }
             });
         }
 

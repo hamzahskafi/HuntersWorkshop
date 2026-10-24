@@ -97,7 +97,7 @@ public:
     }
 
     /// The game's own HDR request (VideoOut, every flip). bbport: off (Swapchain::HasHDR is
-    /// false), so it leaves the HDR output (hdr in lantern.ini, PresentHdr) and pp_settings alone.
+    /// false), so it leaves the HDR output (hdr in config.ini, PresentHdr) and pp_settings alone.
     void SetHDR(bool enable) {
         if (!IsHDRSupported()) {
             return;

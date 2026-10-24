@@ -11,7 +11,7 @@ namespace BloodborneLauncher.Core
     public static class CrashReport
     {
         private static readonly string[] Experimental =
-            { "exp_vram_cleanup", "exp_frame_pacing", "exp_vram_budget", "exp_thread_priority", "exp_sleep_spin", "exp_async_pipelines", "exp_occlusion", "exp_fast_draws", "exp_compile_skip", "exp_fast_loading", "exp_hot_pages", "exp_sfx_workaround", "exp_camera_easing", "exp_sharp_ui" };
+            { "exp_vram_cleanup", "exp_frame_pacing", "exp_vblank_lock", "exp_particle_cap", "exp_vram_budget", "exp_thread_priority", "exp_sleep_spin", "exp_async_pipelines", "exp_occlusion", "exp_fast_draws", "exp_compile_skip", "exp_fast_loading", "exp_hot_pages", "exp_sfx_workaround", "exp_camera_easing", "exp_sharp_ui" };
 
         /// <summary>What stopped the game, from the end of the session log (exit code 23 is the
         /// engine stopping itself, for several reasons).</summary>
@@ -191,7 +191,7 @@ namespace BloodborneLauncher.Core
         {
             var hw = Hardware.Detect();
             var text = new StringBuilder();
-            text.AppendLine($"Lantern Engine {Updater.CurrentLabel}, engine {Updater.LocalEngine() ?? "unknown"}");
+            text.AppendLine($"Hunter's Workshop {Updater.CurrentLabel}, engine {Updater.LocalEngine() ?? "unknown"}");
             var tail = Tail(GameRunner.SessionLog, 120).ToList();
             text.AppendLine(L.F($"Exit code 0x{EngineCode(tail, code):X}: {Explain(code)}"));
             text.AppendLine(L.F($"{hw.Summary}, {hw.RamBytes >> 30} GB RAM, Windows {Environment.OSVersion.Version}"));

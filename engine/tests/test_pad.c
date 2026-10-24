@@ -34,7 +34,7 @@ int main(void) {
     assert(fd>=0);
     close(fd);
     setenv("BB_PAD_FILE",path,1);
-    /* lantern.ini controls: buttons moved, a trigger as a button and a button as a trigger. */
+    /* config.ini controls: buttons moved, a trigger as a button and a button as a trigger. */
     char config[]="/tmp/bbport-pad-config-XXXXXX";
     int config_fd=mkstemp(config);
     assert(config_fd>=0);

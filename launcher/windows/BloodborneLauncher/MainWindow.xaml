@@ -5,7 +5,7 @@
                  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
                  xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
                  xmlns:views="clr-namespace:BloodborneLauncher.Views"
-                 Title="Lantern Engine"
+                 Title="Hunter's Workshop"
                  Icon="app.ico"
                  Height="780" Width="1040"
                  MinHeight="560" MinWidth="820"
@@ -373,7 +373,7 @@
                 </Grid>
 
                 <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12" IsHitTestVisible="False">
-                    <Run Text="Lantern Engine" FontWeight="SemiBold" Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                    <Run Text="Hunter's Workshop" FontWeight="SemiBold" Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
                     <Run x:Name="TitlePage" Text="" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
                 </TextBlock>
 
@@ -418,7 +418,7 @@
             </Grid.RowDefinitions>
 
             <!-- Classic, and Modern with Settings › Navigation: Sidebar: the pages in groups (the hunt, how it
-                 looks, the workshop's mods and cheats, the Lantern Engine itself). -->
+                 looks, the workshop's mods and cheats, the Hunter's Workshop itself). -->
             <Border x:Name="Sidebar" Grid.Column="0" Grid.RowSpan="2" Width="196" Visibility="Collapsed"
                     Background="{DynamicResource WindowBaseBrush}"
                     BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="0,0,1,0">
@@ -490,7 +490,7 @@
                                 <TextBlock Text="{loc:Tr &#x27;Cheats&#x27;}" />
                             </StackPanel>
                         </RadioButton>
-                        <TextBlock Text="{loc:Tr &#x27;LANTERN&#x27;}" Style="{StaticResource SidebarHeader}" Margin="18,18,0,6" />
+                        <TextBlock Text="{loc:Tr &#x27;ENGINE&#x27;}" Style="{StaticResource SidebarHeader}" Margin="18,18,0,6" />
                         <RadioButton x:Name="ClassicSettings" GroupName="Classic" Style="{StaticResource SidebarItem}"
                                      Tag="{x:Type views:SettingsPage}" Checked="SidebarItem_Checked">
                             <StackPanel Orientation="Horizontal">

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Live cheats: Blood Vials (goods 1000) and Quicksilver Bullets (goods 900), each off, infinite
-// or kept at an amount (lantern.ini cheat_vials / cheat_bullets, the overlay's Cheats section).
+// or kept at an amount (config.ini cheat_vials / cheat_bullets, the overlay's Cheats section).
 //
 // The inventory helpers are the game's own, the ones its debug menu's "fill to the maximum"
 // (sub_18d3dc0) calls, as droogie/bbhost's boss_rush plugin found and used them

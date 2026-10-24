@@ -33,7 +33,7 @@ struct TilingInfo {
     u32 num_slices;
     u32 num_mips;
     std::array<ImageInfo::MipInfo, 16> mips;
-    u32 extent_width = 0; ///< Lantern Engine: tiling writes only this extent (0: everything)
+    u32 extent_width = 0; ///< Hunter's Workshop: tiling writes only this extent (0: everything)
     u32 extent_height = 0;
 };
 

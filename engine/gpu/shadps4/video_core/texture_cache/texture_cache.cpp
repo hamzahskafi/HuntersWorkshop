@@ -381,7 +381,7 @@ void TextureCache::DownloadImageMemory(ImageId image_id, bool sync) {
     }
 }
 
-// Lantern Engine: freeing a GPU-written tiled image under VRAM pressure. Its contents exist only
+// Hunter's Workshop: freeing a GPU-written tiled image under VRAM pressure. Its contents exist only
 // in VRAM, in linear form; guest memory holds the surface tiled. The image is copied out linearly
 // and tiled by the tiling shader into a host buffer that already holds the guest bytes, writing
 // only texels inside the image's extent (TileImage's extent_only): padding rows and columns, and
@@ -1619,7 +1619,7 @@ void TextureCache::GarbageCollectImages() {
     u64 below_tick = 0;
     size_t num_deletions = 0;
     u32 visited = 0;
-    // Lantern Engine: GPU-written tiled images are stored into guest memory (StoreTiledImage)
+    // Hunter's Workshop: GPU-written tiled images are stored into guest memory (StoreTiledImage)
     // and freed under pressure. BB_IMAGE_WRITEBACK_GC=0: kept resident instead.
     static const bool store_tiled = [] {
         const char* env = std::getenv("BB_IMAGE_WRITEBACK_GC");

@@ -213,7 +213,7 @@ std::string mods_text(std::uint32_t chord) {
     return text;
 }
 
-// A chord as lantern.ini writes it ("Shift+E", "Ctrl+Mouse2"), or "" when it names nothing.
+// A chord as config.ini writes it ("Shift+E", "Ctrl+Mouse2"), or "" when it names nothing.
 std::string chord_token(std::uint32_t chord) {
     const int code = int(chord & kChordCode);
     if (!code) return "";

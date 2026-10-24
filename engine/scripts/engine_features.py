@@ -8,7 +8,7 @@ beta 8, no Linux start had any of them: the mouse did nothing and key bindings w
 
 Prints its messages as they are and `env:KEY=VALUE` for each variable run.sh exports.
 
-    engine_features.py <game> --out <out> --data <data dir> --config <lantern.ini>
+    engine_features.py <game> --out <out> --data <data dir> --config <config.ini>
 """
 import argparse
 import os

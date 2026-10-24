@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Lantern Engine: every executable address the frame-rate presets write (for fps_constants.py).
+"""Hunter's Workshop: every executable address the frame-rate presets write (for fps_constants.py).
 
 Usage: fps_patched.py out/eboot.elf [uncap|60|90|120|144] > patched.txt
 One address per line: each byte a preset's writes (frame-rate patch, corrections, sprint fix) touch.

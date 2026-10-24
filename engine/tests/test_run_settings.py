@@ -25,7 +25,7 @@ class RestartResolutionTests(unittest.TestCase):
             struct.pack_into('<IIQQQQQQ', elf, 64, 1, 0, 0, 0, 0, 0, 0x6000000, 0)
             (out / 'eboot.elf').write_bytes(elf)
             (data / 'eboot.bin').touch()
-            config = data / 'lantern.ini'
+            config = data / 'config.ini'
             config.write_text('upscaler=fsr3\npreset=1\noutput_res=1280x720\n' + ini_extra)
             if caps is not None:  # the GPU check next to the probe (live_resolution=auto)
                 tool = data / 'bb-gpu-capabilities'
@@ -86,7 +86,7 @@ class RestartResolutionTests(unittest.TestCase):
         self.assertTrue(all(row['BB_AUTO_RENDER_RES'] is None for row in rows))
 
     def test_live_resolution_setting_and_gpu_check(self):
-        # Only the first launch matters here: the probe rewrites lantern.ini for the restarts.
+        # Only the first launch matters here: the probe rewrites config.ini for the restarts.
         self.assertIsNone(self.run_restarts(ini_extra='live_resolution=1\n')[0]['BB_RENDER_RES'])
         self.assertEqual(self.run_restarts(ini_extra='live_resolution=0\n', caps=1)[0]['BB_RENDER_RES'],
                          '852x480')

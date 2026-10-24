@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-or-later
 """Windows counterpart of run.sh: prepare the game image, compile the patches and start
-out/bb-probe.exe. Same environment variables and lantern.ini settings as run.sh.
+out/bb-probe.exe. Same environment variables and config.ini settings as run.sh.
 
     run.bat [--game-dir DIR] [bb-probe options...]
 
@@ -25,7 +25,7 @@ from mods import remove_overlay
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS = ROOT / 'scripts'
-# The package keeps the engine in engine\ beside the player's files (lantern.ini, user, mods, logs):
+# The package keeps the engine in engine\ beside the player's files (config.ini, user, mods, logs):
 # those are the data folder's by default. Older packages had both in one folder.
 PACKAGE = ROOT.parent if ROOT.name.lower() == 'engine' and (ROOT.parent / 'package.json').is_file() else ROOT
 PYTHON = sys.executable
@@ -251,14 +251,7 @@ def main():
     except (OSError, ValueError):
         pass
     out.mkdir(parents=True, exist_ok=True)
-    # Settings were bbport.ini before 0.9.37 beta 2: copied once (the old file stays for an older
-    # launcher pointed at this folder).
-    if not (data / 'lantern.ini').exists() and (data / 'bbport.ini').exists():
-        try:
-            shutil.copy2(data / 'bbport.ini', data / 'lantern.ini')
-        except OSError:
-            pass
-    os.environ.setdefault('BB_CONFIG', str(data / 'lantern.ini'))
+    os.environ.setdefault('BB_CONFIG', str(data / 'config.ini'))
     config = Path(os.environ['BB_CONFIG'])
     from online import configure_online, read_settings
     try:

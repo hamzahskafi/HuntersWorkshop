@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// bbport: CPU and GPU usage for the FPS counter (lantern.ini show_fps_cpu / show_fps_gpu).
+// bbport: CPU and GPU usage for the FPS counter (config.ini show_fps_cpu / show_fps_gpu).
 #pragma once
 
 namespace BbUsage {

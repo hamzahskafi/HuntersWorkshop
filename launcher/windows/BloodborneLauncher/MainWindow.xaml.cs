@@ -29,7 +29,6 @@ namespace BloodborneLauncher
             ws.Logged += OnLogged;
             ws.Saved += () => SavedText.Text = L.F($"Saved {DateTime.Now:HH:mm:ss}");
             ws.GameStateChanged += UpdatePlayButton;
-            ws.GameStateChanged += UpdateDiscord;
             ws.GameCrashed += OnGameCrashed;
             ws.SignInRefused += OnSignInRefused;
             ws.Initialise();
@@ -40,7 +39,7 @@ namespace BloodborneLauncher
             // Layout, read once at start (Settings › Layout restarts the launcher to switch).
             var args = Environment.GetCommandLineArgs();
             var forced = Array.IndexOf(args, "--layout") is var at and >= 0 && at + 1 < args.Length ? args[at + 1] : null;
-            SettingRow.Classic = (forced ?? ws.Settings.Str("ui_layout")) == "classic";
+            SettingRow.Classic = (forced ?? ws.Settings.Str("ui_layout")) != "modern";
             if (Array.IndexOf(args, "--test-prompt") is var shot and >= 0 && shot + 1 < args.Length)
             {
                 Prompt.SnapshotPath = args[shot + 1];
@@ -101,8 +100,8 @@ namespace BloodborneLauncher
                     Dispatcher.BeginInvoke(() => Prompt.Confirm(L.T("Switch layout"), L.T("The launcher restarts to change its layout."), L.T("Restart now")),
                         System.Windows.Threading.DispatcherPriority.ApplicationIdle);
                 ws.Log(Paths.IsPortDir(Paths.PortDir)
-                        ? L.F($"Lantern Engine ready. Engine: {Paths.PortDir}")
-                        : L.T("Lantern Engine ready. Choose the engine folder in Settings."),
+                        ? L.F($"Hunter's Workshop ready. Engine: {Paths.PortDir}")
+                        : L.T("Hunter's Workshop ready. Choose the engine folder in Settings."),
                     Paths.IsPortDir(Paths.PortDir) ? LogLevel.Good : LogLevel.Warn);
                 // Once: the settings that suit this PC, shown before anything changes.
                 if (_directPlay)
@@ -487,27 +486,15 @@ namespace BloodborneLauncher
             }
         }
 
-        private DateTime? _gameStartedUtc;
-
-        /// <summary>Discord status: shown while the game runs (Core/DiscordPresence).</summary>
-        public void UpdateDiscord()
-        {
-            var running = Workspace.Current.Game.Running;
-            if (running && _gameStartedUtc == null) _gameStartedUtc = DateTime.UtcNow;
-            if (!running) _gameStartedUtc = null;
-            DiscordPresence.Update(Workspace.Current.Settings, running, _gameStartedUtc);
-        }
-
         private async void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
         {
             Workspace.Current.SaveNow();
-            DiscordPresence.Stop();
             if (_closing || !Workspace.Current.Game.Running)
                 return;
 
             var answer = System.Windows.MessageBox.Show(this,
                 L.T("The game is still running. Stop it and close the launcher?"),
-                "Lantern Engine", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
+                "Hunter's Workshop", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
             if (answer == MessageBoxResult.Cancel)
             {
                 e.Cancel = true;
@@ -901,7 +888,7 @@ namespace BloodborneLauncher
                         L.T("Windows or an antivirus would not let these through, so the old ones were kept:\n") +
                         string.Join("\n", skipped.Take(5)) +
                         L.T("\n\nThe game runs without them; online play may need ") +
-                        L.F($"them. Allow the Lantern Engine folder in the antivirus and update again, or take them from {Updater.ReleasesPage}"));
+                        L.F($"them. Allow the Hunter's Workshop folder in the antivirus and update again, or take them from {Updater.ReleasesPage}"));
                 Application.Current.Shutdown();
             }
             catch (Exception ex)
@@ -960,7 +947,7 @@ namespace BloodborneLauncher
                 if (!Paths.IsPortDir(Paths.PortDir))
                 {
                     if (!Prompt.Confirm(L.T("Where is the engine?"),
-                            L.T("The launcher needs the Lantern Engine (the folder with run.py and bin\\bb-probe.exe). ") +
+                            L.T("The launcher needs the engine (the folder with run.py and bin\\bb-probe.exe). ") +
                             L.T("It is normally the folder the launcher came in."), L.T("Choose folder")))
                         return;
                     var dialog = new Microsoft.Win32.OpenFolderDialog { Title = L.T("Port folder (with Bloodborne.exe and run.py)") };
