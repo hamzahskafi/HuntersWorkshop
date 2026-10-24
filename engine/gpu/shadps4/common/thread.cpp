@@ -116,7 +116,7 @@ void SetCurrentThreadPriority(ThreadPriority new_priority) {
 bool AccurateSleep(const std::chrono::nanoseconds duration, std::chrono::nanoseconds* remaining,
                    const bool interruptible) {
     if (LanternPacing::Enabled()) {
-        // Lantern Engine pacing: the thread's high resolution timer (lantern_pacing.cpp).
+        // Hunter's Workshop pacing: the thread's high resolution timer (lantern_pacing.cpp).
         const auto begin = std::chrono::steady_clock::now();
         const bool done = LanternPacing::Sleep(duration, interruptible);
         if (remaining) {
@@ -251,7 +251,7 @@ void AccurateTimer::Start() {
     const auto begin_sleep = std::chrono::high_resolution_clock::now();
     if (total_wait.count() > 0) {
         if (LanternPacing::Enabled()) {
-            // Lantern Engine pacing: this timer paces vblank, so it lands on time (a spin of at
+            // Hunter's Workshop pacing: this timer paces vblank, so it lands on time (a spin of at
             // most 1.5 ms and an eighth of the interval after the timer sleep).
             LanternPacing::WaitUntil(
                 std::chrono::steady_clock::now() + total_wait, true,

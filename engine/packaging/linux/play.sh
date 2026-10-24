@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Starts Bloodborne with the Lantern Engine from a terminal (Linux package; the launcher, "Lantern
+# Starts Bloodborne with the Hunter's Workshop from a terminal (Linux package; the launcher, "Lantern
 # Engine", does the same with its settings).
 #
-#   ./lantern.sh [game folder] [bb-probe options...]
+#   ./play.sh [game folder] [bb-probe options...]
 #
 # The game folder holds the game's files (eboot.bin, sce_module, ...): the first argument, else
 # BB_GAME_DIR, else the last one used, else CUSA03173 next to this folder or inside it.
-# Settings are lantern.ini here (the in-game menu: Insert or L3+R3); saves, mods and logs stay in
+# Settings are config.ini here (the in-game menu: Insert or L3+R3); saves, mods and logs stay in
 # this folder too.
 set -euo pipefail
 here=$(cd -- "$(dirname -- "$0")" && pwd)

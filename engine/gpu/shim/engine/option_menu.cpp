@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Native System page and guest row builders adapted from bbhost option_menu.cpp.
-// The existing renderer and lantern.ini remain authoritative.
+// The existing renderer and config.ini remain authoritative.
 #include "option_menu.h"
 #include "engine_hooks.h"
 #include <SDL3/SDL.h>
@@ -1019,6 +1019,6 @@ void Tick() {
         last_resolution=std::clamp(output_resolution,0,BbSettings::OutputCount-1);
         BbSettings::Get().output_res=last_resolution;changed=true;
     }
-    if (changed) { BbSettings::Save(); host_log("pc-options: System option changed; saved to lantern.ini"); }
+    if (changed) { BbSettings::Save(); host_log("pc-options: System option changed; saved to config.ini"); }
 }
 } // namespace BbEngine::Options

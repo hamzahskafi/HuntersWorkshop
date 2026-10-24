@@ -6,7 +6,7 @@
 
 namespace start {
 
-/// Sets the engine's online environment from lantern.ini; true when online.
+/// Sets the engine's online environment from config.ini; true when online.
 bool ConfigureOnline(const std::map<std::string, std::string>& settings, const fs::path& data);
 
 } // namespace start

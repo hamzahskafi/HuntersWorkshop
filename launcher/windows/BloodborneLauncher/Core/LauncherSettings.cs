@@ -11,7 +11,6 @@ namespace BloodborneLauncher.Core
     public sealed class LauncherSettings
     {
         public const string OnlineCommunity = "https://thehuntersdream.com";
-        public const string Discord = "https://discord.gg/d3Uv3Cfr5x";
         public const string ShadnetServer = "srv.shadps4.net:31313";
 
         private JsonObject _data = new();
@@ -49,17 +48,14 @@ namespace BloodborneLauncher.Core
             ["switch_to_output"] = true,
             ["check_updates"] = true,
             ["save_backups"] = true,
-            ["discord_status"] = "off",
-            ["discord_timer"] = true,
             ["safe_mode_next"] = false,
             ["memory_check_off"] = false,
-            ["discord_hidden"] = false,
             ["hardware_offered"] = false,
             ["setup_shown"] = false, // the setup guide opened once (Views/SetupGuide.cs)
             ["cheat_vials_amount"] = 20,
             ["cheat_bullets_amount"] = 20,
             ["update_channel"] = "", // empty: beta builds follow beta, others stable
-            ["ui_layout"] = "modern",
+            ["ui_layout"] = "classic", // classic | modern
             ["ui_navigation"] = "tabs", // tabs | sidebar (Modern layout; Classic has the sidebar)
             ["ui_theme"] = "default",
             ["ui_theme_colour"] = "#C41E3A",
@@ -68,12 +64,14 @@ namespace BloodborneLauncher.Core
             ["ui_background_blur"] = "strong", // strong | light | off
             ["app_icon"] = "auto", // auto | red | blue | j3loo | custom (AppIcon)
             ["app_icon_image"] = "", // custom: the picture chosen (AppIcon.CustomFile holds it as an icon)
-            ["ui_window_buttons"] = "mac", // mac | windows
+            ["ui_window_buttons"] = "windows", // windows | mac
             ["ui_window_buttons_side"] = "usual", // usual (mac left, windows right) | left | right
             ["fsr4_balanced"] = false,
             ["exp_vram_cleanup"] = true,
             // 0.9.37 beta 4: the dev setup, measured faster (PerfDefaults below switches older files once).
             ["exp_frame_pacing"] = true,
+            ["exp_vblank_lock"] = false, // frames locked to the display's refresh (BB_VBLANK_PACING=1)
+            ["exp_particle_cap"] = false, // indirect dispatch counts clamped (BB_INDIRECT_CLAMP=1)
             ["exp_thread_priority"] = true,
             ["exp_sleep_spin"] = true,
             ["exp_async_pipelines"] = true,

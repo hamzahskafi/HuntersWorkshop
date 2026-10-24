@@ -94,7 +94,7 @@ namespace BloodborneLauncher.Views
 
         private void Export()
         {
-            var file = Ui.SaveFile(L.T("Export the game output"), $"lantern-{DateTime.Now:yyyyMMdd_HHmmss}.log",
+            var file = Ui.SaveFile(L.T("Export the game output"), $"hunters-workshop-{DateTime.Now:yyyyMMdd_HHmmss}.log",
                 L.T("Log files|*.log|Text files|*.txt|All files|*.*"));
             if (file == null) return;
             try

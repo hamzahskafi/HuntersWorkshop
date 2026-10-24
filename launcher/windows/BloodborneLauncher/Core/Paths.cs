@@ -5,56 +5,17 @@ namespace BloodborneLauncher.Core
 {
     /// <summary>
     /// Where things live. The package folder (PortDir) holds the launcher, Bloodborne.exe and the
-    /// player's files - lantern.ini, mods.json, patches.json, user, mods, logs (its data folder,
+    /// player's files - config.ini, mods.json, patches.json, user, mods, logs (its data folder,
     /// BB_DATA_DIR) - and the engine in engine\: out\bb-probe.exe, scripts\run_windows.py and a
     /// bundled Python. Older packages had the engine at the top (EngineDirOf handles both).
-    /// Launcher settings are per-user, in %APPDATA%\Lantern Engine\settings.json.
+    /// Launcher settings are per-user, in %APPDATA%\Hunters Workshop\settings.json.
     /// </summary>
     public static class Paths
     {
-        public static readonly string ConfigDir = MigratedConfigDir();
-
-        /// <summary>%APPDATA%\Lantern Engine; it was %APPDATA%\bbport-launcher before 0.9.37 beta 2
-        /// and is copied once (the old folder stays in use if it cannot be copied). The old folder
-        /// stays: launchers of 0.9.36 and earlier (the stable channel, a rollback) read only it, and
-        /// without it they start with no saves folder and no player profiles. Beta 2 moved it; when
-        /// it is missing, the new folder is copied back to it once.</summary>
-        private static string MigratedConfigDir()
-        {
-            var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-            var dir = Path.Combine(appData, "Lantern Engine");
-            var old = Path.Combine(appData, "bbport-launcher");
-            if (!Directory.Exists(dir) && Directory.Exists(old))
-            {
-                try
-                {
-                    CopyMissing(old, dir);
-                }
-                catch (IOException) { return old; }
-                catch (UnauthorizedAccessException) { return old; }
-            }
-            else if (Directory.Exists(dir) && !Directory.Exists(old))
-            {
-                try { CopyMissing(dir, old); }
-                catch (IOException) { }
-                catch (UnauthorizedAccessException) { }
-            }
-            return dir;
-        }
-
-        /// <summary>Copies the files of <paramref name="from"/> (subfolders too) that
-        /// <paramref name="to"/> does not have yet.</summary>
-        private static void CopyMissing(string from, string to)
-        {
-            Directory.CreateDirectory(to);
-            foreach (var file in Directory.GetFiles(from))
-            {
-                var target = Path.Combine(to, Path.GetFileName(file));
-                if (!File.Exists(target)) File.Copy(file, target);
-            }
-            foreach (var sub in Directory.GetDirectories(from))
-                CopyMissing(sub, Path.Combine(to, Path.GetFileName(sub)));
-        }
+        /// <summary>%APPDATA%\Hunters Workshop: this launcher's own folder, never shared with another
+        /// launcher's.</summary>
+        public static readonly string ConfigDir =
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Hunters Workshop");
 
         public static readonly string ConfigFile = Path.Combine(ConfigDir, "settings.json");
 
@@ -69,56 +30,23 @@ namespace BloodborneLauncher.Core
                 ? path
                 : Migrated(DataDir);
 
-        /// <summary>Settings were bbport.ini before 0.9.37 beta 2: copied once per folder (the old
-        /// file stays for an older launcher pointed at this folder). Without either, lantern.ini starts
-        /// as the shipped settings (engine\lantern.default.ini).
-        /// The 0.9.37 beta 2 package carried a lantern.ini with the shipped settings, and launchers
-        /// before it keep only bbport.ini when they update: the update put that lantern.ini beside the
-        /// player's bbport.ini and their settings looked reset. A lantern.ini that still holds exactly
-        /// the shipped settings while bbport.ini holds others is replaced by bbport.ini.</summary>
+        /// <summary>The game's settings, config.ini in the data folder. A folder without one starts with
+        /// the shipped settings (engine\config.default.ini).</summary>
         private static string Migrated(string dir)
         {
-            var path = Path.Combine(dir, "lantern.ini");
+            var path = Path.Combine(dir, "config.ini");
             if (dir.Length != 0 && MigratedDirs.Add(dir))
             {
                 try
                 {
-                    var old = Path.Combine(dir, "bbport.ini");
-                    var shipped = Path.Combine(EngineDirOf(dir), "lantern.default.ini");
-                    if (!File.Exists(path))
-                    {
-                        if (File.Exists(old)) File.Copy(old, path);
-                        else if (File.Exists(shipped)) File.Copy(shipped, path);
-                    }
-                    else if (File.Exists(old) && File.Exists(shipped))
-                    {
-                        var current = ReadSettings(path);
-                        if (SameSettings(current, ReadSettings(shipped)) && !SameSettings(current, ReadSettings(old)))
-                            File.Copy(old, path, overwrite: true);
-                    }
+                    var shipped = Path.Combine(EngineDirOf(dir), "config.default.ini");
+                    if (!File.Exists(path) && File.Exists(shipped)) File.Copy(shipped, path);
                 }
                 catch (IOException) { }
                 catch (UnauthorizedAccessException) { }
             }
             return path;
         }
-
-        /// <summary>An ini's key=value pairs (comments, blank lines and the order left out).</summary>
-        private static Dictionary<string, string> ReadSettings(string path)
-        {
-            var settings = new Dictionary<string, string>(StringComparer.Ordinal);
-            foreach (var line in File.ReadAllLines(path))
-            {
-                var text = line.Trim();
-                var at = text.IndexOf('=');
-                if (text.Length == 0 || text[0] == '#' || text[0] == ';' || at < 0) continue;
-                settings[text[..at].Trim()] = text[(at + 1)..].Trim();
-            }
-            return settings;
-        }
-
-        private static bool SameSettings(Dictionary<string, string> a, Dictionary<string, string> b) =>
-            a.Count == b.Count && a.All(pair => b.TryGetValue(pair.Key, out var value) && value == pair.Value);
 
         private static readonly HashSet<string> MigratedDirs = new(StringComparer.OrdinalIgnoreCase);
 

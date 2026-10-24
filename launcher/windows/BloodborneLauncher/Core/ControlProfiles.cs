@@ -9,7 +9,7 @@ namespace BloodborneLauncher.Core
 {
     /// <summary>
     /// Control profiles: named sets of keyboard and mouse bindings, kept as small JSON files in
-    /// %APPDATA%\Lantern Engine\profiles and shared as text: export a file or copy the JSON, paste
+    /// %APPDATA%\Hunter's Workshop\profiles and shared as text: export a file or copy the JSON, paste
     /// it on any paste site, and someone else imports it from the file or the link.
     ///
     /// {
@@ -45,9 +45,9 @@ namespace BloodborneLauncher.Core
 
         public static readonly Profile[] BuiltIns =
         {
-            new("PC default", "Lantern Engine", L.T("The engine's own layout: attack on left click, firearm and transform on the mouse too."),
+            new("PC default", "Hunter's Workshop", L.T("The engine's own layout: attack on left click, firearm and transform on the mouse too."),
                 DefaultBindings(), BuiltIn: true),
-            new("EldenRingStyle", "Lantern Engine", L.T("Elden Ring's PC layout (the package default): left click attacks, Shift + left click strong attack, ") +
+            new("EldenRingStyle", "Hunter's Workshop", L.T("Elden Ring's PC layout (the package default): left click attacks, Shift + left click strong attack, ") +
                 L.T("right click left hand (firearm / parry), Q or middle click lock on, R Blood Vial, E interact, arrows switch."),
                 new Dictionary<string, string>(DefaultBindings())
                 {
@@ -67,7 +67,7 @@ namespace BloodborneLauncher.Core
                     ["dpad_up"] = "Up",
                     ["walk"] = "Left Alt",
                 }, BuiltIn: true),
-            new("Mouse focus", "Lantern Engine", L.T("Both attacks and lock on on the mouse: left click attack, right click strong attack, ") +
+            new("Mouse focus", "Hunter's Workshop", L.T("Both attacks and lock on on the mouse: left click attack, right click strong attack, ") +
                 L.T("middle click lock on; firearm F, quick item V."),
                 new Dictionary<string, string>(DefaultBindings())
                 {

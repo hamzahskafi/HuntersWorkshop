@@ -435,7 +435,7 @@ private:
     /// Copies image memory back to CPU.
     void DownloadImageMemory(ImageId image_id, bool sync = false);
 
-    /// Lantern Engine: stores a GPU-written tiled image into guest memory in its tiled layout,
+    /// Hunter's Workshop: stores a GPU-written tiled image into guest memory in its tiled layout,
     /// synchronously, so the collector may free it. False when this image cannot be stored (its
     /// layout, other GPU data over it, a mapping lost meanwhile): it then stays resident.
     bool StoreTiledImage(ImageId image_id);

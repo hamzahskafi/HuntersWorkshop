@@ -170,7 +170,7 @@ void runtime_file_configure(const char *app0,const char *user) {
     else printf("Saves: the saves folder %s cannot be written (%s): the game cannot create or keep "
                 "saves. Pick another saves folder in the launcher%s\n",user,strerror(errno),
 #ifdef _WIN32
-                ", or allow Lantern Engine in Windows Security > Ransomware protection > "
+                ", or allow Hunter's Workshop in Windows Security > Ransomware protection > "
                 "Controlled folder access"
 #else
                 ""

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Live cheats switched from lantern.ini (cheat_*) and the in-game overlay: Blood Vials and
+// Live cheats switched from config.ini (cheat_*) and the in-game overlay: Blood Vials and
 // Quicksilver Bullets (infinite or kept at an amount), stamina, stealth, firearm range, keeping
 // Blood Echoes on death, an echo multiplier, weapon durability, consumables; and the overlay's
 // add Blood Echoes / Insight actions. See cheats.cpp.

@@ -1,6 +1,6 @@
 # DLSS Frame Generation and the upscaler options (2026-10-22)
 
-`frame_gen=dlss` in `lantern.ini` (the menu's Frame generation > DLSS, the launcher's Graphics
+`frame_gen=dlss` in `config.ini` (the menu's Frame generation > DLSS, the launcher's Graphics
 page) runs NVIDIA DLSS Frame Generation (DLSS-G) through NVIDIA Streamline. Off by default;
 loaded at start (a change needs a restart), switched on and off live once loaded. FSR 3.1 frame
 generation (`frame_gen=fsr3`, `vk_frame_generation.cpp`) stays as it is and is the choice on
@@ -169,7 +169,7 @@ guest flip ─► GPU command thread ──────────────�
 
 ## Settings
 
-| `lantern.ini` | Env | Values | Live |
+| `config.ini` | Env | Values | Live |
 |---|---|---|---|
 | `frame_gen` | `BB_FRAME_GEN` | `off`, `fsr3`, `dlss` | yes once loaded; `dlss` loads at start |
 | `frame_gen_frames` | `BB_FRAME_GEN_FRAMES` | 1-5 generated frames per real one (DLSS) | yes |

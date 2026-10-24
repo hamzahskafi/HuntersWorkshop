@@ -18,7 +18,7 @@
             new(L.T("Off"), "off"),
         };
 
-        /// <summary>frame_gen in lantern.ini: generated frames between the game's own (the engine's
+        /// <summary>frame_gen in config.ini: generated frames between the game's own (the engine's
         /// vk_frame_generation.h; DLSS through NVIDIA Streamline, vk_streamline.h). Off by default.</summary>
         public static readonly Choice[] FrameGeneration =
         {
@@ -226,11 +226,6 @@
         };
 
         /// <summary>pad_icons: the game's controller icons as they are (PlayStation's) or as an Xbox controller's buttons; automatic follows the controller in use.</summary>
-        public static readonly Choice[] DiscordStatus =
-        {
-            new(L.T("Off"), "off"), new("Lantern Engine", "lantern"), new(L.T("Custom"), "custom"),
-        };
-
         public static readonly Choice[] PadIcons =
         {
             new(L.T("Automatic (default)"), "auto"), new("PlayStation", "playstation"), new("Xbox", "xbox"),
@@ -289,7 +284,7 @@
 
         public static readonly Choice[] LaunchMethods =
         {
-            new("Lantern Engine", "windows", L.T("Prepares mods and patches, then starts the engine (out\\bb-probe.exe)")),
+            new("Hunter's Workshop", "windows", L.T("Prepares mods and patches, then starts the engine (out\\bb-probe.exe)")),
             new(L.T("Custom command"), "custom", L.T("Runs a program of your choice with the settings as environment variables")),
         };
 

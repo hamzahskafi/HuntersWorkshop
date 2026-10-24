@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // bbport: user settings changed at run time from the in-game menu (bbport_overlay.h) and kept
-// in lantern.ini (BB_CONFIG overrides the path). Environment variables override the file at
+// in config.ini (BB_CONFIG overrides the path). Environment variables override the file at
 // start. Readers load the atomics every frame; writers are the menu and Load().
 
 #pragma once
@@ -20,7 +20,7 @@ inline bool IsFsr4(int upscaler) {
 inline bool IsFrameUpscaler(int upscaler) {
     return IsFsr4(upscaler) || upscaler == UpscalerDlss;
 }
-/// bbport: frame_gen in lantern.ini (BB_FRAME_GEN): generated frames between the game's own
+/// bbport: frame_gen in config.ini (BB_FRAME_GEN): generated frames between the game's own
 /// (vk_frame_generation.h): FSR 3.1 frame interpolation (2x), or NVIDIA DLSS Frame Generation
 /// through Streamline (vk_streamline.h; RTX 40/50, loaded at start, frame_gen_frames per real one).
 enum FrameGen : int { FrameGenOff = 0, FrameGenFsr3 = 1, FrameGenDlss = 2, FrameGenCount };
@@ -28,15 +28,15 @@ inline constexpr const char* FrameGenNames[] = {"off", "fsr3", "dlss"};
 static_assert(sizeof(FrameGenNames) / sizeof(FrameGenNames[0]) == FrameGenCount);
 /// frame_gen_frames: DLSS generated frames per real one (1 = 2x .. 5 = 6x; RTX 50 for more than 1).
 inline constexpr int FrameGenFramesMax = 5;
-/// reflex in lantern.ini (BB_REFLEX): NVIDIA Reflex low latency while Streamline is loaded; on (at
+/// reflex in config.ini (BB_REFLEX): NVIDIA Reflex low latency while Streamline is loaded; on (at
 /// least) whenever DLSS Frame Generation runs, as NVIDIA requires.
 enum Reflex : int { ReflexOff = 0, ReflexOn = 1, ReflexBoost = 2, ReflexCount };
 inline constexpr const char* ReflexNames[] = {"off", "on", "boost"};
 static_assert(sizeof(ReflexNames) / sizeof(ReflexNames[0]) == ReflexCount);
-/// Custom (render_scale in lantern.ini): output / render size of the player's choosing.
+/// Custom (render_scale in config.ini): output / render size of the player's choosing.
 enum Preset : int { NativeAA = 0, Quality, Balanced, Performance, UltraPerformance, PresetCustom, PresetCount };
 inline constexpr float RenderScaleMin = 1.0f, RenderScaleMax = 3.0f;
-/// mip_bias in lantern.ini: added to the scene's texture LOD bias while an upscaler runs.
+/// mip_bias in config.ini: added to the scene's texture LOD bias while an upscaler runs.
 inline constexpr float MipBiasMin = -2.0f, MipBiasMax = 1.0f;
 /// bbport: where the FPS counter sits (fps_position).
 enum FpsPosition : int { FpsTopRight = 0, FpsTopLeft, FpsBottomRight, FpsBottomLeft, FpsTopCentre, FpsPositionCount };
@@ -45,7 +45,7 @@ enum DebugView : int { DebugNone = 0, DebugReactive = 1, DebugMotion = 2, DebugV
 enum class MenuLanguage {
     English, Russian, Spanish, PortugueseBrazil, French, German, Italian, Polish, Turkish, ChineseSimplified
 };
-/// menu_language in lantern.ini, by MenuLanguage; the launcher's BB_MENU_LANGUAGE uses the same codes.
+/// menu_language in config.ini, by MenuLanguage; the launcher's BB_MENU_LANGUAGE uses the same codes.
 inline constexpr const char* MenuLanguageCodes[] = {"en", "ru", "es", "pt_BR", "fr", "de", "it", "pl", "tr", "zh_CN"};
 inline constexpr int MenuLanguageCount = int(sizeof(MenuLanguageCodes) / sizeof(MenuLanguageCodes[0]));
 static_assert(MenuLanguageCount == int(MenuLanguage::ChineseSimplified) + 1);
@@ -89,7 +89,7 @@ static_assert(sizeof(OutputWidths) / sizeof(OutputWidths[0]) == OutputCount &&
               sizeof(OutputHeights) / sizeof(OutputHeights[0]) == OutputCount);
 int OutputWidth(int index);
 int OutputHeight(int index);
-/// Live cheats (engine/cheats.cpp): cheat_vials / cheat_bullets in lantern.ini are "off",
+/// Live cheats (engine/cheats.cpp): cheat_vials / cheat_bullets in config.ini are "off",
 /// "infinite" or an amount kept in the inventory, 1..CheatMaxAmount.
 inline constexpr int CheatOff = 0, CheatInfinite = -1, CheatMaxAmount = 99;
 /// cheat_gun_range: "off" (0) or the firearm bullets' range in percent.
@@ -105,34 +105,34 @@ inline constexpr float HdrBoostDefault = 0.25f;
 inline constexpr float HdrUiBrightnessMin = 0.5f, HdrUiBrightnessMax = 2.0f, HdrUiColorDefault = 1.0f;
 /// The swapchain's HDR signal (Values::hdr_output).
 enum HdrOutput : int { HdrOutputOff = 0, HdrOutputHdr10 = 1, HdrOutputScRgb = 2 };
-/// hdr_mode in lantern.ini (docs/hdr.md). Native: the highlights' brightness from the game's own
+/// hdr_mode in config.ini (docs/hdr.md). Native: the highlights' brightness from the game's own
 /// HDR scene (vk_hdr_native.h), expand where a frame has none (menus, loading, movies). Expand:
 /// the SDR picture's highlights stretched towards the peak.
 enum HdrMode : int { HdrModeNative = 0, HdrModeExpand = 1, HdrModeCount };
 inline constexpr const char* HdrModeNames[] = {"native", "expand"};
 static_assert(sizeof(HdrModeNames) / sizeof(HdrModeNames[0]) == HdrModeCount);
 
-/// dlss_preset in lantern.ini (BB_DLSS_PRESET): DLSS's render preset, "default" (0: the DLL's own
+/// dlss_preset in config.ini (BB_DLSS_PRESET): DLSS's render preset, "default" (0: the DLL's own
 /// for each quality mode) or a letter (1 = A .. 26 = Z). K (11, the transformer model) unless set.
 inline constexpr int DlssPresetDefault = 0, DlssPresetK = 11, DlssPresetMax = 26;
 /// bbport: "auto": the model per quality mode as NVIDIA's DLSS 4.5 pairs them: K (DLAA, Quality,
 /// Balanced), M (Performance), L (Ultra Performance).
 inline constexpr int DlssPresetAuto = -1, DlssPresetL = 12, DlssPresetM = 13;
 int DlssPresetFromText(const char* text);
-/// "default" or the preset's letter (lowercase), as lantern.ini keeps it.
+/// "default" or the preset's letter (lowercase), as config.ini keeps it.
 const char* DlssPresetText(int preset);
 
-/// optiscaler_sync_submit in lantern.ini (BB_OPTISCALER_SYNC_SUBMIT): one submit thread only while
+/// optiscaler_sync_submit in config.ini (BB_OPTISCALER_SYNC_SUBMIT): one submit thread only while
 /// OptiScaler's frame generation is on (auto), always, or never.
 enum OptiSubmit : int { OptiSubmitAuto = -1, OptiSubmitOff = 0, OptiSubmitOn = 1 };
 
-/// button_prompts in lantern.ini: the game's button icons drawn as the bound keys while the keyboard
+/// button_prompts in config.ini: the game's button icons drawn as the bound keys while the keyboard
 /// or mouse is in use (auto), always (keyboard), or never (controller). engine/key_prompts.h.
 enum ButtonPrompts : int { PromptsAuto = 0, PromptsKeyboard = 1, PromptsController = 2, PromptsCount };
 inline constexpr const char* ButtonPromptsNames[] = {"auto", "keyboard", "controller"};
 static_assert(sizeof(ButtonPromptsNames) / sizeof(ButtonPromptsNames[0]) == PromptsCount);
 
-/// pad_icons in lantern.ini: the game's controller icons as they are (PlayStation's) or as an Xbox
+/// pad_icons in config.ini: the game's controller icons as they are (PlayStation's) or as an Xbox
 /// controller's buttons; auto follows the gamepad in use. engine/key_prompts.h.
 enum PadIcons : int { PadIconsAuto = 0, PadIconsPlayStation = 1, PadIconsXbox = 2, PadIconsCount };
 inline constexpr const char* PadIconsNames[] = {"auto", "playstation", "xbox"};
@@ -177,7 +177,7 @@ struct Values {
     std::atomic<float> reactive_scale{1.0f};
     std::atomic<float> reactive_threshold{0.2f};
     std::atomic<float> reactive_max{0.9f};
-    /// bbport: FSR 3.1's tuning constants (fsr3_* in lantern.ini; live), as OptiScaler offers them:
+    /// bbport: FSR 3.1's tuning constants (fsr3_* in config.ini; live), as OptiScaler offers them:
     /// velocity factor (lower: steadier bright pixels in motion), reactiveness and shading change
     /// scales, accumulation added per frame (lower: less ghosting, more thin-detail flicker) and
     /// the least accumulation at disocclusions (higher: less white-pixel flicker). SDK defaults.
@@ -193,7 +193,7 @@ struct Values {
     std::atomic<bool> show_fps_gpu{false}; ///< bbport: the GPU's 3D engine use
     /// "Building shaders" in a corner while pipelines are built in play (compile_note).
     std::atomic<bool> show_compile_note{true};
-    /// bbport: the FPS counter's look (fps_* in lantern.ini; live): its corner (FpsPosition),
+    /// bbport: the FPS counter's look (fps_* in config.ini; live): its corner (FpsPosition),
     /// size, text and background colours (0xRRGGBB), background opacity and border.
     std::atomic<int> fps_position{0};
     std::atomic<float> fps_scale{1.0f};
@@ -233,11 +233,11 @@ struct Values {
     std::atomic<float> camera_fov_scale{1.0f}, camera_distance_scale{1.0f}, camera_height_scale{1.0f};
     std::atomic<int> model_lod{0}; ///< -2 highest .. 2 lowest, 0 the game's
     std::atomic<int> output_res{OutputDefault}; ///< index into OutputWidths
-    /// output_res = OutputCustom's size, from lantern.ini (fixed for the session).
+    /// output_res = OutputCustom's size, from config.ini (fixed for the session).
     int custom_output_w = 1920, custom_output_h = 1080;
     /// CheatOff, CheatInfinite or the amount to keep (1..CheatMaxAmount); live.
     std::atomic<int> cheat_vials{CheatOff}, cheat_bullets{CheatOff};
-    /// The other cheats (0/1 in lantern.ini); live.
+    /// The other cheats (0/1 in config.ini); live.
     std::atomic<bool> cheat_stamina{false}, cheat_stealth{false}, cheat_keep_echoes{false},
         cheat_no_durability{false}, cheat_consumables{false};
     /// One of CheatGunRanges / CheatEchoMultipliers; live.
@@ -283,7 +283,7 @@ struct Values {
     std::atomic<float> render_scale{1.3f};
     /// mip_bias (BB_MIP_BIAS): texture LOD bias added while an upscaler runs (MipBiasMin..Max); live.
     std::atomic<float> mip_bias{0.0f};
-    /// OptiScaler compatibility (vk_optiscaler.h), optiscaler_* in lantern.ini: the mode, NGX calls
+    /// OptiScaler compatibility (vk_optiscaler.h), optiscaler_* in config.ini: the mode, NGX calls
     /// under the queue lock, the Vulkan instance and device made on a thread of their own, one
     /// submit thread (OptiSubmit). The menu edits these; the engine reads startup_optiscaler, and
     /// BB_OPTISCALER_* (the launcher's switch) override that.

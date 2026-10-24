@@ -7,7 +7,7 @@ using BloodborneLauncher.Core;
 namespace BloodborneLauncher.Views
 {
     /// <summary>
-    /// Cheats the engine applies live (lantern.ini cheat_*: off, infinite or an amount kept topped up).
+    /// Cheats the engine applies live (config.ini cheat_*: off, infinite or an amount kept topped up).
     /// Turning one off restores the game values it changed; the items you have stay.
     /// </summary>
     public sealed class CheatsPage : LauncherPage

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Linux build environment of the Lantern Engine on Ubuntu 24.04 (WSL, a VM, a CI runner): the same
+# Linux build environment of the Hunter's Workshop on Ubuntu 24.04 (WSL, a VM, a CI runner): the same
 # packages and libraries as packaging/linux/Dockerfile, installed directly. Run as root once;
 # packaging/linux/build.sh then builds and packages the engine.
 #

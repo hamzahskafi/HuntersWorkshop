@@ -92,7 +92,7 @@ static int list_gamepads(void) {
 
 /* --read-input key|pad: a small window; prints "key <SDL key name>" or "pad <SDL button name>"
  * (lefttrigger/righttrigger for the triggers) for the first key or gamepad button pressed, the
- * names bbport.ini's key.* and pad.* lines take. Escape, closing it or 15 s: nothing. */
+ * names config.ini's key.* and pad.* lines take. Escape, closing it or 15 s: nothing. */
 static int read_input(const char *kind) {
     const int want_key = strcmp(kind, "pad") != 0, want_pad = strcmp(kind, "key") != 0;
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {

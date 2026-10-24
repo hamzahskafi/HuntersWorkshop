@@ -71,7 +71,7 @@ unsigned long PoolRefused(std::uint64_t mib);
 /// others are closed.
 void PoolHandOff(std::uint64_t mib);
 
-/// lantern.ini as the scripts read it: key=value, # and ; comments.
+/// config.ini as the scripts read it: key=value, # and ; comments.
 std::map<std::string, std::string> ReadSettings(const fs::path& path);
 std::optional<std::string> Setting(const std::map<std::string, std::string>& settings, const std::string& key);
 

@@ -83,7 +83,7 @@ void CheckGame(const fs::path& game, const Bytes& image, const fs::path& engine)
         return;
     }
     if (version != kSupportedVersion)
-        throw GameCheckError(found + " Lantern Engine needs the 1.09 update merged into the game folder: copy everything "
+        throw GameCheckError(found + " Hunter's Workshop needs the 1.09 update merged into the game folder: copy everything "
                                      "from the dumped 1.09 update (e.g. CUSA03173-patch) into the game folder, "
                                      "replacing files (eboot.bin and sce_sys too).");
     throw GameCheckError(found + " param.sfo is from 1.09 but eboot.bin is not: copy eboot.bin from the dumped "

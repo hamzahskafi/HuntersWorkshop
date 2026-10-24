@@ -333,7 +333,7 @@ void Swapchain::FindPresentFormat() {
 
     // bbport: the game's own HDR request (sceVideoOutConfigureOutputMode with BT.2020 PQ, which
     // Bloodborne never makes) stays off: HDR output is the presenter's encode of the SDR
-    // picture (hdr in lantern.ini, below), and the per-flip SetHDR(false) must not touch it.
+    // picture (hdr in config.ini, below), and the per-flip SetHDR(false) must not touch it.
     supports_hdr = false;
 
     // If there is a single undefined surface format, the device doesn't care, so we'll just use
@@ -362,7 +362,7 @@ void Swapchain::FindPresentFormat() {
     surface_format.format = found->format;
     surface_format.colorSpace = found->colorSpace;
 
-    // bbport: HDR output (hdr in lantern.ini, BB_HDR), chosen once.
+    // bbport: HDR output (hdr in config.ini, BB_HDR), chosen once.
     const auto& settings = BbSettings::Get();
     if (!settings.startup_hdr) {
         return;

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Lantern Engine: frame pacing (lantern_pacing.h).
+// Hunter's Workshop: frame pacing (lantern_pacing.h).
 #include "lantern_pacing.h"
 
 #include <algorithm>
@@ -260,9 +260,12 @@ void WatchVblanks() {
 } // namespace
 
 bool VblankPacing() {
+    // Off unless asked for (BB_VBLANK_PACING=1, the launcher's "Fixed-refresh frame lock"). On by
+    // default it stuttered, most of all on G-Sync and FreeSync displays that ran steady at their
+    // full refresh for a while (menus) and were then held to it.
     static const bool on = [] {
         const char* env = std::getenv("BB_VBLANK_PACING");
-        return Enabled() && !(env && env[0] == '0');
+        return Enabled() && env && env[0] == '1';
     }();
     return on;
 }

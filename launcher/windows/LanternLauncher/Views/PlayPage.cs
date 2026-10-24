@@ -75,24 +75,6 @@ namespace BloodborneLauncher.Views
             _engineCard.Margin = new Thickness(0, 12, 0, 0);
             Body.Children.Add(_engineCard);
 
-            // The community: help, news and people to play with. Hidden for good with the X
-            // (Settings keeps the link).
-            if (!S.Bool("discord_hidden"))
-            {
-                SettingRow? discord = null;
-                discord = Card(SymbolRegular.PeopleCommunity24, L.T("Join the Discord"),
-                    L.T("Help, news, co-op partners and beta feedback"), Row(
-                        SmallButton(L.T("Join"), SymbolRegular.Open24, (_, _) => Ui.OpenLink(LauncherSettings.Discord), ControlAppearance.Primary),
-                        IconButton(SymbolRegular.Dismiss24, L.T("Hide"), (_, _) =>
-                        {
-                            S.Set("discord_hidden", true);
-                            Ws.SaveSoon();
-                            Body.Children.Remove(discord!);
-                        })), out _);
-                discord.Margin = new Thickness(0, 12, 0, 0);
-                Body.Children.Add(discord);
-            }
-
             // ==================== Game ====================
             Group(L.T("Game"));
             var gameCard = Card(SymbolRegular.Folder24, L.T("Game folder"), "", Row(
@@ -159,7 +141,7 @@ namespace BloodborneLauncher.Views
                 RefreshBackups();
             };
             Add(Card(SymbolRegular.ArrowSync24, L.T("Save backups"),
-                L.F($"Before every start, when this profile's saves changed. The newest {SaveBackups.Keep} are kept"), Row(
+                L.F($"Before every start and every {SaveBackups.InGameEvery.TotalMinutes:0} minutes while playing, when this profile's saves changed. The newest {SaveBackups.Keep} from before starting and {SaveBackups.InGameKeep} from playing are kept"), Row(
                 _restoreButton,
                 IconButton(SymbolRegular.Open24, L.T("Open the backups folder"), (_, _) =>
                 {
@@ -324,7 +306,7 @@ namespace BloodborneLauncher.Views
             var exe = windows ? Path.Combine(Paths.PortDir, "Bloodborne.exe") : Environment.ProcessPath ?? "";
             if (!File.Exists(exe))
             {
-                Prompt.Tell(L.T("Add to Steam"), L.T("Bloodborne.exe is missing from the Lantern Engine folder: reinstall the package."));
+                Prompt.Tell(L.T("Add to Steam"), L.T("Bloodborne.exe is missing from the Hunter's Workshop folder: reinstall the package."));
                 return;
             }
             if (SteamShortcut.SteamDir() is null)
@@ -411,7 +393,8 @@ namespace BloodborneLauncher.Views
                 var item = new MenuItem
                 {
                     Header = L.F($"{backup.When:d MMM yyyy, HH:mm}  ·  {backup.Bytes / 1048576.0:0.0} MB") +
-                             (backup.MadeBeforeRestore ? L.T("  ·  before a restore") : ""),
+                             (backup.MadeBeforeRestore ? L.T("  ·  before a restore") : "") +
+                             (backup.MadeInGame ? L.T("  ·  while playing") : ""),
                 };
                 var chosen = backup;
                 item.Click += (_, _) => Dispatcher.UIThread.Post(() => RestoreBackup(chosen));

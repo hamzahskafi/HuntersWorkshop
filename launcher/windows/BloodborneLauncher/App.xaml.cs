@@ -56,13 +56,6 @@ namespace BloodborneLauncher
                 args.SetObserved();
             };
 
-            // The launcher's new name (0.9.34 beta 8): once, before anything else.
-            if (Core.LanternRename.Run(e.Args))
-            {
-                Shutdown();
-                return;
-            }
-
             // A copy outside the package (dragged to the desktop) is never updated and drifted from
             // the package's own launcher (other pages, settings missing): it starts that one.
             if (HandOverToPackage(e.Args))
@@ -78,7 +71,7 @@ namespace BloodborneLauncher
                 var failed = Core.LayoutCleanup.Run(package);
                 if (failed.Count > 0)
                     MessageBox.Show("These old files could not be removed (in use?) and can be deleted by hand:\n\n" +
-                                    string.Join("\n", failed), "Lantern Engine", MessageBoxButton.OK, MessageBoxImage.Information);
+                                    string.Join("\n", failed), "Hunter's Workshop", MessageBoxButton.OK, MessageBoxImage.Information);
             }
         }
 
@@ -89,7 +82,7 @@ namespace BloodborneLauncher
         {
             try
             {
-                var ini = Path.Combine(package, "lantern.ini");
+                var ini = Path.Combine(package, "config.ini");
                 if (!File.Exists(ini)) return;
                 var lines = File.ReadAllLines(ini);
                 var lockOn = Array.FindIndex(lines, l => l.Trim() == "bind.lock_on=Mouse3");

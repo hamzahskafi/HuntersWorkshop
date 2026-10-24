@@ -1,6 +1,6 @@
 # HDR output
 
-`hdr=1` in `lantern.ini` (`BB_HDR=1`, the menu's "HDR output", applied on restart) presents the
+`hdr=1` in `config.ini` (`BB_HDR=1`, the menu's "HDR output", applied on restart) presents the
 game in an HDR swapchain when the display offers one (Windows HDR on): HDR10 (BT.2020, PQ,
 `A2B10G10R10`) or scRGB (linear BT.709 in FP16). The game itself only makes an 8-bit SDR frame;
 `hdr_output.frag` encodes it. SDR white is shown at `hdr_paper_white` nits (10-500, default 200),

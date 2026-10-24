@@ -751,7 +751,7 @@ PatchResult CompilePatches(const PatchRequest& request) {
                                                 "folder): repack it with WitchyBND, or use the packed files")
                                   : std::string()) +
                         ". The fonts: https://www.nexusmods.com/bloodborne/mods/253; or turn the debug menu off "
-                        "(debug_menu in lantern.ini)");
+                        "(debug_menu in config.ini)");
     }
 
     const Bytes elf = ReadFile(request.out / "eboot.elf");
@@ -842,7 +842,7 @@ PatchResult CompilePatches(const PatchRequest& request) {
     // file) under 16 GiB unless the scene is above 1080p.
     {
         const bool large_scene = size && std::int64_t(size->w) * size->h > std::int64_t(kOutput.w) * kOutput.h;
-        // Lantern Engine: only what outgrows the PS4 heaps enlarges them. Every heap page the
+        // Hunter's Workshop: only what outgrows the PS4 heaps enlarges them. Every heap page the
         // game touches stays in RAM for the session (its allocators spread over the whole heap),
         // so larger heaps meant up to 3.3 GB more RAM: 7 GB of game memory and Windows swapping
         // on 16 GB PCs (the multi-second hangs of 2026-10-21). BB_GAME_HEAPS=1 enlarges anyway.

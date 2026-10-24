@@ -9,33 +9,31 @@ namespace BloodborneLauncher.Core
 {
     /// <summary>
     /// Updates from the GitHub releases of the repository. Each release carries the whole package
-    /// (LanternEngine-*.zip; BloodbornePC-*.zip before beta 9.6), the launcher on its own ("Bloodborne Launcher.exe") and package.json,
+    /// (HuntersWorkshop-*.zip), the launcher on its own (Hunters Workshop.exe) and package.json,
     /// which names the engine build inside the package.
     ///
     /// When only the launcher changed, the exe alone is downloaded. When the engine changed (or the
     /// package has no package.json yet), the whole package is downloaded and copied over this one,
     /// keeping the player's settings, saves, mods and profiles. A running exe cannot be overwritten
     /// but can be renamed, so the launcher moves itself aside and is removed on the next start.
-    /// On Linux the update is always the whole package (LanternEngine-v&lt;version&gt;-linux-x64.tar.gz).
+    /// On Linux the update is always the whole package (HuntersWorkshop-v&lt;version&gt;-linux-x64.tar.gz).
     ///
     /// Two channels: stable follows GitHub's latest release; beta also takes pre-releases, tagged
     /// v&lt;version&gt;-beta.&lt;n&gt;. A beta comes before the stable release of the same version.
     /// </summary>
     public static class Updater
     {
-        public const string Repository = "Awakenchan/LanternEngine";
+        public const string Repository = "hamzahskafi/HuntersWorkshop";
         public static string ReleasesPage => $"https://github.com/{Repository}/releases";
 
         /// <summary>The engine build this launcher is made for (package.json "engine").</summary>
-        public const string EngineId = "lantern-fps93";
+        public const string EngineId = "hunters-workshop-1";
 
-        public const string ExeName = "Lantern Engine.exe";
-        /// <summary>The launcher's name before 0.9.34 beta 8 (now a forwarder to ExeName).</summary>
-        public const string OldExeName = "Bloodborne Launcher.exe";
+        public const string ExeName = "Hunters Workshop.exe";
         private const string PackageFile = "package.json";
 
         /// <summary>Files and folders of the player's that a package update never touches.</summary>
-        private static readonly string[] Kept = { "lantern.ini", "bbport.ini", "mods.json", "patches.json", "user", "mods", "logs", "network", "engine-assets" };
+        private static readonly string[] Kept = { "config.ini", "mods.json", "patches.json", "user", "mods", "logs", "network", "engine-assets" };
 
         public sealed record Release(Version Version, int Beta, string Tag, string Name, string Notes, string Page,
             string? ExeUrl, string? ZipUrl, string? PackageUrl, long ExeSize, long ZipSize, DateTime Published = default)
@@ -186,12 +184,12 @@ namespace BloodborneLauncher.Core
         }
 
         /// <summary>The release's package for this system: the Windows zip, or on Linux the tarball
-        /// (LanternEngine-v&lt;version&gt;-linux-x64.tar.gz, packaging/linux/build.sh).</summary>
+        /// (HuntersWorkshop-v&lt;version&gt;-linux-x64.tar.gz, packaging/linux/build.sh).</summary>
         private static bool IsPackageAsset(string name) => OperatingSystem.IsLinux()
             ? name.EndsWith("-linux-x64.tar.gz", StringComparison.OrdinalIgnoreCase)
             : name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase);
 
-        /// <summary>The launcher's file in a package: "Lantern Engine.exe", on Linux "Lantern Engine".</summary>
+        /// <summary>The launcher's file in a package: "Hunters Workshop.exe", on Linux "Hunters Workshop".</summary>
         private static string LauncherFile => OperatingSystem.IsWindows() ? ExeName : Path.GetFileNameWithoutExtension(ExeName);
 
         private static Release? Parse(JsonElement root)
@@ -207,12 +205,9 @@ namespace BloodborneLauncher.Core
                 var name = asset.GetProperty("name").GetString() ?? "";
                 var url = asset.GetProperty("browser_download_url").GetString();
                 var size = asset.GetProperty("size").GetInt64();
-                // GitHub stores "Lantern Engine.exe" as "Lantern.Engine.exe". A release before the
-                // rename has only the old name.
+                // GitHub stores "Hunters Workshop.exe" as "Hunters.Workshop.exe".
                 var spaced = name.Replace(".", " ").Replace(" exe", ".exe");
-                if (!OperatingSystem.IsLinux() &&
-                    (spaced.Equals(ExeName, StringComparison.OrdinalIgnoreCase) ||
-                     (exe == null && spaced.Equals(OldExeName, StringComparison.OrdinalIgnoreCase))))
+                if (!OperatingSystem.IsLinux() && spaced.Equals(ExeName, StringComparison.OrdinalIgnoreCase))
                     (exe, exeSize) = (url, size);
                 else if (IsPackageAsset(name) && zip == null)
                     (zip, zipSize) = (url, size);
@@ -315,8 +310,7 @@ namespace BloodborneLauncher.Core
                     ExtractTarball(zip, unpacked);
                 else
                     Extract(zip, unpacked, skipped);
-                var root = (Directory.GetFiles(unpacked, LauncherFile, SearchOption.AllDirectories).FirstOrDefault() ??
-                            (tarball ? null : Directory.GetFiles(unpacked, OldExeName, SearchOption.AllDirectories).FirstOrDefault())) is { } found
+                var root = Directory.GetFiles(unpacked, LauncherFile, SearchOption.AllDirectories).FirstOrDefault() is { } found
                     ? Path.GetDirectoryName(found)
                     : throw new InvalidOperationException($"The package has no {LauncherFile}.");
                 CopyPackage(root!, folder, self, skipped);
@@ -369,7 +363,7 @@ namespace BloodborneLauncher.Core
 
         private static Exception Blocked(string file, Exception e) => new InvalidOperationException(
             $"{e.Message}\n\nAn antivirus is most likely holding or removing {Path.GetFileName(file)}. Allow it (or the " +
-            "Lantern Engine folder) in the antivirus and update again.", e);
+            "Hunter's Workshop folder) in the antivirus and update again.", e);
 
         private static void Extract(string zip, string to, List<string> skipped)
         {
@@ -469,7 +463,7 @@ namespace BloodborneLauncher.Core
 
 #if AVALONIA
         /// <summary>Whether this launcher can update itself: releases carry the Windows package and the
-        /// Linux one (LanternEngine-v&lt;version&gt;-linux-x64.tar.gz, with this launcher inside).</summary>
+        /// Linux one (HuntersWorkshop-v&lt;version&gt;-linux-x64.tar.gz, with this launcher inside).</summary>
         public static bool Supported => OperatingSystem.IsWindows() || OperatingSystem.IsLinux();
 
 #endif

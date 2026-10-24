@@ -26,7 +26,7 @@ namespace {
 
 const char* Path() {
     const char* env = std::getenv("BB_CONFIG");
-    return env && env[0] ? env : "lantern.ini";
+    return env && env[0] ? env : "config.ini";
 }
 
 float Clamp(float v, float lo, float hi) {
@@ -439,7 +439,7 @@ void Load() {
     for (int e = 0; e < EffectCount; ++e) {
         v.effects[e] = Effects[e].default_on;
     }
-    // bbport: the menu's language until one is chosen in it (menu_language in lantern.ini): the
+    // bbport: the menu's language until one is chosen in it (menu_language in config.ini): the
     // launcher's (BB_MENU_LANGUAGE), else the system's, as the launcher picks its own.
     {
         const char* lang = std::getenv("BB_MENU_LANGUAGE");
@@ -710,7 +710,7 @@ void Save() {
         std::fclose(file);
     }
     if (!had_lines) {
-        out = "# Lantern Engine settings (in-game menu: Insert / L3+R3)\n";
+        out = "# Hunter's Workshop settings (in-game menu: Insert / L3+R3)\n";
     }
     for (size_t k = 0; k < keys.size(); ++k) {
         if (!written[k]) {

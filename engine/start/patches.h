@@ -13,7 +13,7 @@ struct Size {
 };
 std::optional<Size> ParseSize(std::string_view text);
 
-/// (render, output) when lantern.ini selects an output other than 1080p (patches.py scaled_sizes).
+/// (render, output) when config.ini selects an output other than 1080p (patches.py scaled_sizes).
 std::optional<std::pair<Size, Size>> ScaledSizes(const std::map<std::string, std::string>& settings);
 
 struct PatchRequest {

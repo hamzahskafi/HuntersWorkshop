@@ -10,7 +10,7 @@ namespace BloodborneLauncher.Core
     /// Packages since 0.9.30 keep the engine in engine\, so the top of the folder holds only the
     /// launcher, Bloodborne.exe and the player's files. An update copies the new layout over an
     /// older one, which leaves the engine's old top-level folders behind: they are removed once,
-    /// at the next start, behind a window that says so. The player's files (lantern.ini, user, mods, patches,
+    /// at the next start, behind a window that says so. The player's files (config.ini, user, mods, patches,
     /// logs, network, engine-assets, fsr4_411) are never touched; the old out\ only held the engine
     /// and files each start makes again.
     /// </summary>
@@ -102,7 +102,7 @@ namespace BloodborneLauncher.Core
             var bar = new ProgressBar { Height = 6, Minimum = 0, Maximum = leftovers.Count, Margin = new Thickness(0, 14, 0, 0) };
             var window = new Window
             {
-                Title = "Lantern Engine",
+                Title = "Hunter's Workshop",
                 Width = 420,
                 SizeToContent = SizeToContent.Height,
                 ResizeMode = ResizeMode.NoResize,
@@ -117,7 +117,7 @@ namespace BloodborneLauncher.Core
                         new TextBlock { Text = "New version: cleaning up", FontSize = 16, FontWeight = FontWeights.SemiBold },
                         new TextBlock
                         {
-                            Text = "Removing the old engine files from the Lantern Engine folder. Your saves, settings and mods stay. Please wait…",
+                            Text = "Removing the old engine files from the Hunter's Workshop folder. Your saves, settings and mods stay. Please wait…",
                             TextWrapping = TextWrapping.Wrap,
                             Margin = new Thickness(0, 8, 0, 0),
                         },

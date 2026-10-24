@@ -207,7 +207,7 @@ std::vector<const char*> GetInstanceExtensions(Frontend::WindowSystemType window
 
     if (window_type != Frontend::WindowSystemType::Headless) {
         extensions.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
-        // bbport: HDR output (hdr in lantern.ini): the surface lists its HDR formats only with
+        // bbport: HDR output (hdr in config.ini): the surface lists its HDR formats only with
         // this extension. Enabled whenever available; the SDR swapchain still picks
         // SRGB_NONLINEAR (vk_swapchain.cpp).
         extensions.push_back(VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME);

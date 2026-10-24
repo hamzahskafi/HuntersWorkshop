@@ -44,7 +44,7 @@ bool ReadFile(const std::string& path, std::vector<u8>& data) {
 }
 
 FfxFsr4ModelPreset ModelPreset(int preset) {
-    // Lantern Engine: BB_FSR4_MODEL=native|quality|balanced|performance|ultra runs at least that
+    // Hunter's Workshop: BB_FSR4_MODEL=native|quality|balanced|performance|ultra runs at least that
     // model (a smaller preset model is raised to it, a larger one stays); the render size stays
     // the preset's. A larger model leaves fewer trails behind moving characters at the low
     // presets, at some GPU cost.

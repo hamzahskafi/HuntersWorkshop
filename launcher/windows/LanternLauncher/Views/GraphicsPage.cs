@@ -15,7 +15,7 @@ namespace BloodborneLauncher.Views
         private bool _syncing;
 
         public GraphicsPage() : base(L.T("Graphics"),
-            L.T("Stored in lantern.ini; the upscaler can also be changed in game (Insert or L3 + R3)."))
+            L.T("Stored in config.ini; the upscaler can also be changed in game (Insert or L3 + R3)."))
         {
             Add(Card(SymbolRegular.Gauge24, L.T("Best settings for this PC"), Hardware.Detect().Summary,
                 SmallButton(L.T("Recommend…"), SymbolRegular.Sparkle24, (_, _) => MainWindow.Instance!.OfferBestSettings(firstRun: false)), out _));
@@ -128,6 +128,12 @@ namespace BloodborneLauncher.Views
             SettingToggle(SymbolRegular.Timer24, L.T("Precise frame pacing"),
                 L.T("A high-resolution timer and even spacing between frames: steadier frame times and less VRR flicker. Uses a little CPU. On by default"),
                 "exp_frame_pacing", exp);
+            SettingToggle(SymbolRegular.Desktop24, L.T("Fixed-refresh frame lock"),
+                L.T("Only for monitors without G-Sync or FreeSync (VRR). Each frame is shown right after one of the monitor's refreshes when the FPS limit divides its refresh rate (60 FPS on 60, 120 or 240 Hz). Needs Precise frame pacing. With G-Sync or FreeSync it stutters: leave it off. Off by default"),
+                "exp_vblank_lock", exp);
+            SettingToggle(SymbolRegular.Shield24, L.T("Particle work safety cap"),
+                L.T("Checks the size of the game's GPU particle work before the graphics card runs it, and caps it to what the card supports. Only for games that crash with \"device lost\" in effect-heavy scenes. It costs smoothness in busy scenes. Off by default"),
+                "exp_particle_cap", exp);
             Feature(SymbolRegular.Storage24, L.T("Use more VRAM for textures"),
                 L.T("Keeps textures in video memory up to 80% of the card instead of about 40%, so they aren't thrown out and loaded again (the cause of most stutters on 8 GB cards)"),
                 "exp_vram_budget", exp);

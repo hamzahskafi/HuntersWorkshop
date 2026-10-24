@@ -2,12 +2,12 @@ using System.Diagnostics;
 using System.Text;
 using BloodborneLauncher.Build;
 
-// Build Launcher: keeps "Bloodborne Launcher.exe" in step with its sources.
+// Build Launcher: keeps "Hunters Workshop.exe" in step with its sources.
 //
 //   1. fingerprints launcher/windows/BloodborneLauncher (+ Shared) and compares it with
 //      LauncherApp/build-stamp.json, written by the last build;
 //   2. if they differ, the exe is missing, or --force was given: publishes the launcher and
-//      installs it over LauncherApp/Bloodborne Launcher.exe (the launcher must be closed);
+//      installs it over LauncherApp/Hunters Workshop.exe (the launcher must be closed);
 //   3. does the same for this builder's own sources, replacing itself (a running exe can be
 //      renamed, so the old one is moved aside and removed on the next run);
 //   4. starts the launcher.
@@ -24,7 +24,7 @@ namespace BloodborneLauncher.Builder;
 
 internal static class Program
 {
-    private const string LauncherProcess = "Bloodborne Launcher";
+    private const string LauncherProcess = "Hunters Workshop";
 
     private static int Main(string[] args)
     {
@@ -75,7 +75,7 @@ internal static class Program
         Directory.CreateDirectory(appDir);
         CleanUpOldSelf();
 
-        Title("Bloodborne Launcher builder");
+        Title("Hunters Workshop builder");
         Info($"  sources  {root}");
         Info($"  install  {appDir}");
 
@@ -186,8 +186,8 @@ internal static class Program
         while (Running(exe).Length > 0)
         {
             if (noPause || Console.IsInputRedirected)
-                throw new StepFailed("Bloodborne Launcher is open. Close it and run the builder again.");
-            Warn("Bloodborne Launcher is open and its exe cannot be replaced.");
+                throw new StepFailed("Hunters Workshop is open. Close it and run the builder again.");
+            Warn("Hunters Workshop is open and its exe cannot be replaced.");
             Console.Write("Close it and press Enter, type k to close it for you, or q to quit: ");
             var answer = (Console.ReadLine() ?? "q").Trim().ToLowerInvariant();
             if (answer == "q")
@@ -204,7 +204,7 @@ internal static class Program
     {
         Step($"Building {exeName}");
         RequireDotnet();
-        var output = Path.Combine(Path.GetTempPath(), "lantern-engine-publish", project);
+        var output = Path.Combine(Path.GetTempPath(), "hunters-workshop-publish", project);
         if (Directory.Exists(output))
             Directory.Delete(output, recursive: true);
 
@@ -249,7 +249,7 @@ internal static class Program
     private static void WriteForceScript(string appDir)
     {
         var script = Path.Combine(appDir, "Force Rebuild Launcher.cmd");
-        const string text = "@echo off\r\nrem Rebuilds Bloodborne Launcher.exe even when its sources did not change.\r\n" +
+        const string text = "@echo off\r\nrem Rebuilds Hunters Workshop.exe even when its sources did not change.\r\n" +
                             "\"%~dp0Build Launcher.exe\" --force\r\n";
         if (!File.Exists(script) || File.ReadAllText(script) != text)
             File.WriteAllText(script, text);

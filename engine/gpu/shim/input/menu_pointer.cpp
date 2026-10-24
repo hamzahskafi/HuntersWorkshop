@@ -144,6 +144,9 @@ bool g_passive = false;
 
 std::atomic<std::uint64_t> g_tick{0};
 std::atomic<std::int64_t> g_focus_ms{0};
+// The last time a list with focus offered a choice (offers_choice): what decides whether the keys
+// that move the character navigate a menu in the world (menu_pointer_navigating).
+std::atomic<std::int64_t> g_choice_ms{0};
 std::atomic<bool> g_click{false};
 std::atomic<std::int64_t> g_click_ms{0};
 std::atomic<std::uint32_t> g_press{0};
@@ -553,6 +556,23 @@ Seen& seen(std::uint8_t* c, bool* fresh) {
     return s;
 }
 
+// A list there is something to pick in: more than one item, and its root clip on screen (a list
+// whose clip cannot be read counts as shown). A list can keep focus with one item or hidden - the
+// world's own lists do - and with it the keys that move the hunter were taken for the menu's
+// d-pad: W held after closing a menu kept walking its cursor instead of the character.
+bool offers_choice(const std::uint8_t* c) {
+    if (field<std::int32_t>(c, kCount) <= 1) {
+        return false;
+    }
+    std::uint64_t root = 0;
+    const auto data = field<std::uint64_t>(c, kRootData);
+    if ((field<std::uint32_t>(c, kRootType) & 0x8f) != 10 || !data ||
+        !safe_read(data + kNative, &root, sizeof(root)) || !root) {
+        return true;
+    }
+    return shown(root);
+}
+
 void pointer_step(std::uint8_t* c, const std::uint8_t* input) {
     if (g_log && input && !*input) {
         static std::uint8_t* told[64] = {};
@@ -574,7 +594,11 @@ void pointer_step(std::uint8_t* c, const std::uint8_t* input) {
     // A list with focus is a menu the player is in, pointer or not - this is
     // what hands the mouse back from the camera.
     g_tick.fetch_add(1, std::memory_order_relaxed);
-    g_focus_ms.store(now_ms(), std::memory_order_relaxed);
+    const std::int64_t focused_ms = now_ms();
+    g_focus_ms.store(focused_ms, std::memory_order_relaxed);
+    if (offers_choice(c)) {
+        g_choice_ms.store(focused_ms, std::memory_order_relaxed);
+    }
     // Nor while a controller is the device in use: its cursor is hidden, and
     // the mouse moving again is what hands it back (host_input_device).
     if (!host_settings().mouse_menu || host_options_open() || ingame_menu_open() || host_mouse_relative() || g_passive ||
@@ -871,11 +895,12 @@ bool menu_pointer_in_menu() {
 
 bool menu_pointer_navigating() {
     // bbport: whether the keys that move the character navigate a menu as the d-pad (input.cpp):
-    // the front end, the flow's open menu, or a list with focus in the last few frames. Not the
+    // the front end, the flow's open menu, or a list offering a choice (offers_choice) with focus
+    // in the last few frames. Not the
     // pointer's 400 ms after a list lost focus: W pressed right after closing the inventory was a
     // held d-pad up in the world, which turns HP into Quicksilver Bullets.
     if (front_end()) {
         return true;
     }
-    return menu_open() || now_ms() - g_focus_ms.load(std::memory_order_relaxed) < 70;
+    return menu_open() || now_ms() - g_choice_ms.load(std::memory_order_relaxed) < 70;
 }

@@ -37,7 +37,7 @@ fs::path SelfPath() {
 
 struct Folders {
     fs::path engine;   // engine\ (out\, patches\, data\)
-    fs::path package;  // the package: package.json, lantern.ini, user, mods, logs
+    fs::path package;  // the package: package.json, config.ini, user, mods, logs
     fs::path out;      // engine\out: the programs and what each start generates
 };
 
@@ -342,31 +342,17 @@ int Main(std::vector<std::wstring> arguments) {
     // threads then miss (seen with 0.9.37 beta 3 on a Desktop in OneDrive: the CPU busier and
     // draw preparation falling behind more often than in a session from E:\, not proven to be it).
     if (Lower(Utf8(folders.package)).find("onedrive") != std::string::npos)
-        Log("Performance: this Lantern Engine folder is synced by OneDrive (%s); OneDrive uploads its logs and "
+        Log("Performance: this Hunter's Workshop folder is synced by OneDrive (%s); OneDrive uploads its logs and "
             "shader cache while you play. A folder outside OneDrive (C:\\Games, for example) avoids that",
             Utf8(folders.package).c_str());
-    // Settings were bbport.ini before 0.9.37 beta 2: copied once (the old file stays for an older
-    // launcher pointed at this folder). Without either, lantern.ini starts as the shipped settings
-    // (engine\lantern.default.ini). The 0.9.37 beta 2 package carried a lantern.ini with the shipped
-    // settings, and launchers before it keep only bbport.ini when they update: the player's settings
-    // looked reset. A lantern.ini that still holds exactly the shipped settings while bbport.ini
-    // holds others is replaced by bbport.ini (the launcher does the same, Core/Paths.cs).
+    // The game's settings, config.ini in the data folder: a folder without one starts with the shipped
+    // settings (engine\config.default.ini).
     {
         std::error_code ec;
-        const fs::path ini = data / "lantern.ini", old = data / "bbport.ini";
-        const fs::path shipped = folders.engine / "lantern.default.ini";
-        if (!fs::exists(ini, ec)) {
-            if (fs::exists(old, ec)) fs::copy_file(old, ini, ec);
-            else if (fs::exists(shipped, ec)) fs::copy_file(shipped, ini, ec);
-        } else if (fs::exists(old, ec) && fs::exists(shipped, ec)) {
-            const auto current = ReadSettings(ini);
-            if (current == ReadSettings(shipped) && current != ReadSettings(old)) {
-                fs::copy_file(old, ini, fs::copy_options::overwrite_existing, ec);
-                if (!ec) Log("Settings: lantern.ini restored from bbport.ini (an update had put the shipped settings in it)");
-            }
-        }
+        const fs::path ini = data / "config.ini", shipped = folders.engine / "config.default.ini";
+        if (!fs::exists(ini, ec) && fs::exists(shipped, ec)) fs::copy_file(shipped, ini, ec);
     }
-    if (!Env("BB_CONFIG")) SetEnv("BB_CONFIG", Utf8(data / "lantern.ini"));
+    if (!Env("BB_CONFIG")) SetEnv("BB_CONFIG", Utf8(data / "config.ini"));
     const fs::path config = Path(*Env("BB_CONFIG"));
     const auto settings = ReadSettings(config);
     try {

@@ -21,7 +21,7 @@ namespace Vulkan::OptiScaler {
 
 namespace {
 
-/// The switch `name` (BB_OPTISCALER_*): its variable when set (0: off), else lantern.ini's value at
+/// The switch `name` (BB_OPTISCALER_*): its variable when set (0: off), else config.ini's value at
 /// start (the in-game menu's optiscaler_*).
 bool EnvOn(const char* name) {
     if (const char* env = std::getenv(name)) {

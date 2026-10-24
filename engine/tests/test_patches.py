@@ -467,9 +467,9 @@ class HeapPoolTests(unittest.TestCase):
             shutil.copy(ROOT / 'patches/Bloodborne.xml', root / 'ext/community.xml')
         (root / 'patches.json').write_text(json.dumps(
             {'enabled': ['community.xml/Resolution Patch 2560x1080 (21:9)']}))
-        (root / 'lantern.ini').write_text('')
+        (root / 'config.ini').write_text('')
         subprocess.run([sys.executable, str(ROOT / 'scripts/patches.py'), '--xml', str(root / 'xml/Bloodborne.xml'),
-                        '--out', str(root / 'out'), '--fps', '30', '--settings', str(root / 'lantern.ini'),
+                        '--out', str(root / 'out'), '--fps', '30', '--settings', str(root / 'config.ini'),
                         '--game-dir', str(root), '--patches-dir', str(root / 'ext'),
                         '--patches-config', str(root / 'patches.json')], check=True, capture_output=True)
         return json.loads((root / 'out/patches-info.json').read_text())['heap_patch']

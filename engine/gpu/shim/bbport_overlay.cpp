@@ -444,7 +444,7 @@ const char* Item(const char* english, const char* russian = nullptr) {
     return russian ? BbSettings::MenuText(english, russian) : BbSettings::MenuText(english);
 }
 
-// HDR output (lantern.ini hdr*): on/off on restart; paper white, peak and boost live.
+// HDR output (config.ini hdr*): on/off on restart; paper white, peak and boost live.
 void HdrSection() {
     auto& s = BbSettings::Get();
     Section("HDR output", "Вывод HDR");
@@ -1242,7 +1242,7 @@ void MaskSection() {
 }
 
 // bbport: OptiScaler (vk_optiscaler.h): what was found at start, and the engine's compatibility
-// mode for it (optiscaler_* in lantern.ini, applied on restart).
+// mode for it (optiscaler_* in config.ini, applied on restart).
 void OptiScalerSection() {
     auto& s = BbSettings::Get();
     const auto& opti = Vulkan::OptiScaler::Detect();
@@ -1647,7 +1647,7 @@ int pending_tab = -1;           // a tab chosen by L2 / R2 or Ctrl+PgUp / PgDn, 
 void Menu() {
     auto& s = BbSettings::Get();
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
-    // Where it was moved last (lantern.ini menu_pos, a fraction of the screen), kept on screen.
+    // Where it was moved last (config.ini menu_pos, a fraction of the screen), kept on screen.
     ImVec2 pos(viewport->WorkPos.x + 40.0f * base_scale, viewport->WorkPos.y + 40.0f * base_scale);
     if (s.menu_x >= 0.0f && s.menu_y >= 0.0f) {
         const float margin = 80.0f * base_scale;
@@ -1810,8 +1810,8 @@ void Menu() {
         quit_armed = false;
     }
     ImGui::SameLine();
-    ImGui::TextDisabled("%s", BbSettings::MenuText("Settings are saved to lantern.ini",
-                                             "Настройки сохраняются в lantern.ini"));
+    ImGui::TextDisabled("%s", BbSettings::MenuText("Settings are saved to config.ini",
+                                             "Настройки сохраняются в config.ini"));
     ImGui::PushTextWrapPos();
     ImGui::TextDisabled("%s", BbSettings::MenuText(
                                   "Tabs: L2 / R2 or Ctrl+PgUp / Ctrl+PgDn. Search: Ctrl+F, Esc clears it. "

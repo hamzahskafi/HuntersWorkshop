@@ -128,7 +128,7 @@ void SetP(NgxParameter* p, const char* name, void* v) {
     Slot<void (*)(NgxParameter*, const char*, void*)>(p, SetVoid)(p, name, v);
 }
 /// bbport: NVSDK_NGX_DLSS_Hint_Render_Preset (0 the DLL's default, 1 A ... 11 K): dlss_preset in
-/// lantern.ini, BB_DLSS_PRESET overrides it ("k" when neither); live from the menu.
+/// config.ini, BB_DLSS_PRESET overrides it ("k" when neither); live from the menu.
 unsigned DlssPreset(int quality);
 /// The same preset for every quality mode: the feature is created again when the mode changes.
 void SetPreset(NgxParameter* p, unsigned preset) {

@@ -10,7 +10,7 @@ namespace BloodborneLauncher.Core
     /// Keeps a player's saves from going missing. Save backups (SaveBackups) live in the saves
     /// folder and follow the settings; this does not:
     /// - a safety copy of every profile's savedata, at each start and when the game exits, in
-    ///   %LOCALAPPDATA%\Lantern Engine\save-vault (the newest few per profile, whatever the Save
+    ///   %LOCALAPPDATA%\Hunter's Workshop\save-vault (the newest few per profile, whatever the Save
     ///   backups switch says): it outlives a deleted package folder (the default saves folder is
     ///   its user\), lost launcher settings and a moved saves folder;
     /// - at Play, when the current profile has no saves but a saves folder used before (or the
@@ -28,7 +28,7 @@ namespace BloodborneLauncher.Core
         private static readonly object Lock = new();
 
         public static string VaultDir =>
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Lantern Engine", "save-vault");
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Hunters Workshop", "save-vault");
 
         /// <summary>Saves the launcher can point at instead: `Root` is a saves folder with
         /// `Profiles` holding saves; or, when that folder is gone, `Copy` is the vault's newest copy
@@ -209,7 +209,7 @@ namespace BloodborneLauncher.Core
         {
             var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
             var files = new List<string>();
-            foreach (var folder in new[] { "Lantern Engine", "bbport-launcher" })
+            foreach (var folder in new[] { "Hunters Workshop" })
             {
                 var dir = Path.Combine(appData, folder);
                 if (!Directory.Exists(dir)) continue;

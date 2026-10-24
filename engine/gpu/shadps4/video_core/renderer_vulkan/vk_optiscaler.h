@@ -4,7 +4,7 @@
 // DLSS runs through its own feature, which may call vkDeviceWaitIdle from the thread recording
 // the evaluate (a release, or a backend change from its menu). It is allowed; while it is loaded
 // a compatibility mode keeps the engine on the paths it handles. BB_OPTISCALER_COMPAT=0 turns
-// the whole mode off; each part has its own switch as well. Unset, they come from lantern.ini
+// the whole mode off; each part has its own switch as well. Unset, they come from config.ini
 // (optiscaler_*, the in-game menu; BbSettings::Values::startup_optiscaler).
 #pragma once
 

@@ -41,6 +41,6 @@ int main(int argc, char** argv) {
     setenv("DISABLE_VK_LAYER_VALVE_steam_fossilize_1", "1", 1);
     argv[0] = (char*)TARGET;
     execv(TARGET, argv);
-    perror("Lantern Engine: " TARGET);
+    perror("Hunter's Workshop: " TARGET);
     return 127;
 }

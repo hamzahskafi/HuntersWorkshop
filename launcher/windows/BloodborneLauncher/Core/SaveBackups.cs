@@ -8,16 +8,24 @@ namespace BloodborneLauncher.Core
     /// <summary>
     /// Copies of the current profile's savedata, made before each start when it changed since the
     /// last copy; the newest ten are kept, in launcher-backups\&lt;profile&gt;\&lt;time&gt; in the saves
-    /// folder. Restoring first backs up what is there now.
+    /// folder. While the game runs, a copy is also made every few minutes when the saves changed
+    /// (CreateInGame); those are counted apart, so a long session does not push out the copies
+    /// made before starting. Restoring first backs up what is there now.
     /// </summary>
     public static class SaveBackups
     {
         public const int Keep = 10;
+        public const int InGameKeep = 5;
+        public static readonly TimeSpan InGameEvery = TimeSpan.FromMinutes(15);
+        /// <summary>How long the saves must have been left alone before a copy while playing: the
+        /// game writes its save files in place, and a copy taken mid-write would be torn.</summary>
+        private static readonly TimeSpan InGameQuiet = TimeSpan.FromSeconds(45);
         private const string Stamp = "yyyy-MM-dd_HH-mm-ss";
         private const string BeforeRestore = "_before-restore";
+        private const string InGame = "_in-game";
         private const string FingerprintFile = "fingerprint.txt";
 
-        public sealed record Backup(string Dir, DateTime When, long Bytes, bool MadeBeforeRestore);
+        public sealed record Backup(string Dir, DateTime When, long Bytes, bool MadeBeforeRestore, bool MadeInGame = false);
 
         public static string SaveData(LauncherSettings s) => Path.Combine(GameEnvironment.UserDir(s), "savedata");
 
@@ -38,8 +46,10 @@ namespace BloodborneLauncher.Core
                 var name = Path.GetFileName(dir);
                 var before = name.EndsWith(BeforeRestore, StringComparison.Ordinal);
                 if (before) name = name[..^BeforeRestore.Length];
+                var inGame = name.EndsWith(InGame, StringComparison.Ordinal);
+                if (inGame) name = name[..^InGame.Length];
                 if (DateTime.TryParseExact(name, Stamp, CultureInfo.InvariantCulture, DateTimeStyles.None, out var when))
-                    list.Add(new Backup(dir, when, Size(dir), before));
+                    list.Add(new Backup(dir, when, Size(dir), before, inGame));
             }
             return list.OrderByDescending(b => b.When).ToList();
         }
@@ -59,11 +69,53 @@ namespace BloodborneLauncher.Core
             if (Directory.Exists(target)) return null; // one a second is plenty
             Copy(source, Path.Combine(target, "savedata"));
             File.WriteAllText(Path.Combine(target, FingerprintFile), print);
-            foreach (var old in List(s).Skip(Keep))
-            {
-                try { Directory.Delete(old.Dir, recursive: true); } catch { /* in use: next time */ }
-            }
+            Prune(s);
             return target;
+        }
+
+        /// <summary>A copy while the game runs: only when the saves changed since the newest backup
+        /// and nothing was written to them for a while, and only if no file changed during the copy
+        /// (it is made in a side folder and renamed when complete). Returns the new backup's folder,
+        /// or null when there was nothing to copy or the game was saving.</summary>
+        public static string? CreateInGame(LauncherSettings s)
+        {
+            var source = SaveData(s);
+            if (!Directory.Exists(source)) return null;
+            var files = Directory.GetFiles(source, "*", SearchOption.AllDirectories).Where(f => !Staging(source, f)).ToList();
+            if (files.Count == 0) return null;
+            if (DateTime.UtcNow - files.Max(File.GetLastWriteTimeUtc) < InGameQuiet) return null;
+            var print = Fingerprint(source);
+            if (List(s).FirstOrDefault() is { } newest && ReadFingerprint(newest.Dir) == print) return null;
+
+            var target = Path.Combine(Folder(s), DateTime.Now.ToString(Stamp, CultureInfo.InvariantCulture) + InGame);
+            if (Directory.Exists(target)) return null;
+            // Side folders left by a copy that never finished (the launcher closed during it).
+            foreach (var left in Directory.Exists(Folder(s)) ? Directory.GetDirectories(Folder(s), "*.partial") : Array.Empty<string>())
+            {
+                try { Directory.Delete(left, recursive: true); } catch { /* in use: next time */ }
+            }
+            var partial = target + ".partial";
+            Copy(source, Path.Combine(partial, "savedata"));
+            if (Fingerprint(source) != print)
+            {
+                Directory.Delete(partial, recursive: true); // saved meanwhile: next time
+                return null;
+            }
+            File.WriteAllText(Path.Combine(partial, FingerprintFile), print);
+            Directory.Move(partial, target);
+            Prune(s);
+            return target;
+        }
+
+        /// <summary>The newest Keep backups made outside the game and InGameKeep made while it ran.</summary>
+        private static void Prune(LauncherSettings s)
+        {
+            var all = List(s);
+            var old = all.Where(b => !b.MadeInGame).Skip(Keep).Concat(all.Where(b => b.MadeInGame).Skip(InGameKeep));
+            foreach (var backup in old)
+            {
+                try { Directory.Delete(backup.Dir, recursive: true); } catch { /* in use: next time */ }
+            }
         }
 
         /// <summary>Puts a backup's savedata back, after backing up the current one.</summary>

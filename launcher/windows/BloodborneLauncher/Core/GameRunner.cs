@@ -72,10 +72,10 @@ namespace BloodborneLauncher.Core
                 // Linux (the Avalonia launcher): the package's out/bb-start, a script that runs the engine's
                 // run.sh with --game-dir and this same environment (engine/packaging/linux).
                 if (!Paths.IsPortDir(Paths.PortDir))
-                    return "The engine folder is not set. Choose it in Settings › Lantern Engine.";
+                    return "The engine folder is not set. Choose it in Settings › Engine.";
                 if (!Writable(Path.Combine(Paths.EngineDir, "out")))
                     return $"Windows does not let the game write into its own folder ({Paths.PortDir}), which it needs for its " +
-                           "prepared files, logs and saves. This happens under Program Files: move the Lantern Engine folder " +
+                           "prepared files, logs and saves. This happens under Program Files: move the Hunter's Workshop folder " +
                            "somewhere else, such as C:\\Games or your Documents.";
                 if (File.Exists(Paths.Start))
                 {
@@ -115,7 +115,7 @@ namespace BloodborneLauncher.Core
                 var process = new Process { StartInfo = info, EnableRaisingEvents = true };
                 OpenLog();
                 // The first line of every log, the Output page's export included: which build ran.
-                Emit($"Lantern Engine {Updater.CurrentLabel}, engine {Updater.LocalEngine() ?? "unknown"}, {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                Emit($"Hunter's Workshop {Updater.CurrentLabel}, engine {Updater.LocalEngine() ?? "unknown"}, {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
                 process.OutputDataReceived += (_, e) => { if (e.Data != null) Emit(e.Data); };
                 process.ErrorDataReceived += (_, e) => { if (e.Data != null) Emit(e.Data); };
                 process.Exited += (_, _) =>

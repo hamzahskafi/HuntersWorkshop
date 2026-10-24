@@ -26,7 +26,7 @@ namespace BloodborneLauncher.Views
         private readonly StackPanel _themeColour = new(), _picture = new(), _iconPicture = new();
         private TextBlock _pictureHint = null!, _iconPictureHint = null!;
 
-        public SettingsPage() : base(L.T("Settings"), L.T("The Lantern Engine, how the game is started, and keeping this launcher up to date."))
+        public SettingsPage() : base(L.T("Settings"), L.T("The engine, how the game is started, and keeping this launcher up to date."))
         {
             Group(L.T("Appearance"));
             ComboRow(SymbolRegular.LocalLanguage24, L.T("Launcher language"), L.T("Restart the launcher to apply the language."),
@@ -38,9 +38,9 @@ namespace BloodborneLauncher.Views
                 });
             FrameworkElement layout = null!;
             var reverting = false;
-            layout = ComboRow(SymbolRegular.PanelLeft24, L.T("Layout"), L.T("Modern: tabs and compact rows. Classic: the sidebar and one card per setting"),
-                new[] { new Choice(L.T("Modern"), "modern"), new Choice(L.T("Classic"), "classic") },
-                () => S.Str("ui_layout") == "classic" ? "classic" : "modern", v => S.Set("ui_layout", v), changed: () =>
+            layout = ComboRow(SymbolRegular.PanelLeft24, L.T("Layout"), L.T("Classic: the sidebar and one card per setting. Modern: tabs and compact rows"),
+                new[] { new Choice(L.T("Classic"), "classic"), new Choice(L.T("Modern"), "modern") },
+                () => S.Str("ui_layout") == "modern" ? "modern" : "classic", v => S.Set("ui_layout", v), changed: () =>
                 {
                     if (reverting || RestartForLayout()) return;
                     // Cancelled: put back the layout that is showing, so the next start doesn't switch either.
@@ -48,7 +48,7 @@ namespace BloodborneLauncher.Views
                     var shown = SettingRow.Classic ? "classic" : "modern";
                     S.Set("ui_layout", shown);
                     Ws.SaveNow();
-                    var index = shown == "classic" ? 1 : 0;
+                    var index = shown == "classic" ? 0 : 1;
                     if (layout is Segmented segmented) segmented.Select(index, notify: false);
                     else if (layout is ComboBox box) box.SelectedIndex = index;
                     reverting = false;
@@ -129,15 +129,15 @@ namespace BloodborneLauncher.Views
             Add(Card(SymbolRegular.ImageEdit24, L.T("Icon picture"), L.T("A PNG, JPG, BMP or ICO; square pictures look best"),
                 SmallButton(L.T("Choose"), SymbolRegular.FolderOpen24, (_, _) => ChooseIcon()), out _iconPictureHint), _iconPicture);
             Body.Children.Add(_iconPicture);
-            SettingCombo(SymbolRegular.Window24, L.T("Window buttons"), L.T("macOS: the red, yellow and green dots. Windows: – □ ✕"),
-                new[] { new Choice("macOS", "mac"), new Choice("Windows", "windows") },
+            SettingCombo(SymbolRegular.Window24, L.T("Window buttons"), L.T("Windows: – □ ✕. macOS: the red, yellow and green dots"),
+                new[] { new Choice("Windows", "windows"), new Choice("macOS", "mac") },
                 "ui_window_buttons", changed: () => MainWindow.Instance?.ApplyWindowButtons());
             SettingCombo(SymbolRegular.ArrowBidirectionalLeftRight24, L.T("Window buttons side"), null,
                 new[] { new Choice(L.T("Usual"), "usual", L.T("macOS on the left, Windows on the right")), new Choice(L.T("Left"), "left"), new Choice(L.T("Right"), "right") },
                 "ui_window_buttons_side", changed: () => MainWindow.Instance?.ApplyWindowButtons());
             ShowAppearance();
 
-            Group("Lantern Engine");
+            Group(L.T("Engine"));
             Add(Card(SymbolRegular.FolderLink24, L.T("Engine folder"), "", Row(
                 SmallButton(L.T("Browse"), SymbolRegular.FolderOpen24, (_, _) => ChoosePort()),
                 IconButton(SymbolRegular.Open24, L.T("Open in Explorer"), (_, _) => Paths.OpenFolder(Paths.PortDir)),
@@ -190,7 +190,7 @@ namespace BloodborneLauncher.Views
             Group(L.T("Files"));
             Add(Card(SymbolRegular.DocumentSettings20, L.T("Launcher settings"), Paths.ConfigFile,
                 IconButton(SymbolRegular.Open24, L.T("Open in Explorer"), (_, _) => Paths.OpenFolder(Paths.ConfigDir)), out _));
-            Add(Card(SymbolRegular.DocumentSettings20, L.T("Port settings (lantern.ini)"), Paths.IniPath,
+            Add(Card(SymbolRegular.DocumentSettings20, L.T("Game settings (config.ini)"), Paths.IniPath,
                 IconButton(SymbolRegular.Open24, L.T("Open in Explorer"), (_, _) => Paths.OpenFolder(Path.GetDirectoryName(Paths.IniPath)!)), out _));
             Add(Card(SymbolRegular.Broom24, L.T("Shader cache"),
                 L.T("The game's compiled shaders, kept between starts (a new engine version clears them itself). Clear them if ") +
@@ -211,58 +211,6 @@ namespace BloodborneLauncher.Views
             Add(Card(SymbolRegular.ArrowImport24, L.T("Import settings"), L.T("Someone's code or file. You see what changes before anything is applied"),
                 Row(SmallButton(L.T("Paste code"), SymbolRegular.ClipboardPaste24, (_, _) => ImportSettingsCode()),
                     SmallButton(L.T("Open file"), SymbolRegular.FolderOpen24, (_, _) => ImportSettingsFile())), out _));
-
-            Group(L.T("Community"));
-            // Discord status: a preview of the card, and for Custom every part Discord lets a game set.
-            var discordPreview = new DiscordPreview();
-            var discordCustom = new StackPanel();
-            var discordLink = new StackPanel();
-            var discordOwn = new StackPanel();
-            void DiscordChanged()
-            {
-                var mode = S.Str("discord_status");
-                discordCustom.Visibility = mode == "custom" ? Visibility.Visible : Visibility.Collapsed;
-                discordLink.Visibility = S.Str("discord_picture") == "url" ? Visibility.Visible : Visibility.Collapsed;
-                discordOwn.Visibility = S.Str("discord_app") == "own" ? Visibility.Visible : Visibility.Collapsed;
-                discordPreview.Show(DiscordPresence.LookOf(S));
-                Ws.SaveSoon();
-                MainWindow.Instance?.UpdateDiscord();
-            }
-            Wpf.Ui.Controls.TextBox DiscordText(string title, string placeholder, string key, string? hint = null) =>
-                TextRow(SymbolRegular.TextDescription24, title, hint, placeholder, () => S.Str(key),
-                    v => { S.Set(key, v); DiscordChanged(); }, discordCustom, 380);
-            SettingCombo(SymbolRegular.PeopleCommunity24, L.T("Discord status"),
-                L.T("Shows that you're playing on your Discord profile while the game runs. Custom: your own lines, picture and buttons"),
-                Choices.DiscordStatus, "discord_status", changed: DiscordChanged);
-            Body.Children.Add(discordPreview);
-            ComboRow(SymbolRegular.Rename24, L.T("Name"), L.T("The name in bold is the Discord app's. My own Discord app: make one on discord.com/developers with any name and paste its Application ID"),
-                DiscordPresence.Names, () => S.Str("discord_app") is { Length: > 0 } v ? v : "lantern",
-                v => S.Set("discord_app", v), discordCustom, changed: DiscordChanged);
-            TextRow(SymbolRegular.Key24, L.T("Application ID"), L.T("From your app's General Information page"), L.T("e.g. 1234567890123456789"),
-                () => S.Str("discord_app_id"), v => { S.Set("discord_app_id", v); DiscordChanged(); }, discordOwn, 380);
-            TextRow(SymbolRegular.Rename24, L.T("Your app's name"), L.T("Only for the preview: Discord shows the name you gave the app"), "Bloodborne",
-                () => S.Str("discord_app_name"), v => { S.Set("discord_app_name", v); DiscordChanged(); }, discordOwn, 380);
-            discordCustom.Children.Add(discordOwn);
-            DiscordText(L.T("First line"), "Hunting in Yharnam", "discord_details", L.T("{version} shows the launcher's version"));
-            DiscordText(L.T("Second line"), L.T("Optional"), "discord_state");
-            ComboRow(SymbolRegular.Image24, L.T("Picture"), null, DiscordPresence.Pictures, () => S.Str("discord_picture") is { Length: > 0 } v ? v : "logo",
-                v => S.Set("discord_picture", v), discordCustom, changed: DiscordChanged);
-            TextRow(SymbolRegular.Link24, L.T("Picture link"), L.T("An https link to a PNG, JPG or GIF: Discord downloads it, so a file on your PC can't be used"),
-                "https://…", () => S.Str("discord_image_url"), v => { S.Set("discord_image_url", v); DiscordChanged(); }, discordLink, 380);
-            discordCustom.Children.Add(discordLink);
-            DiscordText(L.T("Picture hover text"), "Lantern Engine", "discord_image_text");
-            DiscordText(L.T("Small badge link"), L.T("Optional https link"), "discord_badge_url", L.T("A small round picture on the corner of the big one"));
-            DiscordText(L.T("Badge hover text"), L.T("Optional"), "discord_badge_text");
-            ToggleRow(SymbolRegular.Timer24, L.T("Show play time"), null, () => S.Bool("discord_timer"), v => S.Set("discord_timer", v), discordCustom, DiscordChanged);
-            DiscordText(L.T("Button 1 text"), L.T("Optional, e.g. Join my Discord"), "discord_button1_label", L.T("Other people see the buttons; Discord hides them on your own profile"));
-            DiscordText(L.T("Button 1 link"), "https://…", "discord_button1_url");
-            DiscordText(L.T("Button 2 text"), L.T("Optional"), "discord_button2_label");
-            DiscordText(L.T("Button 2 link"), "https://…", "discord_button2_url");
-            Body.Children.Add(discordCustom);
-            DiscordChanged();
-            Add(Card(SymbolRegular.PeopleCommunity24, "Discord", L.T("Help, news, co-op partners and beta feedback"),
-                SmallButton(L.T("Join"), SymbolRegular.Open24, (_, _) =>
-                    Process.Start(new ProcessStartInfo(LauncherSettings.Discord) { UseShellExecute = true })), out _));
 
             Group(L.T("Updates"));
             _updateNow = SmallButton(L.T("Update now"), SymbolRegular.ArrowDownload24, async (_, _) => await MainWindow.Instance!.InstallUpdateAsync(),
@@ -491,7 +439,7 @@ namespace BloodborneLauncher.Views
             var dialog = new Microsoft.Win32.SaveFileDialog
             {
                 Title = L.T("Export shader catalog"), Filter = L.T("Shader catalog|*.zip"),
-                FileName = "Lantern Engine shader catalog.zip",
+                FileName = "Hunters Workshop shader catalog.zip",
             };
             if (dialog.ShowDialog() != true) return;
             try
@@ -568,7 +516,7 @@ namespace BloodborneLauncher.Views
 
         private void SaveSettingsFile()
         {
-            var dialog = new Microsoft.Win32.SaveFileDialog { Title = L.T("Save settings"), FileName = "Lantern Engine settings.json", Filter = L.T("Settings|*.json") };
+            var dialog = new Microsoft.Win32.SaveFileDialog { Title = L.T("Save settings"), FileName = "Hunters Workshop settings.json", Filter = L.T("Settings|*.json") };
             if (dialog.ShowDialog() != true) return;
             try
             {

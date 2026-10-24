@@ -3,7 +3,7 @@
 namespace BloodborneLauncher.Core
 {
     /// <summary>
-    /// The environment run_windows.py gets from the launcher. Most settings travel in lantern.ini
+    /// The environment run_windows.py gets from the launcher. Most settings travel in config.ini
     /// (graphics, controls, online); these are the ones the engine takes from the environment.
     /// </summary>
     public static class GameEnvironment
@@ -148,6 +148,9 @@ namespace BloodborneLauncher.Core
             if (s.Bool("fsr4_balanced")) env["BB_FSR4_MODEL"] = "balanced";
             // Experimental engine features: on by default, each can be turned off.
             env["BB_PRECISE_PACING"] = s.Bool("exp_frame_pacing") ? "1" : "0";
+            // Off by default, and passed either way: an engine that has it on unless told 0 gets 0.
+            env["BB_VBLANK_PACING"] = s.Bool("exp_vblank_lock") ? "1" : "0";
+            env["BB_INDIRECT_CLAMP"] = s.Bool("exp_particle_cap") ? "1" : "0";
             env["BB_IMAGE_WRITEBACK_GC"] = s.Bool("exp_vram_cleanup") ? "1" : "0";
             // Gamepads (SDL3 reads its hints from the environment): DualShock 3 through SDL's own
             // driver (with DsHidMini or Sony's sixaxis driver installed), and the community
@@ -210,6 +213,9 @@ namespace BloodborneLauncher.Core
                 env.Remove("BB_NATIVE_CALLS");
                 env.Remove("BB_CAMERA_FIX");
                 env["BB_PRECISE_PACING"] = "0";
+                env["BB_VBLANK_PACING"] = "0";
+                // A crash guard: on, whatever the setting, in the run after a crash.
+                env["BB_INDIRECT_CLAMP"] = "1";
                 env["BB_IMAGE_WRITEBACK_GC"] = "0";
                 env["BB_GC_PRESSURE_PERCENT"] = "0";
                 env["BB_GC_PRESSURE_SECONDS"] = "0";

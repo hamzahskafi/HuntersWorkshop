@@ -13,13 +13,13 @@ if [[ ${1:-} == --software ]]; then
 fi
 # BB_PREBUILT=1 (packaged builds, the AppImage): out/bb-probe and its GPU library are installed
 # next to this script; nothing is built and no nix-shell is needed.
-# BB_DATA_DIR: writable directory for the generated files (out/), saves (user/) and bbport.ini;
+# BB_DATA_DIR: writable directory for the generated files (out/), saves (user/) and config.ini;
 # by default this directory. BB_OUT_DIR: the generated files elsewhere (the Linux package keeps
 # them in engine/out beside its programs, as on Windows; packaging/linux/bb-start).
 data=${BB_DATA_DIR:-.}
 out=${BB_OUT_DIR:-$data/out}
 mkdir -p "$out"
-export BB_CONFIG=${BB_CONFIG:-$data/bbport.ini}
+export BB_CONFIG=${BB_CONFIG:-$data/config.ini}
 # FSR 4.1.1 assets (tools/fsr4cap/build_assets.sh): next to run.sh or in the data directory.
 if [[ -z ${BB_FSR411_DIR:-} && ! -d fsr4_411 && -d $data/fsr4_411 ]]; then
     export BB_FSR411_DIR=$data/fsr4_411
@@ -81,13 +81,13 @@ fi
 # Frame rate: BB_FPS=uncap (default; delta-time patch, vblank 480 Hz, frames shown at once),
 # 60/90 (fixed-timestep patches) or 30 (unpatched). BB_PATCHES adds patch names ("a;b").
 fps=${BB_FPS:-uncap}
-# bbport.ini output_res other than 1080p (720p for the Steam Deck, 1440p, 2160p): the whole game
+# config.ini output_res other than 1080p (720p for the Steam Deck, 1440p, 2160p): the whole game
 # renders at the preset's size of the output (a patch), the upscaler fills the output, the UI is
 # drawn at the output size. Preset and output changes need a restart.
 # Live resolution changes keep the guest at 1920x1080 and scale host targets at run time instead
 # (output and presets change in the menu without a restart, but post-processing stays at 1080p
 # and scene targets are copied back: much slower on the Steam Deck and older GPUs). Chosen by
-# BB_LIVE_RES=0/1, else bbport.ini live_resolution=0/1/auto (auto: the GPU check, strong
+# BB_LIVE_RES=0/1, else config.ini live_resolution=0/1/auto (auto: the GPU check, strong
 # discrete GPUs get them); off when unset. 1080p output and TAA always use the live path.
 if [[ -z ${BB_RENDER_RES:-} ]]; then
     read -r scaled_render scaled_output < <("$PYTHON" scripts/patches.py --print-scaled --settings "$BB_CONFIG") || true
