@@ -7,7 +7,7 @@ Usage: frame_rate_check.py [eboot.elf] [--xml patches/Bloodborne.xml]
 
 Without the eboot: the entries' shapes, that none overlaps another, that the list's bytes recorded for each
 entry are the list's, that the list's frame-time code is as required and leaves every per-frame load alone,
-and that the slots fit past 1.09's image. With it, also: the game's bytes and values at every entry, and that
+and that the slots fit past the end of 1.09's data segment, in its last page. With it, also: the game's bytes and values at every entry, and that
 each load's displacement reaches its constant. Prints each failure; the exit code is their number.
 """
 import argparse
@@ -20,7 +20,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 INC = ROOT / 'gpu/shim/engine/frame_rate_sites.inc'
 BASE = 0x400000
-IMAGE_SIZE = 0x56d30f4  # 1.09's image: the end of its data segment (frame_rate.cpp's slots follow it)
+DATA_END = 0x56d30f4  # 1.09: the end of its data segment (frame_rate.cpp's kDataEnd; the slots follow it)
 GROUPS = ('Clips', 'Physics', 'Grass', 'Targeting', 'Jump', 'Sprint', 'Slope', 'Online', 'Hitbox', 'Timers', 'Menus',
           'Durations', 'PlayTime')
 KINDS = ('Step', 'Amount', 'Decay', 'Keep', 'Rate', 'Game')
@@ -147,11 +147,16 @@ def check(entries, listed, eboot=None):
     for (a0, a1, n0), (b0, b1, n1) in zip(spans, spans[1:]):
         if b0 < a1:
             fail(f'{n0} and {n1} overlap')
-    size = eboot.size if eboot else IMAGE_SIZE
+    cpp = re.search(r'kDataEnd = (0x[0-9a-f]+)', (ROOT / 'gpu/shim/engine/frame_rate.cpp').read_text())
+    if not cpp or int(cpp[1], 16) != DATA_END:
+        fail(f'frame_rate.cpp kDataEnd is not {DATA_END:#x}')
+    if eboot and eboot.size != DATA_END:
+        fail(f"the eboot's data segment ends at {eboot.size:#x}, not {DATA_END:#x}")
+    size = DATA_END
     slots = len(entries['loads']) + len(entries['play'])
     first, end = (size + 15) & ~15, (size + 4095) & ~4095
     if first + 16 * slots > end:
-        fail(f'{slots} slots of 16 bytes do not fit in the {end - size} bytes past the image')
+        fail(f'{slots} slots of 16 bytes do not fit in the {end - size} bytes past the game\'s data')
     return failures
 
 

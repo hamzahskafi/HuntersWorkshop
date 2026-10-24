@@ -5,21 +5,27 @@
 // (frame_rate_sites.inc says what each one is). Every byte is checked before anything is written; a
 // group with a mismatch is left out whole, the others still go in.
 //
-// The per-frame values are read from slots of ours in the image's tail: the boot image is allocated in
-// whole pages and the game's data ends 3,852 bytes short of its last one (1.09), which is writable with
-// the data segment. Each frame they are worked out from the frame's step the 60 FPS++ cave keeps in
-// 0x575a908. This hook runs before the cave updates it, so they follow the frame before; the cave eases
-// the step by 0.15 a frame, which keeps that difference small.
+// The per-frame values are read from slots of ours past the end of the game's data segment (1.09: image
+// offset 0x56d30f4), in that segment's last page: the loader protects each segment in whole pages, so
+// those 3,852 bytes are writable with the data, and the linked modules (libc...) start after the page
+// (0x56e0000). Not past the whole image: the last module's page there is not writable. Each frame the
+// values are worked out from the frame's step the 60 FPS++ cave keeps in 0x575a908. This hook runs
+// before the cave updates it, so they follow the frame before; the cave eases the step by 0.15 a frame,
+// which keeps that difference small.
 #include "frame_rate.h"
 #include "engine_hooks.h"
 #include "engine_state.h"
 #include <array>
 #include <cctype>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 namespace BbEngine::FrameRate {
 namespace {
@@ -27,6 +33,7 @@ constexpr std::uint64_t kBase = 0x400000;       // the patch lists' addresses: t
 constexpr std::uint64_t kFrameTime = 0x575a908; // the 60 FPS++ cave's step
 constexpr double kSixtieth = 1.0 / 60.0;
 constexpr std::size_t kPage = 4096, kSlot = 16;
+constexpr std::size_t kDataEnd = 0x56d30f4; // the end of 1.09's data segment (its VA + memsz)
 
 enum class Group : std::uint8_t {
     Clips, Physics, Grass, Targeting, Jump, Sprint, Slope, Online, Hitbox, Timers, Menus, Durations, PlayTime,
@@ -141,6 +148,7 @@ std::vector<Slot> g_slots;
 std::uint8_t* g_play_ms = nullptr;
 PlayTime g_play;
 bool g_on = false;
+bool g_checked = false; // the slots' page found writable (first Tick, after the loader's protections)
 
 void WriteSlot(const Slot& s, double seconds) {
     float out[4]{};
@@ -174,6 +182,10 @@ std::int32_t PlayTime::Add(double seconds) {
 }
 
 bool Install(std::uint8_t* image, std::size_t size) {
+    g_on = g_checked = false;
+    g_slots.clear();
+    g_play_ms = nullptr;
+    g_play = {};
     if (const char* off = std::getenv("BB_FRAME_FIXES"); off && off[0] == '0') {
         host_log("Frame rate fixes: off (BB_FRAME_FIXES=0)");
         return false;
@@ -246,16 +258,17 @@ bool Install(std::uint8_t* image, std::size_t size) {
         if (!holds(p.at, Hex(p.was))) fail(p.group, p.at);
     }
 
-    // The slots: from the first 16-byte boundary past the image's bytes to the end of its last page.
+    // The slots: from the first 16-byte boundary past the game's data to the end of that page, which must
+    // be in the image and unused (zero, as the loader leaves it).
     std::size_t slots = 0;
     for (const Load& l : kLoads) slots += on[std::size_t(l.group)];
     for (const PlayTimeSite& p : kPlayTime) slots += on[std::size_t(p.group)];
-    const std::size_t first = (size + kSlot - 1) & ~(kSlot - 1), end = (size + kPage - 1) & ~(kPage - 1);
-    if (first + slots * kSlot > end) {
-        host_log("Frame rate fixes: per-frame values left out: %zu slots do not fit past the image (%zu bytes)", slots,
-                 end - size);
-        for (const Load& l : kLoads) on[std::size_t(l.group)] = false;
-        for (const PlayTimeSite& p : kPlayTime) on[std::size_t(p.group)] = false;
+    const std::size_t first = (kDataEnd + kSlot - 1) & ~(kSlot - 1), end = (kDataEnd + kPage - 1) & ~(kPage - 1);
+    bool per_frame = end <= size && first + slots * kSlot <= end;
+    for (std::size_t i = kDataEnd; per_frame && i < end; ++i) per_frame = image[i] == 0;
+    if (slots && !per_frame) {
+        host_log("Frame rate fixes: per-frame values left out: no free room past the game's data (0x%zx..0x%zx)",
+                 kDataEnd, end);
     }
 
     g_image = image;
@@ -274,7 +287,7 @@ bool Install(std::uint8_t* image, std::size_t size) {
         if (holds(s.at, now) || write(s.at, now.data(), now.size())) ++applied[std::size_t(s.group)];
     }
     for (const Load& l : kLoads) {
-        if (!on[std::size_t(l.group)]) continue;
+        if (!on[std::size_t(l.group)] || !per_frame) continue;
         Slot slot{next, nullptr, {}, l.kind, l.lanes};
         // The constant as the game has it: read live (a .data tunable keeps working), unless the list
         // changed it, in which case the game's value is ours to start from.
@@ -299,7 +312,7 @@ bool Install(std::uint8_t* image, std::size_t size) {
         if (write(v.at, &ours, sizeof ours)) ++applied[std::size_t(v.group)];
     }
     for (const PlayTimeSite& p : kPlayTime) {
-        if (!on[std::size_t(p.group)]) continue;
+        if (!on[std::size_t(p.group)] || !per_frame) continue;
         const std::int32_t zero = 0;
         std::memcpy(next, &zero, sizeof zero);
         // mov ecx, [slot]; nop7 (0f 1f 80 00 00 00 00) over the 13 bytes of the multiply and convert.
@@ -329,6 +342,37 @@ bool Install(std::uint8_t* image, std::size_t size) {
 
 void Tick() {
     if (!g_on) return;
+    if (!g_checked) {
+        // The loader sets each segment's protection after Install: the slots' page must have come out
+        // writable. Otherwise they keep the values they were given for a 1/60 s frame.
+        g_checked = true;
+        const void* slots = g_slots.empty() ? g_play_ms : g_slots.front().at;
+        bool writable = true;
+#ifdef _WIN32
+        MEMORY_BASIC_INFORMATION info{};
+        writable = VirtualQuery(slots, &info, sizeof info) &&
+                   (info.Protect & (PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY));
+#else
+        if (FILE* maps = std::fopen("/proc/self/maps", "r")) {
+            const auto a = reinterpret_cast<std::uintptr_t>(slots);
+            char line[512];
+            while (std::fgets(line, sizeof line, maps)) {
+                unsigned long lo = 0, hi = 0;
+                char perms[5]{};
+                if (std::sscanf(line, "%lx-%lx %4s", &lo, &hi, perms) == 3 && lo <= a && a < hi) {
+                    writable = perms[1] == 'w';
+                    break;
+                }
+            }
+            std::fclose(maps);
+        }
+#endif
+        if (!writable) {
+            host_log("Frame rate fixes: the per-frame values' page is not writable; they stay at 60 FPS's");
+            g_on = false;
+            return;
+        }
+    }
     float step = 0;
     std::memcpy(&step, g_image + (kFrameTime - kBase), sizeof step);
     const double seconds = std::isfinite(step) && step >= 0.001f && step <= 0.1f ? double(step) : kSixtieth;

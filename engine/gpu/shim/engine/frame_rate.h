@@ -28,8 +28,9 @@ private:
 };
 
 /// Loader start, after the patches and the executable's verification: at 60 FPS with the 60 FPS++
-/// list in place, checks and applies the sites and points the per-frame loads at slots in the image's
-/// tail (past `size`, in its last page). BB_FRAME_FIXES=0 turns all of it off; BB_FRAME_FIXES_SKIP
+/// list in place, checks and applies the sites and points the per-frame loads at slots past the end of
+/// the game's data segment, in its last page (`size`: the whole image, the linked modules after the
+/// game included). BB_FRAME_FIXES=0 turns all of it off; BB_FRAME_FIXES_SKIP
 /// names groups to leave out (a comma list: clips, physics, grass, targeting, jump, sprint, slope,
 /// online, hitbox, timers, menus, durations, playtime).
 bool Install(std::uint8_t* image, std::size_t size);
