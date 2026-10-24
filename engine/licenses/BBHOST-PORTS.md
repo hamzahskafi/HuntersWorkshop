@@ -66,8 +66,8 @@ engine/trophy_sync.cpp are from the boss rush table of plugins/boss_rush/boss_ru
 Frame-rate source (the same commit):
 engine/frame_rate.cpp and frame_rate_sites.inc adapt from src/engine/frame_rate.cpp the steps made
 to read the frame's time (kFrameTimeSites: the ragdoll/clip drive, the Havok physics and AI worlds,
-grass, the target bank), the per-frame loads read from slots in the image's tail
-(frame_rate_dt_loads.inc, made by tools/dt_loads.py), the values bbhost sets differently from Kyo's
+grass, the target bank), the per-frame loads (frame_rate_dt_loads.inc, made by tools/dt_loads.py;
+here they read slots past the end of the game's data segment, in its last page), the values bbhost sets differently from Kyo's
 "60 FPS++" at 60, the durations tools/fps_sites.py keeps from that list, and the play time's count.
 They are applied over Kyo's list as patches/Bloodborne.xml ships it, with the frame's step from the
 list's own cave, instead of bbhost's SprjFlipper::Update; a constant the list changed is converted
