@@ -1,4 +1,4 @@
-# Linux build environment of the Lantern Engine (packaging/linux/build.sh runs the build in it).
+# Linux build environment of Hunter's Workshop (packaging/linux/build.sh runs the build in it).
 # Ubuntu 24.04: the package runs on glibc 2.39 and later (Ubuntu 24.04, Debian 13, Fedora 40,
 # Arch, SteamOS 3.6, Bazzite). The libraries the Windows build takes from MSYS2 are built here at
 # the same versions, static where they can be; SDL3 is the one shared library shipped

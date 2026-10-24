@@ -17,7 +17,7 @@
 #endif
 #include "common/assert.h"
 #include "bbport_platform.h"
-#include "lantern_pacing.h"
+#include "precise_pacing.h"
 #include "bbport_toggles.h"
 #include "bbport_heap_sites.h"
 #include "bbport_wait_trace.h"
@@ -1130,7 +1130,7 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
     auto next_flip = std::chrono::steady_clock::now();
     std::printf("VideoOut: vblank %u Hz, frame limit %u FPS, precise pacing %s\n",
                 EmulatorSettings.GetVblankFrequency(), frame_limit,
-                LanternPacing::Enabled() ? "on" : "off");
+                PrecisePacing::Enabled() ? "on" : "off");
 
     const auto receive_request = [this] -> Request {
         std::scoped_lock lk{mutex};
@@ -1171,18 +1171,18 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
         main_port.vblank_cv.notify_all();
     };
 
-    // Hunter's Workshop pacing for immediate flips (lantern_pacing.h; BB_PRECISE_PACING, on by
+    // Hunter's Workshop pacing for immediate flips (precise_pacing.h; BB_PRECISE_PACING, on by
     // default on Windows). Vblank ticks and flips each follow a cadence of their own: ticks one
     // vblank period apart, flips one pace period apart (the frame limit's, or the vblank period
     // without one). A flip may take its slot a sixteenth of a period early; one that comes more
     // than a quarter period late restarts the flip cadence at itself instead of being followed by
     // a quick catch-up flip, which on a variable refresh display is a visible refresh swing.
     // Flips on vblank ticks without a frame limit keep the AccurateTimer path below.
-    if (immediate_flips && LanternPacing::Enabled()) {
-        using Clock = LanternPacing::Clock;
+    if (immediate_flips && PrecisePacing::Enabled()) {
+        using Clock = PrecisePacing::Clock;
         const auto pace_of = [&] { return frame_limit ? frame_period : vblank_period; };
-        LanternPacing::Cadence ticks{vblank_period, Clock::now() + vblank_period};
-        LanternPacing::Cadence flips{pace_of()};
+        PrecisePacing::Cadence ticks{vblank_period, Clock::now() + vblank_period};
+        PrecisePacing::Cadence flips{pace_of()};
         // The pace follows frame generation's cap (effective_limit) when it changes.
         const auto update_pace = [&] {
             const u32 limit = effective_limit();
@@ -1201,7 +1201,7 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
         // 480 ticks a second took a core from the game's threads on 6-8 core CPUs.
         const auto max_spin = std::min<std::chrono::nanoseconds>(std::chrono::microseconds(1500),
                                                                  vblank_period / 8);
-        // Flips locked to the display's vblanks (LanternPacing::VblankPacing; off unless
+        // Flips locked to the display's vblanks (PrecisePacing::VblankPacing; off unless
         // BB_VBLANK_PACING=1): on a fixed refresh display whose refresh is a whole number N of frame
         // limits (60 FPS on 60, 120, 180 or 240 Hz), the flip period is N measured refreshes and
         // each slot sits just past a vblank, so every frame is shown for exactly N refreshes. A
@@ -1209,15 +1209,15 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
         // and then: a frame up a refresh longer, the next one shorter (judder at 60 FPS on 180 Hz).
         // Not with Immediate (tearing, no vblank to wait for) or while frame generation paces the
         // frames it adds; G-Sync and FreeSync refresh on the flips, and the watch reports nothing.
-        const bool lock_allowed = LanternPacing::VblankPacing() &&
+        const bool lock_allowed = PrecisePacing::VblankPacing() &&
                                   EmulatorSettings.GetPresentMode() != "Immediate";
         bool locked = false;
         int lock_reports = 0;
         const auto lock_to_vblank = [&] {
-            std::optional<LanternPacing::VblankTime> vblank;
+            std::optional<PrecisePacing::VblankTime> vblank;
             if (lock_allowed && frame_limit &&
                 !BbSettings::Get().frame_gen_active.load(std::memory_order_relaxed)) {
-                vblank = LanternPacing::Vblank();
+                vblank = PrecisePacing::Vblank();
             }
             u32 refreshes = 0;
             double hz = 0;
@@ -1270,7 +1270,7 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
 
             if (DebugState.IsGuestThreadsPaused()) {
                 DrawLastFrame();
-                LanternPacing::WaitUntil(tick_deadline, !frame_limit, max_spin);
+                PrecisePacing::WaitUntil(tick_deadline, !frame_limit, max_spin);
                 ticks.Tick(Clock::now());
                 continue;
             }
@@ -1303,12 +1303,12 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
                 if (flips.Slot() - flips.Period() / 16 >= tick_deadline) {
                     break; // its slot is at the next tick or later
                 }
-                LanternPacing::WaitUntil(flips.Slot() - flips.Period() / 16, true, max_spin);
+                PrecisePacing::WaitUntil(flips.Slot() - flips.Period() / 16, true, max_spin);
                 if (const auto request = receive_request()) {
                     take_flip(request, Clock::now());
                 }
             }
-            LanternPacing::WaitUntil(tick_deadline, !frame_limit, max_spin);
+            PrecisePacing::WaitUntil(tick_deadline, !frame_limit, max_spin);
             ticks.Tick(Clock::now());
         }
         return;

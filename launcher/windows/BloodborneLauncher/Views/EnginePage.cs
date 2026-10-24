@@ -74,7 +74,7 @@ namespace BloodborneLauncher.Views
                 L.T("While a new shader compiles, the objects that need it appear a moment later instead of the game freezing. New: turn it off if something stays missing"),
                 "exp_compile_skip", exp);
             SettingToggle(SymbolRegular.ArrowForward24, L.T("Fast loading"),
-                L.T("Loading screens run at 30 FPS: fewer frames leave the CPU to the loading work itself. Not before cutscenes. Off by default"),
+                L.T("Above 60 FPS, loading screens run at 60 so more of the CPU goes to the loading itself. Does nothing at 30 or 60 FPS, or before a cutscene. On by default"),
                 "exp_fast_loading", exp);
             SettingToggle(SymbolRegular.Flash24, L.T("Fewer memory write checks"),
                 L.T("Memory the game rewrites before almost every use is no longer watched for changes, saving up to about 2 ms a frame in busy areas. On by default"),

@@ -1470,7 +1470,7 @@
   "A high-resolution timer and even spacing between frames: steadier frame times and less VRR flicker. Uses a little CPU. On by default": "高精度计时器和均匀的帧间隔：帧时间更稳定，VRR 闪烁更少。会占用少量 CPU。默认开启",
   "Runs the engine's graphics threads at a higher CPU priority than the game's other threads, so a frame isn't held up behind them. On by default": "让引擎的图形线程以高于游戏其他线程的 CPU 优先级运行，帧不会被它们拖住。默认开启",
   "The game's many short sleeps busy-wait only as long as the timer needs (about 0.2–0.4 ms instead of 0.6 ms), leaving that CPU time to the graphics threads. On by default": "游戏大量的短暂休眠只按计时器所需忙等（约 0.2–0.4 毫秒，而不是 0.6 毫秒），把这部分 CPU 时间留给图形线程。默认开启",
-  "Loading screens run at 30 FPS: fewer frames leave the CPU to the loading work itself. Not before cutscenes. Off by default": "加载画面以 30 FPS 运行：更少的帧让 CPU 专注于加载本身。过场动画前不生效。默认关闭",
+  "Above 60 FPS, loading screens run at 60 so more of the CPU goes to the loading itself. Does nothing at 30 or 60 FPS, or before a cutscene. On by default": "帧率高于 60 FPS 时，加载画面以 60 FPS 运行，让更多 CPU 用于加载本身。在 30 或 60 FPS 下以及过场动画之前不起作用。默认开启",
   "Memory the game rewrites before almost every use is no longer watched for changes, saving up to about 2 ms a frame in busy areas. On by default": "游戏几乎每次使用前都会重写的内存不再被监视变化，在繁忙区域每帧最多可节省约 2 毫秒。默认开启",
   "PC memory model": "PC 内存模型",
   "The GPU reads the game's memory where it is instead of copies, so far less memory is watched and copied: more of the CPU and GPU used. On by default; turn it off if textures look wrong or the game stutters": "GPU 直接读取游戏内存而不是副本，需要监视和复制的内存大大减少：CPU 和 GPU 的利用率更高。默认开启；如果纹理显示异常或游戏卡顿，请关闭",

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Hunter's Workshop: frame pacing (lantern_pacing.h).
-#include "lantern_pacing.h"
+// Hunter's Workshop: frame pacing (precise_pacing.h).
+#include "precise_pacing.h"
 
 #include <algorithm>
 #include <array>
@@ -22,7 +22,7 @@
 #include <time.h>
 #endif
 
-namespace LanternPacing {
+namespace PrecisePacing {
 namespace {
 using namespace std::chrono_literals;
 
@@ -313,4 +313,4 @@ void WaitUntil(Clock::time_point deadline, bool exact, std::chrono::nanoseconds 
         _mm_pause();
     }
 }
-} // namespace LanternPacing
+} // namespace PrecisePacing

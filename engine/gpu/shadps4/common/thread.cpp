@@ -14,7 +14,7 @@
 #include "common/error.h"
 #include "common/logging/log.h"
 #include "common/thread.h"
-#include "lantern_pacing.h"
+#include "precise_pacing.h"
 // bbport: common/ntapi.h (ntdll entry points) is not used by the vendored code.
 #ifdef __APPLE__
 #include <mach/mach.h>
@@ -115,10 +115,10 @@ void SetCurrentThreadPriority(ThreadPriority new_priority) {
 
 bool AccurateSleep(const std::chrono::nanoseconds duration, std::chrono::nanoseconds* remaining,
                    const bool interruptible) {
-    if (LanternPacing::Enabled()) {
-        // Hunter's Workshop pacing: the thread's high resolution timer (lantern_pacing.cpp).
+    if (PrecisePacing::Enabled()) {
+        // Hunter's Workshop pacing: the thread's high resolution timer (precise_pacing.cpp).
         const auto begin = std::chrono::steady_clock::now();
-        const bool done = LanternPacing::Sleep(duration, interruptible);
+        const bool done = PrecisePacing::Sleep(duration, interruptible);
         if (remaining) {
             const auto slept = std::chrono::steady_clock::now() - begin;
             *remaining = duration > slept
@@ -250,10 +250,10 @@ AccurateTimer::AccurateTimer(std::chrono::nanoseconds target_interval)
 void AccurateTimer::Start() {
     const auto begin_sleep = std::chrono::high_resolution_clock::now();
     if (total_wait.count() > 0) {
-        if (LanternPacing::Enabled()) {
+        if (PrecisePacing::Enabled()) {
             // Hunter's Workshop pacing: this timer paces vblank, so it lands on time (a spin of at
             // most 1.5 ms and an eighth of the interval after the timer sleep).
-            LanternPacing::WaitUntil(
+            PrecisePacing::WaitUntil(
                 std::chrono::steady_clock::now() + total_wait, true,
                 std::min<std::chrono::nanoseconds>(std::chrono::microseconds(1500),
                                                    target_interval / 8));

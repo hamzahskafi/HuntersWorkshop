@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Starts Bloodborne with the Hunter's Workshop from a terminal (Linux package; the launcher, "Lantern
-# Engine", does the same with its settings).
+# Starts Bloodborne with Hunter's Workshop from a terminal (Linux package; the launcher does the same
+# with its settings).
 #
 #   ./play.sh [game folder] [bb-probe options...]
 #

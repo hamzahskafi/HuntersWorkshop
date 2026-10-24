@@ -389,7 +389,7 @@ namespace BloodborneLauncher.Views
             Ws.SaveNow();
             if (Environment.ProcessPath is { } self)
                 Process.Start(new ProcessStartInfo(self) { UseShellExecute = OperatingSystem.IsWindows(), WorkingDirectory = Path.GetDirectoryName(self)! });
-            LanternApp.Quit();
+            WorkshopApp.Quit();
         }
 
         /// <summary>Deletes the engine's shader and pipeline caches (user\cache beside the engine;
@@ -680,7 +680,7 @@ namespace BloodborneLauncher.Views
             Ws.SaveNow();
             var args = $"--wait-pid {Environment.ProcessId}" + (force ? " --force" : "");
             Process.Start(new ProcessStartInfo(builder, args) { UseShellExecute = OperatingSystem.IsWindows(), WorkingDirectory = Path.GetDirectoryName(builder)! });
-            LanternApp.Quit();
+            WorkshopApp.Quit();
         }
     }
 }

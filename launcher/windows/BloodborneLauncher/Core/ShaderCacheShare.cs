@@ -67,7 +67,7 @@ namespace BloodborneLauncher.Core
         {
             var folder = Path.Combine(CacheDir, Game);
             if (Pipelines(folder) == 0) throw new InvalidOperationException("there is no shader cache yet: play for a while first");
-            var work = Path.Combine(Path.GetTempPath(), "lantern-catalog-" + Guid.NewGuid().ToString("N"));
+            var work = Path.Combine(Path.GetTempPath(), "hunters-workshop-catalog-" + Guid.NewGuid().ToString("N"));
             try
             {
                 var catalog = Path.Combine(work, Game);
@@ -107,7 +107,7 @@ namespace BloodborneLauncher.Core
             var eboot = Path.Combine(Paths.EngineDir, "out", "eboot.elf");
             if (!File.Exists(eboot) || !Directory.Exists(Path.Combine(gameDir, "dvdroot_ps4", "shader")))
                 throw new InvalidOperationException("the game folder is not set up yet: start the game once first");
-            var work = Path.Combine(Path.GetTempPath(), "lantern-catalog-" + Guid.NewGuid().ToString("N"));
+            var work = Path.Combine(Path.GetTempPath(), "hunters-workshop-catalog-" + Guid.NewGuid().ToString("N"));
             try
             {
                 using (var archive = ZipFile.OpenRead(zip))

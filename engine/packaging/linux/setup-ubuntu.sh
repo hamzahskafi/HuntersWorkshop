@@ -29,7 +29,7 @@ export CC=clang CXX=clang++ PKG_CONFIG_PATH=/opt/deps/lib/pkgconfig:/opt/deps/sh
     CMAKE_PREFIX_PATH=/opt/deps
 deps=(-G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/opt/deps
       -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DBUILD_SHARED_LIBS=OFF)
-work=${BB_DEPS_WORK:-/var/tmp/lantern-deps}
+work=${BB_DEPS_WORK:-/var/tmp/hunters-workshop-deps}
 mkdir -p "$work" /opt/deps
 cd "$work"
 

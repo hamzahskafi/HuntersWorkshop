@@ -148,7 +148,7 @@ namespace BloodborneLauncher
                 Sidebar.BorderThickness = new Thickness(1);
                 Sidebar.SetResourceReference(Border.BackgroundProperty, "PillTrackBrush");
                 Sidebar.SetResourceReference(Border.BorderBrushProperty, "GlassPaneStrokeBrush");
-                // Settings once, in the LANTERN group (Classic has it at the bottom too).
+                // Settings once, in the ENGINE group (Classic has it at the bottom too).
                 ClassicSettingsBottom.Visibility = Visibility.Collapsed;
                 var style = (Style)FindResource("GlassSidebarItem");
                 foreach (var item in SettingSearch.Descendants(Sidebar).OfType<System.Windows.Controls.RadioButton>())

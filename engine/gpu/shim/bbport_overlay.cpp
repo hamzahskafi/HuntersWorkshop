@@ -2043,7 +2043,7 @@ void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count) 
     io.ConfigDebugHighlightIdConflicts = false; // a programmer's warning, not for players
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad;
     io.BackendFlags |= ImGuiBackendFlags_HasGamepad;
-    io.BackendPlatformName = "lantern";
+    io.BackendPlatformName = "hunters-workshop";
 
     ImGui::StyleColorsDark();
     ImGuiStyle& style = ImGui::GetStyle();

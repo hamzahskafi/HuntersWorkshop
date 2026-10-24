@@ -65,7 +65,7 @@ dotnet publish launcher/windows/BloodborneLauncher/BloodborneLauncher.csproj -c 
 `build.sh` here builds the engine with clang, CMake, Ninja and the Vulkan and SDL3 headers. On
 Ubuntu 24.04, `packaging/linux/setup-ubuntu.sh` builds the libraries it needs once, and
 `packaging/linux/build.sh` makes a Linux package with the cross-platform launcher
-(`../launcher/windows/LanternLauncher`). To run from a checkout:
+(`../launcher/windows/AvaloniaLauncher`). To run from a checkout:
 `BB_GAME_DIR=/path/to/CUSA03173 ./run.sh`.
 
 ### What a package holds

@@ -8,20 +8,20 @@
 #
 # Phases, in this order the first time:
 #   profile  an empty cache: the engine writes this GPU's (and family's) shader profile
-#   seed     copies $LANTERN_CACHE (a player's or the dev PC's cache folder, CUSA03173) and
+#   seed     copies $BB_VALIDATE_CACHE (a player's or the dev PC's cache folder, CUSA03173) and
 #            recompiles it for that profile with bb-shader-lab, then checks it (--check-cache)
 #   warmup   a start that builds every cached pipeline under validation
 #   play     a start from an empty cache: pipelines compiled in play, under validation
 # Family: none (default), nvidia, gtx10, rdna, polaris (BB_VK_HIDE, vk_instance.cpp).
 #
 # Needs: a built engine (build.sh), mesa-vulkan-drivers and vulkan-validationlayers (Ubuntu),
-# BB_GAME_DIR (the game folder) and, for seed, LANTERN_CACHE. WSL: run as root in the distro.
+# BB_GAME_DIR (the game folder) and, for seed, BB_VALIDATE_CACHE. WSL: run as root in the distro.
 set -uo pipefail
 phase=${1:-warmup}
 family=${2:-none}
 seconds=${3:-300}
 engine=$(cd -- "$(dirname -- "$0")/.." && pwd)
-work=${LANTERN_VALIDATE_DIR:-/tmp/lantern-validate}/$family
+work=${BB_VALIDATE_DIR:-/tmp/hunters-workshop-validate}/$family
 cache=$work/gpu/cache/CUSA03173
 : "${BB_GAME_DIR:?set BB_GAME_DIR to the game folder}"
 mkdir -p "$work/data" "$work/gpu/cache"
@@ -36,12 +36,12 @@ profile)
     mkdir -p "$work/gpu/cache"
     ;;
 seed)
-    : "${LANTERN_CACHE:?set LANTERN_CACHE to a cache folder (…/cache/CUSA03173) to copy}"
+    : "${BB_VALIDATE_CACHE:?set BB_VALIDATE_CACHE to a cache folder (…/cache/CUSA03173) to copy}"
     [[ -f $cache/profile.bin ]] || { echo "run the profile phase first"; exit 1; }
     profile=$(mktemp)
     cp "$cache/profile.bin" "$profile"
     rm -rf "$cache"
-    cp -r "$LANTERN_CACHE" "$cache"
+    cp -r "$BB_VALIDATE_CACHE" "$cache"
     rm -f "$cache/warmup.running" "$cache/warmup.off" "$cache"/catalog-*.applied
     cp "$profile" "$cache/profile.bin"
     rm -f "$profile"

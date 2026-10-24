@@ -8,7 +8,7 @@
 #include <cstdint>
 #include <optional>
 
-namespace LanternPacing {
+namespace PrecisePacing {
 using Clock = std::chrono::steady_clock;
 
 /// Flips locked to the display's vblanks (driver.cpp): precise pacing on and BB_VBLANK_PACING=1
@@ -87,4 +87,4 @@ private:
     std::chrono::nanoseconds period;
     Clock::time_point slot;
 };
-} // namespace LanternPacing
+} // namespace PrecisePacing

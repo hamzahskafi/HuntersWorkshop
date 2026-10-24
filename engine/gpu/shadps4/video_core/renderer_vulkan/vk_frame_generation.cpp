@@ -14,7 +14,7 @@
 
 #include "bbport_settings.h"
 #include "common/thread.h"
-#include "lantern_pacing.h"
+#include "precise_pacing.h"
 #include "core/emulator_settings.h"
 #include "ffx_vk_fsr3_3_1_5_bridge.h"
 #include "video_core/host_shaders/frame_gen_compose_comp.h"
@@ -661,7 +661,7 @@ void FrameGenerator::WaitForRealSlot(Clock::time_point shown) {
     const auto half = std::chrono::duration_cast<Clock::duration>(
         std::chrono::duration<double, std::milli>(std::min(interval_ms, 50.0) * 0.5));
     const auto deadline = shown + half;
-    LanternPacing::WaitUntil(deadline, true);
+    PrecisePacing::WaitUntil(deadline, true);
 }
 
 void FrameGenerator::OnRealPresented(Clock::time_point start, bool generated_shown,
