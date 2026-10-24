@@ -25,22 +25,25 @@ Clock::time_point g_start, g_began;
 std::uint64_t g_frames = 0;
 bool g_seen_world = false;
 
-// Loading pace (BB_FAST_LOADING=1, the launcher's "Fast loading"): while a loading screen is up the
-// four instructions that set the pacer's target (mov dword [r12+0x18], frame time; the FPS patches'
-// frame sites) give 1/30 s, and they go back when the load ends. Measured: loads run on the main
-// thread's per-frame work beside the decompression thread (Core.Res.PostProcessor); uncapped (3.3 ms
-// frames) the first load took 49.1 s instead of 19.6 s at 120 FPS, the main thread at 65% in game
-// code and the decompression thread down from ~40% to ~10%. Fewer frames leave the loading work more
-// room. Not at 30 FPS (nothing to change) and not when a cutscene follows (timed for the frame rate).
+// Loading pace (BB_FAST_LOADING=1, the launcher's "Fast loading"), above 60 FPS only (BB_FPS 90, 120,
+// 144 or uncap): while a loading screen is up the four instructions that set the pacer's target
+// (mov dword [r12+0x18], frame time; the FPS patches' frame sites) give 1/60 s, and they go back when
+// the load ends. Measured: loads run on the main thread's per-frame work beside the decompression
+// thread (Core.Res.PostProcessor); uncapped (3.3 ms frames) the first load took 49.1 s instead of
+// 19.6 s at 120 FPS, the main thread at 65% in game code and the decompression thread down from ~40%
+// to ~10%. Fewer frames leave the loading work more room. Nothing at 30 or 60 FPS (no faster than the
+// loading pace already), and not when a cutscene follows (timed for the frame rate).
 constexpr std::size_t kTargetSites[] = {0x2034840, 0x203485a, 0x203487e, 0x20348b3};
 constexpr std::uint8_t kTargetStore[] = {0x41, 0xc7, 0x44, 0x24, 0x18}; // mov dword [r12+0x18], imm32
-constexpr float kFastTarget = 1.0f / 30.0f;
+constexpr float kFastTarget = 1.0f / 60.0f;
 bool g_fast_allowed = false, g_fast_on = false, g_fast_this_load = false;
 float g_saved[4]{};
 // The pacer's target when the load began: the restored instructions only set the live target when
 // the game runs them again, which it may not do for minutes after a load (two loads back to back,
-// a lantern travel: FPS stuck at 29 until the next one, 0.9.37 beta 7).
+// a lantern travel: FPS stuck at 29 until the next one, 0.9.37 beta 7). Uncapped's target is 0, so
+// whether there is one is kept apart from its value.
 float g_target_before = 0;
+bool g_have_target_before = false;
 
 void SetFast(bool on) {
     if (on == g_fast_on || !g_fast_allowed) return;
@@ -77,8 +80,10 @@ void Install(std::uint8_t* image) {
     const char* fast = std::getenv("BB_FAST_LOADING");
     const char* fps = std::getenv("BB_FPS");
     if (!fast || fast[0] != '1') return;
-    if (fps && !std::strcmp(fps, "30")) {
-        std::printf("Loading: fast loading not needed at 30 FPS\n");
+    const bool above_sixty = fps && (!std::strcmp(fps, "90") || !std::strcmp(fps, "120") ||
+                                     !std::strcmp(fps, "144") || !std::strcmp(fps, "uncap"));
+    if (!above_sixty) {
+        std::printf("Loading: fast loading not used at %s FPS (only above 60)\n", fps ? fps : "an unknown");
         return;
     }
     for (std::size_t at : kTargetSites)
@@ -87,7 +92,7 @@ void Install(std::uint8_t* image) {
             return;
         }
     g_fast_allowed = true;
-    std::printf("Loading: fast loading on (loading screens paced at 30 FPS)\n");
+    std::printf("Loading: fast loading on (loading screens paced at 60 FPS)\n");
 }
 
 bool ScreenUp() { return g_up.load(std::memory_order_relaxed); }
@@ -119,7 +124,11 @@ void Tick(std::uint64_t flipper) {
         g_frames = 0;
         const Pace p = PaceOf(flipper);
         // A load that begins while the last one's pace is still set keeps the earlier target.
-        if (p.target != kFastTarget) g_target_before = p.target;
+        float target = 0;
+        if (Read(flipper + 0x18, target) && target != kFastTarget) {
+            g_target_before = target;
+            g_have_target_before = true;
+        }
         std::printf("Loading: begins; pacer mode %u, %u vblank(s) a frame, target %.1f ms\n", p.mode, p.vblanks,
                     p.target * 1000.0f);
     } else if (!loading && was) {
@@ -131,7 +140,7 @@ void Tick(std::uint64_t flipper) {
         // The live target back to what it was before the load, if it is still the loading pace this
         // load set (a cutscene sets its own pace: left alone). The game's own store at +0x18.
         float live = 0;
-        if (g_fast_this_load && !cutscene && g_target_before > 0 && Read(flipper + 0x18, live) &&
+        if (g_fast_this_load && !cutscene && g_have_target_before && Read(flipper + 0x18, live) &&
             live == kFastTarget) {
             *reinterpret_cast<volatile float*>(flipper + 0x18) = g_target_before;
             std::printf("Loading: the frame pace back to %.1f ms (the loading pace stayed set)\n",
