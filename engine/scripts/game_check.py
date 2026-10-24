@@ -80,7 +80,7 @@ def explain(kind, title, version):
     """What is wrong and what to do, for the log (English)."""
     found = f'Found {title} version {version} (sce_sys/param.sfo).'
     return {
-        'missing_update': f'{found} Hunter's Workshop needs the 1.09 update merged into the game folder: copy '
+        'missing_update': f"{found} Hunter's Workshop needs the 1.09 update merged into the game folder: copy "
                           'everything from the dumped 1.09 update (e.g. CUSA03173-patch) into the '
                           'game folder, replacing files (eboot.bin and sce_sys too).',
         'wrong_eboot': f'{found} param.sfo is from 1.09 but eboot.bin is not: copy eboot.bin from '
