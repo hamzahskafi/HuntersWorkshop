@@ -389,6 +389,11 @@ target_link_libraries(fsr4-bench PRIVATE ffx-vulkan::fsr4-v07-vulkan ffx-vulkan:
 add_executable(engine-hooks-test EXCLUDE_FROM_ALL ../tests/test_engine_hooks.cpp shim/engine/engine_hooks.cpp)
 target_compile_options(engine-hooks-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(engine-hooks-test PRIVATE ..)
+# The frame-rate corrections on a synthetic image built from their own table (no game files).
+add_executable(frame-rate-test EXCLUDE_FROM_ALL ../tests/test_frame_rate.cpp shim/engine/frame_rate.cpp
+    shim/engine/engine_hooks.cpp)
+target_compile_options(frame-rate-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(frame-rate-test PRIVATE shim shim/engine)
 # Local game-derived native menu assets. No game data is embedded in this tool.
 find_package(ZLIB REQUIRED)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS

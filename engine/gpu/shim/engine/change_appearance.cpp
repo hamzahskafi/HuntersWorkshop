@@ -13,6 +13,7 @@
 #include "loading.h"
 #include "render_guard.h"
 #include "effect_timing.h"
+#include "frame_rate.h"
 #include "online_fixes.h"
 #include "trophy_sync.h"
 #include "bbport_settings.h"
@@ -166,6 +167,7 @@ std::int64_t __attribute__((sysv_abi)) StepHook(std::uint64_t, const std::uint64
     return 0;
 }
 std::int64_t __attribute__((sysv_abi)) FrameHook(std::uint64_t, const std::uint64_t* saved) {
+    FrameRate::Tick();
     Loading::Tick(saved[5]); // rdi: the frame pacer
     change_appearance_tick();
     Rebirth::Tick();
@@ -226,7 +228,9 @@ void Install(std::uint8_t* image, std::size_t size) {
     const bool online=OnlineFixes::Install(image,size);
     const bool guard=RenderGuard::Install(image,size);
     const bool timing=EffectTiming::Install(image,size);
-    if (!g_frame_on && !camera && !rebirth && !menus && !graphics && !wide && !input && !cheats && !online && !guard && !timing) {
+    const bool frames=FrameRate::Install(image,size);
+    if (!g_frame_on && !camera && !rebirth && !menus && !graphics && !wide && !input && !cheats && !online && !guard && !timing &&
+        !frames) {
         for (auto& hook : hooks) Discard(hook);
         Log("engine enhancements disabled: no compatible feature could be prepared"); return;
     }
