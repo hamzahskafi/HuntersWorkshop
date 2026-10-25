@@ -39,6 +39,15 @@ const std::map<std::string, std::vector<std::string>>& FpsPresets() {
         {"30", {}}, {"60", {"60 FPS++"}}, {"90", {"90 FPS++", kSprint}}, {"uncap", {"Uncap FPS++", kSprint}}};
     return presets;
 }
+// The frame-rate corrections (the engine's frame_rate.cpp; BB_FRAME_FIXES=0, the launcher's "Frame rate
+// corrections" off, or safe mode turns them off): every rate above 30 on the 60 FPS++ list, as bbhost runs
+// it, the engine setting the frame pacer's target, the values for the rate and the cloth (which the 90 FPS++
+// list carries) and fixing the sprint's wall test (the Sprint Fix's job). Off: the lists above, as before.
+const char* const kSixtyBase = "60 FPS++";
+bool FrameFixesOn() { return Env("BB_FRAME_FIXES", "1").substr(0, 1) != "0"; }
+// Uncapped's reference rate for what is converted once (the engine's too): 120, as bbhost and Kyo's uncapped
+// list take it.
+constexpr int kUncappedReference = 120;
 
 const std::vector<std::tuple<std::string, const char*, const char*>>& Effects() {
     static const std::vector<std::tuple<std::string, const char*, const char*>> effects{
@@ -230,8 +239,9 @@ std::map<std::uint64_t, Bytes> ScaledRateValues(int fps) {
 
 // The per-frame steps 60 FPS++ halves from the game's 1/30 to 1/60 (physics, falling objects and
 // more): the 90 FPS++ base keeps them at 1/60, so at 120 FPS they ran twice as fast ("gravity
-// doubled"). Here they are 1/fps. 0x4D27C4C is the effects' second step (#15), fixed separately.
-// BB_FRAME_STEP_FIX=0 keeps them at 1/60.
+// doubled"). Here they are 1/fps (the corrections off only: with them, the engine reads the physics
+// world's step from the frame and the rest keep Kyo's 1/60, as bbhost). 0x4D27C4C is the effects'
+// second step (#15), fixed separately. BB_FRAME_STEP_FIX=0 keeps them at 1/60.
 constexpr std::uint64_t kEffectSecondStep = 0x4D27C4C;
 
 Writes RateScaled(const Writes& writes, int fps) {
@@ -284,6 +294,10 @@ constexpr std::uint64_t kCameraParamEase = 0x183A7DE;
 const Bytes kCameraParamWas = {0xcd, 0xcc, 0x4c, 0x3d};
 constexpr std::uint64_t kEffectStepFirst = 0x1CBC4FB, kEffectStepSecond = 0x1CBC511;
 const Bytes kEffectStepWas = {0x37, 0xb7, 0x06, 0x03}, kEffectStepNow = {0xf3, 0xe3, 0xa9, 0x03};
+// The engine's timed condition wait (sub_2483e80): the lists turn its call into a bare ret, five pushes deep,
+// which would return to a pushed register if it ran; its 16 direct callers all wait without a timeout, so it
+// never does. Left out, as bbhost leaves it: the game's call stays.
+const std::pair<std::uint64_t, std::uint64_t> kTimedWait{0x2483EC1, 0x2483EC6};
 
 double CameraValue(std::optional<std::uint32_t> field, double value, double frames) {
     if (field == kCameraAngle || !(0 < value && value < 1)) return value;
@@ -297,7 +311,11 @@ double CameraValue(std::optional<std::uint32_t> field, double value, double fram
 // sprinting (GitHub issue 32). Original (the default; camera_tuning=fps++ or
 // BB_CAMERA_TUNING=fps++ keeps the retune) leaves all of them as the game has them and
 // converts the game's own per-frame eases, distance (0.1) and chase rate (1/30), from a 30 FPS
-// frame: the camera of the game at 30 at every rate, as bbhost's Camera tuning: Original.
+// frame: the camera of the game at 30 at every rate, as bbhost's Camera tuning: Original. FPS++ above 60 with
+// the frame-rate corrections on: the retune's weights and eases (the constructor's, the stores', the list's
+// distance and chase-rate eases and LockCamParam's blend) are a 60 FPS frame's, converted from it, so the
+// camera moves as it does at 60 (bbhost's camera_tuned_fps). BB_CAMERA_FIX=1 converts the eases from the
+// game's 30 instead, as before.
 constexpr std::uint64_t kCameraWallEscape = 0x183DCFE;
 // The jump the retune puts over 1.5 KiB of the game's follow camera (to 0x183E271), with the wall
 // escape inside the code it skips.
@@ -309,14 +327,17 @@ bool KyoCameraSite(std::uint64_t a, std::size_t size) {
                        [&](const auto& r) { return a < r.second && a + size > r.first; });
 }
 
-Writes FrameRateFixes(const Writes& writes, std::optional<int> fps, const Bytes& elf, bool original_camera) {
+Writes FrameRateFixes(const Writes& writes, std::optional<int> fps, const Bytes& elf, bool original_camera,
+                      bool sixty_camera) {
     const bool camera = !original_camera && Env("BB_CAMERA_FIX", "0") == "1";
+    sixty_camera = sixty_camera && !original_camera && !camera && fps && *fps > 60;
     original_camera = original_camera && fps.has_value();
     Writes out;
     for (const auto& [offset, original] : writes) {
         Bytes data = original;
         const std::uint64_t a = offset + kBase;
         if (kEffectRateSites.count(a)) continue;
+        if (a < kTimedWait.second && a + data.size() > kTimedWait.first) continue;
         if (original_camera) {
             if (KyoCameraSite(a, data.size())) continue;
             if (const auto ease = kCameraEases.find(a); ease != kCameraEases.end()) {
@@ -339,7 +360,7 @@ Writes FrameRateFixes(const Writes& writes, std::optional<int> fps, const Bytes&
                 data = Concat({one, one, one, one});
             }
         }
-        if (fps && camera) {
+        if (fps && (camera || sixty_camera)) {
             if (const auto field = kCameraFields.find(a); field != kCameraFields.end()) {
                 data = F32(CameraValue(field->second, Load<float>(data.data()), 60.0 / *fps));
             } else if (std::any_of(std::begin(kCameraStores), std::end(kCameraStores),
@@ -350,7 +371,8 @@ Writes FrameRateFixes(const Writes& writes, std::optional<int> fps, const Bytes&
                 const Bytes v = F32(CameraValue(f, value, 60.0 / *fps));
                 std::copy(v.begin(), v.end(), data.begin() + 7);
             } else if (const auto ease = kCameraEases.find(a); ease != kCameraEases.end()) {
-                data = F32(CameraValue(std::nullopt, ease->second, 30.0 / *fps));
+                data = camera ? F32(CameraValue(std::nullopt, ease->second, 30.0 / *fps))
+                              : F32(CameraValue(std::nullopt, Load<float>(data.data()), 60.0 / *fps));
             }
         }
         out.emplace_back(offset, std::move(data));
@@ -358,9 +380,9 @@ Writes FrameRateFixes(const Writes& writes, std::optional<int> fps, const Bytes&
     if (std::any_of(out.begin(), out.end(), [](const Write& w) { return w.first + kBase == kEffectStepFirst; }) &&
         OriginalBytes(elf, kEffectStepSecond - kBase, kEffectStepWas.size()) == kEffectStepWas)
         out.emplace_back(kEffectStepSecond - kBase, kEffectStepNow);
-    if (fps && camera && OriginalBytes(elf, kCameraParamEase - kBase, 4) == kCameraParamWas)
-        out.emplace_back(kCameraParamEase - kBase,
-                         F32(CameraValue(std::nullopt, Load<float>(kCameraParamWas.data()), 30.0 / *fps)));
+    if (fps && (camera || sixty_camera) && OriginalBytes(elf, kCameraParamEase - kBase, 4) == kCameraParamWas)
+        out.emplace_back(kCameraParamEase - kBase, F32(CameraValue(std::nullopt, Load<float>(kCameraParamWas.data()),
+                                                                   (camera ? 30.0 : 60.0) / *fps)));
     return out;
 }
 
@@ -714,8 +736,12 @@ PatchResult CompilePatches(const PatchRequest& request) {
     const std::map<std::string, int> scaled_fps{{"120", 120}, {"144", 144}};
     const auto preset_it = presets.find(request.fps);
     if (preset_it == presets.end() && !scaled_fps.count(request.fps)) throw Error("invalid FPS preset " + request.fps);
+    const bool corrections = FrameFixesOn();
+    const bool on_sixty = corrections && request.fps != "30" && request.fps != "60";
     const std::vector<std::string> preset =
-        preset_it != presets.end() ? preset_it->second : std::vector<std::string>{kScaledBase, kSprint};
+        on_sixty                      ? std::vector<std::string>{kSixtyBase}
+        : preset_it != presets.end() ? preset_it->second
+                                      : std::vector<std::string>{kScaledBase, kSprint};
     std::vector<std::string> names = preset;
     const auto has = [&](const std::string& n) { return std::find(names.begin(), names.end(), n) != names.end(); };
     for (const std::string& n : Split(request.extra, ';'))
@@ -790,15 +816,23 @@ PatchResult CompilePatches(const PatchRequest& request) {
         writes = RateScaled(writes, scaled_fps.at(request.fps));
         Log("Patches: %s FPS: %s with its frame-rate values for %s", request.fps.c_str(), kScaledBase, request.fps.c_str());
     }
+    if (on_sixty && has(kSixtyBase))
+        Log("Patches: %s on the 60 FPS++ list: the engine sets the pace and the values for the rate (frame-rate "
+            "corrections; off, the %s list)",
+            request.fps == "uncap" ? "uncapped" : (request.fps + " FPS").c_str(),
+            request.fps == "uncap" ? "Uncap FPS++" : request.fps == "90" ? "90 FPS++" : "scaled 90 FPS++");
     if (!preset.empty() && has(preset[0])) {
         std::optional<int> fps;
         if (request.fps == "60") fps = 60;
         else if (request.fps == "90") fps = 90;
         else if (scaled_fps.count(request.fps)) fps = scaled_fps.at(request.fps);
+        else if (request.fps == "uncap" && on_sixty) fps = kUncappedReference;
         const std::string tuning = Lower(Env("BB_CAMERA_TUNING", Setting(settings, "camera_tuning").value_or("original")));
-        writes = FrameRateFixes(writes, fps, elf, tuning != "fps++");
+        writes = FrameRateFixes(writes, fps, elf, tuning != "fps++", corrections);
         if (fps) Log("Patches: follow camera %s", tuning != "fps++" ? "as the game has it, its eases converted from 30 FPS"
-                                                                   : "with the FPS++ retune (camera_tuning=fps++)");
+                                                  : corrections && *fps > 60
+                                                      ? "with the FPS++ retune, its weights converted from 60 FPS"
+                                                      : "with the FPS++ retune (camera_tuning=fps++)");
     }
     if (Env("BB_DLC", "") == "1") {
         const Bytes was = FromHex("e8bb210000");

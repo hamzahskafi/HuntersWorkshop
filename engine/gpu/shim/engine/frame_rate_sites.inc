@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// The frame-rate corrections at 60 FPS (frame_rate.cpp): what Kyo's "60 FPS++" (1.0, as patches/Bloodborne.xml
-// ships it) leaves at the game's 30 FPS timing or gets wrong. Adapted from bbhost (droogie/bbhost 566184a:
+// The frame-rate corrections at 60 FPS and above (frame_rate.cpp): what Kyo's "60 FPS++" (1.0, as
+// patches/Bloodborne.xml ships it, the base at every rate) leaves at the game's 30 FPS timing or gets wrong, and
+// what the rates above 60 need on top of it. Adapted from bbhost (droogie/bbhost 566184a:
 // src/engine/frame_rate.cpp, frame_rate_dt_loads.inc and tools/fps_sites.py), which also collects Kyo's 1.3
 // lists and yogesh1239's high-FPS findings. Addresses are the patch lists' (the ELF's VA + 0x400000).
 // tools/re/frame_rate_check.py checks every entry against a 1.09 eboot.elf and the list.
@@ -21,10 +22,39 @@ FRAME_SITE(Physics, 0x222bcbf, "488d0d6a404c034883c11048898d40feffffc78548feffff
 FRAME_SITE(Physics, 0x1bf9b69, "48c745c000000000c745b88988083d", "48c745c000000000c745b88988883c", "8b05990db6038945b8660f1f440000")
 // grass sway's second path (the list already points the first at the frame's time).
 FRAME_SITE(Grass, 0x2713d8d, "c5fa1025db606102", "c5fa1025736b0403", "c5fa1025736b0403")
+// the sound thread's sleep: the game's call back in place of the list's cap (16 ms, a cave in the loop); the
+// thread's update time (FRAME_COUNT below) is one frame instead.
+FRAME_SITE(Sound, 0x2c0137d, "e83ea788ff", "e84affffff", "e83ea788ff")
+// The cloth above 60, from Kyo's "90 FPS++" (bbhost's ninety_fps_sites.inc): with one substep a frame (the 60
+// list's 0xb6e67a) the cloth solver runs at the frame rate against the 60 its part files were made for, so
+// each of the six constraint operators gets a cave (in a dead profiling block: its guard's jae made a jmp)
+// that multiplies the stiffness it is called with by a scale, (60 dt)^2 as in Kyo's 1.3 lists. The jump to
+// each cave, then the cave.
+FRAME_SITE(Cloth, 0xb20dee, "c5f82945a0", "", "e921000000")
+FRAME_SITE(Cloth, 0xb20e12, "7317488d050def08044889010f318941084883c11048894b08", "", "eb17c5f85905e4ae2104c5f82945a0e9cdffffff9090909090")
+FRAME_SITE(Cloth, 0xb2b2fe, "c5f82945a0", "", "e921000000")
+FRAME_SITE(Cloth, 0xb2b322, "7317488d05e85d08044889010f318941084883c11048894b08", "", "eb17c5f85905d4092104c5f82945a0e9cdffffff9090909090")
+FRAME_SITE(Cloth, 0xb30ade, "c5f82945a0", "", "e921000000")
+FRAME_SITE(Cloth, 0xb30b02, "7317488d05350808044889010f318941084883c11048894b08", "", "eb17c5f85905f4b12004c5f82945a0e9cdffffff9090909090")
+FRAME_SITE(Cloth, 0xb38711, "c5f82945b0", "", "e929000000")
+FRAME_SITE(Cloth, 0xb3873d, "7317488d058c9307044889010f318941084883c11049894d08", "", "eb17c5f85905b9352004c5f82945b0e9c5ffffff9090909090")
+FRAME_SITE(Cloth, 0xb41f4e, "c5f8294580", "", "e921000000")
+FRAME_SITE(Cloth, 0xb41f72, "7317488d0505fd06044889010f318941084883c11048894b08", "", "eb17c5f85905849d1f04c5f8294580e9cdffffff9090909090")
+FRAME_SITE(Cloth, 0xb420ee, "c5f82945a0", "", "e921000000")
+FRAME_SITE(Cloth, 0xb42112, "7317488d0595fb06044889010f318941084883c11048894b08", "", "eb17c5f85905e49b1f04c5f82945a0e9cdffffff9090909090")
 
 // FRAME_LOAD(group, instruction, length, displacement offset, constant, kind, lanes, the instruction's bytes,
 // the constant's value in each lane): a value the game means "a frame" by, read from a slot of ours that
-// frame_rate.cpp rewrites every frame from the frame's time; the constant itself stays as it is.
+// frame_rate.cpp rewrites every frame from the frame's time; the constant itself stays as it is. An
+// instruction one of the group's sites writes (the cloth caves') is checked against the site's bytes.
+// the cloth caves' stiffness scale (vmulps xmm0, xmm0, [0x4d3bd00]: the tail of an assert message's file
+// name, "DLLightMutex.cpp", which the 90 list overwrites with its scale), (60 dt)^2 at most 1 every frame.
+FRAME_LOAD(Cloth, 0xb20e14, 8, 4, 0x4d3bd00, Cloth, 4, "c5f85905e4ae2104", 0x694c4c44, 0x4d746867, 0x78657475, 0x7070632e)
+FRAME_LOAD(Cloth, 0xb2b324, 8, 4, 0x4d3bd00, Cloth, 4, "c5f85905d4092104", 0x694c4c44, 0x4d746867, 0x78657475, 0x7070632e)
+FRAME_LOAD(Cloth, 0xb30b04, 8, 4, 0x4d3bd00, Cloth, 4, "c5f85905f4b12004", 0x694c4c44, 0x4d746867, 0x78657475, 0x7070632e)
+FRAME_LOAD(Cloth, 0xb3873f, 8, 4, 0x4d3bd00, Cloth, 4, "c5f85905b9352004", 0x694c4c44, 0x4d746867, 0x78657475, 0x7070632e)
+FRAME_LOAD(Cloth, 0xb41f74, 8, 4, 0x4d3bd00, Cloth, 4, "c5f85905849d1f04", 0x694c4c44, 0x4d746867, 0x78657475, 0x7070632e)
+FRAME_LOAD(Cloth, 0xb42114, 8, 4, 0x4d3bd00, Cloth, 4, "c5f85905e49b1f04", 0x694c4c44, 0x4d746867, 0x78657475, 0x7070632e)
 // movement controller momentum, 0.95 a frame on the body's X/Z (chr_motion_physics_update).
 FRAME_LOAD(Jump, 0x1e4abca, 8, 4, 0x4d0b5b0, Keep, 4, "c5f85905de09ec02", 0x3f733333, 0x3f733333, 0x3f733333, 0x3f733333)
 // sprint wall test: blocked, x0.8 a frame.
@@ -73,7 +103,7 @@ FRAME_LOAD(Timers, 0x1d0854c, 8, 4, 0x4d27fe0, Amount, 1, "c5fa580d8cfa0103", 0x
 FRAME_LOAD(Timers, 0x25d6ae2, 8, 4, 0x4d2979c, Amount, 1, "c5fa101db22c7502", 0x3c888889)
 
 // FRAME_VALUE(group, address, kind, the game's value, the 60 FPS++ list's value): a value written once for the
-// rate (Game: the game's own back). The durations are seconds, not steps: the list converted them as
+// rate (uncapped: for 120, its reference rate; Game: the game's own back). The durations are seconds, not steps: the list converted them as
 // if they were frames (Kyo's 1.3 lists and bbhost keep them; bbhost tools/fps_sites.py EXCLUDE).
 // a count of 1/30 s frames in sub_11ca140's rate sums.
 FRAME_VALUE(Durations, 0x4c88688, Game, 0x3d088889, 0x3c888889)
@@ -119,6 +149,39 @@ FRAME_VALUE(Timers, 0x1972a80, Step, 0x3d088889, 0x3d088889)
 FRAME_VALUE(Timers, 0x25df519, Amount, 0x3c888889, 0x3c888889)
 // the target bank refresh's step (its load reads the frame's time above).
 FRAME_VALUE(Targeting, 0x4d2577c, Step, 0x3d088889, 0x3d088889)
+// the ragdoll keyframe controller's drive step (an hkaRagdollRigidBodyController's +0x60): the physics world's
+// step, which follows the frame.
+FRAME_VALUE(Physics, 0x1c0ca9a, Step, 0x3d088889, 0x3c888889)
+// a tenth of a change a frame over the 10-frame interval at 0x192c405 (FRAME_COUNT below): the two together.
+FRAME_VALUE(Timers, 0x4cf6420, Amount, 0x3dcccccd, 0x3d4ccccd)
+FRAME_VALUE(Timers, 0x4cf6424, Amount, 0x3dcccccd, 0x3d4ccccd)
+FRAME_VALUE(Timers, 0x4cf6428, Amount, 0x3dcccccd, 0x3d4ccccd)
+FRAME_VALUE(Timers, 0x4cf642c, Amount, 0x3dcccccd, 0x3d4ccccd)
+
+// FRAME_COUNT(group, address, size, the game's value, kind): a count written once for the rate. Frames: a
+// number of frames, the game's times rate / 30 (uncapped: for 120). Micros: microseconds, the game's times
+// 30 / rate. Digits: microseconds as five ASCII digits, one frame at the rate (uncapped: its limit, at most
+// 240). The 60 FPS++ list holds 60's for the first three.
+// a countdown of 10 frames (movl into +0xf8).
+FRAME_COUNT(Timers, 0x192c405, 4, 10, Frames)
+// the default of 5 an int setting is read with (mov edx before sub_24eba00).
+FRAME_COUNT(Timers, 0x1929676, 4, 5, Frames)
+// a worker's usleep(33000) in a polling loop.
+FRAME_COUNT(Timers, 0x25629f1, 4, 33000, Micros)
+// the sound thread's update time, MainThreadUpdateTime in the game's text config (sub_2bf67f0, strtol): 33333,
+// two frames of sound requests an update at 60, and some attack sounds played half as often as at 30.
+FRAME_COUNT(Sound, 0x4b33c51, 5, 33333, Digits)
+
+// FRAME_TARGET(address, the game's value): the frame pacer's target, mov dword [r12+0x18], imm32 (the 60 FPS++
+// list's 1/60): 1/rate, uncapped 1/its limit (at most 480). Without all four the game stays at 60.
+FRAME_TARGET(0x2434840, 0x3c888889)
+FRAME_TARGET(0x243485a, 0x3d088889)
+FRAME_TARGET(0x243487e, 0x3d088889)
+FRAME_TARGET(0x24348b3, 0x3d088889)
+
+// FRAME_CLOTH_SCALE(address, the game's bytes): the scale the cloth caves read where a slot cannot replace it,
+// (60 / rate)^2 in each of its four lanes (uncapped: for 120).
+FRAME_CLOTH_SCALE(0x4d3bd00, "444c4c696768744d757465782e637070")
 
 // FRAME_REQUIRE(address, the 60 FPS++ list's bytes): the list's frame-time code, which keeps the frame's step
 // in 0x575a908 (the measured frame time clamped to [target, 1/30], eased by 0.15 a frame). The sites above

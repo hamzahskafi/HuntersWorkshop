@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Frame-rate corrections at 60 FPS, on top of Kyo's "60 FPS++" (frame_rate.cpp; the sites are in
+// Frame-rate corrections at 60 FPS and above, on top of Kyo's "60 FPS++" (frame_rate.cpp; the sites are in
 // frame_rate_sites.inc). Adapted from bbhost (src/engine/frame_rate.cpp; licenses/BBHOST-PORTS.md).
 #pragma once
 #include <cstddef>
@@ -14,6 +14,7 @@ enum class Kind : std::uint8_t {
     Keep,   ///< a share kept a frame: was^(30 * seconds)
     Rate,   ///< a distance a frame times 30 is a speed: was / (30 * seconds)
     Game,   ///< the game's own value at every rate (a duration the FPS++ list took for a step)
+    Cloth,  ///< the cloth's stiffness scale, its solver's rate against the 60 it was made for: (60 * seconds)^2, at most 1
 };
 float Rated(Kind kind, float was, double seconds);
 
@@ -27,12 +28,13 @@ private:
     double carry = 0;
 };
 
-/// Loader start, after the patches and the executable's verification: at 60 FPS with the 60 FPS++
-/// list in place, checks and applies the sites and points the per-frame loads at slots past the end of
-/// the game's data segment, in its last page (`size`: the whole image, the linked modules after the
-/// game included). BB_FRAME_FIXES=0 turns all of it off; BB_FRAME_FIXES_SKIP
-/// names groups to leave out (a comma list: clips, physics, grass, targeting, jump, sprint, slope,
-/// online, hitbox, timers, menus, durations, playtime).
+/// Loader start, after the patches and the executable's verification: at 60, 90, 120, 144 FPS or uncapped
+/// (BB_FPS; uncapped's limit BB_FPS_LIMIT) with the 60 FPS++ list in place, checks and applies the sites,
+/// sets the frame pacer's target and the values for the rate, and points the per-frame loads at slots past
+/// the end of the game's data segment, in its last page (`size`: the whole image, the linked modules after
+/// the game included). BB_FRAME_FIXES=0 turns all of it off; BB_FRAME_FIXES_SKIP names groups to leave out
+/// (a comma list: clips, physics, grass, targeting, jump, sprint, slope, online, hitbox, timers, menus,
+/// durations, playtime, pace, sound, cloth; without pace the game stays at 60).
 bool Install(std::uint8_t* image, std::size_t size);
 /// Each frame on the game's main thread, at the start of its frame pacer: the slots from the frame's
 /// time (the 60 FPS++ cave's, 0x575a908).

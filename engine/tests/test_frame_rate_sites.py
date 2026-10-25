@@ -22,10 +22,12 @@ class FrameRateSitesTests(unittest.TestCase):
 
     def test_every_entry_is_parsed(self):
         counts = {k: len(v) for k, v in self.entries.items()}
-        self.assertEqual(counts, {'sites': 7, 'loads': 23, 'values': 22, 'require': 2, 'play': 1})
+        self.assertEqual(counts, {'sites': 20, 'loads': 29, 'values': 27, 'counts': 4, 'targets': 4, 'cloth_scales': 1,
+                                  'require': 2, 'play': 1})
         text = frame_rate_check.INC.read_text()
-        self.assertEqual(sum(text.count(f'\n{m}(') for m in ('FRAME_SITE', 'FRAME_LOAD', 'FRAME_VALUE',
-                                                               'FRAME_REQUIRE', 'FRAME_PLAY_TIME')), 55)
+        self.assertEqual(sum(text.count(f'\n{m}(') for m in ('FRAME_SITE', 'FRAME_LOAD', 'FRAME_VALUE', 'FRAME_COUNT',
+                                                               'FRAME_TARGET', 'FRAME_CLOTH_SCALE', 'FRAME_REQUIRE',
+                                                               'FRAME_PLAY_TIME')), 88)
 
     def test_a_wrong_entry_fails(self):
         wrong = copy.deepcopy(self.entries)
@@ -37,6 +39,28 @@ class FrameRateSitesTests(unittest.TestCase):
         wrong = copy.deepcopy(self.entries)
         wrong['values'].append(dict(wrong['values'][0]))  # the same bytes twice
         self.assertTrue(any('overlap' in f for f in frame_rate_check.check(wrong, self.listed)))
+
+    def test_counts_and_targets_follow_the_rate(self):
+        by_at = {c['at']: c for c in self.entries['counts']}
+        for fps, frames, micros, digits in ((60, 20, 16500, b'16666'), (90, 30, 11000, b'11111'),
+                                            (120, 40, 8250, b'08333'), (144, 48, 6875, b'06944')):
+            with self.subTest(fps=fps):
+                self.assertEqual(frame_rate_check.count_bytes(by_at[0x192c405], fps), frames.to_bytes(4, 'little'))
+                self.assertEqual(frame_rate_check.count_bytes(by_at[0x25629f1], fps), micros.to_bytes(4, 'little'))
+                self.assertEqual(frame_rate_check.count_bytes(by_at[0x4b33c51], fps), digits)
+        self.assertEqual(frame_rate_check.count_bytes(by_at[0x4b33c51], 240), b'04166')  # uncapped's most
+        wrong = copy.deepcopy(self.entries)
+        wrong['counts'][0]['game'] += 1  # 60's is no longer what the list holds
+        self.assertTrue(any(f.startswith('count') for f in frame_rate_check.check(wrong, self.listed)))
+        wrong = copy.deepcopy(self.entries)
+        wrong['targets'][0]['at'] += 1
+        self.assertTrue(any(f.startswith('target') for f in frame_rate_check.check(wrong, self.listed)))
+
+    def test_a_cave_load_is_in_its_site(self):
+        wrong = copy.deepcopy(self.entries)
+        load = next(l for l in wrong['loads'] if l['group'] == 'Cloth')
+        load['bytes'] = load['bytes'][:-1] + bytes([load['bytes'][-1] ^ 1])
+        self.assertTrue(any('not what its site' in f for f in frame_rate_check.check(wrong, self.listed)))
 
     def test_the_list_frame_time_code_is_required(self):
         listed = dict(self.listed)

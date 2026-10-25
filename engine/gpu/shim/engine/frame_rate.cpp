@@ -1,9 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Frame-rate corrections at 60 FPS (frame_rate.h), adapted from bbhost's src/engine/frame_rate.cpp
-// (droogie/bbhost 566184a; licenses/BBHOST-PORTS.md). Kyo's "60 FPS++" stays the base: these are the
-// systems it leaves on a fixed 30 FPS step, the durations it took for steps, and the play time's clock
-// (frame_rate_sites.inc says what each one is). Every byte is checked before anything is written; a
+// Frame-rate corrections at 60 FPS and above (frame_rate.h), adapted from bbhost's src/engine/frame_rate.cpp
+// (droogie/bbhost 566184a; licenses/BBHOST-PORTS.md). Kyo's "60 FPS++" is the base at every rate, as in
+// bbhost: these are the systems it leaves on a fixed 30 FPS step, the durations it took for steps, the play
+// time's clock, and above 60 the frame pacer's target, the values and counts that follow the rate and the
+// cloth (frame_rate_sites.inc says what each one is). Every byte is checked before anything is written; a
 // group with a mismatch is left out whole, the others still go in.
+//
+// The rates: 60, 90, 120 and 144 as they are; uncapped with the pacer's target at its limit and, for what
+// cannot follow the frame's time (code immediates, frame counts), the values of 120, as bbhost and Kyo's
+// uncapped list take them. Above 60 the list's other steps keep their 60 value, as Kyo's 90 and 120 lists
+// hold them ("the known-good 120 FPS++ block holds 1/60 at these same addresses"); the ones whose systems
+// were read follow the frame (the sites and loads here).
 //
 // The per-frame values are read from slots of ours past the end of the game's data segment (1.09: image
 // offset 0x56d30f4), in that segment's last page: the loader protects each segment in whole pages, so
@@ -15,6 +22,7 @@
 #include "frame_rate.h"
 #include "engine_hooks.h"
 #include "engine_state.h"
+#include <algorithm>
 #include <array>
 #include <cctype>
 #include <cmath>
@@ -31,17 +39,26 @@ namespace BbEngine::FrameRate {
 namespace {
 constexpr std::uint64_t kBase = 0x400000;       // the patch lists' addresses: the image offset + this
 constexpr std::uint64_t kFrameTime = 0x575a908; // the 60 FPS++ cave's step
-constexpr double kSixtieth = 1.0 / 60.0;
 constexpr std::size_t kPage = 4096, kSlot = 16;
 constexpr std::size_t kDataEnd = 0x56d30f4; // the end of 1.09's data segment (its VA + memsz)
+constexpr std::uint8_t kTargetStore[] = {0x41, 0xc7, 0x44, 0x24, 0x18}; // mov dword [r12+0x18], imm32
+constexpr std::uint32_t kListedTarget = 0x3c888889;                     // the 60 FPS++ list's 1/60
 
 enum class Group : std::uint8_t {
     Clips, Physics, Grass, Targeting, Jump, Sprint, Slope, Online, Hitbox, Timers, Menus, Durations, PlayTime,
-    Count
+    Pace, Sound, Cloth, Count
 };
-constexpr const char* kGroupNames[] = {"clips",  "physics", "grass",  "targeting", "jump",      "sprint",  "slope",
-                                       "online", "hitbox",  "timers", "menus",     "durations", "playtime"};
+constexpr const char* kGroupNames[] = {"clips",  "physics", "grass",  "targeting", "jump",      "sprint",
+                                       "slope",  "online",  "hitbox", "timers",    "menus",     "durations",
+                                       "playtime", "pace",  "sound",  "cloth"};
 static_assert(std::size(kGroupNames) == std::size_t(Group::Count));
+
+/// How a count follows the rate.
+enum class Counted : std::uint8_t {
+    Frames, ///< a number of frames: the game's times rate / 30
+    Micros, ///< microseconds: the game's times 30 / rate
+    Digits, ///< one frame's microseconds as ASCII digits
+};
 
 struct Site {
     Group group;
@@ -64,6 +81,21 @@ struct Value {
     Kind kind;
     std::uint32_t game, listed;
 };
+struct CountSite {
+    Group group;
+    std::uint64_t at;
+    std::uint8_t size;
+    std::uint32_t game;
+    Counted kind;
+};
+struct Target {
+    std::uint64_t at;
+    std::uint32_t game;
+};
+struct ClothScale {
+    std::uint64_t at;
+    const char* was;
+};
 struct Require {
     std::uint64_t at;
     const char* bytes;
@@ -74,39 +106,66 @@ struct PlayTimeSite {
     const char* was;
 };
 
-#define FRAME_SITE(g, at, was, listed, now) {Group::g, at, was, listed, now},
+// Each table is the .inc read with only its own macro defined.
+#define FRAME_SITE(...)
 #define FRAME_LOAD(...)
 #define FRAME_VALUE(...)
+#define FRAME_COUNT(...)
+#define FRAME_TARGET(...)
+#define FRAME_CLOTH_SCALE(...)
 #define FRAME_REQUIRE(...)
 #define FRAME_PLAY_TIME(...)
+#undef FRAME_SITE
+#define FRAME_SITE(g, at, was, listed, now) {Group::g, at, was, listed, now},
 constexpr Site kSites[] = {
 #include "frame_rate_sites.inc"
 };
 #undef FRAME_SITE
-#undef FRAME_LOAD
 #define FRAME_SITE(...)
+#undef FRAME_LOAD
 #define FRAME_LOAD(g, insn, length, disp, constant, kind, lanes, bytes, ...)                                   \
     {Group::g, insn, length, disp, constant, Kind::kind, lanes, bytes, {__VA_ARGS__}},
 constexpr Load kLoads[] = {
 #include "frame_rate_sites.inc"
 };
 #undef FRAME_LOAD
-#undef FRAME_VALUE
 #define FRAME_LOAD(...)
+#undef FRAME_VALUE
 #define FRAME_VALUE(g, at, kind, game, listed) {Group::g, at, Kind::kind, game, listed},
 constexpr Value kValues[] = {
 #include "frame_rate_sites.inc"
 };
 #undef FRAME_VALUE
-#undef FRAME_REQUIRE
 #define FRAME_VALUE(...)
+#undef FRAME_COUNT
+#define FRAME_COUNT(g, at, size, game, kind) {Group::g, at, size, game, Counted::kind},
+constexpr CountSite kCounts[] = {
+#include "frame_rate_sites.inc"
+};
+#undef FRAME_COUNT
+#define FRAME_COUNT(...)
+#undef FRAME_TARGET
+#define FRAME_TARGET(at, game) {at, game},
+constexpr Target kTargets[] = {
+#include "frame_rate_sites.inc"
+};
+#undef FRAME_TARGET
+#define FRAME_TARGET(...)
+#undef FRAME_CLOTH_SCALE
+#define FRAME_CLOTH_SCALE(at, was) {at, was},
+constexpr ClothScale kClothScales[] = {
+#include "frame_rate_sites.inc"
+};
+#undef FRAME_CLOTH_SCALE
+#define FRAME_CLOTH_SCALE(...)
+#undef FRAME_REQUIRE
 #define FRAME_REQUIRE(at, bytes) {at, bytes},
 constexpr Require kRequire[] = {
 #include "frame_rate_sites.inc"
 };
 #undef FRAME_REQUIRE
-#undef FRAME_PLAY_TIME
 #define FRAME_REQUIRE(...)
+#undef FRAME_PLAY_TIME
 #define FRAME_PLAY_TIME(g, at, was) {Group::g, at, was},
 constexpr PlayTimeSite kPlayTime[] = {
 #include "frame_rate_sites.inc"
@@ -114,6 +173,9 @@ constexpr PlayTimeSite kPlayTime[] = {
 #undef FRAME_SITE
 #undef FRAME_LOAD
 #undef FRAME_VALUE
+#undef FRAME_COUNT
+#undef FRAME_TARGET
+#undef FRAME_CLOTH_SCALE
 #undef FRAME_REQUIRE
 #undef FRAME_PLAY_TIME
 
@@ -135,6 +197,50 @@ std::uint32_t ToBits(float f) {
     return bits;
 }
 
+/// What the corrections are for. Fixed rates: all three the rate. Uncapped (BB_FPS=uncap): the pacer's target
+/// its limit (BB_FPS_LIMIT, 60 to 480; none: 480, the vblank it runs on), the values for 120 (no more than the
+/// limit), the sound's updates one a frame up to 240 a second.
+struct Rate {
+    double values = 60, target = 60, sound = 60;
+    bool uncapped = false;
+};
+bool RateOf(const char* fps, Rate& rate) {
+    if (!fps) return false;
+    for (const double fixed : {60.0, 90.0, 120.0, 144.0}) {
+        if (std::to_string(int(fixed)) == fps) {
+            rate = {fixed, fixed, fixed, false};
+            return true;
+        }
+    }
+    if (std::strcmp(fps, "uncap") != 0) return false;
+    const char* limit = std::getenv("BB_FPS_LIMIT");
+    const long n = limit ? std::strtol(limit, nullptr, 10) : 240;
+    const double target = n > 0 ? std::clamp(double(n), 60.0, 480.0) : 480.0;
+    rate = {std::min(120.0, target), target, std::min(240.0, target), true};
+    return true;
+}
+
+/// A count's bytes at `rate` (its own rate: the sound's for the update time, the values' for the rest).
+std::vector<std::uint8_t> CountBytes(const CountSite& c, double rate) {
+    double n = c.game;
+    if (c.kind == Counted::Frames) n = std::round(c.game * rate / 30.0);
+    else if (c.kind == Counted::Micros) n = std::round(c.game * 30.0 / rate);
+    else if (rate != 30.0) n = std::floor(1e6 / rate); // whole microseconds, as the game's own 33333
+    const auto value = std::uint32_t(n);
+    std::vector<std::uint8_t> out(c.size);
+    if (c.kind == Counted::Digits) {
+        char text[16];
+        std::snprintf(text, sizeof text, "%0*u", int(c.size), value);
+        std::memcpy(out.data(), text, c.size);
+    } else {
+        for (std::size_t i = 0; i < c.size; ++i) out[i] = std::uint8_t(value >> (8 * i));
+    }
+    return out;
+}
+double CountRate(const CountSite& c, const Rate& rate) {
+    return c.kind == Counted::Digits ? rate.sound : rate.values;
+}
+
 // A per-frame value: its slot, the constant it follows (live, or the game's when the list changed it).
 struct Slot {
     std::uint8_t* at;
@@ -147,6 +253,7 @@ std::uint8_t* g_image = nullptr;
 std::vector<Slot> g_slots;
 std::uint8_t* g_play_ms = nullptr;
 PlayTime g_play;
+double g_fallback = 1.0 / 60.0; // the step before the 60 FPS++ cave has one: a frame at the rate
 bool g_on = false;
 bool g_checked = false; // the slots' page found writable (first Tick, after the loader's protections)
 
@@ -170,6 +277,10 @@ float Rated(Kind kind, float was, double seconds) {
     case Kind::Keep: return float(std::pow(w, frames));
     case Kind::Rate: return float(w / frames);
     case Kind::Game: return was;
+    case Kind::Cloth: {
+        const double scale = std::min(1.0, 60.0 * seconds);
+        return float(scale * scale);
+    }
     }
     return was;
 }
@@ -191,8 +302,9 @@ bool Install(std::uint8_t* image, std::size_t size) {
         return false;
     }
     const char* fps = std::getenv("BB_FPS");
-    if (!fps || std::strcmp(fps, "60") != 0) {
-        host_log("Frame rate fixes: not at %s FPS (60 only for now)", fps ? fps : "an unknown");
+    Rate rate;
+    if (!RateOf(fps, rate)) {
+        host_log("Frame rate fixes: not at %s FPS (60, 90, 120, 144 or uncapped)", fps ? fps : "an unknown");
         return false;
     }
     const auto at = [&](std::uint64_t address) { return image + (address - kBase); };
@@ -237,12 +349,42 @@ bool Install(std::uint8_t* image, std::size_t size) {
         host_log("Frame rate fixes: %s left out: 0x%llx holds neither 1.09's bytes nor the 60 FPS++ list's",
                  kGroupNames[std::size_t(g)], (unsigned long long)address);
     };
+
+    // The pacer's target first: without all four the game keeps the list's 1/60, and what follows is for 60.
+    const auto target_bits = [&] { return ToBits(float(1.0 / rate.target)); };
+    for (const Target& t : kTargets) {
+        std::uint32_t imm = 0;
+        const bool store = inside(t.at, sizeof kTargetStore + 4) && !std::memcmp(at(t.at), kTargetStore, sizeof kTargetStore);
+        if (store) std::memcpy(&imm, at(t.at) + sizeof kTargetStore, 4);
+        if (!store || (imm != t.game && imm != kListedTarget && imm != target_bits())) fail(Group::Pace, t.at);
+    }
+    if (!on[std::size_t(Group::Pace)] && rate.target != 60) {
+        host_log("Frame rate fixes: the frame pacer's target left as the 60 FPS++ list has it: the game runs at 60");
+        rate = Rate{};
+    }
+    // One cloth substep a frame (the list's) is what the cloth was made for at 60: its scale only above.
+    if (rate.target <= 60) on[std::size_t(Group::Cloth)] = false;
+    g_fallback = 1.0 / rate.values;
+    const double step = 1.0 / rate.values;
+
     for (const Site& s : kSites) {
         const auto was = Hex(s.was), listed = Hex(s.listed), now = Hex(s.now);
         if (!holds(s.at, was) && !holds(s.at, listed) && !holds(s.at, now)) fail(s.group, s.at);
     }
+    // A load holds its instruction, or one of its group's sites writes it (the cloth caves').
+    const auto load_holds = [&](const Load& l) {
+        const auto bytes = Hex(l.bytes);
+        if (holds(l.insn, bytes)) return true;
+        for (const Site& s : kSites) {
+            const auto now = Hex(s.now);
+            if (s.group == l.group && l.insn >= s.at && l.insn - s.at + bytes.size() <= now.size() &&
+                !std::memcmp(now.data() + (l.insn - s.at), bytes.data(), bytes.size()))
+                return true;
+        }
+        return false;
+    };
     for (const Load& l : kLoads) {
-        if (!holds(l.insn, Hex(l.bytes)) || !inside(l.constant, 4u * l.lanes)) fail(l.group, l.insn);
+        if (!load_holds(l) || !inside(l.constant, 4u * l.lanes)) fail(l.group, l.insn);
     }
     for (const Value& v : kValues) {
         std::uint32_t now = 0;
@@ -251,8 +393,22 @@ bool Install(std::uint8_t* image, std::size_t size) {
             continue;
         }
         std::memcpy(&now, at(v.at), 4);
-        const std::uint32_t ours = ToBits(Rated(v.kind, FromBits(v.game), kSixtieth));
+        const std::uint32_t ours = ToBits(Rated(v.kind, FromBits(v.game), step));
         if (now != v.game && now != v.listed && now != ours) fail(v.group, v.at);
+    }
+    for (const CountSite& c : kCounts) {
+        const auto as_game = CountBytes(c, 30.0), at_sixty = CountBytes(c, 60.0), ours = CountBytes(c, CountRate(c, rate));
+        if (!holds(c.at, as_game) && !holds(c.at, at_sixty) && !holds(c.at, ours)) fail(c.group, c.at);
+    }
+    for (const ClothScale& c : kClothScales) {
+        // The game's text, or a scale a list wrote (four equal lanes in (0, 1]).
+        bool fine = holds(c.at, Hex(c.was));
+        if (!fine && inside(c.at, 16)) {
+            float lanes[4];
+            std::memcpy(lanes, at(c.at), sizeof lanes);
+            fine = lanes[0] > 0 && lanes[0] <= 1 && lanes[1] == lanes[0] && lanes[2] == lanes[0] && lanes[3] == lanes[0];
+        }
+        if (!fine) fail(Group::Cloth, c.at);
     }
     for (const PlayTimeSite& p : kPlayTime) {
         if (!holds(p.at, Hex(p.was))) fail(p.group, p.at);
@@ -281,6 +437,11 @@ bool Install(std::uint8_t* image, std::size_t size) {
         }
         return true;
     };
+    if (on[std::size_t(Group::Pace)]) {
+        const std::uint32_t bits = target_bits();
+        for (const Target& t : kTargets)
+            if (write(t.at + sizeof kTargetStore, &bits, sizeof bits)) ++applied[std::size_t(Group::Pace)];
+    }
     for (const Site& s : kSites) {
         if (!on[std::size_t(s.group)]) continue;
         const auto now = Hex(s.now);
@@ -299,7 +460,7 @@ bool Install(std::uint8_t* image, std::size_t size) {
             game &= now == l.value[i];
         }
         if (game) slot.live = at(l.constant);
-        WriteSlot(slot, kSixtieth);
+        WriteSlot(slot, step);
         const auto disp = std::int32_t(next - (at(l.insn) + l.length));
         if (!write(l.insn + l.disp, &disp, sizeof disp)) continue;
         g_slots.push_back(slot);
@@ -308,8 +469,19 @@ bool Install(std::uint8_t* image, std::size_t size) {
     }
     for (const Value& v : kValues) {
         if (!on[std::size_t(v.group)]) continue;
-        const std::uint32_t ours = ToBits(Rated(v.kind, FromBits(v.game), kSixtieth));
+        const std::uint32_t ours = ToBits(Rated(v.kind, FromBits(v.game), step));
         if (write(v.at, &ours, sizeof ours)) ++applied[std::size_t(v.group)];
+    }
+    for (const CountSite& c : kCounts) {
+        if (!on[std::size_t(c.group)]) continue;
+        const auto ours = CountBytes(c, CountRate(c, rate));
+        if (write(c.at, ours.data(), ours.size())) ++applied[std::size_t(c.group)];
+    }
+    // Where the caves' loads have no slot, they read the scale for the rate.
+    for (const ClothScale& c : kClothScales) {
+        if (!on[std::size_t(Group::Cloth)] || per_frame) continue;
+        const float lane = Rated(Kind::Cloth, 0, step), lanes[4] = {lane, lane, lane, lane};
+        if (write(c.at, lanes, sizeof lanes)) ++applied[std::size_t(Group::Cloth)];
     }
     for (const PlayTimeSite& p : kPlayTime) {
         if (!on[std::size_t(p.group)] || !per_frame) continue;
@@ -335,7 +507,12 @@ bool Install(std::uint8_t* image, std::size_t size) {
         return false;
     }
     g_on = !g_slots.empty() || g_play_ms;
-    host_log("Frame rate fixes: on at 60 FPS (%s); %zu per-frame values at guest+0x%zx", list.c_str(),
+    char where[96];
+    if (rate.uncapped)
+        std::snprintf(where, sizeof where, "uncapped, target %.0f FPS, values for %.0f", rate.target, rate.values);
+    else
+        std::snprintf(where, sizeof where, "at %.0f FPS", rate.values);
+    host_log("Frame rate fixes: on %s (%s); %zu per-frame values at guest+0x%zx", where, list.c_str(),
              g_slots.size() + (g_play_ms ? 1 : 0), first);
     return true;
 }
@@ -344,7 +521,7 @@ void Tick() {
     if (!g_on) return;
     if (!g_checked) {
         // The loader sets each segment's protection after Install: the slots' page must have come out
-        // writable. Otherwise they keep the values they were given for a 1/60 s frame.
+        // writable. Otherwise they keep the values they were given for a frame at the rate.
         g_checked = true;
         const void* slots = g_slots.empty() ? g_play_ms : g_slots.front().at;
         bool writable = true;
@@ -368,14 +545,14 @@ void Tick() {
         }
 #endif
         if (!writable) {
-            host_log("Frame rate fixes: the per-frame values' page is not writable; they stay at 60 FPS's");
+            host_log("Frame rate fixes: the per-frame values' page is not writable; they stay at the rate's");
             g_on = false;
             return;
         }
     }
     float step = 0;
     std::memcpy(&step, g_image + (kFrameTime - kBase), sizeof step);
-    const double seconds = std::isfinite(step) && step >= 0.001f && step <= 0.1f ? double(step) : kSixtieth;
+    const double seconds = std::isfinite(step) && step >= 0.001f && step <= 0.1f ? double(step) : g_fallback;
     for (const Slot& s : g_slots) WriteSlot(s, seconds);
     if (g_play_ms) {
         const std::int32_t ms = g_play.Add(seconds);

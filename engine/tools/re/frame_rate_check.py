@@ -6,9 +6,11 @@ patches/Bloodborne.xml and, given one, a 1.09 eboot.elf.
 Usage: frame_rate_check.py [eboot.elf] [--xml patches/Bloodborne.xml]
 
 Without the eboot: the entries' shapes, that none overlaps another, that the list's bytes recorded for each
-entry are the list's, that the list's frame-time code is as required and leaves every per-frame load alone,
-and that the slots fit past the end of 1.09's data segment, in its last page. With it, also: the game's bytes and values at every entry, and that
-each load's displacement reaches its constant. Prints each failure; the exit code is their number.
+entry are the list's (the frame pacer's targets 1/60, the counts 60's), that the list's frame-time code is as
+required and leaves every per-frame load alone, that each load a site writes is in that site's bytes, and that
+the slots fit past the end of 1.09's data segment, in its last page. With it, also: the game's bytes and values
+at every entry, and that each load's displacement reaches its constant. Prints each failure; the exit code is
+their number.
 """
 import argparse
 import re
@@ -22,14 +24,18 @@ INC = ROOT / 'gpu/shim/engine/frame_rate_sites.inc'
 BASE = 0x400000
 DATA_END = 0x56d30f4  # 1.09: the end of its data segment (frame_rate.cpp's kDataEnd; the slots follow it)
 GROUPS = ('Clips', 'Physics', 'Grass', 'Targeting', 'Jump', 'Sprint', 'Slope', 'Online', 'Hitbox', 'Timers', 'Menus',
-          'Durations', 'PlayTime')
-KINDS = ('Step', 'Amount', 'Decay', 'Keep', 'Rate', 'Game')
+          'Durations', 'PlayTime', 'Sound', 'Cloth')
+KINDS = ('Step', 'Amount', 'Decay', 'Keep', 'Rate', 'Game', 'Cloth')
+COUNTS = ('Frames', 'Micros', 'Digits')
+TARGET_STORE = bytes.fromhex('41c7442418')  # mov dword [r12+0x18], imm32
+SIXTIETH = 0x3c888889
 GAME_BYTES = "the game's bytes"
 
 
 def parse(text):
     """The .inc's entries, as dicts."""
-    out = {'sites': [], 'loads': [], 'values': [], 'require': [], 'play': []}
+    out = {'sites': [], 'loads': [], 'values': [], 'counts': [], 'targets': [], 'cloth_scales': [], 'require': [],
+           'play': []}
     for m in re.finditer(r'^FRAME_SITE\((\w+), (0x[0-9a-f]+), "([0-9a-f]*)", "([0-9a-f]*)", "([0-9a-f]*)"\)$', text, re.M):
         out['sites'].append(dict(group=m[1], at=int(m[2], 16), was=bytes.fromhex(m[3]), listed=bytes.fromhex(m[4]),
                                  now=bytes.fromhex(m[5])))
@@ -40,11 +46,31 @@ def parse(text):
                                  value=[int(v, 16) for v in m[9].split(',')]))
     for m in re.finditer(r'^FRAME_VALUE\((\w+), (0x[0-9a-f]+), (\w+), (0x[0-9a-f]+), (0x[0-9a-f]+)\)$', text, re.M):
         out['values'].append(dict(group=m[1], at=int(m[2], 16), kind=m[3], game=int(m[4], 16), listed=int(m[5], 16)))
+    for m in re.finditer(r'^FRAME_COUNT\((\w+), (0x[0-9a-f]+), (\d), (\d+), (\w+)\)$', text, re.M):
+        out['counts'].append(dict(group=m[1], at=int(m[2], 16), size=int(m[3]), game=int(m[4]), kind=m[5]))
+    for m in re.finditer(r'^FRAME_TARGET\((0x[0-9a-f]+), (0x[0-9a-f]+)\)$', text, re.M):
+        out['targets'].append(dict(at=int(m[1], 16), game=int(m[2], 16)))
+    for m in re.finditer(r'^FRAME_CLOTH_SCALE\((0x[0-9a-f]+), "([0-9a-f]+)"\)$', text, re.M):
+        out['cloth_scales'].append(dict(at=int(m[1], 16), was=bytes.fromhex(m[2])))
     for m in re.finditer(r'^FRAME_REQUIRE\((0x[0-9a-f]+), "([0-9a-f]+)"\)$', text, re.M):
         out['require'].append(dict(at=int(m[1], 16), bytes=bytes.fromhex(m[2])))
     for m in re.finditer(r'^FRAME_PLAY_TIME\((\w+), (0x[0-9a-f]+), "([0-9a-f]+)"\)$', text, re.M):
         out['play'].append(dict(group=m[1], at=int(m[2], 16), was=bytes.fromhex(m[3])))
     return out
+
+
+def count_bytes(c, rate):
+    """A count's bytes at `rate`, as frame_rate.cpp writes it (30: the game's own)."""
+    n = c['game']
+    if c['kind'] == 'Frames':
+        n = round(c['game'] * rate / 30)
+    elif c['kind'] == 'Micros':
+        n = round(c['game'] * 30 / rate)
+    elif rate != 30:
+        n = int(1e6 // rate)
+    if c['kind'] == 'Digits':
+        return f'{n:0{c["size"]}d}'.encode()
+    return n.to_bytes(c['size'], 'little')
 
 
 def list_bytes(xml, name='60 FPS++'):
@@ -133,12 +159,46 @@ def check(entries, listed, eboot=None):
             fail(f'load {l["insn"]:#x}: reads {target:#x}, not {l["constant"]:#x}')
         if list_over(l['insn'], l['length']):
             fail(f'load {l["insn"]:#x}: the list writes into the instruction')
+        # An instruction one of its group's sites writes (a cave's): in that site's bytes, not the game's.
+        site = next((s for s in entries['sites'] if s['group'] == l['group'] and
+                     s['at'] <= l['insn'] < s['at'] + len(s['now'])), None)
+        if site and site['now'][l['insn'] - site['at']:l['insn'] - site['at'] + l['length']] != l['bytes']:
+            fail(f'load {l["insn"]:#x}: not what its site {site["at"]:#x} writes')
         if eboot:
-            if eboot.read(l['insn'], l['length']) != l['bytes']:
+            if not site and eboot.read(l['insn'], l['length']) != l['bytes']:
                 fail(f"load {l['insn']:#x}: the game's instruction differs")
             if eboot.read(l['constant'], 4 * l['lanes']) != struct.pack(f'<{l["lanes"]}I', *l['value']):
                 fail(f"load {l['insn']:#x}: the game's value at {l['constant']:#x} differs")
-        spans.append((l['insn'] + l['disp'], l['insn'] + l['disp'] + 4, f'load {l["insn"]:#x}'))
+        if not site:
+            spans.append((l['insn'] + l['disp'], l['insn'] + l['disp'] + 4, f'load {l["insn"]:#x}'))
+    for c in entries['counts']:
+        if c['group'] not in GROUPS or c['kind'] not in COUNTS:
+            fail(f'count {c["at"]:#x}: group or kind')
+        game = count_bytes(c, 30)
+        if eboot and eboot.read(c['at'], c['size']) != game:
+            fail(f"count {c['at']:#x}: the game's value is not {c['game']}")
+        over = list_over(c['at'], c['size'], game)
+        expect = game if c['kind'] == 'Digits' else count_bytes(c, 60)
+        if (over or game) != expect:
+            fail(f'count {c["at"]:#x}: the list leaves {over.hex() if over else GAME_BYTES}, not {expect.hex()}')
+        spans.append((c['at'], c['at'] + c['size'], f'count {c["at"]:#x}'))
+    for t in entries['targets']:
+        game = TARGET_STORE + struct.pack('<I', t['game'])
+        if eboot and eboot.read(t['at'], 9) != game:
+            fail(f"target {t['at']:#x}: the game's bytes differ")
+        if list_over(t['at'], 9, game) != TARGET_STORE + struct.pack('<I', SIXTIETH):
+            fail(f'target {t["at"]:#x}: the list does not set 1/60 there')
+        spans.append((t['at'], t['at'] + 9, f'target {t["at"]:#x}'))
+    for c in entries['cloth_scales']:
+        if len(c['was']) != 16:
+            fail(f'cloth scale {c["at"]:#x}: not four lanes')
+        if eboot and eboot.read(c['at'], len(c['was'])) != c['was']:
+            fail(f"cloth scale {c['at']:#x}: the game's bytes differ")
+        if list_over(c['at'], len(c['was'])):
+            fail(f'cloth scale {c["at"]:#x}: the list writes there')
+        if any(l['constant'] != c['at'] for l in entries['loads'] if l['group'] == 'Cloth'):
+            fail(f'cloth scale {c["at"]:#x}: a cloth load reads elsewhere')
+        spans.append((c['at'], c['at'] + len(c['was']), f'cloth scale {c["at"]:#x}'))
     for r in entries['require']:
         over = list_over(r['at'], len(r['bytes']))
         if over != r['bytes']:
