@@ -53,8 +53,50 @@ Investigated, not changed:
 | `20261025_180526` (60 FPS, ~13 min) | Pacing near perfect (median 16.67 ms, stddev ~0.05 ms). Four long frames, 42–106 ms. In 3 of 4 the hitch came before the nearest save, not during it. |
 | `20261025_202235` (`BB_SAMPLE_THREADS=main`) | 17 long frames during play (43–122 ms) plus one area load. The main thread is in the game's condition-variable wait (image offset 0x2083ecd, Dantelion `PthreadCondition.cpp`), so it waits on another thread. Nearly every one has a 9.4 MB texture upload (a 1920×1080 image, 0x900000 bytes) and 1,400–3,700 memory-protection calls (90–235 MB of pages) in the same frame. |
 
-Next step: a session with `BB_HITCH_REPORT_MS=40` under Extra variables, to name the thread the
-main thread waits for and what it is doing. The sampler's 5-second totals are too coarse for this.
+### Hitch reports, six sessions (2026-10-25 evening, ~95 min of play, 7 reports)
+
+Sessions `205240`, `211729`, `214630`, `221249` and `234823` had `BB_HITCH_REPORT_MS=40`;
+`20261026_002308` had 30 and included an online co-op summon.
+
+**Fewer long frames in play than this afternoon:** 0.1–0.3 frames a minute over 1.5× the median,
+mostly 25–65 ms. That compares with 0.6 (`180526`) and 0.9 (`202235`). Loading screens are
+excluded from all of these counts. The areas played differ, so no change is credited for this.
+
+**Each report costs about 200 ms itself**, so "the next frame came 240 ms after" is not the
+hitch's length. Leave the switch off for normal play.
+
+What the reports found:
+
+- **The game's job workers were never the cause.** In every report the six `CSChrThread`
+  workers and the `EzWorkPool` threads sat idle in their condition-variable wait. A1 stays a
+  throughput fix, after bbhost's measurement, but it will not remove these stalls.
+- **Online summon: a synchronous server request on the game's network thread.**
+  - Both reports in `002308` end with The Hunter's Dream's
+    `sceNpSignalingActivateConnection ... (resolved ...)` line.
+  - `thd_np.cpp:117` calls `ServerSignalingResolve`, an HTTPS POST to the session server
+    (8 s read timeout, 5 s connect), inside the call.
+  - The game's network thread (`NexusRevolution`) makes that call while holding a game mutex
+    (0xf3ecd3b0). The main thread needs that mutex (`DLLightMutex` 0x207ee90), so the game
+    stops until the server answers. The report named the mutex's holder.
+  - On PS4 this call returns at once and reports the connection later through the signaling
+    callback.
+  - HW's matching2 calls already run on a worker (`DispatchAfter`); only this one doesn't.
+  - Fix to propose: resolve on that worker and announce the connection when the address comes
+    back. Inherited from Lantern 0.9.37 beta 7.
+- **In-play streaming frames** (100–350 MB of uploads in one frame while moving):
+  - The main thread sleeps in the game's pacer (0x2034770): the frame is late on the GPU side.
+  - The engine's breakdown for those frames, as thread time across the draw-preparation
+    workers: 85–133 ms checking uploaded images for changes and 35–58 ms of Vulkan memory
+    allocation.
+  - The draw-recording threads are inside the NVIDIA driver: kernel calls, and one of the
+    driver's locks with `_nvngx.dll` (DLSS) on the stack.
+- **The 9.4 MB full-screen image** (1920×1080, 0x900000 bytes) re-uploaded after the game writes
+  it from the CPU: 42–65 ms. Seen in play and around the summon.
+- **Flip step waiting for the game's render thread.** The main thread is in the flip step
+  (0x1d976e0, `SprjFlipper`), which hands work to `GXRenderThread` and waits for it (0x2198fd0).
+  The render thread is in the engine's own code, on a host condition variable or lock (one
+  report each). Which engine function needs names for the `bb-probe.exe+0x...` frames: the
+  user's `bb-probe.exe` (built with `-g`) would give them.
 
 Side note: Windows' commit headroom read 0.75–1.4 GB in that log. The page file is
 Windows-managed, so Windows grows it when needed; nothing to change.
