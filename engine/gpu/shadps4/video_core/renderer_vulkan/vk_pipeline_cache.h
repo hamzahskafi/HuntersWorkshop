@@ -146,7 +146,7 @@ public:
     void SetObjectMotionEnabled(bool enabled) { object_motion_enabled = enabled; }
 
     bool LoadComputePipeline(Serialization::Archive& ar);
-    bool LoadGraphicsPipeline(Serialization::Archive& ar, bool legacy);
+    bool LoadGraphicsPipeline(Serialization::Archive& ar, u32 version);
     bool LoadPipelineStage(Serialization::Archive& ar, size_t stage, u64 expected_hash);
 
     const GraphicsPipeline* GetGraphicsPipeline(const DrawIndirectParams params = {},

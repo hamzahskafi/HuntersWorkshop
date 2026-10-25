@@ -28,7 +28,8 @@ namespace Serialization {
 static constexpr u32 ShaderBinaryVersion = 7u; // bbport: interpolated integer fix (Pascal)
 static constexpr u32 MotionShaderBinaryVersion = 8u; // runtime address descriptor, set 1
 static constexpr u32 ShaderMetaVersion = 8u; // bbport: HwFragmentRuntimeInfo::depth_first
-static constexpr u32 PipelineKeyVersion = 6u; // pointer-free pipeline state + generated fragment
+static constexpr u32 PipelineKeyVersion = 7u; // pointer-free pipeline state + generated fragment,
+                                               // decided by the draw's own registers without a pixel shader
 } // namespace Serialization
 
 namespace Vulkan {
@@ -302,7 +303,7 @@ bool GraphicsPipeline::SerializationSupport::Deserialize(Serialization::Archive&
     return true;
 }
 
-bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar, bool legacy) {
+bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar, u32 version) {
     sel.graphics_key.Deserialize(ar);
     if (sel.graphics_key.motion_vectors &&
         !instance.GetPhysicalDevice().getFeatures().vertexPipelineStoresAndAtomics) {
@@ -310,12 +311,14 @@ bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar, bool legacy
     }
 
     GraphicsPipeline::SerializationSupport sdata{};
-    if (!sdata.Deserialize(ar, legacy)) {
+    if (!sdata.Deserialize(ar, version == 5)) {
         return false;
     }
-    // v5 did not save the generated clip-discard fragment shader. Only this ambiguous
-    // legacy variant needs rebuilding; ordinary v5 pipelines remain usable.
-    if (legacy && profile.needs_clip_distance_emulation &&
+    // v5 did not save the generated clip-discard fragment shader, and v6 decided it, for a
+    // pipeline without a pixel shader, from the fragment state the previous draw left. On NVIDIA
+    // (clip distance emulation) those are left out once and compile again in play, saved as v7;
+    // every other v5 and v6 pipeline remains usable.
+    if (version < Serialization::PipelineKeyVersion && profile.needs_clip_distance_emulation &&
         !sel.graphics_key.stage_hashes[u32(Shader::SwStage::Fragment)]) {
         return false;
     }
@@ -658,9 +661,9 @@ void PipelineCache::WarmUp() {
             u32 version{}, is_compute{};
             reader.Read(version);
             reader.Read(is_compute);
-            if ((version == 5 || version == Serialization::PipelineKeyVersion) && is_compute <= 1) {
-                loaded = is_compute ? LoadComputePipeline(ar)
-                                    : LoadGraphicsPipeline(ar, version == 5);
+            if ((version == 5 || version == 6 || version == Serialization::PipelineKeyVersion) &&
+                is_compute <= 1) {
+                loaded = is_compute ? LoadComputePipeline(ar) : LoadGraphicsPipeline(ar, version);
             }
         } catch (const std::exception& error) {
             ++damaged;
