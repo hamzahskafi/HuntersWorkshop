@@ -41,6 +41,7 @@ Hunter's Workshop started from [Lantern Engine](https://github.com/Awakenchan/La
 | Launcher and engine this project started from | [Lantern Engine](https://github.com/Awakenchan/LanternEngine) by Awaken |
 | Engine starting point | [DarkIzuku/bloodborne_pc](https://github.com/DarkIzuku/bloodborne_pc), built on [bbport](https://github.com/deadinside28/bloodborne_pc) and [shadPS4](https://github.com/shadps4-emu/shadPS4) |
 | VRAM cleanup and frame pacing | adapted from [IFreemz/shadPS4-Bloodborne-DLSS-FSR](https://github.com/IFreemz/shadPS4-Bloodborne-DLSS-FSR) |
+| Character creation by mouse, and the check on the menus the engine holds open (Hunter's Dream) | adapted from [Lantern Engine](https://github.com/Awakenchan/LanternEngine) 0.9.37 by Awaken |
 | Crash and controller fixes | adapted from [AwesomeObserver](https://github.com/AwesomeObserver/bloodborne_pc), [Supermedo](https://github.com/Supermedo/bloodborne_pc) and [deadinside28](https://github.com/deadinside28/bloodborne_pc) |
 | PC controls, camera, menus, cheats, online sign-in, occlusion culling, trophy research and the frame-rate corrections (with findings from Kyo's later FPS++ lists and yogesh1239) | [droogie/bbhost](https://github.com/droogie/bbhost) |
 | Linux online start and the bound on runaway particle work | [Lena Różalska](https://github.com/DecayingEagle) |

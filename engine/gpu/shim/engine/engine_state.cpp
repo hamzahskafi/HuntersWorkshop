@@ -137,6 +137,13 @@ void menu_steps_notify(const std::uint64_t* saved) {
     }
 }
 std::uint64_t menu_steps_take(int w) { return w>=0 && w<count?watches[w].made.exchange(0,std::memory_order_acq_rel):0; }
+bool menu_step_is(std::uint64_t step,std::uint64_t type,const char16_t* name) {
+    std::int32_t refs=0;std::uint64_t kind=0,text=0;
+    if (!step || !name || !Read(step+8,&refs) || refs<1 || !Read(step+0x28,&kind) || kind!=type ||
+        !Read(step+0x30,&text) || !text) return false;
+    for (unsigned i=0;i<64;++i) { char16_t c=0;if (!Read(text+2*i,&c) || c!=name[i]) return false;if (!c) return true; }
+    return false;
+}
 void menu_step_release(std::uint64_t step) {
     if (__atomic_sub_fetch(menu_step_count(step),1,__ATOMIC_ACQ_REL)==0) Call(Pointer(Pointer(step)),step);
 }

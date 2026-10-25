@@ -158,7 +158,7 @@ void Tick() {
         set_flag(kReqUndo, false);
     }
     if (flag(kMenu)) {
-        if (!g_menu && made && *menu_step_count(made) >= 1) {
+        if (!g_menu && menu_step_is(made, 7, u"LevelUp")) {
             menu_step_hold(made);  // ours: when it is the last, the menu has closed
             g_menu = made;
             g_menu_wait = 0;

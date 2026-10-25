@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // The editor controller/refcount lifecycle is adapted from bbhost, not the GPU renderer.
 #include "engine_hooks.h"
+#include "change_appearance.h"
 #include "camera.h"
 #include "widescreen.h"
 #include "../input/input.h"
@@ -77,6 +78,11 @@ std::uint64_t g_list = 0;                  // the list's step, while we hold a r
 std::uint64_t g_desc = 0;                  // our descriptor, while ChrMake_BG is open
 std::uint8_t g_active = 1;                 // the update's argument (a flag byte it reads)
 int g_opened = 0;                          // for the log
+// Character creation at the title: its list's step, while we hold a reference, so the mouse knows
+// the hunter's preview is on screen (input.cpp turns it by dragging). With keyboard and mouse only.
+bool g_title_watch = false;
+std::uint64_t g_title = 0;
+std::atomic<bool> g_preview{false};
 
 std::uint64_t slot(std::uint64_t bn) { return g_slide + (bn - kPreferredGuestSlide); }
 std::uint64_t rd64(std::uint64_t a) {
@@ -134,18 +140,28 @@ bool g_frame_on = false;
 }  // namespace
 
 void change_appearance_tick() {
-    if (!g_frame_on) return;
-    if (const std::uint64_t made = menu_steps_take(g_watch)) {
-        std::uint32_t block = 0;
-        if (!g_list && !g_desc && world_player_block(&block) && *menu_step_count(made) >= 1 && open_frame()) {
+    if (g_watch < 0) return;
+    const bool world = world_player_block(nullptr);
+    if (const std::uint64_t made = menu_steps_take(g_watch); menu_step_is(made, kListType, kListName)) {
+        if (!world) {
+            // Character creation: the game opens its own ChrMake_BG; only its list is followed.
+            if (g_title_watch && !g_title) {
+                menu_step_hold(made);
+                g_title = made;
+            }
+        } else if (g_frame_on && !g_list && !g_desc && open_frame()) {
             menu_step_hold(made);  // ours: when it is the last, the list has closed
             g_list = made;
             if (g_opened++ < 4) Log("change appearance: the editor's frame opened (ChrMake_BG, preview of the hunter)");
         }
     }
+    if (g_title && (world || *menu_step_count(g_title) == 1)) {
+        menu_step_release(g_title);
+        g_title = 0;
+    }
     // Out of the world (quit to the title, a disconnect) with the editor open: its frame belongs
     // to the world that went, so it goes with it.
-    if (g_desc && !world_player_block(nullptr)) {
+    if (g_desc && !world) {
         close_frame();
         if (g_list) release_list();
         Log("change appearance: the editor's frame closed on leaving the world");
@@ -158,7 +174,10 @@ void change_appearance_tick() {
         close_frame();
         release_list();
     }
+    g_preview.store(g_title || g_list, std::memory_order_relaxed);
 }
+
+bool ChangeAppearancePreview() { return g_preview.load(std::memory_order_relaxed); }
 
 
 namespace {
@@ -215,6 +234,11 @@ void Install(std::uint8_t* image, std::size_t size) {
         Log("Dream mirror enabled: native appearance editor and ChrMake_BG preview; %s", asset);
     }
     const bool input=BbInput::Install(image,size);
+    // The keyboard and mouse follow character creation's list too (ChangeAppearancePreview).
+    if (input) {
+        if (g_watch < 0) g_watch = menu_steps_watch(kListType,kListName);
+        g_title_watch = g_watch >= 0;
+    }
     const bool camera = Camera::Install(image, size);
     const bool wide=Widescreen::Install(image,size);
     const bool graphics=Graphics::Install(image,size);

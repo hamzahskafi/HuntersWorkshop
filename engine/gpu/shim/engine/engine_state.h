@@ -33,5 +33,10 @@ inline std::int32_t* menu_step_count(std::uint64_t step) { return reinterpret_ca
 // The count is the game's, which its own threads change too: held and released atomically.
 inline void menu_step_hold(std::uint64_t step) { __atomic_add_fetch(menu_step_count(step),1,__ATOMIC_ACQ_REL); }
 void menu_step_release(std::uint64_t step);
+// A step taken from a watch is the one the game made a frame or so earlier, which it may have
+// freed since and reused for another menu: still that menu (a reference held, its type at +0x28
+// and name at +0x30 as sub_201cce0 stores them), checked before a reference of ours is added.
+// After Lantern Engine 0.9.37 (Awakenchan).
+bool menu_step_is(std::uint64_t step,std::uint64_t type,const char16_t* name);
 template<typename T,typename... A> T hle_call_guest(void* fn,A... a) { return static_cast<T>(Call(reinterpret_cast<std::uint64_t>(fn),a...)); }
 }
