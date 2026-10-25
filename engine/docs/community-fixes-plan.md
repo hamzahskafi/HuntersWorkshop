@@ -94,9 +94,42 @@ What the reports found:
   it from the CPU: 42–65 ms. Seen in play and around the summon.
 - **Flip step waiting for the game's render thread.** The main thread is in the flip step
   (0x1d976e0, `SprjFlipper`), which hands work to `GXRenderThread` and waits for it (0x2198fd0).
-  The render thread is in the engine's own code, on a host condition variable or lock (one
-  report each). Which engine function needs names for the `bb-probe.exe+0x...` frames: the
-  user's `bb-probe.exe` (built with `-g`) would give them.
+  Named with the user's `bb-probe.exe` (debug line tables; `scratchpad` tool
+  `probe/sym_reports.py`):
+  - **The render thread** is in `sceGnmSubmitCommandBuffers` → `WaitPreviousFrame`
+    (`gnmdriver.cpp:190`), waiting for the GPU side to retire the previous frame. In one report
+    it is in `SubmitGfx` → `Enqueue`'s lock (`liverpool.cpp:2484`). On average that wait is
+    0.02–0.14 ms a frame; frames still overlap (no "no longer overlap" message).
+  - **The GPU side is late because of the NVIDIA driver:**
+    - the presenter in `scheduler.Flush` (`vk_presenter.cpp:1381`, the frame's `vkQueueSubmit`)
+      or making kernel calls;
+    - the draw recorders waiting on a driver-internal critical section, or in kernel calls
+      (`win32u`) of their own.
+  - **With the memory model off, one report also has the recorder in `SynchronizeMemory` →
+    `UpdatePageWatchersForRegion` → `VirtualProtect`** (`buffer_cache.cpp:3202`,
+    `win32_memory.c:201`).
+  - **Another report is game work on the main thread itself** (0x103d040 / 0x1067530, the
+    task manager and render jobs), 40 ms of it.
+
+### PC memory model (`BB_GUEST_IN_PLACE`), on and off (RTX 3070 Ti, i5-14600KF, 60 FPS)
+
+On in `180526`, `202235`, `205240`, `221249`, `003848`; off in `211729`, `214630`, `234823`,
+`002308`.
+
+| | On | Off |
+|---|---|---|
+| FPS over the session | 60 throughout, no sinking | 60 throughout |
+| Pages re-protected a second | ~6,000 | 105,000–129,000 |
+| Draw recorder (stage B) busy | 12–16 % | 15–22 % |
+| CPU cores in use | 2.8–3.2 | 3.0–3.4 |
+| In-play 5-s windows with a frame over 33 ms | 10 in 35 min (0.29/min; `202235` left out, it ran the sampler) | 6 in 57 min (0.10/min), 2 of them the online summon |
+
+- **The sinking from 2026-10-22 is gone.** The in-place share follows the area (0.1–551 MB a
+  frame) and doesn't climb.
+- **The long-frame difference points to off being smoother at 60 FPS on this PC.** But the counts
+  are small and the routes differed, so it isn't settled.
+- **Off costs CPU that is spare at 60.** Above 60 that changes, and on would matter more.
+- **To settle it:** the same route offline (no summon), 10 minutes each way, hitch report off.
 
 Side note: Windows' commit headroom read 0.75–1.4 GB in that log. The page file is
 Windows-managed, so Windows grows it when needed; nothing to change.
