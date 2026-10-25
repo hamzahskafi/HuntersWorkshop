@@ -394,6 +394,12 @@ add_executable(frame-rate-test EXCLUDE_FROM_ALL ../tests/test_frame_rate.cpp shi
     shim/engine/engine_hooks.cpp)
 target_compile_options(frame-rate-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(frame-rate-test PRIVATE shim shim/engine)
+# The work pools' lock and node cache against models of the game's lock and job list.
+add_executable(job-pool-test EXCLUDE_FROM_ALL ../tests/test_job_pool.cpp shim/engine/job_pool.cpp)
+target_compile_options(job-pool-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(job-pool-test PRIVATE shim shim/engine)
+find_package(Threads REQUIRED)
+target_link_libraries(job-pool-test PRIVATE Threads::Threads)
 # The FMOD ring guard's helpers on a synthetic ring.
 add_executable(fmod-ring-test EXCLUDE_FROM_ALL ../tests/test_fmod_ring.cpp)
 target_compile_options(fmod-ring-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)

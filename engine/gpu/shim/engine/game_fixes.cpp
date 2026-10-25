@@ -6,6 +6,7 @@
 #include "engine_hooks.h"
 #include "engine_state.h"
 #include "fmod_ring.h"
+#include "job_pool.h"
 #include "skip_list.h"
 #include <array>
 #include <atomic>
@@ -150,6 +151,26 @@ bool Install(std::uint8_t* image, std::size_t size) {
                  {kRunnerReset, kResetPrologue, RunnerReset}},
                 "render job slots given back")) {
         g_step = hooks[hooks.size() - 3].original;
+    }
+    // The work pools' lock, replaced whole (Replace: the game's Lock runs for every heap, GX and
+    // queue lock, too often for a stub), and their job lists' node cache.
+    if (on[kJobLock] && !JobPool::LockReady(image, size)) {
+        host_log("Game fixes: job_lock left out: DLAdaptiveMutex::Lock differs from 1.09");
+    } else if (on[kJobLock]) {
+        Hook hook;
+        if (Replace(hook, image, size, JobPool::kLock, JobPool::kLockEntry,
+                    reinterpret_cast<const void*>(&JobPool::Lock))) {
+            hooks.push_back(hook);
+            placed.emplace_back("job lock spins with pause");
+        } else {
+            host_log("Game fixes: job_lock left out: 0x%zx differs from 1.09", JobPool::kLock);
+        }
+    }
+    if (on[kJobNodes] && !JobPool::NodesReady(image, size)) {
+        host_log("Game fixes: job_nodes left out: the work pools' code differs from 1.09");
+    } else {
+        prepare(kJobNodes, {{JobPool::kProcessOne, JobPool::kProcessOnePrologue, JobPool::PoolPop}},
+                "job list nodes cached");
     }
     if (on[kFmodRing] && !FmodRing::Check(image, size)) {
         host_log("Game fixes: fmod_ring left out: FMOD's code differs from 1.09");
