@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// The frame-rate corrections at 60 FPS and above (frame_rate.cpp): what Kyo's "60 FPS++" (1.0, as
-// patches/Bloodborne.xml ships it, the base at every rate) leaves at the game's 30 FPS timing or gets wrong, and
+// The frame-rate corrections at 60 FPS and above (frame_rate.cpp): what Kyo's "60 FPS++" (1.0; the base at every
+// rate, as our table start/frame_rate_base.inc holds it) leaves at the game's 30 FPS timing or gets wrong, and
 // what the rates above 60 need on top of it. Adapted from bbhost (droogie/bbhost 566184a:
 // src/engine/frame_rate.cpp, frame_rate_dt_loads.inc and tools/fps_sites.py), which also collects Kyo's 1.3
 // lists and yogesh1239's high-FPS findings. Addresses are the patch lists' (the ELF's VA + 0x400000).
@@ -172,6 +172,16 @@ FRAME_COUNT(Timers, 0x25629f1, 4, 33000, Micros)
 // the sound thread's update time, MainThreadUpdateTime in the game's text config (sub_2bf67f0, strtol): 33333,
 // two frames of sound requests an update at 60, and some attack sounds played half as often as at 30.
 FRAME_COUNT(Sound, 0x4b33c51, 5, 33333, Digits)
+
+// FRAME_EASE(instruction, length, displacement offset, constant, the instruction's bytes, the game's weight, the
+// 60 FPS++ list's): the follow camera's eases, a weight a frame read from a slot with the frame timer
+// (BB_FRAME_TIMER=1), worked out from the frame's step every frame: the game's own a 30 FPS frame (Original, or
+// BB_CAMERA_FIX=1), or with the FPS++ retune the list's a 60 FPS frame, so it eases as it does at 60. Without
+// the timer the start program converts them once for the rate (patches.cpp).
+// the distance ease (vmulss xmm1, xmm1, [0x4d25e68]): 0.1 a frame, the list's 0.025.
+FRAME_EASE(0x183af8c, 8, 4, 0x4d25e68, "c5f2590dd4ae4e03", 0x3dcccccd, 0x3ccccccd)
+// the chase-rate ease (vmovss xmm2, [0x4d25e94]; value += (target - value) * w): 1/30 a frame, the list's too.
+FRAME_EASE(0x183e2b2, 8, 4, 0x4d25e94, "c5fa1015da7b4e03", 0x3d088889, 0x3d088889)
 
 // FRAME_TARGET(address, the game's value): the frame pacer's target, mov dword [r12+0x18], imm32 (the 60 FPS++
 // list's 1/60): 1/rate, uncapped 1/its limit (at most 480). Without all four the game stays at 60.

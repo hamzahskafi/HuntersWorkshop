@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Frame-rate corrections at 60 FPS and above (frame_rate.h), adapted from bbhost's src/engine/frame_rate.cpp
-// (droogie/bbhost 566184a; licenses/BBHOST-PORTS.md). Kyo's "60 FPS++" is the base at every rate, as in
-// bbhost: these are the systems it leaves on a fixed 30 FPS step, the durations it took for steps, the play
+// (droogie/bbhost 566184a; licenses/BBHOST-PORTS.md). Kyo's "60 FPS++" findings are the base at every rate, as
+// in bbhost: our table of them (start/frame_rate_base.inc, which the Windows start program writes; on Linux the
+// patch file's list, the same bytes). These are the systems it leaves on a fixed 30 FPS step, the durations it
+// took for steps, the play
 // time's clock, and above 60 the frame pacer's target, the values and counts that follow the rate and the
 // cloth (frame_rate_sites.inc says what each one is). Every byte is checked before anything is written; a
 // group with a mismatch is left out whole, the others still go in.
@@ -15,10 +17,15 @@
 // The per-frame values are read from slots of ours past the end of the game's data segment (1.09: image
 // offset 0x56d30f4), in that segment's last page: the loader protects each segment in whole pages, so
 // those 3,852 bytes are writable with the data, and the linked modules (libc...) start after the page
-// (0x56e0000). Not past the whole image: the last module's page there is not writable. Each frame the
-// values are worked out from the frame's step the 60 FPS++ cave keeps in 0x575a908. This hook runs
-// before the cave updates it, so they follow the frame before; the cave eases the step by 0.15 a frame,
-// which keeps that difference small.
+// (0x56e0000). Not past the whole image: the last module's page there is not writable.
+//
+// The frame's step. The 60 FPS++ cave (0x2418e3d, right after the game's frame pacer returns) hands the
+// game's task step the pacer's measured frame time kept in [target, 1/30], and eases a copy of it by 0.15 a
+// frame into 0x575a908, which the list's sites read. Without the frame timer the values here follow that
+// copy, worked out at the start of the next frame (the frame hook, at the pacer's entry): a frame late and
+// eased, so after a long frame they catch up over 10 to 15 frames while the task step has already. With it
+// (BB_FRAME_TIMER=1) the cave calls ours: the same step as the task step's, from the same measurement, into
+// the task step, 0x575a908 and every value here before the frame's tasks run - one step for all of it.
 #include "frame_rate.h"
 #include "engine_hooks.h"
 #include "engine_state.h"
@@ -46,11 +53,11 @@ constexpr std::uint32_t kListedTarget = 0x3c888889;                     // the 6
 
 enum class Group : std::uint8_t {
     Clips, Physics, Grass, Targeting, Jump, Sprint, Slope, Online, Hitbox, Timers, Menus, Durations, PlayTime,
-    Pace, Sound, Cloth, Count
+    Pace, Sound, Cloth, Timer, Camera, Count
 };
 constexpr const char* kGroupNames[] = {"clips",  "physics", "grass",  "targeting", "jump",      "sprint",
                                        "slope",  "online",  "hitbox", "timers",    "menus",     "durations",
-                                       "playtime", "pace",  "sound",  "cloth"};
+                                       "playtime", "pace",  "sound",  "cloth",     "timer",     "camera"};
 static_assert(std::size(kGroupNames) == std::size_t(Group::Count));
 
 /// How a count follows the rate.
@@ -96,6 +103,13 @@ struct ClothScale {
     std::uint64_t at;
     const char* was;
 };
+struct Ease {
+    std::uint64_t insn;
+    std::uint8_t length, disp;
+    std::uint64_t constant;
+    const char* bytes;
+    std::uint32_t game, listed;
+};
 struct Require {
     std::uint64_t at;
     const char* bytes;
@@ -113,6 +127,7 @@ struct PlayTimeSite {
 #define FRAME_COUNT(...)
 #define FRAME_TARGET(...)
 #define FRAME_CLOTH_SCALE(...)
+#define FRAME_EASE(...)
 #define FRAME_REQUIRE(...)
 #define FRAME_PLAY_TIME(...)
 #undef FRAME_SITE
@@ -158,6 +173,13 @@ constexpr ClothScale kClothScales[] = {
 };
 #undef FRAME_CLOTH_SCALE
 #define FRAME_CLOTH_SCALE(...)
+#undef FRAME_EASE
+#define FRAME_EASE(insn, length, disp, constant, bytes, game, listed) {insn, length, disp, constant, bytes, game, listed},
+constexpr Ease kEases[] = {
+#include "frame_rate_sites.inc"
+};
+#undef FRAME_EASE
+#define FRAME_EASE(...)
 #undef FRAME_REQUIRE
 #define FRAME_REQUIRE(at, bytes) {at, bytes},
 constexpr Require kRequire[] = {
@@ -176,6 +198,7 @@ constexpr PlayTimeSite kPlayTime[] = {
 #undef FRAME_COUNT
 #undef FRAME_TARGET
 #undef FRAME_CLOTH_SCALE
+#undef FRAME_EASE
 #undef FRAME_REQUIRE
 #undef FRAME_PLAY_TIME
 
@@ -256,6 +279,72 @@ PlayTime g_play;
 double g_fallback = 1.0 / 60.0; // the step before the 60 FPS++ cave has one: a frame at the rate
 bool g_on = false;
 bool g_checked = false; // the slots' page found writable (first Tick, after the loader's protections)
+// The frame timer: the step's slot, which the cave loads into the task step, and the camera's eases.
+bool g_timer = false;
+std::uint8_t* g_step = nullptr;
+struct EaseSlot {
+    std::uint8_t* at;
+    double was; // a 30 FPS frame's weight
+};
+std::vector<EaseSlot> g_eases;
+Hook g_timer_hook;
+constexpr std::uint64_t kCave = 0x2418e3d;           // the 60 FPS++ cave, kRequire's first
+constexpr std::uint64_t kCameraSkip = 0x183dc96;     // the FPS++ retune's jump over the game's follow camera
+constexpr std::uint8_t kCameraSkipped[] = {0xe9, 0xd6, 0x05, 0x00, 0x00};
+constexpr double kShortest = 1.0 / 480;              // a step's floor without a target (a loading screen)
+constexpr double kLongest = 1.0 / 30;                // and its ceiling, as the cave's (the game slows below 30)
+
+// The slots' page must have come out of the loader's protections writable; once, at the first frame.
+bool Writable() {
+    if (g_checked) return g_on;
+    g_checked = true;
+    const void* slots = g_step ? g_step : g_slots.empty() ? g_play_ms : g_slots.front().at;
+    bool writable = true;
+#ifdef _WIN32
+    MEMORY_BASIC_INFORMATION info{};
+    writable = VirtualQuery(slots, &info, sizeof info) &&
+               (info.Protect & (PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY));
+#else
+    if (FILE* maps = std::fopen("/proc/self/maps", "r")) {
+        const auto a = reinterpret_cast<std::uintptr_t>(slots);
+        char line[512];
+        while (std::fgets(line, sizeof line, maps)) {
+            unsigned long lo = 0, hi = 0;
+            char perms[5]{};
+            if (std::sscanf(line, "%lx-%lx %4s", &lo, &hi, perms) == 3 && lo <= a && a < hi) {
+                writable = perms[1] == 'w';
+                break;
+            }
+        }
+        std::fclose(maps);
+    }
+#endif
+    if (!writable) {
+        host_log("Frame rate fixes: the per-frame values' page is not writable; they stay at the rate's");
+        g_on = false;
+    }
+    return g_on;
+}
+
+void WriteSlot(const Slot& s, double seconds);
+
+// A frame of `seconds`: the slots, the play time and the eases.
+void Update(double seconds) {
+    for (const Slot& s : g_slots) WriteSlot(s, seconds);
+    if (g_play_ms) {
+        const std::int32_t ms = g_play.Add(seconds);
+        std::memcpy(g_play_ms, &ms, sizeof ms);
+    }
+    for (const EaseSlot& e : g_eases) {
+        const float w = Rated(Kind::Decay, float(e.was), seconds);
+        std::memcpy(e.at, &w, sizeof w);
+    }
+}
+
+std::int64_t __attribute__((sysv_abi)) StepHook(std::uint64_t, const std::uint64_t* saved) {
+    Step(saved[5]); // rdi: the frame pacer (the cave's rbx)
+    return 0;
+}
 
 void WriteSlot(const Slot& s, double seconds) {
     float out[4]{};
@@ -293,10 +382,12 @@ std::int32_t PlayTime::Add(double seconds) {
 }
 
 bool Install(std::uint8_t* image, std::size_t size) {
-    g_on = g_checked = false;
+    g_on = g_checked = g_timer = false;
     g_slots.clear();
-    g_play_ms = nullptr;
+    g_play_ms = g_step = nullptr;
     g_play = {};
+    g_eases.clear();
+    Discard(g_timer_hook);
     if (const char* off = std::getenv("BB_FRAME_FIXES"); off && off[0] == '0') {
         host_log("Frame rate fixes: off (BB_FRAME_FIXES=0)");
         return false;
@@ -342,6 +433,10 @@ bool Install(std::uint8_t* image, std::size_t size) {
             name.clear();
             if (!*c) break;
         }
+    }
+    // The frame timer and the camera's per-frame eases with it: only when asked for (the launcher's Experimental).
+    if (const char* timer = std::getenv("BB_FRAME_TIMER"); !timer || timer[0] != '1') {
+        on[std::size_t(Group::Timer)] = on[std::size_t(Group::Camera)] = false;
     }
     const auto fail = [&](Group g, std::uint64_t address) {
         if (!on[std::size_t(g)]) return;
@@ -413,12 +508,16 @@ bool Install(std::uint8_t* image, std::size_t size) {
     for (const PlayTimeSite& p : kPlayTime) {
         if (!holds(p.at, Hex(p.was))) fail(p.group, p.at);
     }
+    for (const Ease& e : kEases) {
+        if (!holds(e.insn, Hex(e.bytes)) || !inside(e.constant, 4)) fail(Group::Camera, e.insn);
+    }
 
     // The slots: from the first 16-byte boundary past the game's data to the end of that page, which must
     // be in the image and unused (zero, as the loader leaves it).
     std::size_t slots = 0;
     for (const Load& l : kLoads) slots += on[std::size_t(l.group)];
     for (const PlayTimeSite& p : kPlayTime) slots += on[std::size_t(p.group)];
+    if (on[std::size_t(Group::Timer)]) slots += 1 + (on[std::size_t(Group::Camera)] ? std::size(kEases) : 0);
     const std::size_t first = (kDataEnd + kSlot - 1) & ~(kSlot - 1), end = (kDataEnd + kPage - 1) & ~(kPage - 1);
     bool per_frame = end <= size && first + slots * kSlot <= end;
     for (std::size_t i = kDataEnd; per_frame && i < end; ++i) per_frame = image[i] == 0;
@@ -497,6 +596,59 @@ bool Install(std::uint8_t* image, std::size_t size) {
         ++applied[std::size_t(p.group)];
     }
 
+    // The frame timer: the cave calls ours (Step) right after the pacer returns, and the task step loads the step
+    // from our slot. push rdi; mov rdi, rbx (the pacer, for the hook); the 14 bytes the hook's jump takes (nops
+    // until then, run after the call); pop rdi; movss xmm0, [step]; movss [rbp-0x38], xmm0 (the task step's
+    // step-info, as the cave stores it); nop14. The list's ease (0x2418e9e) is no longer called.
+    if (on[std::size_t(Group::Timer)] && per_frame) {
+        std::uint8_t cave[] = {0x57, 0x48, 0x89, 0xdf,
+                               0x0f, 0x1f, 0x84, 0, 0, 0, 0, 0, 0x66, 0x0f, 0x1f, 0x44, 0, 0,
+                               0x5f, 0xf3, 0x0f, 0x10, 0x05, 0, 0, 0, 0, 0xf3, 0x0f, 0x11, 0x45, 0xc8,
+                               0x0f, 0x1f, 0x84, 0, 0, 0, 0, 0, 0x66, 0x0f, 0x1f, 0x44, 0, 0};
+        static_assert(sizeof cave == 46, "the cave's 46 bytes");
+        constexpr std::size_t kSite = 4, kLoad = 19, kLoadEnd = 27;
+        const auto kyo = Hex(kRequire[0].bytes);
+        g_step = next;
+        const float first_step = float(step);
+        std::memcpy(g_step, &first_step, sizeof first_step);
+        const auto disp = std::int32_t(g_step - (at(kCave) + kLoadEnd));
+        std::memcpy(cave + kLoad + 4, &disp, sizeof disp);
+        bool hooked = kyo.size() == sizeof cave && write(kCave, cave, sizeof cave) &&
+                      Prepare(g_timer_hook, image, size, kCave - kBase + kSite, {cave + kSite, 14}, StepHook);
+        if (hooked) {
+            std::uint8_t jump[14] = {0xff, 0x25, 0, 0, 0, 0};
+            const auto stub = reinterpret_cast<std::uint64_t>(g_timer_hook.stub);
+            std::memcpy(jump + 6, &stub, sizeof stub);
+            hooked = write(kCave + kSite, jump, sizeof jump);
+        }
+        if (!hooked) {
+            write(kCave, kyo.data(), kyo.size());
+            Discard(g_timer_hook);
+            g_step = nullptr;
+            host_log("Frame rate fixes: the frame timer left out: its hook could not be placed");
+        } else {
+            g_timer = true;
+            next += kSlot;
+            ++applied[std::size_t(Group::Timer)];
+            // The camera's eases: the retune's (its jump over the game's camera is in) a 60 FPS frame's, unless
+            // BB_CAMERA_FIX=1; the game's a 30 FPS frame's otherwise. As a 30 FPS frame's: 1 - (1 - w)^2.
+            const auto skipped = std::vector<std::uint8_t>(std::begin(kCameraSkipped), std::end(kCameraSkipped));
+            const char* fix = std::getenv("BB_CAMERA_FIX");
+            const bool sixty = holds(kCameraSkip, skipped) && !(fix && fix[0] == '1');
+            for (const Ease& e : kEases) {
+                if (!on[std::size_t(Group::Camera)]) break;
+                const double w = FromBits(sixty ? e.listed : e.game);
+                const auto ease_disp = std::int32_t(next - (at(e.insn) + e.length));
+                if (!write(e.insn + e.disp, &ease_disp, sizeof ease_disp)) continue;
+                g_eases.push_back({next, sixty ? 1 - (1 - w) * (1 - w) : w});
+                const float now = Rated(Kind::Decay, float(g_eases.back().was), step);
+                std::memcpy(next, &now, sizeof now);
+                next += kSlot;
+                ++applied[std::size_t(Group::Camera)];
+            }
+        }
+    }
+
     std::string list;
     for (std::size_t g = 0; g < applied.size(); ++g) {
         if (!applied[g]) continue;
@@ -506,57 +658,39 @@ bool Install(std::uint8_t* image, std::size_t size) {
         host_log("Frame rate fixes: none applied");
         return false;
     }
-    g_on = !g_slots.empty() || g_play_ms;
+    g_on = !g_slots.empty() || g_play_ms || g_timer;
     char where[96];
     if (rate.uncapped)
         std::snprintf(where, sizeof where, "uncapped, target %.0f FPS, values for %.0f", rate.target, rate.values);
     else
         std::snprintf(where, sizeof where, "at %.0f FPS", rate.values);
-    host_log("Frame rate fixes: on %s (%s); %zu per-frame values at guest+0x%zx", where, list.c_str(),
-             g_slots.size() + (g_play_ms ? 1 : 0), first);
+    host_log("Frame rate fixes: on %s (%s); %zu per-frame values at guest+0x%zx%s", where, list.c_str(),
+             g_slots.size() + (g_play_ms ? 1 : 0) + g_eases.size() + (g_step ? 1 : 0), first,
+             g_timer ? "; the frame timer ours: one step for the game and every value" : "");
     return true;
 }
 
 void Tick() {
-    if (!g_on) return;
-    if (!g_checked) {
-        // The loader sets each segment's protection after Install: the slots' page must have come out
-        // writable. Otherwise they keep the values they were given for a frame at the rate.
-        g_checked = true;
-        const void* slots = g_slots.empty() ? g_play_ms : g_slots.front().at;
-        bool writable = true;
-#ifdef _WIN32
-        MEMORY_BASIC_INFORMATION info{};
-        writable = VirtualQuery(slots, &info, sizeof info) &&
-                   (info.Protect & (PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY));
-#else
-        if (FILE* maps = std::fopen("/proc/self/maps", "r")) {
-            const auto a = reinterpret_cast<std::uintptr_t>(slots);
-            char line[512];
-            while (std::fgets(line, sizeof line, maps)) {
-                unsigned long lo = 0, hi = 0;
-                char perms[5]{};
-                if (std::sscanf(line, "%lx-%lx %4s", &lo, &hi, perms) == 3 && lo <= a && a < hi) {
-                    writable = perms[1] == 'w';
-                    break;
-                }
-            }
-            std::fclose(maps);
-        }
-#endif
-        if (!writable) {
-            host_log("Frame rate fixes: the per-frame values' page is not writable; they stay at the rate's");
-            g_on = false;
-            return;
-        }
-    }
+    if (!g_on || g_timer || !Writable()) return; // with the timer, Step from the cave does it
     float step = 0;
     std::memcpy(&step, g_image + (kFrameTime - kBase), sizeof step);
-    const double seconds = std::isfinite(step) && step >= 0.001f && step <= 0.1f ? double(step) : g_fallback;
-    for (const Slot& s : g_slots) WriteSlot(s, seconds);
-    if (g_play_ms) {
-        const std::int32_t ms = g_play.Add(seconds);
-        std::memcpy(g_play_ms, &ms, sizeof ms);
+    Update(std::isfinite(step) && step >= 0.001f && step <= 0.1f ? double(step) : g_fallback);
+}
+
+void Step(std::uint64_t pacer) {
+    if (!g_on || !g_timer || !Writable()) return;
+    // The cave's own: the pacer's measured frame time (+0x264) kept in [its target (+0x18), 1/30].
+    float measured = 0, target = 0;
+    if (pacer) {
+        std::memcpy(&measured, reinterpret_cast<const void*>(pacer + 0x264), sizeof measured);
+        std::memcpy(&target, reinterpret_cast<const void*>(pacer + 0x18), sizeof target);
     }
+    const double floor = std::isfinite(target) && target > 0 ? double(target) : kShortest;
+    const double seconds = std::isfinite(measured) && measured > 0 ? std::min(std::max(double(measured), floor), kLongest)
+                                                                   : g_fallback;
+    const float step = float(seconds);
+    std::memcpy(g_step, &step, sizeof step);
+    std::memcpy(g_image + (kFrameTime - kBase), &step, sizeof step);
+    Update(seconds);
 }
 } // namespace BbEngine::FrameRate

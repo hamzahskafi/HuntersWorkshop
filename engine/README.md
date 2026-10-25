@@ -80,6 +80,8 @@ catalogs and the upscalers' files are not kept in this repository; `tools/fetch_
 ## Tests and checks
 
 - `build.sh --test`, and the GPU library's tests (`ninja -C out/gpu pc-input-test frame-rate-test ...`).
+- `tools/re/frame_rate_base.py eboot.elf [--check]`: our frame-rate table (start/frame_rate_base.inc) from the 60 FPS++
+  list and a 1.09 executable.
 - `tools/re/frame_rate_check.py [eboot.elf]`: the frame-rate corrections' table against the 60 FPS++ list
   and, given one, a 1.09 executable.
 - `tools/validate_pipelines.sh`: the engine on Mesa's software Vulkan driver with the validation

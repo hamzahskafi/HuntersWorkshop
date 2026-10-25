@@ -76,7 +76,8 @@ namespace BloodborneLauncher.Core
             ["exp_sleep_spin"] = true,
             ["exp_async_pipelines"] = true,
             ["exp_fast_loading"] = true, // does nothing at 30 or 60 FPS (loading.cpp)
-            ["exp_frame_fixes"] = true, // the frame-rate corrections at 60 FPS (frame_rate.cpp)
+            ["exp_frame_fixes"] = true, // the frame-rate corrections at 60 FPS and above (frame_rate.cpp)
+            ["exp_frame_timer"] = false, // one frame time for the game and every correction (frame_rate.cpp Step)
             ["exp_hot_pages"] = true,
             ["exp_guest_in_place"] = true,
             ["exp_native_calls"] = true,

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Ported from scripts/patches.py: the comments there explain each correction; this keeps them
-// short and the behaviour, byte for byte, the same.
+// short and the behaviour, byte for byte, the same, but for the frame-rate base: with the corrections on,
+// our table (frame_rate_base.inc) where scripts/patches.py applies the patch file's 60 FPS++ list, the same
+// bytes but for the three the start programs always leave out.
 #include "patches.h"
 #include "elf.h"
 #include "xml.h"
@@ -40,11 +42,20 @@ const std::map<std::string, std::vector<std::string>>& FpsPresets() {
     return presets;
 }
 // The frame-rate corrections (the engine's frame_rate.cpp; BB_FRAME_FIXES=0, the launcher's "Frame rate
-// corrections" off, or safe mode turns them off): every rate above 30 on the 60 FPS++ list, as bbhost runs
-// it, the engine setting the frame pacer's target, the values for the rate and the cloth (which the 90 FPS++
-// list carries) and fixing the sprint's wall test (the Sprint Fix's job). Off: the lists above, as before.
-const char* const kSixtyBase = "60 FPS++";
+// corrections" off, or safe mode turns them off): every rate above 30 on our frame-rate table (Kyo's 60
+// FPS++ findings, frame_rate_base.inc, no longer the patch file's list), as bbhost runs every rate on that
+// list, the engine setting the frame pacer's target, the values for the rate and the cloth (which the 90
+// FPS++ list carries) and fixing the sprint's wall test (the Sprint Fix's job). Off: the lists above.
 bool FrameFixesOn() { return Env("BB_FRAME_FIXES", "1").substr(0, 1) != "0"; }
+struct BaseEntry {
+    std::uint64_t at;
+    const char *was, *now;
+};
+const BaseEntry kFrameRateBase[] = {
+#define FRAME_BASE(at, was, now) {at, was, now},
+#include "frame_rate_base.inc"
+#undef FRAME_BASE
+};
 // Uncapped's reference rate for what is converted once (the engine's too): 120, as bbhost and Kyo's uncapped
 // list take it.
 constexpr int kUncappedReference = 120;
@@ -298,6 +309,29 @@ const Bytes kEffectStepWas = {0x37, 0xb7, 0x06, 0x03}, kEffectStepNow = {0xf3, 0
 // which would return to a pushed register if it ran; its 16 direct callers all wait without a timeout, so it
 // never does. Left out, as bbhost leaves it: the game's call stays.
 const std::pair<std::uint64_t, std::uint64_t> kTimedWait{0x2483EC1, 0x2483EC6};
+
+// The frame-rate table's writes, in its order, when the executable holds the game's bytes at every entry;
+// none otherwise (the game then runs at 30, as with the 60 FPS++ list left out).
+Writes FrameRateBase(const Bytes& elf) {
+    Writes out;
+    std::size_t differing = 0;
+    std::uint64_t first = 0;
+    for (const BaseEntry& e : kFrameRateBase) {
+        const Bytes was = FromHex(e.was);
+        if (OriginalBytes(elf, e.at - kBase, was.size()) != was) {
+            if (!differing++) first = e.at - kBase;
+            continue;
+        }
+        out.emplace_back(e.at - kBase, FromHex(e.now));
+    }
+    if (differing) {
+        Log("Patches: the frame-rate table left out: this game executable is not the standard 1.09 at %zu of its %zu "
+            "spots (first: image offset %s)",
+            differing, std::size(kFrameRateBase), Hex(first).c_str());
+        return {};
+    }
+    return out;
+}
 
 double CameraValue(std::optional<std::uint32_t> field, double value, double frames) {
     if (field == kCameraAngle || !(0 < value && value < 1)) return value;
@@ -737,9 +771,10 @@ PatchResult CompilePatches(const PatchRequest& request) {
     const auto preset_it = presets.find(request.fps);
     if (preset_it == presets.end() && !scaled_fps.count(request.fps)) throw Error("invalid FPS preset " + request.fps);
     const bool corrections = FrameFixesOn();
-    const bool on_sixty = corrections && request.fps != "30" && request.fps != "60";
+    const bool own = corrections && request.fps != "30";      // our frame-rate table, not the patch file's lists
+    const bool on_sixty = own && request.fps != "60";         // above 60 on it
     const std::vector<std::string> preset =
-        on_sixty                      ? std::vector<std::string>{kSixtyBase}
+        own                           ? std::vector<std::string>{}
         : preset_it != presets.end() ? preset_it->second
                                       : std::vector<std::string>{kScaledBase, kSprint};
     std::vector<std::string> names = preset;
@@ -812,16 +847,21 @@ PatchResult CompilePatches(const PatchRequest& request) {
         names = kept;
     }
     Writes writes = xml.Compile(names, app_version, segments);
+    // The table first, where the preset's list was.
+    const Writes base = own ? FrameRateBase(elf) : Writes{};
+    writes.insert(writes.begin(), base.begin(), base.end());
     if (scaled_fps.count(request.fps) && has(kScaledBase)) {
         writes = RateScaled(writes, scaled_fps.at(request.fps));
         Log("Patches: %s FPS: %s with its frame-rate values for %s", request.fps.c_str(), kScaledBase, request.fps.c_str());
     }
-    if (on_sixty && has(kSixtyBase))
-        Log("Patches: %s on the 60 FPS++ list: the engine sets the pace and the values for the rate (frame-rate "
-            "corrections; off, the %s list)",
-            request.fps == "uncap" ? "uncapped" : (request.fps + " FPS").c_str(),
-            request.fps == "uncap" ? "Uncap FPS++" : request.fps == "90" ? "90 FPS++" : "scaled 90 FPS++");
-    if (!preset.empty() && has(preset[0])) {
+    if (!base.empty())
+        Log("Patches: %s on the frame-rate table (%zu writes, Kyo's 60 FPS++ findings)%s (frame-rate corrections; off, "
+            "the %s list)",
+            request.fps == "uncap" ? "uncapped" : (request.fps + " FPS").c_str(), base.size(),
+            on_sixty ? ": the engine sets the pace and the values for the rate" : "",
+            request.fps == "uncap" ? "Uncap FPS++" : request.fps == "90" ? "90 FPS++"
+                                   : request.fps == "60" ? "60 FPS++" : "scaled 90 FPS++");
+    if ((!preset.empty() && has(preset[0])) || !base.empty()) {
         std::optional<int> fps;
         if (request.fps == "60") fps = 60;
         else if (request.fps == "90") fps = 90;

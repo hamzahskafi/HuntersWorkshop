@@ -4,7 +4,9 @@
 // entry, with the 60 FPS++ list's where the list changes them, the list's frame-time code, and one
 // group's bytes spoiled; Install must apply the rest, leave that group and a skipped one alone, and Tick
 // must fill the slots from the frame's step. At 90, 120, 144 and uncapped it must also set the frame pacer's
-// target, the values and counts for the rate and the cloth; without the target the game stays at 60. The
+// target, the values and counts for the rate and the cloth; without the target the game stays at 60. With the
+// frame timer the cave must call ours, and Step (what its hook runs) must hand one step to the task step, the
+// list's slot and every value, the camera's eases among them. The
 // image is laid out and protected as the loader does it (src/probe.c): linked modules after the game's data,
 // every page closed, then each segment opened in whole pages; a slot outside the game's data segment would
 // fault in Tick (0.2.0's first build put them past the whole image, in a closed page).
@@ -41,6 +43,7 @@ constexpr std::size_t kDataEnd = 0x56d30f4; // 1.09: the end of the game's data 
 constexpr std::size_t kSize = 0x594ba40;    // the whole image with the linked modules after it (a 0.2.0 log)
 constexpr std::size_t kPage = 4096;
 constexpr std::uint32_t kSixtieth = 0x3c888889;
+constexpr float kFrameTimeProbe = 0.0123f;
 std::size_t Pages(std::size_t n) { return (n + kPage - 1) & ~(kPage - 1); }
 
 std::uint8_t* Allocate(std::size_t n) {
@@ -101,6 +104,8 @@ std::vector<Value> values;
 std::vector<Count> counts;
 std::vector<std::pair<std::uint64_t, std::uint32_t>> targets;
 std::vector<std::pair<std::uint64_t, std::string>> required, cloth_scales;
+struct Ease { std::uint64_t insn; int length, disp; std::uint64_t constant; std::string bytes; std::uint32_t game, listed; };
+std::vector<Ease> eases;
 std::pair<std::uint64_t, std::string> play_time;
 
 void Collect() {
@@ -111,6 +116,8 @@ void Collect() {
 #define FRAME_COUNT(g, at, size, game, kind) counts.push_back({#g, at, size, game, Counted::kind});
 #define FRAME_TARGET(at, game) targets.push_back({at, game});
 #define FRAME_CLOTH_SCALE(at, was) cloth_scales.push_back({at, was});
+#define FRAME_EASE(insn, length, disp, constant, bytes, game, listed)                                         \
+    eases.push_back({insn, length, disp, constant, bytes, game, listed});
 #define FRAME_REQUIRE(at, bytes) required.push_back({at, bytes});
 #define FRAME_PLAY_TIME(g, at, was) play_time = {at, was};
 #include "../gpu/shim/engine/frame_rate_sites.inc"
@@ -120,6 +127,7 @@ void Collect() {
 #undef FRAME_COUNT
 #undef FRAME_TARGET
 #undef FRAME_CLOTH_SCALE
+#undef FRAME_EASE
 #undef FRAME_REQUIRE
 #undef FRAME_PLAY_TIME
 }
@@ -211,6 +219,10 @@ Image Build(std::size_t size, bool listed) {
         std::memcpy(image.at(address) + 5, listed ? &kSixtieth : &game, 4);
     }
     for (const auto& [address, was] : cloth_scales) image.put(address, Hex(was));
+    for (const Ease& e : eases) {
+        image.put(e.insn, Hex(e.bytes));
+        std::memcpy(image.at(e.constant), listed ? &e.listed : &e.game, 4);
+    }
     image.put(play_time.first, Hex(play_time.second));
     return image;
 }
@@ -252,7 +264,7 @@ void TestPlayTime() {
 void TestTable() {
     Collect();
     assert(sites.size() == 20 && loads.size() == 29 && values.size() == 27 && counts.size() == 4 &&
-           targets.size() == 4 && cloth_scales.size() == 1 && required.size() == 2);
+           targets.size() == 4 && cloth_scales.size() == 1 && eases.size() == 2 && required.size() == 2);
 }
 
 // 60 FPS, the list's bytes, Online spoiled and Slope skipped by name: the rest goes in, the cloth stays the
@@ -419,6 +431,138 @@ void TestNoRoom() {
 }
 } // namespace
 
+// The frame pacer's two fields the timer reads: the measured frame time (+0x264) and the target (+0x18).
+struct Pacer {
+    alignas(16) std::uint8_t bytes[0x300]{};
+    void set(float measured, float target) {
+        std::memcpy(bytes + 0x264, &measured, 4);
+        std::memcpy(bytes + 0x18, &target, 4);
+    }
+    std::uint64_t address() const { return reinterpret_cast<std::uint64_t>(bytes); }
+};
+const std::uint8_t* Pointed(const Image& image, std::uint64_t insn, int length, int disp) {
+    std::int32_t d;
+    std::memcpy(&d, image.at(insn) + disp, 4);
+    return image.at(insn) + length + d;
+}
+
+// The frame timer at 60 and 120, the FPS++ retune's camera or the game's: the cave calls ours, and Step hands
+// one step to the task step (through its slot), the list's 0x575a908 and every value; Tick does nothing.
+void TestTimer() {
+    for (const bool retune : {false, true}) {
+        for (const char* fps : {"60", "120"}) {
+            const Image image = Build(kSize, true);
+            constexpr std::uint64_t kCave = 0x2418e3d, kSkip = 0x183dc96;
+            if (retune) image.put(kSkip, {0xe9, 0xd6, 0x05, 0x00, 0x00});
+            SetEnv("BB_FPS", fps);
+            SetEnv("BB_FRAME_TIMER", "1");
+            assert(BbEngine::FrameRate::Install(image.base, image.size));
+            SetEnv("BB_FRAME_TIMER", nullptr);
+            Protections(image);
+            const double rate = fps[0] == '6' ? 60 : 120;
+            // push rdi; mov rdi, rbx; jmp [rip+0] to the hook; pop rdi; movss xmm0, [step]; movss [rbp-0x38], xmm0.
+            const std::uint8_t* cave = image.at(kCave);
+            assert(cave[0] == 0x57 && cave[1] == 0x48 && cave[2] == 0x89 && cave[3] == 0xdf);
+            assert(cave[4] == 0xff && cave[5] == 0x25 && cave[18] == 0x5f);
+            assert(cave[19] == 0xf3 && cave[20] == 0x0f && cave[21] == 0x10 && cave[22] == 0x05);
+            assert(cave[27] == 0xf3 && cave[28] == 0x0f && cave[29] == 0x11 && cave[30] == 0x45 && cave[31] == 0xc8);
+            const std::uint8_t* step_slot = Pointed(image, kCave + 19, 8, 4);
+            assert(step_slot >= image.base + kDataEnd && step_slot + 4 <= image.base + Pages(kDataEnd));
+            float step;
+            std::memcpy(&step, step_slot, 4);
+            assert(step == float(1 / rate)); // until the first frame: a frame at the rate
+
+            Pacer pacer;
+            const auto check = [&](float measured, float target, double expect) {
+                pacer.set(measured, target);
+                BbEngine::FrameRate::Step(pacer.address());
+                float got;
+                std::memcpy(&got, step_slot, 4);
+                assert(Near(got, expect));
+                assert(image.get<float>(kFrameTime) == got); // the list's slot: the same step, not eased
+                for (const Load& l : loads) {
+                    if (l.group != "Jump") continue;
+                    float momentum;
+                    std::memcpy(&momentum, image.slot_of(l), 4);
+                    assert(Near(momentum, Rated(Kind::Keep, 0.95f, got)));
+                }
+                for (const Ease& e : eases) {
+                    float w;
+                    std::memcpy(&w, Pointed(image, e.insn, e.length, e.disp), 4);
+                    const double base = retune ? 1 - (1 - double(F(e.listed))) * (1 - double(F(e.listed))) : double(F(e.game));
+                    assert(Near(w, 1 - std::pow(1 - base, 30.0 * got)));
+                }
+            };
+            check(1 / 45.0f, float(1 / rate), 1 / 45.0);       // a long frame: its own length, at once
+            check(1 / 200.0f, float(1 / rate), 1 / rate);      // a short one: no shorter than the target
+            check(0.2f, float(1 / rate), 1 / 30.0);            // the game slows below 30, as the cave has it
+            check(1 / 300.0f, 0, 1 / 300.0);                   // no target (a loading screen): the measured time
+            check(std::nanf(""), float(1 / rate), 1 / rate);   // no measurement: a frame at the rate
+            if (retune && rate == 60) {
+                // The FPS++ retune at 60 eases exactly as the list's values did.
+                check(1 / 60.0f, 1 / 60.0f, 1 / 60.0);
+                for (const Ease& e : eases) {
+                    float w;
+                    std::memcpy(&w, Pointed(image, e.insn, e.length, e.disp), 4);
+                    assert(Near(w, F(e.listed)));
+                }
+            }
+            // The play time: the steps' milliseconds; Tick (the frame hook) leaves everything to Step.
+            const std::uint8_t* code = image.at(play_time.first);
+            std::int32_t disp, ms;
+            std::memcpy(&disp, code + 2, 4);
+            std::memcpy(&ms, code + 6 + disp, 4);
+            assert(ms >= 0 && ms <= 34);
+            float before, after;
+            std::memcpy(&before, step_slot, 4);
+            std::memcpy(image.at(kFrameTime), &kFrameTimeProbe, 4);
+            BbEngine::FrameRate::Tick();
+            std::memcpy(&after, step_slot, 4);
+            assert(before == after);
+            Free(image.base, Pages(image.size));
+        }
+    }
+}
+
+// The cave run as the game runs it: a trampoline sets rbx (the pacer) and rbp (the task function's frame) and
+// calls into it with the stack as the game's at that point, a ret after its 46 bytes. It must reach Step
+// through the hook's stub, come back, and leave the step in the task step's step-info ([rbp-0x38]).
+void TestCaveRuns() {
+    const Image image = Build(kSize, true);
+    constexpr std::uint64_t kCave = 0x2418e3d;
+    SetEnv("BB_FPS", "60");
+    SetEnv("BB_FRAME_TIMER", "1");
+    assert(BbEngine::FrameRate::Install(image.base, image.size));
+    SetEnv("BB_FRAME_TIMER", nullptr);
+    Protections(image);
+    // A ret where the task function goes on (its page opened for it: code pages are read and execute).
+    std::uint8_t* const page = image.at(kCave + 46) - (reinterpret_cast<std::uintptr_t>(image.at(kCave + 46)) % kPage);
+    Protect(page, kPage, 7);
+    image.put(kCave + 46, {0xc3});
+    Protect(page, kPage, 5);
+    // push rbx; push rbp; mov rbx, rdi; mov rbp, rsi; call rdx; pop rbp; pop rbx; ret. The cave starts with the
+    // stack 16-byte aligned, as before a call in the game.
+    static const std::uint8_t kTrampoline[] = {0x53, 0x55, 0x48, 0x89, 0xfb, 0x48, 0x89, 0xf5,
+                                               0xff, 0xd2, 0x5d, 0x5b, 0xc3};
+    std::uint8_t* code = Allocate(kPage);
+    std::memcpy(code, kTrampoline, sizeof kTrampoline);
+    Protect(code, kPage, 5);
+    using Trampoline = void(__attribute__((sysv_abi)) *)(std::uint64_t, std::uint64_t, std::uint64_t);
+    Pacer pacer;
+    alignas(16) std::uint8_t frame[0x100]{};
+    for (const float measured : {1 / 60.0f, 1 / 40.0f}) {
+        pacer.set(measured, 1 / 60.0f);
+        reinterpret_cast<Trampoline>(code)(pacer.address(), reinterpret_cast<std::uint64_t>(frame + 0x80),
+                                          reinterpret_cast<std::uint64_t>(image.at(kCave)));
+        float task_step;
+        std::memcpy(&task_step, frame + 0x80 - 0x38, 4);
+        assert(task_step == measured);
+        assert(image.get<float>(kFrameTime) == measured);
+    }
+    Free(code, kPage);
+    Free(image.base, Pages(image.size));
+}
+
 int main() {
     TestRated();
     TestPlayTime();
@@ -428,6 +572,8 @@ int main() {
     TestUncapped();
     TestNoPace();
     TestNoRoom();
+    TestTimer();
+    TestCaveRuns();
     std::puts("frame-rate-test: all ok");
     return 0;
 }

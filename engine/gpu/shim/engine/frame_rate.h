@@ -34,9 +34,13 @@ private:
 /// the end of the game's data segment, in its last page (`size`: the whole image, the linked modules after
 /// the game included). BB_FRAME_FIXES=0 turns all of it off; BB_FRAME_FIXES_SKIP names groups to leave out
 /// (a comma list: clips, physics, grass, targeting, jump, sprint, slope, online, hitbox, timers, menus,
-/// durations, playtime, pace, sound, cloth; without pace the game stays at 60).
+/// durations, playtime, pace, sound, cloth, timer, camera; without pace the game stays at 60). BB_FRAME_TIMER=1:
+/// the frame timer (Step) and the camera's eases with it.
 bool Install(std::uint8_t* image, std::size_t size);
 /// Each frame on the game's main thread, at the start of its frame pacer: the slots from the frame's
-/// time (the 60 FPS++ cave's, 0x575a908).
+/// time (the 60 FPS++ cave's, 0x575a908). Nothing with the frame timer.
 void Tick();
+/// The frame timer (BB_FRAME_TIMER=1): each frame from the cave, right after the frame pacer (`pacer`)
+/// returns, before the frame's tasks: the step, the task step's and 0x575a908's, and the slots from it.
+void Step(std::uint64_t pacer);
 } // namespace BbEngine::FrameRate

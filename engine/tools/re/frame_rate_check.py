@@ -34,8 +34,8 @@ GAME_BYTES = "the game's bytes"
 
 def parse(text):
     """The .inc's entries, as dicts."""
-    out = {'sites': [], 'loads': [], 'values': [], 'counts': [], 'targets': [], 'cloth_scales': [], 'require': [],
-           'play': []}
+    out = {'sites': [], 'loads': [], 'values': [], 'counts': [], 'targets': [], 'cloth_scales': [], 'eases': [],
+           'require': [], 'play': []}
     for m in re.finditer(r'^FRAME_SITE\((\w+), (0x[0-9a-f]+), "([0-9a-f]*)", "([0-9a-f]*)", "([0-9a-f]*)"\)$', text, re.M):
         out['sites'].append(dict(group=m[1], at=int(m[2], 16), was=bytes.fromhex(m[3]), listed=bytes.fromhex(m[4]),
                                  now=bytes.fromhex(m[5])))
@@ -52,6 +52,10 @@ def parse(text):
         out['targets'].append(dict(at=int(m[1], 16), game=int(m[2], 16)))
     for m in re.finditer(r'^FRAME_CLOTH_SCALE\((0x[0-9a-f]+), "([0-9a-f]+)"\)$', text, re.M):
         out['cloth_scales'].append(dict(at=int(m[1], 16), was=bytes.fromhex(m[2])))
+    for m in re.finditer(r'^FRAME_EASE\((0x[0-9a-f]+), (\d+), (\d+), (0x[0-9a-f]+), "([0-9a-f]+)", (0x[0-9a-f]+), '
+                         r'(0x[0-9a-f]+)\)$', text, re.M):
+        out['eases'].append(dict(insn=int(m[1], 16), length=int(m[2]), disp=int(m[3]), constant=int(m[4], 16),
+                                 bytes=bytes.fromhex(m[5]), game=int(m[6], 16), listed=int(m[7], 16)))
     for m in re.finditer(r'^FRAME_REQUIRE\((0x[0-9a-f]+), "([0-9a-f]+)"\)$', text, re.M):
         out['require'].append(dict(at=int(m[1], 16), bytes=bytes.fromhex(m[2])))
     for m in re.finditer(r'^FRAME_PLAY_TIME\((\w+), (0x[0-9a-f]+), "([0-9a-f]+)"\)$', text, re.M):
@@ -199,6 +203,23 @@ def check(entries, listed, eboot=None):
         if any(l['constant'] != c['at'] for l in entries['loads'] if l['group'] == 'Cloth'):
             fail(f'cloth scale {c["at"]:#x}: a cloth load reads elsewhere')
         spans.append((c['at'], c['at'] + len(c['was']), f'cloth scale {c["at"]:#x}'))
+    for e in entries['eases']:
+        if len(e['bytes']) != e['length'] or e['disp'] + 4 > e['length']:
+            fail(f'ease {e["insn"]:#x}: length')
+        target = e['insn'] + e['length'] + struct.unpack_from('<i', e['bytes'], e['disp'])[0]
+        if target != e['constant']:
+            fail(f'ease {e["insn"]:#x}: reads {target:#x}, not {e["constant"]:#x}')
+        if list_over(e['insn'], e['length']):
+            fail(f'ease {e["insn"]:#x}: the list writes into the instruction')
+        game = struct.pack('<I', e['game'])
+        if (list_over(e['constant'], 4, game) or game) != struct.pack('<I', e['listed']):
+            fail(f'ease {e["insn"]:#x}: the list does not leave {e["listed"]:#010x} at {e["constant"]:#x}')
+        if eboot:
+            if eboot.read(e['insn'], e['length']) != e['bytes']:
+                fail(f"ease {e['insn']:#x}: the game's instruction differs")
+            if eboot.read(e['constant'], 4) != game:
+                fail(f"ease {e['insn']:#x}: the game's value at {e['constant']:#x} differs")
+        spans.append((e['insn'] + e['disp'], e['insn'] + e['disp'] + 4, f'ease {e["insn"]:#x}'))
     for r in entries['require']:
         over = list_over(r['at'], len(r['bytes']))
         if over != r['bytes']:
@@ -213,7 +234,7 @@ def check(entries, listed, eboot=None):
     if eboot and eboot.size != DATA_END:
         fail(f"the eboot's data segment ends at {eboot.size:#x}, not {DATA_END:#x}")
     size = DATA_END
-    slots = len(entries['loads']) + len(entries['play'])
+    slots = len(entries['loads']) + len(entries['play']) + 1 + len(entries['eases'])  # the timer's step too
     first, end = (size + 15) & ~15, (size + 4095) & ~4095
     if first + 16 * slots > end:
         fail(f'{slots} slots of 16 bytes do not fit in the {end - size} bytes past the game\'s data')
