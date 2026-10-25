@@ -273,6 +273,15 @@ HEAP_PATCH='Increased Graphics Heap Sizes'
 RENDER_POOL_SITES=(0x2195c09,0x2195c46)
 RENDER_POOL_CODE=bytes.fromhex('ba00000400')
 RENDER_POOL_SIZE=0x100000
+# The game compresses its play recording (~300 KB, every ~50 s of play, on the main thread) at zlib
+# level 9, ~23 ms in one frame. Its producer's lea rdi, [rip+...] of the "algorithm=deflate;level=9"
+# the five producers share is pointed at the game's own "algorithm=deflate;level=1": the four online
+# producers keep level 9, and inflate reads either. After droogie (bbhost patches/deflate-level.toml).
+# BB_GAME_FIXES_SKIP=deflate (or BB_GAME_FIXES=0) keeps level 9.
+DEFLATE_SITE=0x19c981f
+DEFLATE_CODE=bytes.fromhex('488d3d5d0ff702')
+DEFLATE_LEVEL1=0x4940254
+DEFLATE_LEVEL1_TEXT=b'algorithm=deflate;level=1\0'
 # The game's GX range allocator: GPU memory for buffers the CPU updates (per-draw shader parameters,
 # CPU-deformed vertices; mode 3 of the GX buffer map 0x2169c30). Its region is the GX manager's
 # default 128 MiB (mov dword [rbx+0x88], 0x8000000 at 0x1d9933d) plus 32 MiB, carved at start from
@@ -537,6 +546,27 @@ def render_pool_writes(elf):
         print('Patches: render pools left at the game\'s size: this executable differs there',flush=True)
         return []
     return [(site+1,struct.pack('<I',RENDER_POOL_SIZE)) for site in RENDER_POOL_SITES]
+
+
+def game_fix_on(name, env=os.environ):
+    """The game fixes' switches, as the engine reads them (gpu/shim/engine/game_fixes.cpp):
+    BB_GAME_FIXES=0 turns them all off, BB_GAME_FIXES_SKIP is a comma list of their names."""
+    if env.get('BB_GAME_FIXES')=='0':
+        return False
+    return name not in [''.join(n.split()).lower() for n in env.get('BB_GAME_FIXES_SKIP','').split(',')]
+
+
+def deflate_writes(elf, env=os.environ):
+    """The write that points the play recording's compression at level 1, over the standard code."""
+    if not game_fix_on('deflate',env):
+        print('Patches: the play recording compressed at the game\'s level 9 (BB_GAME_FIXES, BB_GAME_FIXES_SKIP)',flush=True)
+        return []
+    if original_bytes(elf,DEFLATE_SITE,len(DEFLATE_CODE))!=DEFLATE_CODE or \
+       original_bytes(elf,DEFLATE_LEVEL1,len(DEFLATE_LEVEL1_TEXT))!=DEFLATE_LEVEL1_TEXT:
+        print('Patches: the play recording left at level 9: this executable differs there',flush=True)
+        return []
+    print('Patches: the play recording compressed at level 1 (the game\'s own level=1 string)',flush=True)
+    return [(DEFLATE_SITE+3,struct.pack('<i',DEFLATE_LEVEL1-(DEFLATE_SITE+len(DEFLATE_CODE))))]
 
 
 def gx_region_writes(elf, heaps_written, env=os.environ):
@@ -821,6 +851,7 @@ def main():
     if pools:
         writes+=pools
         print(f'Patches: render pools {RENDER_POOL_SIZE>>10} KiB each (the game\'s 256)')
+    writes+=deflate_writes(elf)
     size=render_size(read_settings(a.settings),a.render_res) if a.render_res else None
     # The UI keeps the game's 1920x1080 stage even for a larger output: the port draws it into
     # the output-size image with a viewport scaled by output / 1920 (UiComposition), so it is

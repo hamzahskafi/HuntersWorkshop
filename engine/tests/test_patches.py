@@ -461,6 +461,37 @@ class RenderPoolTests(unittest.TestCase):
         self.assertEqual(len(patches.render_pool_writes(elf)), 2)
 
 
+class DeflateTests(unittest.TestCase):
+    def elf(self, code=patches.DEFLATE_CODE, text=patches.DEFLATE_LEVEL1_TEXT):
+        return segments_elf([(patches.DEFLATE_SITE, code), (patches.DEFLATE_LEVEL1, text)])
+
+    def test_the_recording_takes_the_games_level_1_string(self):
+        writes = patches.deflate_writes(self.elf(), {})
+        self.assertEqual(writes, [(patches.DEFLATE_SITE + 3, bytes.fromhex('2e6af702'))])
+        # The new displacement reaches the string from the end of the lea.
+        disp, = struct.unpack('<i', writes[0][1])
+        self.assertEqual(patches.DEFLATE_SITE + len(patches.DEFLATE_CODE) + disp, patches.DEFLATE_LEVEL1)
+
+    def test_only_over_the_standard_code_and_string(self):
+        self.assertEqual(patches.deflate_writes(self.elf(code=bytes(7)), {}), [])
+        self.assertEqual(patches.deflate_writes(self.elf(text=b'algorithm=deflate;level=9\0'), {}), [])
+
+    def test_the_switches_keep_level_9(self):
+        for env in ({'BB_GAME_FIXES': '0'}, {'BB_GAME_FIXES_SKIP': 'job_lock, Deflate'}):
+            self.assertEqual(patches.deflate_writes(self.elf(), env), [])
+        self.assertEqual(len(patches.deflate_writes(self.elf(), {'BB_GAME_FIXES_SKIP': 'job_lock'})), 1)
+
+    def test_the_verified_executable_has_the_code(self):
+        elf_path = ROOT / 'out/eboot.elf'
+        if not elf_path.is_file():
+            self.skipTest('no prepared eboot.elf')
+        elf = elf_path.read_bytes()
+        from engine_assets import EBOOT_SHA, sha
+        if sha(elf) not in EBOOT_SHA:
+            self.skipTest('out/eboot.elf is not the verified 1.09 executable')
+        self.assertEqual(len(patches.deflate_writes(elf, {})), 1)
+
+
 def segments_elf(parts):
     """An ELF with one loaded segment per (image offset, bytes) part."""
     phoff = 64
