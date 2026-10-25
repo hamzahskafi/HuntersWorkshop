@@ -126,9 +126,11 @@ bool Prepare(Hook& hook, std::uint8_t* image, std::size_t size, std::size_t offs
     if (page == MAP_FAILED) return false;
 #endif
     hook = {image + offset, page, expected.size()};
-    EmitPrologueStub(page, 0, reinterpret_cast<void*>(callback),
+    const std::uint8_t* end = EmitPrologueStub(page, 0, reinterpret_cast<void*>(callback),
         reinterpret_cast<std::uint64_t>(image + offset + expected.size()),
         expected.data(), expected.size(), false);
+    // The displaced instructions sit before the stub's final jmp [rip+0] and its 8-byte target.
+    hook.original = reinterpret_cast<std::uint64_t>(end - 14 - expected.size());
 #ifdef _WIN32
     DWORD previous = 0;
     if (!VirtualProtect(page, 4096, PAGE_EXECUTE_READ, &previous) ||
@@ -139,6 +141,16 @@ bool Prepare(Hook& hook, std::uint8_t* image, std::size_t size, std::size_t offs
     if (mprotect(page, 4096, PROT_READ | PROT_EXEC)) { Discard(hook); return false; }
     __builtin___clear_cache(reinterpret_cast<char*>(page), reinterpret_cast<char*>(page + 4096));
 #endif
+    return true;
+}
+
+bool Replace(Hook& hook, std::uint8_t* image, std::size_t size, std::size_t offset,
+             std::span<const std::uint8_t> expected, const void* target) {
+    if (!image || !target || expected.size() < 14 || expected.size() > 128 ||
+        offset > size || expected.size() > size - offset ||
+        std::memcmp(image + offset, expected.data(), expected.size()) != 0) return false;
+    hook = {image + offset, nullptr, expected.size()};
+    hook.target = reinterpret_cast<std::uint64_t>(target);
     return true;
 }
 
@@ -193,10 +205,11 @@ void Commit(std::span<Hook> hooks) {
     // leaves the page read and execute only (the frame-rate corrections' pacer targets share a page
     // with the frame hook).
     for (Hook& hook : hooks) {
+        if (!hook.site || (!hook.stub && !hook.target)) continue; // never prepared
         std::uint8_t jump[128];
         jump[0] = 0xff; jump[1] = 0x25;
         std::memset(jump + 2, 0, 4);
-        const auto dest = reinterpret_cast<std::uint64_t>(hook.stub);
+        const auto dest = hook.stub ? reinterpret_cast<std::uint64_t>(hook.stub) : hook.target;
         std::memcpy(jump + 6, &dest, 8);
         std::memset(jump + 14, 0xcc, hook.bytes - 14);
         WriteCode(hook.site, jump, hook.bytes);

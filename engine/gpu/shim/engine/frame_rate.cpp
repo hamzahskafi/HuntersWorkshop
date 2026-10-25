@@ -29,6 +29,7 @@
 #include "frame_rate.h"
 #include "engine_hooks.h"
 #include "engine_state.h"
+#include "skip_list.h"
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -416,25 +417,8 @@ bool Install(std::uint8_t* image, std::size_t size) {
     // The groups: left out by name (BB_FRAME_FIXES_SKIP), then by a byte that is not as expected.
     std::array<bool, std::size_t(Group::Count)> on;
     on.fill(true);
-    if (const char* skip = std::getenv("BB_FRAME_FIXES_SKIP")) {
-        std::string name;
-        for (const char* c = skip;; ++c) {
-            if (*c && *c != ',') {
-                if (!std::isspace(static_cast<unsigned char>(*c))) name += char(std::tolower(static_cast<unsigned char>(*c)));
-                continue;
-            }
-            bool known = name.empty();
-            for (std::size_t g = 0; g < std::size(kGroupNames); ++g) {
-                if (name == kGroupNames[g]) {
-                    on[g] = false;
-                    known = true;
-                }
-            }
-            if (!known) host_log("Frame rate fixes: no group \"%s\" to skip", name.c_str());
-            name.clear();
-            if (!*c) break;
-        }
-    }
+    for (const std::string& name : SkipList("BB_FRAME_FIXES_SKIP", kGroupNames, on))
+        host_log("Frame rate fixes: no group \"%s\" to skip", name.c_str());
     // The frame timer and the camera's per-frame eases with it: only when asked for (the launcher's Experimental).
     if (const char* timer = std::getenv("BB_FRAME_TIMER"); !timer || timer[0] != '1') {
         on[std::size_t(Group::Timer)] = on[std::size_t(Group::Camera)] = false;

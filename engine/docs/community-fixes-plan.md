@@ -133,6 +133,33 @@ On in `180526`, `202235`, `205240`, `221249`, `003848`; off in `211729`, `214630
 - **Off costs CPU that is spare at 60.** Above 60 that changes, and on would matter more.
 - **To settle it:** the same route offline (no summon), 10 minutes each way, hitch report off.
 
+### Set aside: GPU memory work at the moment a frame goes out (2026-10-26)
+
+Parked by the user until after A1–A12. Not VRAM pressure: the card never went over 6 of its 8 GB.
+The driver's kernel calls in the stall reports fit memory being created or pinned mid-frame,
+which costs the same however full the card is. From the stall lines' breakdowns:
+
+- **Memory creation.** Many stall frames spent 35–60 ms of thread time allocating GPU memory, in
+  both memory models (up to 233 ms during loads). Each allocation is a call into the driver and the
+  Windows graphics kernel. Streaming a new area asks for the most.
+- **Pinning the game's memory (PC memory model on).** The game's memory is imported for the GPU
+  256 MiB at a time, 14–16 times a session, mostly in the first minutes. 25 of 26 stalls in those
+  sessions' first stretch had one in the same moment, and two in-play stalls did too (40.6 ms in
+  `221249`, 71.1 ms in `003848`).
+- **The full-screen image re-upload** (~10 MB): 41–65 ms with almost no memory creation. Its time
+  goes to the upload and its change checks.
+- **A few stalls have none of these.** For those, the submit itself needs timing.
+
+Fixes this points to, once measured (time each creation, pin and submit, and name it in the stall
+line):
+
+1. **Reuse memory instead of creating it.** Keep larger blocks around and hand out pieces of them,
+   so streaming rarely needs a new allocation.
+2. **Create or pin memory before it's needed,** on a background thread rather than mid-frame.
+   With the PC memory model on, that includes doing the pinning at load rather than in play.
+3. **Spread the full-screen image's upload and checks** over frames, or skip them when nothing
+   changed.
+
 Side note: Windows' commit headroom read 0.75–1.4 GB in that log. The page file is
 Windows-managed, so Windows grows it when needed; nothing to change.
 
