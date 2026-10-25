@@ -90,8 +90,9 @@ if [[ ${BB_AUTO_RENDER_RES:-} == 1 ]]; then
     unset BB_RENDER_RES BB_OUTPUT_RES BB_AUTO_RENDER_RES
 fi
 # BB_RENDER_RES=WxH explicitly sets the game's render resolution (a patch at start).
-# Frame rate: BB_FPS=uncap (default; delta-time patch, vblank 480 Hz, frames shown at once),
-# 60/90 (fixed-timestep patches) or 30 (unpatched). BB_PATCHES adds patch names ("a;b").
+# Frame rate: BB_FPS=uncap (default; vblank 480 Hz, frames shown at once), 60/90/120/144 or 30
+# (unpatched). Above 30 the 60 FPS++ patch, the engine setting the pace and the values for the rate
+# (frame_rate.cpp; BB_FRAME_FIXES=0: the older FPS++ patches above 60). BB_PATCHES adds patch names ("a;b").
 fps=${BB_FPS:-uncap}
 # The engine reads it too (fast loading above 60, frame generation's limit with uncapped).
 export BB_FPS=$fps

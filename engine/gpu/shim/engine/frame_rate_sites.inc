@@ -7,7 +7,8 @@
 // tools/re/frame_rate_check.py checks every entry against a 1.09 eboot.elf and the list.
 
 // FRAME_SITE(group, address, the game's bytes, the 60 FPS++ list's bytes there or "", ours): code that steps
-// by a fixed 1/30 or 1/60 made to read the frame's time, the 60 FPS++ cave's slot (0x575a908).
+// by a fixed 1/30 or 1/60 made to read the frame's time, the 60 FPS++ cave's slot (0x575a908); then the list's
+// sound cap undone (ours the game's) and, above 60 only, the cloth caves.
 // the target bank refresh: its accumulator steps by the frame (SprjTargetBankManager::Update).
 FRAME_SITE(Targeting, 0x16a4416, "c5fa58055e136803", "", "c5fa5805ea640b04")
 // the ragdoll/clip drive, path B (sub_1915ec0): 1/30 s a call, two calls a frame at 60.

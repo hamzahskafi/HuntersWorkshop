@@ -77,7 +77,7 @@ namespace BloodborneLauncher.Views
                 L.T("Above 60 FPS, loading screens run at 60 so more of the CPU goes to the loading itself. Does nothing at 30 or 60 FPS, or before a cutscene. On by default"),
                 "exp_fast_loading", exp);
             SettingToggle(SymbolRegular.Timer24, L.T("Frame rate corrections"),
-                L.T("At 60 FPS, ragdolls, physics, jumps, slopes, sprinting, online movement and timers follow the real frame time, and the timings the 60 FPS++ patch halved or doubled (menu repeat, hit lifetimes, online timers) are the game's own again. On by default"),
+                L.T("At 60 FPS and above, ragdolls, physics, cloth, jumps, slopes, sprinting, attack sounds, online movement and timers follow the real frame time, and the timings the FPS++ patches halved or doubled (menu repeat, hit lifetimes, online timers) are the game's own again. Off: the older FPS++ patches above 60. On by default"),
                 "exp_frame_fixes", exp);
             SettingToggle(SymbolRegular.Flash24, L.T("Fewer memory write checks"),
                 L.T("Memory the game rewrites before almost every use is no longer watched for changes, saving up to about 2 ms a frame in busy areas. On by default"),

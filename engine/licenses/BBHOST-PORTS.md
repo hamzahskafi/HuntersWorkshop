@@ -68,8 +68,14 @@ engine/frame_rate.cpp and frame_rate_sites.inc adapt from src/engine/frame_rate.
 to read the frame's time (kFrameTimeSites: the ragdoll/clip drive, the Havok physics and AI worlds,
 grass, the target bank), the per-frame loads (frame_rate_dt_loads.inc, made by tools/dt_loads.py;
 here they read slots past the end of the game's data segment, in its last page), the values bbhost sets differently from Kyo's
-"60 FPS++" at 60, the durations tools/fps_sites.py keeps from that list, and the play time's count.
-They are applied over Kyo's list as patches/Bloodborne.xml ships it, with the frame's step from the
-list's own cave, instead of bbhost's SprjFlipper::Update; a constant the list changed is converted
-from the game's value. bbhost credits the findings it collects there to Kyo's 1.3 lists and
+"60 FPS++" at 60, the durations tools/fps_sites.py keeps from that list, and the play time's count;
+above 60, as bbhost runs every rate on that list, the frame pacer's target, the values that follow
+the rate (kRated) and the counts (kCounts: the sound thread's MainThreadUpdateTime among them, in
+place of the list's sleep cap), the cloth's six stiffness caves from "90 FPS++" (ninety_fps_sites.inc)
+with their (60 dt)^2 scale read from slots, and uncapped's reference rate (120). They are applied over
+Kyo's list as patches/Bloodborne.xml ships it, with the frame's step from the list's own cave, instead
+of bbhost's SprjFlipper::Update; a constant the list changed is converted from the game's value. The
+patch builders (start/patches.cpp, scripts/patches.py) leave out the list's timed-wait return, as
+fps_sites.py does, and convert the FPS++ camera's weights from a 60 fps frame above 60, after
+bbhost's camera_tuned_fps. bbhost credits the findings it collects there to Kyo's 1.3 lists and
 yogesh1239's high-FPS fixes.
