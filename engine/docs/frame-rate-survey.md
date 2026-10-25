@@ -111,6 +111,51 @@ Nothing new; each was already right.
     clip drive's path A seconds), and 0x4d27284 and 0x4d2728c (SprjSessionManager's random waits,
     min + (max - min) x r, in frames from data).
 
+## The game's other 30s
+
+`tools/re/fps_constants.py` finds every instruction that reads 1/30, 30.0 or their doubles, or stores
+one as an immediate. With everything our base and corrections write marked as patched, it leaves 91
+sites in 69 functions. These are the sites outside Kyo's list. All 91 were read, and none needs
+converting. Addresses here are the patch lists' (the scanner prints VAs, 0x400000 less).
+
+- **Frame counts from data turned into seconds (27):**
+  - `vcvtsi2ss` then times 1/30, or divided by 30: 0x131e607, 0x131f7b7, 0x1320214, 0x1337a64,
+    0x16ab70c and the others in the targeting update, and 0x1bb55ed/0x1bb5754 (SprjSessionManager).
+  - Animation curves keyed in 30 FPS frames: 0x1b97970, 0x1b97aa0, 0x1b982a0 and 0x1be0e20.
+  - Rumble data (0x232ebf7, RumblebndRepository).
+  - Count x 10 / 30 (0x192cb2e, 0x192cbc5, 0x1d0821b): the change over the 10-frame interval that
+    0x192c405 keeps at a third of a second at every rate.
+- **Seconds, counted with the time they are handed (8):**
+  - SprjFade's 30 s wrap (0x1a82a63) and a message screen's 30 s (0x1b10c4d, MsgRepository).
+  - CSMultiPlayMan's 30 s (0x1d3ca18).
+  - Network records' 30 s (0x18761bb, 0x18b0e1b, 0x18b19a6, 0x18b19ff). Their countdowns subtract
+    the step they are given, as the ones the list doubled do.
+  - A threshold already scaled by the update's dt (0x1930aa0: dt x 30 x k).
+- **Not time (22):**
+  - Distances: 30 squared at 0x16387e9, 0x1659c82 (a distance test), the 8-to-30 curves 0x19818c3,
+    0x19819c3, 0x1e97e03 and 0x1f5bba5, and 0x18c9c3e.
+  - Angles: 0x1976308.. (FOV-like curves), 0x192eda4 (degrees to radians), and 0x1913dab (debug).
+  - Havok motion limits (0xf289d5, 0xf289dc and the 4 pi / 30 / 0.2 / 0.1 block at 0x1c03093). These
+    are the game's, as the ones the list doubled are again.
+  - A camera-like block (10, 30, 70, 0.1, 1000 at 0x2669a2c and its copies at 0x2669b2e, 0x266ccf3
+    and 0x266cdf2).
+  - YEBIS's default parameters (0x2b21c00, 0x2b21cb0).
+- **Debug only (24):**
+  - Debug menu sliders' ranges (0x1263ea3, 0x1270e32, 0x1270e9f, 0x128de06, 0x128de7d, 0x17b1dd1,
+    0x17b1e14, 0x1c8e12e.., 0x25db096.., 0x192f8cc, 0x1df307d).
+  - Debug event drawing (0x16fccda, 0x1702b2d, 0x1704272) and debug prints (0x191787f, 0x1cd114d).
+- **Set once, or overwritten (5):**
+  - A 30 s step handed to the Havok AI world once, behind a .data switch (0x1955abf, 0x222dbcc), and
+    the 30 s it starts from (0x19550f9).
+  - An effect timer's fixed rate, copied from data over the 30 its constructor writes (0x12c3d42).
+  - 0x1df1794, a .data tunable halved for a radius.
+- **Already decided or unused (5):**
+  - The effects' data rate (0x12e711f reads 0x4cad7fc, and the immediate at 0x26fb39d). The base
+    leaves both as the game's.
+  - The clip drive's path C rate, which its callee never reads (0x1916038).
+  - A copy of the targeting ring that nothing calls (0x16a3be0: no call, jump, pointer or relocation
+    reaches it; the copy inlined in the targeting update is the one rated).
+
 ## Not visible to this survey
 
 These are only the list's entries and the 1/30 and 30.0 constants around them. A wait counted in
