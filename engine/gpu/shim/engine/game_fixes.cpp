@@ -5,6 +5,7 @@
 #include "game_fixes.h"
 #include "engine_hooks.h"
 #include "engine_state.h"
+#include "fmod_ring.h"
 #include "skip_list.h"
 #include <array>
 #include <atomic>
@@ -149,6 +150,12 @@ bool Install(std::uint8_t* image, std::size_t size) {
                  {kRunnerReset, kResetPrologue, RunnerReset}},
                 "render job slots given back")) {
         g_step = hooks[hooks.size() - 3].original;
+    }
+    if (on[kFmodRing] && !FmodRing::Check(image, size)) {
+        host_log("Game fixes: fmod_ring left out: FMOD's code differs from 1.09");
+    } else {
+        prepare(kFmodRing, {{FmodRing::kPoolFree, FmodRing::kPoolFreePrologue, FmodRing::PoolFree}},
+                "FMOD's sound ring guarded");
     }
 
     Commit(hooks);
