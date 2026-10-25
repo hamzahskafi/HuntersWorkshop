@@ -26,6 +26,7 @@ HW's `Prepare()` calls and the sampler's `+0x...` print. Each address below says
 | Menus the engine holds open are checked before a reference is added (the Dream mirror's editor, the Altar's level-up) | `68c04a1` | `menu_step_is` in `engine_state.cpp`: the step must still hold a reference and carry the expected type (+0x28) and name (+0x30), as the step constructor (patch 0x201cce0) stores them. Fixes the Hunter's Dream "can't interact until Back" case. After Lantern 0.9.37 stable (Awaken). |
 | Character creation by mouse, at the title and the Dream mirror | `68c04a1` | Drag on the hunter turns them (right stick), click a slider steps toward that side, drag across a row steps its value, the wheel steps by ten (L1/R1). Right-click stays Back. After Lantern 0.9.37 stable (Awaken). |
 | Hitch report, `BB_HITCH_REPORT_MS=<ms>` | `b5105f1` | Off by default. For a frame over the threshold: every guest thread's wait, and every thread's stack twice 20 ms apart, the busy ones first. No thread is unwound while suspended. At most 12 per session, 3 s apart, none in the first 20 s or within 10 s of a loading screen. |
+| Online summon no longer holds the game while the server answers | (this commit) | `sceNpSignalingActivateConnection` returns the connection at once; the session server's address lookup runs on the NP thread (`sig_resolve`, `thd_np.cpp`), then ESTABLISHED and ACTIVE follow as before. The log line `np: signaling: ... resolved ... (conn N, T ms)` gives the time the game used to stand still. |
 
 Checked and found already in HW (no change):
 
@@ -80,9 +81,10 @@ What the reports found:
     stops until the server answers. The report named the mutex's holder.
   - On PS4 this call returns at once and reports the connection later through the signaling
     callback.
-  - HW's matching2 calls already run on a worker (`DispatchAfter`); only this one doesn't.
-  - Fix to propose: resolve on that worker and announce the connection when the address comes
-    back. Inherited from Lantern 0.9.37 beta 7.
+  - HW's matching2 calls already run on a worker (`DispatchAfter`); only this one didn't.
+    Inherited from Lantern 0.9.37 beta 7; the unreleased `online-shadps4-0.20` branch has it too.
+  - **Fixed:** the lookup now runs on that worker, and the connection is announced when the
+    address comes back (see "Done since the analysis").
 - **In-play streaming frames** (100–350 MB of uploads in one frame while moving):
   - The main thread sleeps in the game's pacer (0x2034770): the frame is late on the GPU side.
   - The engine's breakdown for those frames, as thread time across the draw-preparation
