@@ -86,4 +86,7 @@ comments after what src/engine/frame_rate.cpp says each entry is), instead of th
 frame timer (BB_FRAME_TIMER=1) follows bbhost's kStepLoad: the cave loads a step of ours into the task
 step, here from the game's own pacer measurement through a hook in the cave rather than bbhost's
 SprjFlipper::Update, and the follow camera's two eases are read per frame, as bbhost's each_frame
-kRated entries.
+kRated entries. The rest of the list's fixed steps, read entry by entry for 0.3.0
+(docs/frame-rate-survey.md), are ours, not bbhost's: the step-infos made to read the frame's step
+(frame_rate_sites.inc's steps, tools/re/frame_rate_steps.py), the steps objects keep, the pacer's first
+target, the camera lens filter's rate, and the durations after the Havok AI's braking limit.

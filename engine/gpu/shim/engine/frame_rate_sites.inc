@@ -3,7 +3,9 @@
 // rate, as our table start/frame_rate_base.inc holds it) leaves at the game's 30 FPS timing or gets wrong, and
 // what the rates above 60 need on top of it. Adapted from bbhost (droogie/bbhost 566184a:
 // src/engine/frame_rate.cpp, frame_rate_dt_loads.inc and tools/fps_sites.py), which also collects Kyo's 1.3
-// lists and yogesh1239's high-FPS findings. Addresses are the patch lists' (the ELF's VA + 0x400000).
+// lists and yogesh1239's high-FPS findings. Every entry of the list was read for 0.3.0 (docs/frame-rate-survey.md);
+// what that added is ours: the steps, the steps objects keep, the pacer's first target, the lens filter's rate
+// and the durations after the Havok AI's braking limit. Addresses are the patch lists' (the ELF's VA + 0x400000).
 // tools/re/frame_rate_check.py checks every entry against a 1.09 eboot.elf and the list.
 
 // FRAME_SITE(group, address, the game's bytes, the 60 FPS++ list's bytes there or "", ours): code that steps
@@ -23,6 +25,65 @@ FRAME_SITE(Physics, 0x222bcbf, "488d0d6a404c034883c11048898d40feffffc78548feffff
 FRAME_SITE(Physics, 0x1bf9b69, "48c745c000000000c745b88988083d", "48c745c000000000c745b88988883c", "8b05990db6038945b8660f1f440000")
 // grass sway's second path (the list already points the first at the frame's time).
 FRAME_SITE(Grass, 0x2713d8d, "c5fa1025db606102", "c5fa1025736b0403", "c5fa1025736b0403")
+// The steps: updates the game hands a fixed 1/30 s step in a step-info (an FD4Time on the stack, its vtable
+// 0x56efd40, the seconds at +8), which the list makes 1/60 at every rate; the step-info's seconds are read
+// from the frame's step instead. Made by tools/re/frame_rate_steps.py, which says how each is rewritten (in
+// place, or with the call folded into call [rax+0xd0] where the vtable comes from an earlier one) and checks
+// that nothing else in the function can tell.
+// a character action family, its +0x260 request run through its own update (vtable +0xd0).
+FRAME_SITE(Steps, 0x1ea3ff1, "488d0d38bd84034883c11048894dd8c745e08988083d", "488d0d38bd84034883c11048894dd8c745e08988883c", "8b0d11698b03894de0488d0d3fbd840348894dd86690")
+FRAME_SITE(Steps, 0x1ea408e, "488d0d9bbc84034883c11048894dd8c745e08988083d", "488d0d9bbc84034883c11048894dd8c745e08988883c", "8b0d74688b03894de0488d0da2bc840348894dd86690")
+FRAME_SITE(Steps, 0x1ea4134, "488d0df5bb84034883c11048894dd8c745e08988083d", "488d0df5bb84034883c11048894dd8c745e08988883c", "8b0dce678b03894de0488d0dfcbb840348894dd86690")
+FRAME_SITE(Steps, 0x1ea49b9, "488d0d70b384034883c11048898d78ffffffc745808988083d", "488d0d70b384034883c11048898d78ffffffc745808988883c", "8b0d495f8b03894d80488d0d77b3840348898d78ffffff6690")
+FRAME_SITE(Steps, 0x1ea4bc8, "488d0d61b184034883c11048894dc0c745c88988083d", "488d0d61b184034883c11048894dc0c745c88988883c", "8b0d3a5d8b03894dc8488d0d68b1840348894dc06690")
+FRAME_SITE(Steps, 0x1ea5236, "488d0df3aa84034883c11048894dc0c745c88988083d", "488d0df3aa84034883c11048894dc0c745c88988883c", "8b0dcc568b03894dc8488d0dfaaa840348894dc06690")
+FRAME_SITE(Steps, 0x1ea5464, "488d0dc5a884034883c11048894dc0c745c88988083d", "488d0dc5a884034883c11048894dc0c745c88988883c", "8b0d9e548b03894dc8488d0dcca8840348894dc06690")
+FRAME_SITE(Steps, 0x1ea551b, "488d0d0ea884034883c11048894dd8c745e08988083d", "488d0d0ea884034883c11048894dd8c745e08988883c", "8b0de7538b03894de0488d0d15a8840348894dd86690")
+FRAME_SITE(Steps, 0x1ea57ae, "488d0d7ba584034883c11048894dd0c745d88988083d", "488d0d7ba584034883c11048894dd0c745d88988883c", "8b0d54518b03894dd8488d0d82a5840348894dd06690")
+FRAME_SITE(Steps, 0x1ea5ab3, "488d0d76a284034883c11048894db0c745b88988083d", "488d0d76a284034883c11048894db0c745b88988883c", "8b0d4f4e8b03894db8488d0d7da2840348894db06690")
+FRAME_SITE(Steps, 0x1ea6003, "488d0d269d84034883c11048894db0c745b88988083d", "488d0d269d84034883c11048894db0c745b88988883c", "8b0dff488b03894db8488d0d2d9d840348894db06690")
+FRAME_SITE(Steps, 0x1ea6033, "488d0df69c84034883c11048894dc0c745c88988083d", "488d0df69c84034883c11048894dc0c745c88988883c", "8b0dcf488b03894dc8488d0dfd9c840348894dc06690")
+FRAME_SITE(Steps, 0x1ea6263, "488d0dc69a84034883c11048894db0c745b88988083d", "488d0dc69a84034883c11048894db0c745b88988883c", "8b0d9f468b03894db8488d0dcd9a840348894db06690")
+FRAME_SITE(Steps, 0x1ea6293, "488d0d969a84034883c11048894dc0c745c88988083d", "488d0d969a84034883c11048894dc0c745c88988883c", "8b0d6f468b03894dc8488d0d9d9a840348894dc06690")
+FRAME_SITE(Steps, 0x1ea631d, "488d0d0c9a84034883c11048894dd8c745e08988083d", "488d0d0c9a84034883c11048894dd8c745e08988883c", "8b0de5458b03894de0488d0d139a840348894dd86690")
+// the same through a sub-object's update (+0x108's vtable +0xd0), its +0x368 request.
+FRAME_SITE(Steps, 0x1eb53f9, "488d0d30a983034883c11048894dd8c745e08988083d", "488d0d30a983034883c11048894dd8c745e08988883c", "8b0d09558a03894de0488d0d37a9830348894dd86690")
+FRAME_SITE(Steps, 0x1eb54ca, "488d0d5fa883034883c11048894dd8c745e08988083d", "488d0d5fa883034883c11048894dd8c745e08988883c", "8b0d38548a03894de0488d0d66a8830348894dd86690")
+FRAME_SITE(Steps, 0x1eb9098, "488d0d916c83034883c11048894dc0c745c88988083d", "488d0d916c83034883c11048894dc0c745c88988883c", "8b0d6a188a03894dc8488d0d986c830348894dc06690")
+FRAME_SITE(Steps, 0x1eb9105, "488d0d246c83034883c11048894dd0c745d88988083d", "488d0d246c83034883c11048894dd0c745d88988883c", "8b0dfd178a03894dd8488d0d2b6c830348894dd06690")
+FRAME_SITE(Steps, 0x1ebb0ff, "488d0d2a4c83034883c11048894dd8c745e08988083d", "488d0d2a4c83034883c11048894dd8c745e08988883c", "8b0d03f88903894de0488d0d314c830348894dd86690")
+FRAME_SITE(Steps, 0x1ebf0c1, "488d0d680c83034883c11048894dd8c745e08988083d", "488d0d680c83034883c11048894dd8c745e08988883c", "8b0d41b88903894de0488d0d6f0c830348894dd86690")
+FRAME_SITE(Steps, 0x1ec3f57, "4c8d2dd2bd82034983c5104c896d80c745888988083d", "4c8d2dd2bd82034983c5104c896d80c745888988883c", "448b2daa69890344896d884c8d2dd7bd82034c896d80")
+FRAME_SITE(Steps, 0x1ec3f8c, "488b80d00000004c896da0c745a88988083d488d75a04c89f7ffd0", "488b80d00000004c896da0c745a88988883c488d75a04c89f7ffd0", "908b0d75698903894da84c896da0488d75a04c89f7ff90d0000000")
+FRAME_SITE(Steps, 0x1ec3fca, "488b80d00000004c896da0c745a88988083d488d75a04c89f7ffd0", "488b80d00000004c896da0c745a88988883c488d75a04c89f7ffd0", "908b0d37698903894da84c896da0488d75a04c89f7ff90d0000000")
+FRAME_SITE(Steps, 0x1ec3ffb, "488b80d00000004c896d90c745988988083d488d75904c89f7ffd0", "488b80d00000004c896d90c745988988883c488d75904c89f7ffd0", "908b0d06698903894d984c896d90488d75904c89f7ff90d0000000")
+FRAME_SITE(Steps, 0x1ec403c, "488d0dedbc82034883c11048894da0c745a88988083d", "488d0dedbc82034883c11048894da0c745a88988883c", "8b0dc6688903894da8488d0df4bc820348894da06690")
+FRAME_SITE(Steps, 0x1ec4092, "488d0d97bc82034883c11048894da0c745a88988083d", "488d0d97bc82034883c11048894da0c745a88988883c", "8b0d70688903894da8488d0d9ebc820348894da06690")
+FRAME_SITE(Steps, 0x1ec40ce, "488d0d5bbc82034883c11048894db0c745b88988083d", "488d0d5bbc82034883c11048894db0c745b88988883c", "8b0d34688903894db8488d0d62bc820348894db06690")
+FRAME_SITE(Steps, 0x1ec4124, "4c8d2505bc82034983c4104c8965c0c745c88988083d", "4c8d2505bc82034983c4104c8965c0c745c88988883c", "448b25dd678903448965c84c8d250abc82034c8965c0")
+FRAME_SITE(Steps, 0x1ec4159, "488b80d00000004c8965a0c745a88988083d488d75a04c89f7ffd0", "488b80d00000004c8965a0c745a88988883c488d75a04c89f7ffd0", "908b0da8678903894da84c8965a0488d75a04c89f7ff90d0000000")
+FRAME_SITE(Steps, 0x1ec4197, "488b80d00000004c8965a0c745a88988083d488d75a04c89f7ffd0", "488b80d00000004c8965a0c745a88988883c488d75a04c89f7ffd0", "908b0d6a678903894da84c8965a0488d75a04c89f7ff90d0000000")
+FRAME_SITE(Steps, 0x1ec41c8, "488b80d00000004c89a570ffffffc78578ffffff8988083d488db570ffffff4c89f7ffd0", "488b80d00000004c89a570ffffffc78578ffffff8988883c488db570ffffff4c89f7ffd0", "908b0d39678903898d78ffffff4c89a570ffffff488db570ffffff4c89f7ff90d0000000")
+FRAME_SITE(Steps, 0x1f032e0, "488d0d49ca7e034883c11048894dd0c745d88988083d", "488d0d49ca7e034883c11048894dd0c745d88988883c", "8b0d22768503894dd8488d0d50ca7e0348894dd06690")
+FRAME_SITE(Steps, 0x1f03750, "488d0dd9c57e034883c11048894dd0c745d88988083d", "488d0dd9c57e034883c11048894dd0c745d88988883c", "8b0db2718503894dd8488d0de0c57e0348894dd06690")
+// functors ticked until done (vtable +0x10; the Chalice dungeon sequences, SprjHolygrail, build some).
+FRAME_SITE(Steps, 0x1f6aa20, "488d0d095378034883c11048894dd8c745e08988083d", "488d0d095378034883c11048894dd8c745e08988883c", "8b0de2fe7e03894de0488d0d1053780348894dd86690")
+FRAME_SITE(Steps, 0x200d8d0, "488d0d59246e034883c11048894dd8c745e08988083d", "488d0d59246e034883c11048894dd8c745e08988883c", "8b0d32d07403894de0488d0d60246e0348894dd86690")
+FRAME_SITE(Steps, 0x200e130, "488d0df91b6e034883c11048894dd8c745e08988083d", "488d0df91b6e034883c11048894dd8c745e08988883c", "8b0dd2c77403894de0488d0d001c6e0348894dd86690")
+FRAME_SITE(Steps, 0x200e2c2, "488d0d671a6e034883c11048894dd8c745e08988083d", "488d0d671a6e034883c11048894dd8c745e08988883c", "8b0d40c67403894de0488d0d6e1a6e0348894dd86690")
+FRAME_SITE(Steps, 0x200fa40, "488d0de9026e034883c11048894dd0c745d88988083d", "488d0de9026e034883c11048894dd0c745d88988883c", "8b0dc2ae7403894dd8488d0df0026e0348894dd06690")
+FRAME_SITE(Steps, 0x20119c0, "488d0d69e36d034883c11048894dd0c745d88988083d", "488d0d69e36d034883c11048894dd0c745d88988883c", "8b0d428f7403894dd8488d0d70e36d0348894dd06690")
+FRAME_SITE(Steps, 0x2012640, "488d0de9d66d034883c11048894dd8c745e08988083d", "488d0de9d66d034883c11048894dd8c745e08988883c", "8b0dc2827403894de0488d0df0d66d0348894dd86690")
+FRAME_SITE(Steps, 0x20127ba, "488d0d6fd56d034883c11048894dd8c745e08988083d", "488d0d6fd56d034883c11048894dd8c745e08988883c", "8b0d48817403894de0488d0d76d56d0348894dd86690")
+FRAME_SITE(Steps, 0x2012920, "488d0d09d46d034883c11048894dd8c745e08988083d", "488d0d09d46d034883c11048894dd8c745e08988883c", "8b0de27f7403894de0488d0d10d46d0348894dd86690")
+FRAME_SITE(Steps, 0x2012ab2, "488d0d77d26d034883c11048894dd8c745e08988083d", "488d0d77d26d034883c11048894dd8c745e08988883c", "8b0d507e7403894de0488d0d7ed26d0348894dd86690")
+FRAME_SITE(Steps, 0x2012c20, "488d0d09d16d034883c11048894dd8c745e08988083d", "488d0d09d16d034883c11048894dd8c745e08988883c", "8b0de27c7403894de0488d0d10d16d0348894dd86690")
+// an event entity's first update.
+FRAME_SITE(Steps, 0x16efe4a, "488d0ddffeff034883c11048894dc0c745c88988083d", "488d0ddffeff034883c11048894dc0c745c88988883c", "8b0db8aa0604894dc8488d0de6feff0348894dc06690")
+// a list update (sub_1373330).
+FRAME_SITE(Steps, 0x13734db, "488d054ec837044883c01048898560ffffffc78568ffffff8988083d", "488d054ec837044883c01048898560ffffffc78568ffffff8988883c", "8b0527743e04898568ffffff488d0552c8370448898560ffffff6690")
+// the item list's screen update.
+FRAME_SITE(Steps, 0x1f96d82, "488d05a78f75034883c01048898540feffffc78548feffff8988083d", "488d05a78f75034883c01048898540feffffc78548feffff8988883c", "8b05803b7c03898548feffff488d05ab8f750348898540feffff6690")
 // the sound thread's sleep: the game's call back in place of the list's cap (16 ms, a cave in the loop); the
 // thread's update time (FRAME_COUNT below) is one frame instead.
 FRAME_SITE(Sound, 0x2c0137d, "e83ea788ff", "e84affffff", "e83ea788ff")
@@ -102,6 +163,9 @@ FRAME_LOAD(Timers, 0x1d08518, 8, 4, 0x4d27fe0, Amount, 1, "c5fa580dc0fa0103", 0x
 FRAME_LOAD(Timers, 0x1d0854c, 8, 4, 0x4d27fe0, Amount, 1, "c5fa580d8cfa0103", 0x3dcccccd)
 // YEBIS's frame time (gx_flip_present): half a 30 fps frame, 1/60.
 FRAME_LOAD(Timers, 0x25d6ae2, 8, 4, 0x4d2979c, Amount, 1, "c5fa101db22c7502", 0x3c888889)
+// the camera lens filter's exposure (vtable 0x56e7bc0, its shader constants): 30 x a / b and its inverse, a
+// frame's worth at 30; the list's 60 is 60's.
+FRAME_LOAD(Lens, 0x125d6e1, 8, 4, 0x4c9f358, Rate, 1, "c5fa10056f1ca403", 0x41f00000)
 
 // FRAME_VALUE(group, address, kind, the game's value, the 60 FPS++ list's value): a value written once for the
 // rate (uncapped: for 120, its reference rate; Game: the game's own back). The durations are seconds, not steps: the list converted them as
@@ -140,6 +204,20 @@ FRAME_VALUE(Durations, 0x1880cfd, Game, 0x41f00000, 0x42700000)
 FRAME_VALUE(Durations, 0x1880e1a, Game, 0x41f00000, 0x42700000)
 // the Havok AI's braking limit, m/s^2.
 FRAME_VALUE(Durations, 0x21bb004, Game, 0x41f00000, 0x42700000)
+// shortest-duration floors, max(t, 1/30) (0x12e596a, 0x12e5a8a, 0x12e5baa), as 0x4cadc08's.
+FRAME_VALUE(Durations, 0x4cad65c, Game, 0x3d088889, 0x3c888889)
+FRAME_VALUE(Durations, 0x4cad660, Game, 0x3d088889, 0x3c888889)
+FRAME_VALUE(Durations, 0x4cad664, Game, 0x3d088889, 0x3c888889)
+// Havok rigid bodies' maximum linear speed, 30 m/s (an hkUFloat8 beside the maximum angular speed, 4 pi rad/s,
+// and the damping, 0.2 and 0.1).
+FRAME_VALUE(Durations, 0x13ef51c, Game, 0x41f00000, 0x42700000)
+FRAME_VALUE(Durations, 0x13ef6ec, Game, 0x41f00000, 0x42700000)
+// an online sequence's timeout (FrpgNetMan): a 30 s countdown by the step it is handed.
+FRAME_VALUE(Durations, 0x203acb7, Game, 0x41f00000, 0x42700000)
+// the install-progress poll (scePlayGoGetLocus) every 30 s: a static initializer's global.
+FRAME_VALUE(Durations, 0x23dede6, Game, 0x41f00000, 0x42700000)
+// the title screen's longest wait, 30 s (only its debug display reads it).
+FRAME_VALUE(Durations, 0x1ab67ef, Game, 0x41f00000, 0x42700000)
 // the physics world's expected minimum step (hkpWorldCinfo): a tolerance hint, 1/fps.
 FRAME_VALUE(Physics, 0x0f383ca, Step, 0x3d088889, 0x3d088889)
 // a shared 1/30 step the list leaves at 1/30 (its other readers step by the frame).
@@ -153,6 +231,13 @@ FRAME_VALUE(Targeting, 0x4d2577c, Step, 0x3d088889, 0x3d088889)
 // the ragdoll keyframe controller's drive step (an hkaRagdollRigidBodyController's +0x60): the physics world's
 // step, which follows the frame.
 FRAME_VALUE(Physics, 0x1c0ca9a, Step, 0x3d088889, 0x3c888889)
+// steps an object keeps (written when it is made, read each update): the rate's.
+// an object's step at +0x70 (sub_a3fad0).
+FRAME_VALUE(Steps, 0xa3fc3f, Step, 0x3d088889, 0x3c888889)
+// a timed object's step at +0x80 until its first measured one (sub_12b5340).
+FRAME_VALUE(Steps, 0x12b5458, Step, 0x3d088889, 0x3c888889)
+// a timeline's step at +0xc8: it advances by it and counts its length in it (sub_1daa5b0).
+FRAME_VALUE(Steps, 0x1daa65e, Step, 0x3d088889, 0x3c888889)
 // a tenth of a change a frame over the 10-frame interval at 0x192c405 (FRAME_COUNT below): the two together.
 FRAME_VALUE(Timers, 0x4cf6420, Amount, 0x3dcccccd, 0x3d4ccccd)
 FRAME_VALUE(Timers, 0x4cf6424, Amount, 0x3dcccccd, 0x3d4ccccd)
@@ -183,12 +268,15 @@ FRAME_EASE(0x183af8c, 8, 4, 0x4d25e68, "c5f2590dd4ae4e03", 0x3dcccccd, 0x3cccccc
 // the chase-rate ease (vmovss xmm2, [0x4d25e94]; value += (target - value) * w): 1/30 a frame, the list's too.
 FRAME_EASE(0x183e2b2, 8, 4, 0x4d25e94, "c5fa1015da7b4e03", 0x3d088889, 0x3d088889)
 
-// FRAME_TARGET(address, the game's value): the frame pacer's target, mov dword [r12+0x18], imm32 (the 60 FPS++
-// list's 1/60): 1/rate, uncapped 1/its limit (at most 480). Without all four the game stays at 60.
-FRAME_TARGET(0x2434840, 0x3c888889)
-FRAME_TARGET(0x243485a, 0x3d088889)
-FRAME_TARGET(0x243487e, 0x3d088889)
-FRAME_TARGET(0x24348b3, 0x3d088889)
+// FRAME_TARGET(address, the store up to its immediate, the game's value): the frame pacer's target, mov dword
+// [r12+0x18], imm32 in the pacer (sub_2434770) and mov dword [r13+0x18], imm32 where the pacer is made
+// (sub_2434520) (the 60 FPS++ list's 1/60): 1/rate, uncapped 1/its limit (at most 480). Without all of them the
+// game stays at 60.
+FRAME_TARGET(0x2434608, "41c74518", 0x3d088889)
+FRAME_TARGET(0x2434840, "41c7442418", 0x3c888889)
+FRAME_TARGET(0x243485a, "41c7442418", 0x3d088889)
+FRAME_TARGET(0x243487e, "41c7442418", 0x3d088889)
+FRAME_TARGET(0x24348b3, "41c7442418", 0x3d088889)
 
 // FRAME_CLOTH_SCALE(address, the game's bytes): the scale the cloth caves read where a slot cannot replace it,
 // (60 / rate)^2 in each of its four lanes (uncapped: for 120).

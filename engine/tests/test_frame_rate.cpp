@@ -102,7 +102,8 @@ std::vector<Site> sites;
 std::vector<Load> loads;
 std::vector<Value> values;
 std::vector<Count> counts;
-std::vector<std::pair<std::uint64_t, std::uint32_t>> targets;
+struct Target { std::uint64_t at; std::string store; std::uint32_t game; std::size_t imm() const { return store.size() / 2; } };
+std::vector<Target> targets;
 std::vector<std::pair<std::uint64_t, std::string>> required, cloth_scales;
 struct Ease { std::uint64_t insn; int length, disp; std::uint64_t constant; std::string bytes; std::uint32_t game, listed; };
 std::vector<Ease> eases;
@@ -114,7 +115,7 @@ void Collect() {
     loads.push_back({#g, insn, length, disp, constant, Kind::kind, lanes, bytes, {__VA_ARGS__}});
 #define FRAME_VALUE(g, at, kind, game, listed) values.push_back({#g, at, Kind::kind, game, listed});
 #define FRAME_COUNT(g, at, size, game, kind) counts.push_back({#g, at, size, game, Counted::kind});
-#define FRAME_TARGET(at, game) targets.push_back({at, game});
+#define FRAME_TARGET(at, store, game) targets.push_back({at, store, game});
 #define FRAME_CLOTH_SCALE(at, was) cloth_scales.push_back({at, was});
 #define FRAME_EASE(insn, length, disp, constant, bytes, game, listed)                                         \
     eases.push_back({insn, length, disp, constant, bytes, game, listed});
@@ -214,9 +215,9 @@ Image Build(std::size_t size, bool listed) {
     }
     for (const Value& v : values) std::memcpy(image.at(v.at), listed ? &v.listed : &v.game, 4);
     for (const Count& c : counts) image.put(c.at, CountAt(c, listed && c.kind != Counted::Digits ? 60.0 : 30.0));
-    for (const auto& [address, game] : targets) {
-        image.put(address, {0x41, 0xc7, 0x44, 0x24, 0x18});
-        std::memcpy(image.at(address) + 5, listed ? &kSixtieth : &game, 4);
+    for (const Target& t : targets) {
+        image.put(t.at, Hex(t.store));
+        std::memcpy(image.at(t.at) + t.imm(), listed ? &kSixtieth : &t.game, 4);
     }
     for (const auto& [address, was] : cloth_scales) image.put(address, Hex(was));
     for (const Ease& e : eases) {
@@ -263,8 +264,8 @@ void TestPlayTime() {
 
 void TestTable() {
     Collect();
-    assert(sites.size() == 20 && loads.size() == 29 && values.size() == 27 && counts.size() == 4 &&
-           targets.size() == 4 && cloth_scales.size() == 1 && eases.size() == 2 && required.size() == 2);
+    assert(sites.size() == 68 && loads.size() == 30 && values.size() == 38 && counts.size() == 4 &&
+           targets.size() == 5 && cloth_scales.size() == 1 && eases.size() == 2 && required.size() == 2);
 }
 
 // 60 FPS, the list's bytes, Online spoiled and Slope skipped by name: the rest goes in, the cloth stays the
@@ -291,7 +292,7 @@ void TestSixty() {
     }
     for (const Count& c : counts) assert(!std::memcmp(image.at(c.at), CountAt(c, 60).data(), std::size_t(c.size)));
     assert(!std::memcmp(image.at(0x4b33c51), "16666", 5));
-    for (const auto& [address, game] : targets) assert(image.get<std::uint32_t>(address + 5) == kSixtieth);
+    for (const Target& t : targets) assert(image.get<std::uint32_t>(t.at + t.imm()) == kSixtieth);
     for (const auto& [address, was] : cloth_scales) assert(!std::memcmp(image.at(address), Hex(was).data(), 16));
     const std::size_t first = (kDataEnd + 15) & ~std::size_t(15), end = Pages(kDataEnd);
     for (const Load& l : loads) {
@@ -340,7 +341,7 @@ void TestFixedRate(int fps) {
     assert(BbEngine::FrameRate::Install(image.base, image.size));
     Protections(image);
     const double frame = 1.0 / fps;
-    for (const auto& [address, game] : targets) assert(image.get<float>(address + 5) == float(frame));
+    for (const Target& t : targets) assert(image.get<float>(t.at + t.imm()) == float(frame));
     for (const Site& s : sites) assert(image.holds(s, Hex(s.now)));
     for (const Value& v : values) {
         const float now = image.get<float>(v.at);
@@ -378,7 +379,7 @@ void TestUncapped() {
         SetEnv("BB_FPS_LIMIT", limit);
         assert(BbEngine::FrameRate::Install(image.base, image.size));
         const double target = limit[0] == '0' ? 480 : 144;
-        for (const auto& [address, game] : targets) assert(image.get<float>(address + 5) == float(1 / target));
+        for (const Target& t : targets) assert(image.get<float>(t.at + t.imm()) == float(1 / target));
         for (const Value& v : values)
             if (v.kind != Kind::Game) assert(Near(image.get<float>(v.at), Rated(v.kind, F(v.game), 1 / 120.0)));
         assert(image.get<std::int32_t>(0x192c405) == 40);
@@ -391,10 +392,11 @@ void TestUncapped() {
 // At 90 with a target the list does not hold: the pacer left alone, so everything is for 60 and no cloth.
 void TestNoPace() {
     const Image image = Build(kSize, true);
-    image.at(targets[1].first + 6)[0] ^= 0x10;
+    image.at(targets[1].at + targets[1].imm() + 1)[0] ^= 0x10;
     SetEnv("BB_FPS", "90");
     assert(BbEngine::FrameRate::Install(image.base, image.size));
-    assert(image.get<std::uint32_t>(targets[0].first + 5) == kSixtieth);
+    for (std::size_t i = 0; i < targets.size(); ++i)
+        if (i != 1) assert(image.get<std::uint32_t>(targets[i].at + targets[i].imm()) == kSixtieth);
     for (const Value& v : values)
         if (v.kind != Kind::Game) assert(Near(image.get<float>(v.at), Rated(v.kind, F(v.game), 1 / 60.0)));
     for (const Count& c : counts) assert(!std::memcmp(image.at(c.at), CountAt(c, 60).data(), std::size_t(c.size)));

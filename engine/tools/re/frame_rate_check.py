@@ -24,10 +24,9 @@ INC = ROOT / 'gpu/shim/engine/frame_rate_sites.inc'
 BASE = 0x400000
 DATA_END = 0x56d30f4  # 1.09: the end of its data segment (frame_rate.cpp's kDataEnd; the slots follow it)
 GROUPS = ('Clips', 'Physics', 'Grass', 'Targeting', 'Jump', 'Sprint', 'Slope', 'Online', 'Hitbox', 'Timers', 'Menus',
-          'Durations', 'PlayTime', 'Sound', 'Cloth')
+          'Durations', 'PlayTime', 'Sound', 'Cloth', 'Steps', 'Lens')
 KINDS = ('Step', 'Amount', 'Decay', 'Keep', 'Rate', 'Game', 'Cloth')
 COUNTS = ('Frames', 'Micros', 'Digits')
-TARGET_STORE = bytes.fromhex('41c7442418')  # mov dword [r12+0x18], imm32
 SIXTIETH = 0x3c888889
 GAME_BYTES = "the game's bytes"
 
@@ -48,8 +47,8 @@ def parse(text):
         out['values'].append(dict(group=m[1], at=int(m[2], 16), kind=m[3], game=int(m[4], 16), listed=int(m[5], 16)))
     for m in re.finditer(r'^FRAME_COUNT\((\w+), (0x[0-9a-f]+), (\d), (\d+), (\w+)\)$', text, re.M):
         out['counts'].append(dict(group=m[1], at=int(m[2], 16), size=int(m[3]), game=int(m[4]), kind=m[5]))
-    for m in re.finditer(r'^FRAME_TARGET\((0x[0-9a-f]+), (0x[0-9a-f]+)\)$', text, re.M):
-        out['targets'].append(dict(at=int(m[1], 16), game=int(m[2], 16)))
+    for m in re.finditer(r'^FRAME_TARGET\((0x[0-9a-f]+), "([0-9a-f]+)", (0x[0-9a-f]+)\)$', text, re.M):
+        out['targets'].append(dict(at=int(m[1], 16), store=bytes.fromhex(m[2]), game=int(m[3], 16)))
     for m in re.finditer(r'^FRAME_CLOTH_SCALE\((0x[0-9a-f]+), "([0-9a-f]+)"\)$', text, re.M):
         out['cloth_scales'].append(dict(at=int(m[1], 16), was=bytes.fromhex(m[2])))
     for m in re.finditer(r'^FRAME_EASE\((0x[0-9a-f]+), (\d+), (\d+), (0x[0-9a-f]+), "([0-9a-f]+)", (0x[0-9a-f]+), '
@@ -187,12 +186,15 @@ def check(entries, listed, eboot=None):
             fail(f'count {c["at"]:#x}: the list leaves {over.hex() if over else GAME_BYTES}, not {expect.hex()}')
         spans.append((c['at'], c['at'] + c['size'], f'count {c["at"]:#x}'))
     for t in entries['targets']:
-        game = TARGET_STORE + struct.pack('<I', t['game'])
-        if eboot and eboot.read(t['at'], 9) != game:
+        n = len(t['store']) + 4
+        if t['store'][:2] != b'\x41\xc7' or t['store'][-1:] != b'\x18':
+            fail(f'target {t["at"]:#x}: not mov dword [r12/r13+0x18], imm32')
+        game = t['store'] + struct.pack('<I', t['game'])
+        if eboot and eboot.read(t['at'], n) != game:
             fail(f"target {t['at']:#x}: the game's bytes differ")
-        if list_over(t['at'], 9, game) != TARGET_STORE + struct.pack('<I', SIXTIETH):
+        if list_over(t['at'], n, game) != t['store'] + struct.pack('<I', SIXTIETH):
             fail(f'target {t["at"]:#x}: the list does not set 1/60 there')
-        spans.append((t['at'], t['at'] + 9, f'target {t["at"]:#x}'))
+        spans.append((t['at'], t['at'] + n, f'target {t["at"]:#x}'))
     for c in entries['cloth_scales']:
         if len(c['was']) != 16:
             fail(f'cloth scale {c["at"]:#x}: not four lanes')

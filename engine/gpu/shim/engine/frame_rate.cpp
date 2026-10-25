@@ -10,9 +10,9 @@
 //
 // The rates: 60, 90, 120 and 144 as they are; uncapped with the pacer's target at its limit and, for what
 // cannot follow the frame's time (code immediates, frame counts), the values of 120, as bbhost and Kyo's
-// uncapped list take them. Above 60 the list's other steps keep their 60 value, as Kyo's 90 and 120 lists
-// hold them ("the known-good 120 FPS++ block holds 1/60 at these same addresses"); the ones whose systems
-// were read follow the frame (the sites and loads here).
+// uncapped list take them. The list's fixed steps (1/30 made 1/60) follow the frame here, at 60 too: each one
+// was read and is either the frame's step now (the step-infos handed to updates, "steps") or, where it is
+// not a step at all, the game's value back (docs/frame-rate-survey.md has every entry and why).
 //
 // The per-frame values are read from slots of ours past the end of the game's data segment (1.09: image
 // offset 0x56d30f4), in that segment's last page: the loader protects each segment in whole pages, so
@@ -48,16 +48,16 @@ constexpr std::uint64_t kBase = 0x400000;       // the patch lists' addresses: t
 constexpr std::uint64_t kFrameTime = 0x575a908; // the 60 FPS++ cave's step
 constexpr std::size_t kPage = 4096, kSlot = 16;
 constexpr std::size_t kDataEnd = 0x56d30f4; // the end of 1.09's data segment (its VA + memsz)
-constexpr std::uint8_t kTargetStore[] = {0x41, 0xc7, 0x44, 0x24, 0x18}; // mov dword [r12+0x18], imm32
-constexpr std::uint32_t kListedTarget = 0x3c888889;                     // the 60 FPS++ list's 1/60
+constexpr std::uint32_t kListedTarget = 0x3c888889; // the 60 FPS++ list's 1/60
 
 enum class Group : std::uint8_t {
     Clips, Physics, Grass, Targeting, Jump, Sprint, Slope, Online, Hitbox, Timers, Menus, Durations, PlayTime,
-    Pace, Sound, Cloth, Timer, Camera, Count
+    Pace, Sound, Cloth, Steps, Lens, Timer, Camera, Count
 };
 constexpr const char* kGroupNames[] = {"clips",  "physics", "grass",  "targeting", "jump",      "sprint",
                                        "slope",  "online",  "hitbox", "timers",    "menus",     "durations",
-                                       "playtime", "pace",  "sound",  "cloth",     "timer",     "camera"};
+                                       "playtime", "pace",  "sound",  "cloth",     "steps",     "lens",
+                                       "timer",  "camera"};
 static_assert(std::size(kGroupNames) == std::size_t(Group::Count));
 
 /// How a count follows the rate.
@@ -97,6 +97,7 @@ struct CountSite {
 };
 struct Target {
     std::uint64_t at;
+    const char* store; // the instruction up to its immediate
     std::uint32_t game;
 };
 struct ClothScale {
@@ -160,7 +161,7 @@ constexpr CountSite kCounts[] = {
 #undef FRAME_COUNT
 #define FRAME_COUNT(...)
 #undef FRAME_TARGET
-#define FRAME_TARGET(at, game) {at, game},
+#define FRAME_TARGET(at, store, game) {at, store, game},
 constexpr Target kTargets[] = {
 #include "frame_rate_sites.inc"
 };
@@ -445,13 +446,14 @@ bool Install(std::uint8_t* image, std::size_t size) {
                  kGroupNames[std::size_t(g)], (unsigned long long)address);
     };
 
-    // The pacer's target first: without all four the game keeps the list's 1/60, and what follows is for 60.
+    // The pacer's target first: without all of them the game keeps the list's 1/60, and what follows is for 60.
     const auto target_bits = [&] { return ToBits(float(1.0 / rate.target)); };
     for (const Target& t : kTargets) {
         std::uint32_t imm = 0;
-        const bool store = inside(t.at, sizeof kTargetStore + 4) && !std::memcmp(at(t.at), kTargetStore, sizeof kTargetStore);
-        if (store) std::memcpy(&imm, at(t.at) + sizeof kTargetStore, 4);
-        if (!store || (imm != t.game && imm != kListedTarget && imm != target_bits())) fail(Group::Pace, t.at);
+        const auto store = Hex(t.store);
+        const bool fits = inside(t.at, store.size() + 4) && holds(t.at, store);
+        if (fits) std::memcpy(&imm, at(t.at) + store.size(), 4);
+        if (!fits || (imm != t.game && imm != kListedTarget && imm != target_bits())) fail(Group::Pace, t.at);
     }
     if (!on[std::size_t(Group::Pace)] && rate.target != 60) {
         host_log("Frame rate fixes: the frame pacer's target left as the 60 FPS++ list has it: the game runs at 60");
@@ -539,7 +541,7 @@ bool Install(std::uint8_t* image, std::size_t size) {
     if (on[std::size_t(Group::Pace)]) {
         const std::uint32_t bits = target_bits();
         for (const Target& t : kTargets)
-            if (write(t.at + sizeof kTargetStore, &bits, sizeof bits)) ++applied[std::size_t(Group::Pace)];
+            if (write(t.at + Hex(t.store).size(), &bits, sizeof bits)) ++applied[std::size_t(Group::Pace)];
     }
     for (const Site& s : kSites) {
         if (!on[std::size_t(s.group)]) continue;

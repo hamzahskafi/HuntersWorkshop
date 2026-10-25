@@ -1,5 +1,8 @@
 # Above 30 FPS: what still assumes the game's 30
 
+For the 60 FPS++ list's own entries (our frame-rate base at every rate) see frame-rate-survey.md: each one
+read, and what the frame-rate corrections do with it. This note is the wider search, from before.
+
 Bloodborne runs its logic at 30 frames a second. The frame-rate presets (`patches.py`:
 `FPS_PRESETS`, `SCALED_FPS`, `frame_rate_fixes`) give it the real frame time and correct what the
 community lists got wrong (effect rate, cloth, follow camera, status effects, stamina, sprint).
