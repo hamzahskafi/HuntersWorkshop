@@ -189,17 +189,17 @@ void Discard(Hook& hook) {
 void Commit(std::span<Hook> hooks) {
     // The loader still owns writable image pages and has not entered guest code.
     // No hook is installed into a running game or overwritten without a byte check.
+    // Through WriteCode: an engine feature may already have written its page with it, which on Linux
+    // leaves the page read and execute only (the frame-rate corrections' pacer targets share a page
+    // with the frame hook).
     for (Hook& hook : hooks) {
-        hook.site[0] = 0xff; hook.site[1] = 0x25;
-        std::memset(hook.site + 2, 0, 4);
+        std::uint8_t jump[128];
+        jump[0] = 0xff; jump[1] = 0x25;
+        std::memset(jump + 2, 0, 4);
         const auto dest = reinterpret_cast<std::uint64_t>(hook.stub);
-        std::memcpy(hook.site + 6, &dest, 8);
-        std::memset(hook.site + 14, 0xcc, hook.bytes - 14);
-#ifdef _WIN32
-        FlushInstructionCache(GetCurrentProcess(), hook.site, hook.bytes);
-#else
-        __builtin___clear_cache(reinterpret_cast<char*>(hook.site), reinterpret_cast<char*>(hook.site + hook.bytes));
-#endif
+        std::memcpy(jump + 6, &dest, 8);
+        std::memset(jump + 14, 0xcc, hook.bytes - 14);
+        WriteCode(hook.site, jump, hook.bytes);
     }
 }
 bool WriteCode(void* address,const void* bytes,std::size_t size) {

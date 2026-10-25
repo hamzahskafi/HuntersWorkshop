@@ -1,5 +1,8 @@
 # Above 30 FPS: what still assumes the game's 30
 
+For the 60 FPS++ list's own entries (our frame-rate base at every rate) see frame-rate-survey.md: each one
+read, and what the frame-rate corrections do with it. This note is the wider search, from before.
+
 Bloodborne runs its logic at 30 frames a second. The frame-rate presets (`patches.py`:
 `FPS_PRESETS`, `SCALED_FPS`, `frame_rate_fixes`) give it the real frame time and correct what the
 community lists got wrong (effect rate, cloth, follow camera, status effects, stamina, sprint).
@@ -28,8 +31,8 @@ Not every 30 is a 30 fps assumption. Three kinds:
    presets do for the camera and status effects.
 3. **Not time at all** (30 degrees, 30 units, a 30-entry table): leave alone.
 
-Still to classify: the other 68 unpatched functions, starting with `0x12ab4c0` (10 sites, 1/30
-and 30.0 mixed), `0x188d8f0` (7), `0x21d9ea0` and `0x1576240` (4 each).
+All of them are classified now (frame-rate-survey.md, "The game's other 30s"). With the 0.3.0 table
+the scan leaves 91 sites in 69 functions; none needs converting.
 
 ## Not visible to the scan
 

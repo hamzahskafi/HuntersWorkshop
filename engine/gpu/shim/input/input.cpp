@@ -8,9 +8,11 @@
 #include "../bbport_settings.h"
 #include "../bbport_overlay.h"
 #include "../engine/option_menu.h"
+#include "../engine/change_appearance.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -25,6 +27,7 @@ float mouse_x=0,mouse_y=0;
 int window_w=1920,window_h=1080;
 uint32_t mouse_buttons=0,mouse_edges=0;
 float wheel=0;
+float drag_x=0,drag_y=0; // the pointer's movement while the left button is held, outside the camera
 std::atomic<bool> in_window{true};
 ElfImage image{};
 uint64_t saved_serial=0;
@@ -100,7 +103,7 @@ void Tick() {
 void Event(const SDL_Event& e,bool blocked) {
     if(!active)return;
     if(e.type==SDL_EVENT_WINDOW_FOCUS_LOST) {focused=false;wanted_relative=false;mouse_camera::g_counts=0;
-        std::lock_guard lock(state_lock);mouse_buttons=mouse_edges=0;wheel=0;return;}
+        std::lock_guard lock(state_lock);mouse_buttons=mouse_edges=0;wheel=0;drag_x=drag_y=0;return;}
     if(e.type==SDL_EVENT_WINDOW_FOCUS_GAINED)focused=true;
     if(e.type==SDL_EVENT_WINDOW_MOUSE_LEAVE)in_window=false;
     if(e.type==SDL_EVENT_WINDOW_MOUSE_ENTER)in_window=true;
@@ -112,6 +115,7 @@ void Event(const SDL_Event& e,bool blocked) {
     if(e.type==SDL_EVENT_MOUSE_MOTION){
         device=InputDevice::KeyboardMouse;std::lock_guard lock(state_lock);mouse_x=e.motion.x;mouse_y=e.motion.y;
         if(relative && focused)mouse_camera::add(mouse_camera::g_counts,e.motion.xrel,e.motion.yrel);
+        else if(mouse_buttons&SDL_BUTTON_LMASK){drag_x+=e.motion.xrel;drag_y+=e.motion.yrel;}
     }
     if(e.type==SDL_EVENT_MOUSE_BUTTON_DOWN || e.type==SDL_EVENT_MOUSE_BUTTON_UP){
         device=InputDevice::KeyboardMouse;
@@ -140,6 +144,44 @@ void Pump(SDL_Window* w,bool editing) {
 }
 }
 
+namespace {
+// Character creation by mouse (after Lantern Engine 0.9.37, Awakenchan): while the hunter's preview
+// is on screen (ChangeAppearancePreview: character creation at the title, the Dream mirror's
+// editor), a left drag on the hunter turns them with the right stick, and a left drag elsewhere
+// steps the value of the row under the pointer, Left or Right for every 8 pixels across.
+// The hunter's half of the stage (chrmake_bg.gfx's model panel), in stage pixels.
+constexpr float kPreviewLeft=1028,kPreviewRight=1810,kPreviewTop=117,kPreviewBottom=895;
+constexpr float kDragStartPx=6,kDragStepPx=8;
+bool turning=false;
+struct ValueDrag {bool on=false,moved=false,released=true;float anchor=0;int steps=0;} value_drag;
+
+// The pad press a value drag makes this frame: one step every other frame, so each is a new press.
+uint32_t drag_value(bool preview,uint32_t buttons,uint32_t edges) {
+    float x=0,y=0;
+    const bool on_stage=host_mouse_stage_position(x,y);
+    if(preview && (edges&SDL_BUTTON_LMASK) && !turning && on_stage)value_drag={true,false,value_drag.released,x,0};
+    if(!preview || !(buttons&SDL_BUTTON_LMASK) || turning) {
+        if(value_drag.on)menu_pointer_hold_row(false);
+        value_drag.on=false;
+    }
+    if(value_drag.on && on_stage) {
+        if(!value_drag.moved && std::abs(x-value_drag.anchor)>=kDragStartPx) {
+            value_drag.moved=true;
+            menu_pointer_hold_row(true); // the row under the pointer at the press keeps the cursor
+        }
+        if(value_drag.moved) {
+            const int steps=int((x-value_drag.anchor)/kDragStepPx);
+            value_drag.steps+=steps;value_drag.anchor+=float(steps)*kDragStepPx;
+        }
+    }
+    if(!value_drag.released || !value_drag.steps){value_drag.released=true;return 0;}
+    value_drag.released=false;
+    const bool right=value_drag.steps>0;
+    value_drag.steps+=right?-1:1;
+    return right?0x20u:0x80u;
+}
+}
+
 extern "C" int bbgpu_menu_buttons(uint32_t* confirm,uint32_t* back) {
     if(!active)return 0;
     *confirm=menu_confirm_button();*back=menu_back_button();
@@ -164,8 +206,9 @@ extern "C" int bbgpu_pc_input(BbPcPad* d,const bool* keys,int nkeys,int gamepad_
     wanted_relative=camera && device==InputDevice::KeyboardMouse;
     mouse_camera_publish(s.mouse_sensitivity,s.mouse_invert_x,s.mouse_invert_y,
         camera && device==InputDevice::KeyboardMouse && !s.mouse_auto_rotation);
-    uint32_t buttons,edges;float scroll;
-    {std::lock_guard lock(state_lock);buttons=mouse_buttons;edges=mouse_edges;scroll=wheel;mouse_edges=0;wheel=0;}
+    uint32_t buttons,edges;float scroll,dx,dy;
+    {std::lock_guard lock(state_lock);buttons=mouse_buttons;edges=mouse_edges;scroll=wheel;dx=drag_x;dy=drag_y;
+        mouse_edges=0;wheel=0;drag_x=drag_y=0;}
     bool any=buttons!=0;for(int i=0;keys&&i<nkeys;i++)any|=keys[i];
     host_bind_capture_note_held(any);
     if(!focused || host_text_entry_open() || host_bind_capture_blocking()){p=PadState{};wanted_relative=false;}
@@ -220,12 +263,26 @@ extern "C" int bbgpu_pc_input(BbPcPad* d,const bool* keys,int nkeys,int gamepad_
             if(!free_move)for(int i=kBindMoveF;i<=kBindMoveR;i++)held[i]=false;
         }
         host_bindings_apply(held,held[kBindStrongMod],p);
+        const bool preview=menu && s.mouse_menu && BbEngine::ChangeAppearancePreview();
+        if(!preview || !(buttons&SDL_BUTTON_LMASK))turning=false;
+        if(preview && (edges&SDL_BUTTON_LMASK)) {
+            float x=0,y=0;
+            turning=host_mouse_stage_position(x,y) && x>=kPreviewLeft && x<=kPreviewRight && y>=kPreviewTop && y<=kPreviewBottom;
+        }
+        // Every frame, so a drag still held when the preview goes lets go of its row.
+        const uint32_t value_step=drag_value(preview,buttons,edges);
         if(menu) {
             if(s.mouse_menu){
-                if(edges&1)menu_pointer_click();
+                if((edges&1) && !turning)menu_pointer_click();
                 if(edges&SDL_BUTTON_RMASK)p.buttons|=menu_back_button();
-                if((navigating||free_move) && scroll>0)p.buttons|=0x10;if((navigating||free_move) && scroll<0)p.buttons|=0x40;
+                // The preview's lists step a value by ten with L1 and R1: the wheel does.
+                if(preview && scroll!=0)p.buttons|=scroll>0?0x800u:0x400u;
+                else {
+                    if((navigating||free_move) && scroll>0)p.buttons|=0x10;
+                    if((navigating||free_move) && scroll<0)p.buttons|=0x40;
+                }
                 p.buttons|=menu_pointer_take_press();
+                p.buttons|=value_step;
             }
             // Options (Escape) closes a menu as well: W held through it was a d-pad up in the world.
             const uint32_t closing=menu_confirm_button()|menu_back_button()|0x8u;
@@ -233,6 +290,11 @@ extern "C" int bbgpu_pc_input(BbPcPad* d,const bool* keys,int nkeys,int gamepad_
         }else {
             bool mh[kBindCount]={};host_bindings_mouse_held(buttons|edges|(scroll>0?32:scroll<0?64:0),mh);
             host_bindings_apply(mh,held[kBindStrongMod]||mh[kBindStrongMod],p);
+        }
+        if(turning) {
+            const float gain=2.5f*float(std::max(1,int(s.mouse_sensitivity)));
+            p.rx=uint8_t(std::clamp(127+int(dx*gain),0,254));
+            p.ry=uint8_t(std::clamp(127+int(dy*gain),0,254));
         }
         // The camera is off in menus unless menu_move leaves it the mouse (see camera above).
         float x,y;if(camera && mouse_camera_flick(x,y)){

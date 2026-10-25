@@ -29,6 +29,25 @@ FPS_PRESETS={'30':[],'60':['60 FPS++'],'90':['90 FPS++','Sprint Fix (High FPS)']
 # fell that much faster).
 SCALED_FPS={'120':120,'144':144}
 SCALED_BASE='90 FPS++'
+# The frame-rate corrections (the engine's frame_rate.cpp; BB_FRAME_FIXES=0, the launcher's "Frame rate
+# corrections" off, or safe mode turns them off): every rate above 30 on the 60 FPS++ list, as bbhost runs
+# it, the engine setting the frame pacer's target, the values for the rate and the cloth (which the 90 FPS++
+# list carries) and fixing the sprint's wall test (the Sprint Fix's job). Off: the presets above, as before.
+SIXTY_BASE='60 FPS++'
+# Uncapped's reference rate for what is converted once (the engine's too): 120, as bbhost and Kyo's uncapped
+# list take it.
+UNCAPPED_REFERENCE=120
+
+
+def frame_fixes_on(env=os.environ):
+    return not env.get('BB_FRAME_FIXES','1').startswith('0')
+
+
+def fps_preset(fps, corrections):
+    """The FPS preset's patch names, and whether it is the 60 FPS++ list at a rate above 60."""
+    if corrections and fps not in ('30','60'):
+        return [SIXTY_BASE],True
+    return (FPS_PRESETS[fps] if fps in FPS_PRESETS else [SCALED_BASE,'Sprint Fix (High FPS)']),False
 
 
 def scaled_rate_values(fps):
@@ -50,12 +69,25 @@ def scaled_rate_values(fps):
     }
 
 
+# The per-frame steps 60 FPS++ halves from the game's 1/30 to 1/60 (physics, falling objects and
+# more): the 90 FPS++ base keeps them at 1/60, so at 120 FPS they ran twice as fast ("gravity
+# doubled"). Here they are 1/fps (the corrections off only: with them, the engine reads the physics
+# world's step from the frame and the rest keep Kyo's 1/60, as bbhost). 0x4D27C4C is the effects'
+# second step (#15), fixed separately. BB_FRAME_STEP_FIX=0 keeps them at 1/60.
+EFFECT_SECOND_STEP=0x4D27C4C
+
+
 def rate_scaled(writes, fps):
-    """The 90 FPS++ writes with their frame-rate values for `fps`."""
+    """The 90 FPS++ writes with their frame-rate values for `fps` (120 or 144)."""
     values=scaled_rate_values(fps)
+    sixtieth,step=struct.pack('<f',1/60),struct.pack('<f',1/fps)
+    step_fix=os.environ.get('BB_FRAME_STEP_FIX','1')!='0'
     out,seen=[],set()
     for offset,data in writes:
         value=values.get(offset+EBOOT_BASE)
+        if step_fix and value is None and data==sixtieth and offset+EBOOT_BASE!=EFFECT_SECOND_STEP:
+            out.append((offset,step))
+            continue
         if value is not None:
             if len(value)!=len(data): raise ValueError(f'{SCALED_BASE}: {offset+EBOOT_BASE:#x} changed size')
             data=value
@@ -91,14 +123,24 @@ CLOTH_LEFT_OUT=((0xB6FBD4,0xB6FBD8),(0xB73F84,0xB73F8D),(0xB73FA8,0xB73FC1),(0x4
 # the direct pitch angle (+0x238) is an angle. Three weights no list tunes are the game's own for
 # a 30 fps frame, converted from it at every rate: the LockCamParam blend (+0x330, an immediate
 # no list writes), the distance ease (0x4D25E68, 0.1; the lists' 0.025 eased at half speed at 60)
-# and the chase-rate ease (0x4D25E94, 1/30).
+# and the chase-rate ease (0x4D25E94, 1/30). That conversion is BB_CAMERA_FIX=1 (below).
+#
+# Original (camera_tuning in config.ini or BB_CAMERA_TUNING, the default) leaves Kyo's retune out: the
+# constructor's defaults, the stores (and the jumps after them: the per-area camera parameters load again),
+# the wall escape and the jump over the game's follow camera, converting the game's own eases from a 30 fps
+# frame, as bbhost's Camera tuning: Original (players saw the retune pull back, lag and widen while
+# sprinting, GitHub issue 32). FPS++ above 60 with the frame-rate corrections on: the retune's weights and
+# eases (the constructor's, the stores', the list's distance and chase-rate eases and LockCamParam's blend)
+# are a 60 fps frame's, converted from it, so the camera moves as it does at 60 (bbhost's camera_tuned_fps).
 CAMERA_FIELDS={0x183a4c3:0x19c,0x183a4cd:0x1a0,0x183a4d7:0x1a4,0x183a4e1:0x1a8,0x183a4f5:0x1b0,
                0x183a4ff:0x1b4,0x183a509:0x1b8,0x183a527:0x1c4,0x183a531:0x1c8,0x183a53b:0x1cc,
                0x183a649:0x238,0x183a653:0x23c,0x183a65d:0x240,0x183a8c1:0x19c,0x183a8cb:0x1a0,
                0x183a8d5:0x1a4,0x183a8df:0x1a8,0x183a8f3:0x1b0,0x183a8fd:0x1b4,0x183a907:0x1b8,
                0x183a925:0x1c4,0x183a92f:0x1c8,0x183a939:0x1cc,0x183aa47:0x238,0x183aa51:0x23c,
                0x183aa5b:0x240}
-CAMERA_STORES=((0x183FF29,0x183FF6B),(0x1840799,0x18407E6))
+CAMERA_STORES=((0x183FF29,0x183FF70),(0x1840799,0x18407EB))  # the stores and the jump after each, ends exclusive
+CAMERA_WALL_ESCAPE=0x183DCFE
+CAMERA_SKIP=0x183DC96  # the jump the retune puts over 1.5 KiB of the game's follow camera
 CAMERA_ANGLE,CAMERA_KEPT=0x238,0x1a8
 CAMERA_EASES={0x4D25E68:0.1,0x4D25E94:1/30}
 CAMERA_PARAM_EASE=(0x183A7DE,bytes.fromhex('cdcc4c3d'))  # mov dword [rbx+0x330], 0.05
@@ -109,6 +151,10 @@ CAMERA_PARAM_EASE=(0x183A7DE,bytes.fromhex('cdcc4c3d'))  # mov dword [rbx+0x330]
 # sets the constant the second reads to 1/60: right at 60 only, so at 90, 120 and 144 effects ran
 # 1.33, 1.5 and 1.6 times as fast (poison ticks, build-up and its decay, buff durations). The
 # second load reads the frame's time too, wherever a list repoints the first.
+# The engine's timed condition wait (sub_2483e80): the lists turn its call into a bare ret, five pushes deep,
+# which would return to a pushed register if it ran; its 16 direct callers all wait without a timeout, so it
+# never does. Left out, as bbhost leaves it: the game's call stays.
+TIMED_WAIT=(0x2483EC1,0x2483EC6)
 EFFECT_STEP_FIRST=0x1CBC4FB
 EFFECT_STEP_SECOND=(0x1CBC511,bytes.fromhex('37b70603'),bytes.fromhex('f3e3a903'))  # vmovss xmm0, [rip+disp]
 
@@ -119,41 +165,58 @@ def camera_value(field, value, frames):
     return value**frames if field==CAMERA_KEPT else 1-(1-value)**frames
 
 
-def frame_rate_fixes(writes, fps, elf=None):
-    """The frame-rate preset's writes with the corrections above, for `fps` (None: uncapped,
-    whose rate is not known here; only the effects' rate is put back)."""
+def kyo_camera_site(address, size):
+    """A write of Kyo's camera retune, left out with the camera as the game has it."""
+    return (address in CAMERA_FIELDS or address in (CAMERA_WALL_ESCAPE,CAMERA_SKIP) or
+            any(address<hi and address+size>lo for lo,hi in CAMERA_STORES))
+
+
+def frame_rate_fixes(writes, fps, elf=None, original_camera=False, sixty_camera=False):
+    """The frame-rate preset's writes with the corrections above, for `fps` (None: uncapped on its own
+    list, whose rate is not known here; only the effects' rate is put back). `original_camera`: the
+    game's follow camera; `sixty_camera`: the retune's weights converted from 60 above it."""
     f=lambda v: struct.pack('<f',v)
     # BB_CAMERA_FIX=1 (the launcher's Extra variables): the camera eases as far in a second as the
     # game does at 30. Off by default: players found it trailing too far behind when running (#32);
     # the camera keeps the FPS++ list's values, as up to 0.9.24.
-    camera=os.environ.get('BB_CAMERA_FIX','0')=='1'
+    camera=not original_camera and os.environ.get('BB_CAMERA_FIX','0')=='1'
+    sixty_camera=sixty_camera and not original_camera and not camera and bool(fps) and fps>60
+    original_camera=original_camera and bool(fps)
     out=[]
     for offset,data in writes:
         a=offset+EBOOT_BASE
-        if a in EFFECT_RATE_SITES:
+        if a in EFFECT_RATE_SITES or (a<TIMED_WAIT[1] and a+len(data)>TIMED_WAIT[0]):
             continue
+        if original_camera:
+            if kyo_camera_site(a,len(data)):
+                continue
+            if a in CAMERA_EASES:
+                out.append((offset,f(camera_value(None,CAMERA_EASES[a],30/fps))))
+                continue
         if fps and fps>60:
             left=next(((lo,hi) for lo,hi in CLOTH_LEFT_OUT if lo<=a<hi),None)
             if left:
                 if a+len(data)>left[1]: raise ValueError(f'frame-rate patch: {a:#x} reaches past {left[1]:#x}')
                 continue
             if a==CLOTH_STIFFNESS: data=f((60/fps)**2)*4
-        if fps and camera:
+        if fps and (camera or sixty_camera):
             if a in CAMERA_FIELDS:
                 data=f(camera_value(CAMERA_FIELDS[a],struct.unpack('<f',data)[0],60/fps))
             elif any(lo<=a<hi for lo,hi in CAMERA_STORES) and len(data)==11 and data[:3]==bytes.fromhex('41c785'):
                 field,value=struct.unpack('<If',data[3:])
                 data=data[:7]+f(camera_value(field,value,60/fps))
             elif a in CAMERA_EASES:
-                data=f(camera_value(None,CAMERA_EASES[a],30/fps))
+                data=(f(camera_value(None,CAMERA_EASES[a],30/fps)) if camera else
+                      f(camera_value(None,struct.unpack('<f',data)[0],60/fps)))
         out.append((offset,data))
     at,was,now=EFFECT_STEP_SECOND
-    if any(offset+EBOOT_BASE==EFFECT_STEP_FIRST for offset,_ in out) and             (elf is None or original_bytes(elf,at-EBOOT_BASE,len(was))==was):
+    if any(offset+EBOOT_BASE==EFFECT_STEP_FIRST for offset,_ in out) and \
+            (elf is None or original_bytes(elf,at-EBOOT_BASE,len(was))==was):
         out.append((at-EBOOT_BASE,now))
-    if fps and camera:
+    if fps and (camera or sixty_camera):
         at,was=CAMERA_PARAM_EASE
         if elf is None or original_bytes(elf,at-EBOOT_BASE,len(was))==was:
-            out.append((at-EBOOT_BASE,f(camera_value(None,struct.unpack('<f',was)[0],30/fps))))
+            out.append((at-EBOOT_BASE,f(camera_value(None,struct.unpack('<f',was)[0],(30 if camera else 60)/fps))))
     return out
 
 
@@ -716,8 +779,10 @@ def main():
         size=render_size(settings)
         if size: print(f'{size[0]}x{size[1]}')
         return
-    # 30's preset is empty (the game's own): only 120 and 144 take the scaled 90 FPS++.
-    preset=FPS_PRESETS[a.fps] if a.fps in FPS_PRESETS else [SCALED_BASE,'Sprint Fix (High FPS)']
+    # 30's preset is empty (the game's own); with the corrections every other rate is the 60 FPS++ list,
+    # without them 120 and 144 take the scaled 90 FPS++.
+    corrections=frame_fixes_on()
+    preset,on_sixty=fps_preset(a.fps,corrections)
     names=preset+[n.strip() for n in a.extra.split(';') if n.strip()]
     names+=[n for n in effect_patches(read_settings(a.settings)) if n not in names]
     selected=[n for n in builtin_selection(a.xml,a.patches_config) if n not in names]
@@ -738,8 +803,19 @@ def main():
     if a.fps in SCALED_FPS and SCALED_BASE in names:
         writes=rate_scaled(writes,SCALED_FPS[a.fps])
         print(f'Patches: {a.fps} FPS: {SCALED_BASE} with its frame-rate values for {a.fps}')
+    if on_sixty and SIXTY_BASE in names:
+        print(f'Patches: {"uncapped" if a.fps=="uncap" else a.fps+" FPS"} on the 60 FPS++ list: the engine sets the pace '
+              f'and the values for the rate (frame-rate corrections; off, the '
+              f'{ {"uncap":"Uncap FPS++","90":"90 FPS++"}.get(a.fps,"scaled 90 FPS++") } list)')
     if preset and preset[0] in names:
-        writes=frame_rate_fixes(writes,{'60':60,'90':90,**SCALED_FPS}.get(a.fps),elf)
+        fps={'60':60,'90':90,**SCALED_FPS}.get(a.fps)
+        if a.fps=='uncap' and on_sixty: fps=UNCAPPED_REFERENCE
+        tuning=os.environ.get('BB_CAMERA_TUNING',read_settings(a.settings).get('camera_tuning','original')).lower()
+        writes=frame_rate_fixes(writes,fps,elf,tuning!='fps++',corrections)
+        if fps:
+            print('Patches: follow camera '+('as the game has it, its eases converted from 30 FPS' if tuning!='fps++' else
+                  'with the FPS++ retune, its weights converted from 60 FPS' if corrections and fps>60 else
+                  'with the FPS++ retune (camera_tuning=fps++)'))
     writes+=old_hunters_writes(elf)
     pools=render_pool_writes(elf)
     if pools:

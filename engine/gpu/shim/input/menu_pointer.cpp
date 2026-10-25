@@ -147,6 +147,7 @@ std::atomic<std::int64_t> g_focus_ms{0};
 // The last time a list with focus offered a choice (offers_choice): what decides whether the keys
 // that move the character navigate a menu in the world (menu_pointer_navigating).
 std::atomic<std::int64_t> g_choice_ms{0};
+std::atomic<bool> g_hold_row{false};
 std::atomic<bool> g_click{false};
 std::atomic<std::int64_t> g_click_ms{0};
 std::atomic<std::uint32_t> g_press{0};
@@ -354,8 +355,8 @@ int item_at(std::uint8_t* c, float sx, float sy, bool log, std::uint64_t* packed
             // An option row's glow covers its label, not its value; the value
             // widget beside it is part of the row too, as DS3's whole-row
             // HitArea is. Only the widget that is showing - a row carries all
-            // four and hides three.
-            for (const char* part : {"Widgets/ComboBox", "Widgets/Slider"}) {
+            // four and hides three. Character creation's rows have their own "Slider".
+            for (const char* part : {"Widgets/ComboBox", "Widgets/Slider", "Slider"}) {
                 if (in) {
                     break;
                 }
@@ -445,6 +446,10 @@ std::uint32_t click_button(std::uint8_t* c, int index, std::uint64_t packed, flo
         return kRight;
     }
     if (shown_hit("Widgets/ComboBox", &w, 0.0f)) {
+        return sx < (w.x1 + w.x2) * 0.5f ? kLeft : kRight;
+    }
+    // Character creation's sliders (after Lantern Engine 0.9.37): a click steps toward its side.
+    if (shown_hit("Slider", &w, 0.0f)) {
         return sx < (w.x1 + w.x2) * 0.5f ? kLeft : kRight;
     }
     return kCircle;
@@ -598,6 +603,10 @@ void pointer_step(std::uint8_t* c, const std::uint8_t* input) {
     g_focus_ms.store(focused_ms, std::memory_order_relaxed);
     if (offers_choice(c)) {
         g_choice_ms.store(focused_ms, std::memory_order_relaxed);
+    }
+    // A value dragged by the mouse (character creation) keeps its row while the pointer crosses others.
+    if (g_hold_row.load(std::memory_order_relaxed)) {
+        return;
     }
     // Nor while a controller is the device in use: its cursor is hidden, and
     // the mouse moving again is what hands it back (host_input_device).
@@ -870,6 +879,8 @@ void menu_pointer_click() {
 }
 
 std::uint32_t menu_pointer_take_press() { return g_press.exchange(0); }
+
+void menu_pointer_hold_row(bool hold) { g_hold_row.store(hold, std::memory_order_relaxed); }
 
 std::uint64_t menu_pointer_tick() { return g_tick.load(std::memory_order_relaxed); }
 

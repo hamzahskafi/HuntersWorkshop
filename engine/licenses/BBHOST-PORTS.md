@@ -68,8 +68,25 @@ engine/frame_rate.cpp and frame_rate_sites.inc adapt from src/engine/frame_rate.
 to read the frame's time (kFrameTimeSites: the ragdoll/clip drive, the Havok physics and AI worlds,
 grass, the target bank), the per-frame loads (frame_rate_dt_loads.inc, made by tools/dt_loads.py;
 here they read slots past the end of the game's data segment, in its last page), the values bbhost sets differently from Kyo's
-"60 FPS++" at 60, the durations tools/fps_sites.py keeps from that list, and the play time's count.
-They are applied over Kyo's list as patches/Bloodborne.xml ships it, with the frame's step from the
-list's own cave, instead of bbhost's SprjFlipper::Update; a constant the list changed is converted
-from the game's value. bbhost credits the findings it collects there to Kyo's 1.3 lists and
+"60 FPS++" at 60, the durations tools/fps_sites.py keeps from that list, and the play time's count;
+above 60, as bbhost runs every rate on that list, the frame pacer's target, the values that follow
+the rate (kRated) and the counts (kCounts: the sound thread's MainThreadUpdateTime among them, in
+place of the list's sleep cap), the cloth's six stiffness caves from "90 FPS++" (ninety_fps_sites.inc)
+with their (60 dt)^2 scale read from slots, and uncapped's reference rate (120). They are applied over
+Kyo's list as patches/Bloodborne.xml ships it, with the frame's step from the list's own cave, instead
+of bbhost's SprjFlipper::Update; a constant the list changed is converted from the game's value. The
+patch builders (start/patches.cpp, scripts/patches.py) leave out the list's timed-wait return, as
+fps_sites.py does, and convert the FPS++ camera's weights from a 60 fps frame above 60, after
+bbhost's camera_tuned_fps. bbhost credits the findings it collects there to Kyo's 1.3 lists and
 yogesh1239's high-FPS fixes.
+
+Since 0.3.0 the Windows start program writes Kyo's "60 FPS++" from our own table,
+start/frame_rate_base.inc (made by tools/re/frame_rate_base.py from the list and a 1.09 eboot, its
+comments after what src/engine/frame_rate.cpp says each entry is), instead of the patch file's list. The
+frame timer (BB_FRAME_TIMER=1) follows bbhost's kStepLoad: the cave loads a step of ours into the task
+step, here from the game's own pacer measurement through a hook in the cave rather than bbhost's
+SprjFlipper::Update, and the follow camera's two eases are read per frame, as bbhost's each_frame
+kRated entries. The rest of the list's fixed steps, read entry by entry for 0.3.0
+(docs/frame-rate-survey.md), are ours, not bbhost's: the step-infos made to read the frame's step
+(frame_rate_sites.inc's steps, tools/re/frame_rate_steps.py), the steps objects keep, the pacer's first
+target, the camera lens filter's rate, and the durations after the Havok AI's braking limit.

@@ -1257,8 +1257,6 @@
   "Memory the game rewrites before almost every use is no longer watched for changes, saving up to about 2 ms a frame in busy areas. New: off by default while it is tested": "ゲームがほぼ毎回使用前に書き換えるメモリの変更監視をやめ、負荷の高いエリアで 1 フレームあたり最大約 2 ms を節約します。新機能: テスト中のため既定ではオフ",
   "Effect trail crash fix": "エフェクト軌跡のクラッシュ修正",
   "For crashes while drawing effect trails on newer Intel CPUs (Witch of Hemwick, for example): stops the crash, and that kind of trail is not drawn. Off by default": "新しい Intel CPU でエフェクトの軌跡を描画中に起こるクラッシュ (例: ヘムウィックの魔女) 向け: クラッシュを防ぎますが、その種の軌跡は描画されません。既定ではオフ",
-  "Camera easing for high FPS": "高 FPS 向けのカメライージング",
-  "With the FPS++ follow camera only: its eases converted for 60 FPS and above. Off by default": "FPS++ の追従カメラ使用時のみ: イージングを 60 FPS 以上向けに変換します。既定ではオフ",
   "Follow camera": "追従カメラ",
   "Original keeps the game's camera distance, angle and follow speed at 60 FPS and above": "「オリジナル」では、60 FPS 以上でもゲーム本来のカメラ距離、角度、追従速度を維持します",
   "Settings most players never need to change": "ほとんどのプレイヤーが変更する必要のない設定",

@@ -274,9 +274,18 @@ class ScaledRateTests(unittest.TestCase):
     WIDE = [(0, 1 << 40)]
 
     def test_the_formulas_rebuild_90_fps(self):
-        # At 90 every frame-rate value is the patch's own.
+        # At 90 every frame-rate value is the patch's own (the steps it keeps at 1/60 too, without the step fix).
+        os.environ['BB_FRAME_STEP_FIX'] = '0'
+        self.addCleanup(os.environ.pop, 'BB_FRAME_STEP_FIX', None)
         writes = patches.compile_patches(XML, [patches.SCALED_BASE], '01.09', self.WIDE)
         self.assertEqual(patches.rate_scaled(writes, 90), writes)
+
+    def test_the_step_fix_makes_the_sixtieths_the_rate(self):
+        os.environ.pop('BB_FRAME_STEP_FIX', None)
+        writes = patches.compile_patches(XML, [patches.SCALED_BASE], '01.09', self.WIDE)
+        scaled = {o + EBOOT_BASE: d for o, d in patches.rate_scaled(writes, 120)}
+        self.assertEqual(scaled[0x1EA4003], struct.pack('<f', 1 / 120))
+        self.assertEqual(scaled[patches.EFFECT_SECOND_STEP], struct.pack('<f', 1 / 60))
 
     def test_120_and_144_values(self):
         for fps in (120, 144):
@@ -361,8 +370,49 @@ class FrameRateFixTests(unittest.TestCase):
         writes = patches.compile_patches(XML, ['Uncap FPS++'], '01.09', self.WIDE)
         fixed = patches.frame_rate_fixes(writes, None)
         at, _was, now = patches.EFFECT_STEP_SECOND
-        self.assertEqual(fixed, [w for w in writes if w[0] + EBOOT_BASE not in patches.EFFECT_RATE_SITES] +
-                         [(at - EBOOT_BASE, now)])
+        lo, hi = patches.TIMED_WAIT
+        self.assertEqual(fixed, [w for w in writes if w[0] + EBOOT_BASE not in patches.EFFECT_RATE_SITES and
+                                 not lo <= w[0] + EBOOT_BASE < hi] + [(at - EBOOT_BASE, now)])
+
+    def test_the_timed_wait_keeps_the_games_call(self):
+        # The lists' bare ret, five pushes deep, in the engine's timed condition wait: never written.
+        lo, hi = patches.TIMED_WAIT
+        for name in ('60 FPS++', '90 FPS++', 'Uncap FPS++'):
+            with self.subTest(name=name):
+                writes = patches.compile_patches(XML, [name], '01.09', self.WIDE)
+                self.assertTrue([o for o, _ in writes if lo <= o + EBOOT_BASE < hi])
+                fixed = patches.frame_rate_fixes(writes, 60)
+                self.assertFalse([o for o, d in fixed if o + EBOOT_BASE < hi and o + EBOOT_BASE + len(d) > lo])
+
+    def test_the_retune_keeps_its_60_fps_feel_above_60(self):
+        # FPS++ with the corrections: Kyo's weights are a 60 FPS frame's, converted from it; at 60 as the list.
+        os.environ.pop('BB_CAMERA_FIX', None)
+        writes = patches.compile_patches(XML, ['60 FPS++'], '01.09', self.WIDE)
+        at60 = {o + EBOOT_BASE: d for o, d in patches.frame_rate_fixes(writes, 60, sixty_camera=True)}
+        plain = {o + EBOOT_BASE: d for o, d in writes}
+        for at in (0x183A4D7, 0x4D25E68, 0x4D25E94, 0x183FF29):
+            self.assertEqual(at60[at], plain[at])
+        self.assertNotIn(patches.CAMERA_PARAM_EASE[0], at60)
+        for fps in (90, 120, 144):
+            with self.subTest(fps=fps):
+                image = {o + EBOOT_BASE: d for o, d in patches.frame_rate_fixes(writes, fps, sixty_camera=True)}
+                frames = 60 / fps
+                self.assertAlmostEqual(self.value(image, 0x183A4D7), 1 - 0.95 ** frames, places=6)
+                self.assertAlmostEqual(self.value(image, 0x183A4E1), 0.05 ** frames, places=6)  # kept
+                self.assertAlmostEqual(self.value(image, 0x4D25E68), 1 - 0.975 ** frames, places=6)  # the list's 0.025
+                self.assertAlmostEqual(self.value(image, 0x4D25E94), 1 - (1 - 1 / 30) ** frames, places=6)
+                self.assertAlmostEqual(struct.unpack('<f', image[0x183FF29][7:])[0], 1 - 0.95 ** frames, places=6)
+                self.assertAlmostEqual(self.value(image, patches.CAMERA_PARAM_EASE[0]), 1 - 0.95 ** frames, places=6)
+
+    def test_original_camera_leaves_the_retune_out(self):
+        writes = patches.compile_patches(XML, ['60 FPS++'], '01.09', self.WIDE)
+        for fps in (60, 120):
+            with self.subTest(fps=fps):
+                fixed = patches.frame_rate_fixes(writes, fps, original_camera=True)
+                self.assertFalse([o for o, d in fixed if patches.kyo_camera_site(o + EBOOT_BASE, len(d))])
+                image = {o + EBOOT_BASE: d for o, d in fixed}
+                self.assertAlmostEqual(self.value(image, 0x4D25E68), 1 - 0.9 ** (30 / fps), places=6)
+                self.assertAlmostEqual(self.value(image, 0x4D25E94), 1 - (1 - 1 / 30) ** (30 / fps), places=6)
 
     def test_status_effects_follow_the_frame_time_twice(self):
         # Issue 15: the second advance of a character's effects (0x1cbc50d) reads the frame's
@@ -372,6 +422,22 @@ class FrameRateFixTests(unittest.TestCase):
             writes = patches.compile_patches(XML, [name], '01.09', self.WIDE)
             self.assertIn((at - EBOOT_BASE, now), patches.frame_rate_fixes(writes, 120))
         self.assertEqual(patches.frame_rate_fixes([], 60), [])
+
+
+class FpsPresetTests(unittest.TestCase):
+    def test_every_rate_takes_the_60_list_with_the_corrections(self):
+        for fps in ('90', '120', '144', 'uncap'):
+            with self.subTest(fps=fps):
+                self.assertEqual(patches.fps_preset(fps, True), (['60 FPS++'], True))
+        self.assertEqual(patches.fps_preset('60', True), (['60 FPS++'], False))
+        self.assertEqual(patches.fps_preset('30', True), ([], False))
+
+    def test_without_them_the_lists_as_before(self):
+        self.assertEqual(patches.fps_preset('90', False), (['90 FPS++', 'Sprint Fix (High FPS)'], False))
+        self.assertEqual(patches.fps_preset('144', False), ([patches.SCALED_BASE, 'Sprint Fix (High FPS)'], False))
+        self.assertEqual(patches.fps_preset('uncap', False), (['Uncap FPS++', 'Sprint Fix (High FPS)'], False))
+        self.assertFalse(patches.frame_fixes_on({'BB_FRAME_FIXES': '0'}))
+        self.assertTrue(patches.frame_fixes_on({}))
 
 
 class RenderPoolTests(unittest.TestCase):

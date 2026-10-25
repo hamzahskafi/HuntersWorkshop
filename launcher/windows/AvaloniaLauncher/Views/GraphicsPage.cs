@@ -159,7 +159,7 @@ namespace BloodborneLauncher.Views
                 L.T("Above 60 FPS, loading screens run at 60 so more of the CPU goes to the loading itself. Does nothing at 30 or 60 FPS, or before a cutscene. On by default"),
                 "exp_fast_loading", exp);
             SettingToggle(SymbolRegular.Timer24, L.T("Frame rate corrections"),
-                L.T("At 60 FPS, ragdolls, physics, jumps, slopes, sprinting, online movement and timers follow the real frame time, and the timings the 60 FPS++ patch halved or doubled (menu repeat, hit lifetimes, online timers) are the game's own again. On by default"),
+                L.T("At 60 FPS and above, ragdolls, physics, cloth, jumps, slopes, sprinting, attack sounds, online movement and timers follow the real frame time, and the timings the FPS++ patches halved or doubled (menu repeat, hit lifetimes, online timers) are the game's own again. Off: the older FPS++ patches above 60. On by default"),
                 "exp_frame_fixes", exp);
             SettingToggle(SymbolRegular.Flash24, L.T("Fewer memory write checks"),
                 L.T("Memory the game rewrites before almost every use is no longer watched for changes, saving up to about 2 ms a frame in busy areas. On by default"),
@@ -173,9 +173,6 @@ namespace BloodborneLauncher.Views
             SettingToggle(SymbolRegular.ShieldCheckmark24, L.T("Effect trail crash fix"),
                 L.T("For crashes while drawing effect trails on newer Intel CPUs (Witch of Hemwick, for example): stops the crash, and that kind of trail is not drawn. Off by default"),
                 "exp_sfx_workaround", exp);
-            SettingToggle(SymbolRegular.Camera24, L.T("Camera easing for high FPS"),
-                L.T("With the FPS++ follow camera only: its eases converted for 60 FPS and above. Off by default"),
-                "exp_camera_easing", exp);
             SettingToggle(SymbolRegular.Run24, L.T("Sharper motion (FSR 4)"),
                 L.T("Uses FSR 4's balanced model at Performance and Ultra Performance: fewer trails behind moving characters, a little more GPU time"),
                 "fsr4_balanced", exp);

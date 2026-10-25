@@ -1257,8 +1257,6 @@
   "Memory the game rewrites before almost every use is no longer watched for changes, saving up to about 2 ms a frame in busy areas. New: off by default while it is tested": "La memoria che il gioco riscrive prima di quasi ogni utilizzo non viene più sorvegliata per le modifiche, risparmiando fino a circa 2 ms per frame nelle aree affollate. Nuovo: disattivato per impostazione predefinita mentre viene testato",
   "Effect trail crash fix": "Correzione crash delle scie degli effetti",
   "For crashes while drawing effect trails on newer Intel CPUs (Witch of Hemwick, for example): stops the crash, and that kind of trail is not drawn. Off by default": "Per i crash durante il disegno delle scie degli effetti sulle CPU Intel più recenti (la strega di Hemwick, ad esempio): evita il crash, e quel tipo di scia non viene disegnato. Disattivato per impostazione predefinita",
-  "Camera easing for high FPS": "Transizioni della telecamera per FPS elevati",
-  "With the FPS++ follow camera only: its eases converted for 60 FPS and above. Off by default": "Solo con la telecamera di inseguimento di FPS++: le sue transizioni convertite per 60 FPS e oltre. Disattivato per impostazione predefinita",
   "Follow camera": "Telecamera di inseguimento",
   "Original keeps the game's camera distance, angle and follow speed at 60 FPS and above": "Originale mantiene la distanza, l'angolazione e la velocità di inseguimento della telecamera del gioco a 60 FPS e oltre",
   "Settings most players never need to change": "Impostazioni che la maggior parte dei giocatori non deve mai cambiare",
