@@ -1257,8 +1257,6 @@
   "Memory the game rewrites before almost every use is no longer watched for changes, saving up to about 2 ms a frame in busy areas. New: off by default while it is tested": "Pamięć, którą gra nadpisuje przed niemal każdym użyciem, nie jest już obserwowana pod kątem zmian, co oszczędza do ok. 2 ms na klatkę w ruchliwych obszarach. Nowość: domyślnie wyłączone na czas testów",
   "Effect trail crash fix": "Poprawka awarii smug efektów",
   "For crashes while drawing effect trails on newer Intel CPUs (Witch of Hemwick, for example): stops the crash, and that kind of trail is not drawn. Off by default": "Przy awariach podczas rysowania smug efektów na nowszych CPU Intel (np. Wiedźma z Hemwick): zapobiega awarii, a ten rodzaj smugi nie jest rysowany. Domyślnie wyłączone",
-  "Camera easing for high FPS": "Wygładzanie kamery przy wysokim FPS",
-  "With the FPS++ follow camera only: its eases converted for 60 FPS and above. Off by default": "Tylko z kamerą podążającą FPS++: jej wygładzanie przeliczone dla 60 FPS i więcej. Domyślnie wyłączone",
   "Follow camera": "Kamera podążająca",
   "Original keeps the game's camera distance, angle and follow speed at 60 FPS and above": "Oryginalna zachowuje odległość, kąt i szybkość podążania kamery gry przy 60 FPS i więcej",
   "Settings most players never need to change": "Ustawienia, których większość graczy nigdy nie musi zmieniać",

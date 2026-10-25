@@ -190,7 +190,6 @@ namespace BloodborneLauncher.Core
             if (s.Bool("exp_guest_in_place")) env["BB_GUEST_IN_PLACE"] = "1";
             if (s.Bool("exp_native_calls")) env["BB_NATIVE_CALLS"] = "1";
             if (s.Bool("exp_sfx_workaround")) env["BB_SFX_WORKAROUND"] = "1";
-            if (s.Bool("exp_camera_easing")) env["BB_CAMERA_FIX"] = "1";
             if (s.Bool("borderless_fullscreen")) env["BB_EXCLUSIVE_FULLSCREEN"] = "0";
             if (!s.Bool("exp_compile_skip"))
             {
@@ -215,7 +214,6 @@ namespace BloodborneLauncher.Core
                 env.Remove("BB_HOT_PAGES");
                 env.Remove("BB_GUEST_IN_PLACE");
                 env.Remove("BB_NATIVE_CALLS");
-                env.Remove("BB_CAMERA_FIX");
                 env["BB_PRECISE_PACING"] = "0";
                 env["BB_VBLANK_PACING"] = "0";
                 // A crash guard: on, whatever the setting, in the run after a crash.

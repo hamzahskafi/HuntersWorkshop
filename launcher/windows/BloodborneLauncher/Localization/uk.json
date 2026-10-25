@@ -1257,8 +1257,6 @@
   "Memory the game rewrites before almost every use is no longer watched for changes, saving up to about 2 ms a frame in busy areas. New: off by default while it is tested": "Пам'ять, яку гра перезаписує майже перед кожним використанням, більше не відстежується на зміни, що заощаджує до близько 2 мс на кадр у насичених областях. Нове: за замовчуванням вимкнено, поки триває тестування",
   "Effect trail crash fix": "Виправлення збою слідів ефектів",
   "For crashes while drawing effect trails on newer Intel CPUs (Witch of Hemwick, for example): stops the crash, and that kind of trail is not drawn. Off by default": "Для збоїв під час малювання слідів ефектів на новіших CPU Intel (наприклад, Відьма Гемвіку): усуває збій, але такі сліди не малюються. За замовчуванням вимкнено",
-  "Camera easing for high FPS": "Згладжування камери для високого FPS",
-  "With the FPS++ follow camera only: its eases converted for 60 FPS and above. Off by default": "Лише з камерою стеження FPS++: її згладжування перераховано для 60 FPS і вище. За замовчуванням вимкнено",
   "Follow camera": "Камера стеження",
   "Original keeps the game's camera distance, angle and follow speed at 60 FPS and above": "«Оригінал» зберігає відстань, кут і швидкість стеження камери гри на 60 FPS і вище",
   "Settings most players never need to change": "Налаштування, які більшості гравців ніколи не доведеться змінювати",

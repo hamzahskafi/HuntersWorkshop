@@ -1257,8 +1257,6 @@
   "Memory the game rewrites before almost every use is no longer watched for changes, saving up to about 2 ms a frame in busy areas. New: off by default while it is tested": "Oyunun neredeyse her kullanımdan önce yeniden yazdığı bellek artık değişiklikler için izlenmez; kalabalık bölgelerde kare başına yaklaşık 2 ms'ye kadar tasarruf sağlar. Yeni: test edilirken varsayılan olarak kapalı",
   "Effect trail crash fix": "Efekt izi çökme düzeltmesi",
   "For crashes while drawing effect trails on newer Intel CPUs (Witch of Hemwick, for example): stops the crash, and that kind of trail is not drawn. Off by default": "Daha yeni Intel CPU'larda efekt izleri çizilirken oluşan çökmeler için (örneğin Witch of Hemwick): çökmeyi durdurur ve bu tür iz çizilmez. Varsayılan olarak kapalı",
-  "Camera easing for high FPS": "Yüksek FPS için kamera yumuşatma",
-  "With the FPS++ follow camera only: its eases converted for 60 FPS and above. Off by default": "Yalnızca FPS++ takip kamerasıyla: yumuşatmaları 60 FPS ve üzeri için dönüştürülür. Varsayılan olarak kapalı",
   "Follow camera": "Takip kamerası",
   "Original keeps the game's camera distance, angle and follow speed at 60 FPS and above": "Orijinal, 60 FPS ve üzerinde oyunun kamera mesafesini, açısını ve takip hızını korur",
   "Settings most players never need to change": "Çoğu oyuncunun asla değiştirmesi gerekmeyen ayarlar",

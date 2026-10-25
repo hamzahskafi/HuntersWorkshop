@@ -1257,8 +1257,6 @@
   "Memory the game rewrites before almost every use is no longer watched for changes, saving up to about 2 ms a frame in busy areas. New: off by default while it is tested": "遊戲幾乎每次使用前都會重寫的記憶體不再受到變更監視，在繁忙區域每個畫格最多可節省約 2 ms。新功能：測試期間預設關閉",
   "Effect trail crash fix": "效果軌跡當機修正",
   "For crashes while drawing effect trails on newer Intel CPUs (Witch of Hemwick, for example): stops the crash, and that kind of trail is not drawn. Off by default": "適用於在較新 Intel CPU 上繪製效果軌跡時發生的當機（例如漢威克的魔女）：可防止當機，但該類軌跡不會被繪製。預設關閉",
-  "Camera easing for high FPS": "高 FPS 鏡頭緩動",
-  "With the FPS++ follow camera only: its eases converted for 60 FPS and above. Off by default": "僅限 FPS++ 跟隨鏡頭：將其緩動轉換為適用於 60 FPS 以上。預設關閉",
   "Follow camera": "跟隨鏡頭",
   "Original keeps the game's camera distance, angle and follow speed at 60 FPS and above": "原版會在 60 FPS 以上維持遊戲的鏡頭距離、角度與跟隨速度",
   "Settings most players never need to change": "大多數玩家永遠不需要變更的設定",

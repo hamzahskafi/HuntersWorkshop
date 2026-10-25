@@ -1257,8 +1257,6 @@
   "Memory the game rewrites before almost every use is no longer watched for changes, saving up to about 2 ms a frame in busy areas. New: off by default while it is tested": "Память, которую игра перезаписывает почти перед каждым использованием, больше не отслеживается на изменения, что экономит до ~2 мс на кадр в насыщенных областях. Новое: по умолчанию выкл., пока идёт тестирование",
   "Effect trail crash fix": "Исправление вылета на шлейфах эффектов",
   "For crashes while drawing effect trails on newer Intel CPUs (Witch of Hemwick, for example): stops the crash, and that kind of trail is not drawn. Off by default": "Для вылетов при отрисовке шлейфов эффектов на новых CPU Intel (например, Ведьма Хемвика): устраняет вылет, но такой шлейф не рисуется. По умолчанию выкл.",
-  "Camera easing for high FPS": "Сглаживание камеры при высоком FPS",
-  "With the FPS++ follow camera only: its eases converted for 60 FPS and above. Off by default": "Только с камерой следования FPS++: её сглаживания пересчитаны для 60 FPS и выше. По умолчанию выкл.",
   "Follow camera": "Камера следования",
   "Original keeps the game's camera distance, angle and follow speed at 60 FPS and above": "«Оригинал» сохраняет дистанцию, угол и скорость следования камеры игры при 60 FPS и выше",
   "Settings most players never need to change": "Настройки, которые большинству игроков менять не нужно",

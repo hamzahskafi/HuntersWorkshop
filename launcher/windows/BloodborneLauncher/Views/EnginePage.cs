@@ -94,9 +94,6 @@ namespace BloodborneLauncher.Views
             SettingToggle(SymbolRegular.ShieldCheckmark24, L.T("Effect trail crash fix"),
                 L.T("For crashes while drawing effect trails on newer Intel CPUs (Witch of Hemwick, for example): stops the crash, and that kind of trail is not drawn. Off by default"),
                 "exp_sfx_workaround", exp);
-            SettingToggle(SymbolRegular.Camera24, L.T("Camera easing for high FPS"),
-                L.T("With the FPS++ follow camera only: its eases converted for 60 FPS and above. Off by default"),
-                "exp_camera_easing", exp);
             SettingToggle(SymbolRegular.Run24, L.T("Sharper motion (FSR 4)"),
                 L.T("Uses FSR 4's balanced model at Performance and Ultra Performance: fewer trails behind moving characters, a little more GPU time"),
                 "fsr4_balanced", exp);

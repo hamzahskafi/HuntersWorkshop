@@ -82,7 +82,6 @@ namespace BloodborneLauncher.Core
             ["exp_guest_in_place"] = true,
             ["exp_native_calls"] = true,
             ["exp_sfx_workaround"] = false,
-            ["exp_camera_easing"] = false,
             ["borderless_fullscreen"] = false,
             // The new engine features (EnginePreset New): on since 0.9.34, stable builds too.
             // Beta 9.9: off by default (objects and floors popped in late or flickered).

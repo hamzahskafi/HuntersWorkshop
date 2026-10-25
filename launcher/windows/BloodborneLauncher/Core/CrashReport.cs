@@ -11,7 +11,7 @@ namespace BloodborneLauncher.Core
     public static class CrashReport
     {
         private static readonly string[] Experimental =
-            { "exp_vram_cleanup", "exp_frame_pacing", "exp_vblank_lock", "exp_particle_cap", "exp_vram_budget", "exp_thread_priority", "exp_sleep_spin", "exp_async_pipelines", "exp_occlusion", "exp_fast_draws", "exp_compile_skip", "exp_fast_loading", "exp_frame_fixes", "exp_frame_timer", "exp_hot_pages", "exp_sfx_workaround", "exp_camera_easing", "exp_sharp_ui" };
+            { "exp_vram_cleanup", "exp_frame_pacing", "exp_vblank_lock", "exp_particle_cap", "exp_vram_budget", "exp_thread_priority", "exp_sleep_spin", "exp_async_pipelines", "exp_occlusion", "exp_fast_draws", "exp_compile_skip", "exp_fast_loading", "exp_frame_fixes", "exp_frame_timer", "exp_hot_pages", "exp_sfx_workaround", "exp_sharp_ui" };
 
         /// <summary>What stopped the game, from the end of the session log (exit code 23 is the
         /// engine stopping itself, for several reasons).</summary>
