@@ -55,6 +55,9 @@ public:
     }
     bool SaveNow(BlobType type, const std::string& name, std::span<const u8> data);
     void Remove(BlobType type, const std::string& name);
+    /// bbport: Remove, queued behind the writes already asked for (Save), so a record saved just
+    /// before is removed and not written back after. The folder only (the archive keeps it).
+    void RemoveQueued(BlobType type, const std::string& name);
 
 private:
     std::jthread io_worker{};

@@ -72,6 +72,19 @@ void RegisterPipelineData(const GraphicsPipelineKey& key, u64 hash,
                                        fmt::format("g_{:#018x}", hash), ar.TakeOff());
 }
 
+void ForgetPipelineData(const Pipeline& pipeline) {
+    if (!Storage::DataBase::Instance().IsOpened()) {
+        return;
+    }
+    // The names RegisterPipelineData gives them.
+    const std::string name =
+        pipeline.IsCompute()
+            ? fmt::format("c_{:#018x}", static_cast<const ComputePipeline&>(pipeline).GetComputeKey().value)
+            : fmt::format("g_{:#018x}", std::hash<GraphicsPipelineKey>{}(
+                                            static_cast<const GraphicsPipeline&>(pipeline).GetGraphicsKey()));
+    Storage::DataBase::Instance().RemoveQueued(Storage::BlobType::PipelineKey, name);
+}
+
 std::vector<u8> SerializeShaderMeta(const Shader::Info& info, const Shader::StageSpecialization& spec,
                                     size_t perm_hash, size_t perm_idx) {
     Serialization::Archive ar;

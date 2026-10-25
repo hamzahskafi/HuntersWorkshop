@@ -139,10 +139,14 @@ ComputePipeline::ComputePipeline(const Instance& instance, Scheduler& scheduler,
         }
         SubmitPipelineJob(this, [this, job, device, cache = pipeline_cache, name = debug_str] {
             auto [result, created] = device.createComputePipelineUnique(cache, job->info);
-            ASSERT_MSG(result == vk::Result::eSuccess, "Failed to create compute pipeline: {}",
-                       vk::to_string(result));
-            pipeline = std::move(created);
-            SetObjectName(device, *pipeline, "Compute Pipeline {}", name);
+            if (result == vk::Result::eSuccess) {
+                pipeline = std::move(created);
+                SetObjectName(device, *pipeline, "Compute Pipeline {}", name);
+            } else {
+                // bbport: left without a pipeline (IsFailed): its dispatches are skipped.
+                LOG_ERROR(Render_Vulkan, "Failed to create compute pipeline {}: {}; its dispatches are skipped",
+                          name, vk::to_string(result));
+            }
             MarkReady();
         });
         return;
@@ -155,8 +159,12 @@ ComputePipeline::ComputePipeline(const Instance& instance, Scheduler& scheduler,
         throw Serialization::CorruptData{"cached compute pipeline rejected by the driver: " +
                                          vk::to_string(pipeline_result)};
     }
-    ASSERT_MSG(pipeline_result == vk::Result::eSuccess, "Failed to create compute pipeline: {}",
-               vk::to_string(pipeline_result));
+    if (pipeline_result != vk::Result::eSuccess) {
+        // bbport: as for graphics pipelines: left empty (IsFailed), its dispatches are skipped.
+        LOG_ERROR(Render_Vulkan, "Failed to create compute pipeline {}: {}; its dispatches are skipped",
+                  debug_str, vk::to_string(pipeline_result));
+        return;
+    }
     pipeline = std::move(pipe);
     SetObjectName(device, *pipeline, "Compute Pipeline {}", debug_str);
 }

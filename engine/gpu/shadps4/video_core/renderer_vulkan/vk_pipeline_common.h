@@ -89,6 +89,18 @@ public:
         return ready.load(std::memory_order_acquire) ? *pipeline : vk::Pipeline{};
     }
 
+    /// bbport: creation is over and there is no pipeline: the driver refused it (ErrorUnknown on
+    /// some AMD and older drivers ended the game). Its draws and dispatches are left out.
+    [[nodiscard]] bool IsFailed() const noexcept {
+        return ready.load(std::memory_order_acquire) && !pipeline;
+    }
+
+    /// bbport: true for the first caller only, which takes a refused pipeline out of the disk
+    /// cache (ForgetPipelineData).
+    bool TakeFailure() const noexcept {
+        return !failure_noted.exchange(true, std::memory_order_acq_rel);
+    }
+
     /// bbport: when a draw of this pipeline was first left out while it compiled (0: never).
     /// Only the thread recording draws uses it (Rasterizer::SkipUncompiledDraw).
     mutable u64 first_skip_ns = 0;
@@ -131,6 +143,7 @@ protected:
 
     /// bbport: cleared by a graphics pipeline whose creation went to a compile thread.
     std::atomic<bool> ready{true};
+    mutable std::atomic<bool> failure_noted{false};
     const Instance& instance;
     Scheduler& scheduler;
     DescriptorHeap& desc_heap;

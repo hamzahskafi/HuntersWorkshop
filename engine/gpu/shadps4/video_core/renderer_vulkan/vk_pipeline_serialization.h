@@ -13,6 +13,9 @@ void RegisterPipelineData(const ComputePipelineKey& key,
                           ComputePipeline::SerializationSupport& sdata);
 void RegisterPipelineData(const GraphicsPipelineKey& key, u64 hash,
                           GraphicsPipeline::SerializationSupport& sdata);
+/// bbport: a pipeline the driver refused (Pipeline::IsFailed) leaves the disk cache, so the next
+/// start does not load it; it compiles again if the game uses it. Queued behind its record's write.
+void ForgetPipelineData(const Pipeline& pipeline);
 void RegisterShaderMeta(const Shader::Info& info,
                         const std::optional<Shader::Gcn::FetchShaderData>& fetch_shader_data,
                         const Shader::StageSpecialization& spec, size_t perm_hash, size_t perm_idx);
