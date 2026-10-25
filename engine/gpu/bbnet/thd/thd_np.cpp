@@ -64,6 +64,34 @@ void announce_locked(unsigned conn_id, Conn& c) {
     DispatchAfter(400, Prio::Signaling, [ctx, conn_id] { sig_fire(ctx, conn_id, kEvActive, 0); });
 }
 
+// The host activates its connection to the guest it summons before the guest is a room member:
+// the server resolves the address from the guest's context_start. Asked here, on the NP thread,
+// not in sig_activate: the game activates holding a lock its main thread waits for, so a request
+// made there held the game still until the server answered (up to the request's 8 s). The
+// connection is pending (status 1) meanwhile, as on the console until ESTABLISHED.
+void sig_resolve(unsigned ctx, unsigned conn_id, const std::string& peer) {
+    const std::int64_t start = NowMs();
+    std::uint32_t addr = 0;
+    std::uint16_t port = 0;
+    std::string error;
+    const bool resolved = ServerSignalingResolve(peer, &addr, &port, error);
+    const long long ms = NowMs() - start;
+    std::lock_guard lk(g_sig_mu);
+    const auto it = g_conn.find(conn_id);
+    if (it == g_conn.end() || it->second.ctx != ctx) return; // its context was deleted meanwhile
+    Conn& c = it->second;
+    if (c.dead || c.member_id) return; // deactivated, or the room named the peer first
+    if (!resolved) {
+        Log("np: signaling: %s not known and not resolved (conn %u, %lld ms): %s", peer.c_str(), conn_id, ms,
+            error.c_str());
+        return;
+    }
+    c.member_id = PeersProvisional(peer, addr, port).member_id;
+    Log("np: signaling: %s resolved %u.%u.%u.%u:%u (conn %u, %lld ms)", peer.c_str(), addr & 0xff,
+        (addr >> 8) & 0xff, (addr >> 16) & 0xff, addr >> 24, port, conn_id, ms);
+    announce_locked(conn_id, c);
+}
+
 s32 PS4_SYSV_ABI sig_init(u64, int, int, u64) { return 0; }
 s32 PS4_SYSV_ABI sig_term() {
     std::lock_guard lk(g_sig_mu);
@@ -107,26 +135,12 @@ s32 PS4_SYSV_ABI sig_activate(unsigned ctx, const void* npid, unsigned* conn_out
     c.online_id = peer;
     Peer p;
     if (PeersFindOnline(peer, &p)) c.member_id = p.member_id;
-    std::string how;
-    if (!c.member_id) {
-        // The host activates its connection to the guest it summons before the guest is a room
-        // member: the server resolves the address from the guest's context_start.
-        std::uint32_t addr = 0;
-        std::uint16_t port = 0;
-        std::string error;
-        if (ServerSignalingResolve(peer, &addr, &port, error)) {
-            c.member_id = PeersProvisional(peer, addr, port).member_id;
-            char text[64];
-            std::snprintf(text, sizeof(text), " (resolved %u.%u.%u.%u:%u)", addr & 0xff, (addr >> 8) & 0xff,
-                          (addr >> 16) & 0xff, addr >> 24, port);
-            how = text;
-        } else {
-            how = " (not known and not resolved: " + error + ")";
-        }
-    }
+    const bool ask = !c.member_id;
     g_conn[id] = c;
     *conn_out = id;
-    Log("sceNpSignalingActivateConnection %s -> conn %u%s", peer.c_str(), id, how.c_str());
+    Log("sceNpSignalingActivateConnection %s -> conn %u%s", peer.c_str(), id,
+        ask ? " (its address asked of the server on the NP thread)" : "");
+    if (ask) DispatchAfter(0, Prio::Request, [ctx, id, peer] { sig_resolve(ctx, id, peer); });
     announce_locked(id, g_conn[id]);
     return 0;
 }

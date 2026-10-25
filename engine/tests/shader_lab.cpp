@@ -80,7 +80,7 @@ using namespace Shader;
 // The pipeline serialization the cache recompile uses links in more of the GPU library than the
 // shared test stubs (tests/test_gpu_runtime_stubs.cpp) cover; the lab never reaches these.
 extern "C" {
-void runtime_blocked_report(void) {}
+void runtime_blocked_report(const char*) {}
 [[noreturn]] void runtime_thread_exit(void*) { std::abort(); }
 int runtime_pad_type(void) { return 0; }
 int runtime_pad_button(uint32_t, int) { return 0; }

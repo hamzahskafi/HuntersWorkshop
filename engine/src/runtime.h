@@ -78,11 +78,12 @@ void runtime_sema_report(void);
 /* bbport: semaphores alive, lookups and list entries walked so far. */
 void runtime_sema_census(uint64_t *live, uint64_t *found, uint64_t *steps);
 unsigned runtime_sema_waiters(uint32_t id);
-/* The freeze report: what blocked guest threads wait for (runtime_blocked.c). */
+/* The freeze and hitch reports: what blocked guest threads wait for (runtime_blocked.c), each
+ * line headed by `prefix`. */
 enum { RUNTIME_BLOCK_MUTEX = 1, RUNTIME_BLOCK_SEMA = 2, RUNTIME_BLOCK_COND = 3 };
 int runtime_block_begin(int kind, uintptr_t object);
 void runtime_block_end(int slot);
-void runtime_blocked_report(void);
+void runtime_blocked_report(const char *prefix);
 void runtime_mutex_describe(uintptr_t mutex, char *out, size_t size);
 void runtime_sema_describe(uint32_t id, char *out, size_t size);
 uintptr_t runtime_time_resolve(const char *name);

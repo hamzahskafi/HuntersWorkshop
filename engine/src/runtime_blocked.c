@@ -1,7 +1,7 @@
 /* What each blocked guest thread waits for (a mutex and its owner, a semaphore and its count, a
- * condition variable), for the freeze report (gpu/shim/bbport_freeze.cpp): a game that stops
- * with every thread waiting is named by the log alone. A slot is held only while its thread
- * blocks, so threads that come and go (a dozen at every area load) never use the table up. */
+ * condition variable), for the freeze and hitch reports (gpu/shim/bbport_freeze.cpp): a game
+ * that stops with every thread waiting is named by the log alone. A slot is held only while its
+ * thread blocks, so threads that come and go (a dozen at every area load) never use the table up. */
 #include "runtime.h"
 #include <stdio.h>
 #ifdef _WIN32
@@ -32,7 +32,7 @@ void runtime_block_end(int slot) {
     InterlockedExchange(&slots[slot].tid, 0);
 }
 
-void runtime_blocked_report(void) {
+void runtime_blocked_report(const char *prefix) {
     for (unsigned i = 0; i < SLOTS; ++i) {
         const LONG tid = slots[i].tid, kind = slots[i].kind;
         const uintptr_t object = slots[i].object;
@@ -41,11 +41,11 @@ void runtime_blocked_report(void) {
         if (kind == RUNTIME_BLOCK_MUTEX) runtime_mutex_describe(object, what, sizeof what);
         else if (kind == RUNTIME_BLOCK_SEMA) runtime_sema_describe((uint32_t)object, what, sizeof what);
         else snprintf(what, sizeof what, "condition variable %#llx", (unsigned long long)object);
-        printf("Freeze: thread %ld waits for %s\n", (long)tid, what);
+        printf("%s: thread %ld waits for %s\n", prefix, (long)tid, what);
     }
 }
 #else
 int runtime_block_begin(int kind, uintptr_t object) { (void)kind; (void)object; return -1; }
 void runtime_block_end(int slot) { (void)slot; }
-void runtime_blocked_report(void) {}
+void runtime_blocked_report(const char *prefix) { (void)prefix; }
 #endif
