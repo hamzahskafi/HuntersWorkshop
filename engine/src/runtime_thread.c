@@ -348,20 +348,12 @@ static int32_t create(GuestThread **out,ThreadAttr **attr_slot,GuestEntry entry,
 #endif
     if (e) { fprintf(stderr,"STOP: host thread creation failed: %d\n",e); exit(21); }
     if (t->detached) host_thread_detach(t->host);
-    /* The game makes its character and cloth workers again at every area load: the standard log
-     * has each name's first (BB_LOG_LEVEL=detailed: every one). */
-    static uint64_t named[256];
-    uint64_t hash=1469598103934665603ull;
-    for (const char *c=t->name;*c;++c) hash=(hash^(uint8_t)*c)*1099511628211ull;
-    int first=0;
+    /* The game's threads as it makes them, its character and cloth workers again at every area
+     * load: BB_LOG_LEVEL=detailed (the 60 s "Load:" line counts them). */
     host_lock(&lock);
     ++created;
-    for (size_t i=0;i<sizeof named/sizeof *named;++i) {
-        if (named[i]==hash) break;
-        if (!named[i]) { named[i]=hash; first=1; break; }
-    }
     host_unlock(&lock);
-    if (first || runtime_log_level())
+    if (runtime_log_level())
         printf("Runtime: guest thread '%s' created (stack=%llu, prio=%d)\n",t->name,(unsigned long long)stack,t->attr.prio);
     return 0;
 }

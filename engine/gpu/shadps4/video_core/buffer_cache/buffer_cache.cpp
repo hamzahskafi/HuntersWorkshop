@@ -1995,8 +1995,10 @@ void BufferCache::EvictIdleCopies(u32 now) {
     }
     const u64 bytes = u64(blocks.size()) * block_size;
     evicted_bytes += bytes;
-    if (evict_reports < 20 &&
-        (evicted_bytes == bytes || (evicted_bytes >> 28) != ((evicted_bytes - bytes) >> 28))) {
+    // Once the first whole MiB is out, then at each 256 MiB (a first block under a MiB said "0 MiB").
+    const u64 before = evicted_bytes - bytes;
+    if (evict_reports < 20 && (((before >> 20) == 0 && (evicted_bytes >> 20) != 0) ||
+                               (evicted_bytes >> 28) != (before >> 28))) {
         ++evict_reports;
         std::printf("Guest memory: %s%llu MiB of the game's data unused for %u s left VRAM "
                     "so far (uploaded again when used)\n",

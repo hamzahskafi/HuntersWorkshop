@@ -251,7 +251,7 @@ extern "C" int bbgpu_pc_input(BbPcPad* d,const bool* keys,int nkeys,int gamepad_
             const int moves=held[kBindMoveF]+held[kBindMoveB]+held[kBindMoveL]+held[kBindMoveR];
             if(was_sprinting && !sprinting && moves>=2 && reports<20) {
                 ++reports;
-                host_log("Input: Dodge / Sprint key read as let go while moving %s%s%s%s (if you were "
+                host_log("Dodge / Sprint key read as let go while moving %s%s%s%s (if you were "
                          "still holding it, the keyboard drops that key combination)",
                          held[kBindMoveF]?"F":"",held[kBindMoveB]?"B":"",held[kBindMoveL]?"L":"",
                          held[kBindMoveR]?"R":"");

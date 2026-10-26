@@ -451,18 +451,26 @@ static void LogLoad(double seconds, u64 flips, double worst_ms, u64 slow) {
     // The frame stats (BB_FRAME_STATS) reset some of these counters every window: a counter
     // below its last value started again (a garbage rate in 9.9's first logs).
     const auto delta = [](u64 a, u64 b) { return a >= b ? a - b : a; };
-    const auto per_s = [&](u64 a, u64 b) { return first ? 0.0 : double(delta(a, b)) / secs; };
+    const auto per_s = [&](u64 a, u64 b) { return double(delta(a, b)) / secs; };
     const auto steps = [](u64 found, u64 walked) {
         return found ? double(walked) / double(found) : 0.0;
     };
+    if (first) {
+        // Nothing to take the rates from yet (they read 0): the FPS, the rest from the next line.
+        std::printf("Load: %.1f FPS (%llu over 33 ms, worst %.0f ms); the counts from the next "
+                    "report on\n",
+                    double(flips) / secs, static_cast<unsigned long long>(slow), worst_ms);
+        last = now;
+        return;
+    }
     std::printf("Load: %.1f FPS (%llu over 33 ms, worst %.0f ms), %.0f draws and %.0f dispatches a "
                 "frame; CPU %.1f cores, %.0f page faults/s; write faults %.0f/s, protects %.0f/s "
                 "(%.0f pages/s), hot pages %lld; threads %llu live of %llu, rwlocks %llu (%.1f "
                 "steps, %.0f/s), semaphores %llu (%.1f steps), memory map %llu regions, heap "
                 "growths %llu; occlusion dumps %.1f a frame (%.1f in order)\n",
                 double(flips) / secs, static_cast<unsigned long long>(slow), worst_ms,
-                first ? 0.0 : double(delta(now.draws, last.draws)) / frames,
-                first ? 0.0 : double(delta(now.dispatches, last.dispatches)) / frames,
+                double(delta(now.draws, last.draws)) / frames,
+                double(delta(now.dispatches, last.dispatches)) / frames,
                 per_s(now.cpu_us, last.cpu_us) / 1e6, per_s(now.faults, last.faults),
                 per_s(now.tracker_faults, last.tracker_faults), per_s(now.protects, last.protects),
                 per_s(now.protect_pages, last.protect_pages),
@@ -474,8 +482,8 @@ static void LogLoad(double seconds, u64 flips, double worst_ms, u64 slow) {
                 steps(delta(now.sema_found, last.sema_found), delta(now.sema_steps, last.sema_steps)),
                 static_cast<unsigned long long>(runtime_memory_regions()),
                 static_cast<unsigned long long>(runtime_heap_growths()),
-                first ? 0.0 : double(delta(now.zpass, last.zpass)) / frames,
-                first ? 0.0 : double(delta(now.zpass_in_order, last.zpass_in_order)) / frames);
+                double(delta(now.zpass, last.zpass)) / frames,
+                double(delta(now.zpass_in_order, last.zpass_in_order)) / frames);
     last = now;
 }
 

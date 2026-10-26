@@ -97,8 +97,9 @@ fi
 # scripts/patches.py): BB_GAME_FIXES=0 leaves them out, BB_GAME_FIXES_SKIP the ones it names (job_lock,
 # job_nodes, job_slots, blur_samples, fmod_ring, deflate).
 # The log (the launcher's Settings > Log, capture and extra variables): BB_LOG_LEVEL=detailed brings
-# back every save mount, thread, semaphore, the draw counts every 5 s, the job pools' caches and the GPU
-# side's info messages; debug adds the GPU side's debug messages (a large log, slower). BB_PAD_LOG=1:
+# back every save mount, thread, semaphore and memory map, the draw counts every 5 s, the job pools'
+# caches and the GPU side's info messages (the driver's missing extensions and formats among them);
+# debug adds the GPU side's debug messages (a large log, slower). BB_PAD_LOG=1:
 # controller details (ids, connection, rumble, disconnects, the first vibration request, round gate).
 # BB_HITCH_REPORT_MS=N: a frame over N ms gets every thread's wait and stack (about twice the frame time).
 fps=${BB_FPS:-uncap}
