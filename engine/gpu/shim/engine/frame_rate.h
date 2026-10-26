@@ -38,7 +38,8 @@ private:
 /// BB_FRAME_TIMER=1: the frame timer (Step) and the camera's eases with it.
 bool Install(std::uint8_t* image, std::size_t size);
 /// Each frame on the game's main thread, at the start of its frame pacer: the slots from the frame's
-/// time (the 60 FPS++ cave's, 0x575a908). Nothing with the frame timer.
+/// time (the 60 FPS++ cave's, 0x575a908), not with the frame timer; and the Bloodletter's L2 self-hit
+/// once its param table is loaded.
 void Tick();
 /// The frame timer (BB_FRAME_TIMER=1): each frame from the cave, right after the frame pacer (`pacer`)
 /// returns, before the frame's tasks: the step, the task step's and 0x575a908's, and the slots from it.

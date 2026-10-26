@@ -121,6 +121,27 @@
                 L.T("Left touchpad / Tab. Needs the adhoc folder from Nexus mod #253 (adhoc/font) in the game's dvdroot_ps4 or as a mod; without it the patch is not applied")),
         };
 
+        /// <summary>log_level (BB_LOG_LEVEL): how much the game writes into its log.</summary>
+        public static readonly Choice[] LogLevels =
+        {
+            new(L.T("Standard"), "standard", L.T("What a problem report needs: the settings at the start, loading times, a summary every minute, warnings and errors")),
+            new(L.T("Detailed"), "detailed", L.T("Also every save, thread and semaphore the game makes, the draw counts every 5 seconds and the GPU side's notes: a larger log, for something odd")),
+            new(L.T("Debug"), "debug", L.T("Warning: everything the GPU side can say. The log grows by many megabytes and the game runs slower. Only to chase a specific bug, then set it back")),
+        };
+
+        /// <summary>hitch_report_ms (BB_HITCH_REPORT_MS): a frame slower than this is reported in the log.</summary>
+        public static readonly Choice[] HitchReports =
+        {
+            new(L.T("Off"), "0"),
+            new("16 ms", "16", L.T("For 144 FPS or uncapped")),
+            new("20 ms", "20", L.T("For 120 FPS")),
+            new("25 ms", "25", L.T("For 90 FPS")),
+            new("30 ms", "30", L.T("60 FPS, every missed refresh: many reports")),
+            new("40 ms", "40", L.T("For 60 FPS")),
+            new("50 ms", "50", L.T("For 30 FPS")),
+            new("100 ms", "100", L.T("Long stalls only, at any frame rate")),
+        };
+
         public static readonly Choice[] CameraTuning =
         {
             new(L.T("Original (the game's camera)"), "original", L.T("As the game has it, at any frame rate")),

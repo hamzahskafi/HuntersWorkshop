@@ -28,7 +28,58 @@ static void inject(const char *path, const char *tokens) {
     usleep(25000);
 }
 
+/* The movement keys' stick (key_move): W then W+A turns toward the corner at most 30 degrees a read
+ * (15 at 60 reads a second), never 45 at once; a half turn (A -> D) goes through forward; a released
+ * key keeps the direction 60 ms. */
+static double turn_between(double a, double b) { return fabs(fmod(b-a+3.0*KEY_PI,2.0*KEY_PI)-KEY_PI); }
+static void test_key_move(void) {
+    int x, y;
+    uint64_t t=1000000;
+    assert(key_move(0,-1,t,&x,&y) && x==0 && y==-127); /* W: forward all the way */
+    double last=atan2(y,x);
+    for (int i=0;i<10;++i) {
+        t+=16667;
+        assert(key_move(-1,-1,t,&x,&y));
+        const double now=atan2(y,x);
+        assert(turn_between(last,now)<16.0*KEY_PI/180.0);
+        last=now;
+    }
+    assert(x==-127 && y==-127); /* the square's corner: both axes all the way */
+    t+=100000;
+    assert(key_move(-1,0,t,&x,&y)); /* A */
+    for (int i=0;i<20;++i) { t+=16667; assert(key_move(-1,0,t,&x,&y)); }
+    assert(x==-127 && y==0);
+    for (int i=0;i<20;++i) { /* D: round through forward, never backward */
+        t+=16667;
+        assert(key_move(1,0,t,&x,&y) && y<=0);
+    }
+    assert(x==127 && y==0);
+    assert(key_move(0,0,t+30000,&x,&y) && x==127 && y==0); /* let go: the direction kept 60 ms */
+    assert(!key_move(0,0,t+70000,&x,&y));
+}
+/* round_gate: a stick past the round gate is brought back onto it in the same direction; one axis
+ * all the way, and anything within the gate, is left as it is. */
+static void test_round_gate(void) {
+    uint8_t x=255, y=255;
+    round_gate(0,&x,&y);
+    assert(x==218 && y==218); /* 128 + 127 / sqrt 2 */
+    x=0; y=0;
+    round_gate(0,&x,&y);
+    assert(x==38 && y==38);
+    x=0; y=128;
+    round_gate(1,&x,&y);
+    assert(x==0 && y==128);
+    x=255; y=128;
+    round_gate(1,&x,&y);
+    assert(x==255 && y==128);
+    x=200; y=60;
+    round_gate(1,&x,&y);
+    assert(x==200 && y==60);
+}
+
 int main(void) {
+    test_key_move();
+    test_round_gate();
     char path[]="/tmp/bbport-pad-test-XXXXXX";
     int fd=mkstemp(path);
     assert(fd>=0);
@@ -122,5 +173,5 @@ int main(void) {
     SDL_Quit();
     unlink(path);
     unlink(config);
-    puts("PASS: pad ABI, debug camera chord, left/right clicks, SDL touch coordinates, overlay capture, controls, menu buttons");
+    puts("PASS: keyboard stick turns, round gate, pad ABI, debug camera chord, left/right clicks, SDL touch coordinates, overlay capture, controls, menu buttons");
 }

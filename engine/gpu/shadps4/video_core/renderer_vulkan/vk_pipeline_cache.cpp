@@ -205,6 +205,21 @@ static u32 MapOutputs(std::span<Shader::OutputMap, 3> outputs, const AmdGpu::VsO
     return num_outputs;
 }
 
+/// Whether the fragment stage emulates clip distances (NVIDIA). Also decided for a draw without a
+/// pixel shader, from its own registers (RefreshGraphicsStages). After bbport 0.6-pre1.
+static bool NeedsClipDistanceEmulation(const AmdGpu::Regs& regs, const Shader::Profile& profile) {
+    // Lowered user clip planes ride the same emulation path as guest-exported distances, so
+    // the fragment side arms whenever the hardware vertex stage lowers them, keeping its input
+    // locations in sync with the shifted vertex outputs.
+    const bool lowers_user_clip_planes =
+        regs.clipper_control.user_clip_plane_enable &&
+        !regs.stage_enable.IsStageEnabled(static_cast<u32>(Shader::HwStage::Geometry));
+    return ((regs.vs_output_control.clip_distance_enable &&
+             !regs.stage_enable.IsStageEnabled(static_cast<u32>(Shader::HwStage::Local))) ||
+            lowers_user_clip_planes) &&
+           profile.needs_clip_distance_emulation;
+}
+
 const Shader::RuntimeInfo& PipelineCache::BuildRuntimeInfo(PipelineSelection& sel, HwStage stage,
                                                              SwStage l_stage) {
     auto& info = sel.runtime_infos[u32(l_stage)];
@@ -328,17 +343,7 @@ const Shader::RuntimeInfo& PipelineCache::BuildRuntimeInfo(PipelineSelection& se
         for (u32 i = 0; i < Shader::MaxColorBuffers; i++) {
             info.hw.fs.color_buffers[i] = sel.graphics_key.color_buffers[i];
         }
-        // Lowered user clip planes ride the same emulation path as guest-exported distances, so
-        // the fragment side arms whenever the hardware vertex stage lowers them, keeping its input
-        // locations in sync with the shifted vertex outputs.
-        const bool lowers_user_clip_planes =
-            regs.clipper_control.user_clip_plane_enable &&
-            !regs.stage_enable.IsStageEnabled(static_cast<u32>(HwStage::Geometry));
-        info.hw.fs.clip_distance_emulation =
-            ((regs.vs_output_control.clip_distance_enable &&
-              !regs.stage_enable.IsStageEnabled(static_cast<u32>(HwStage::Local))) ||
-             lowers_user_clip_planes) &&
-            profile.needs_clip_distance_emulation;
+        info.hw.fs.clip_distance_emulation = NeedsClipDistanceEmulation(regs, profile);
         break;
     }
     case HwStage::Compute: {
@@ -624,7 +629,11 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(const DrawIndirectPar
             instance, scheduler, desc_heap, profile, sel.graphics_key, *pipeline_cache, sel.infos,
             sel.runtime_infos, sel.fetch_shader, sel.modules, sdata, false);
 
-        RegisterPipelineData(sel.graphics_key, pipeline_hash, sdata);
+        // bbport: one the driver refused is not saved (one refused later on a compile thread is
+        // taken out when a draw first meets it: ForgetPipelineData).
+        if (!it.value()->IsFailed()) {
+            RegisterPipelineData(sel.graphics_key, pipeline_hash, sdata);
+        }
         ++num_new_pipelines;
 
         if (EmulatorSettings.IsShaderCollect()) {
@@ -655,7 +664,9 @@ const ComputePipeline* PipelineCache::GetComputePipeline() {
         it.value() = std::make_unique<ComputePipeline>(instance, scheduler, desc_heap, profile,
                                                        *pipeline_cache, compute_key, *sel.infos[0],
                                                        sel.modules[0], sdata, false);
-        RegisterPipelineData(compute_key, sdata);
+        if (!it.value()->IsFailed()) { // as for graphics pipelines
+            RegisterPipelineData(compute_key, sdata);
+        }
         ++num_new_pipelines;
 
         if (EmulatorSettings.IsShaderCollect()) {
@@ -883,7 +894,14 @@ bool PipelineCache::RefreshGraphicsStages(PipelineSelection& sel) {
     sel.infos.fill(nullptr);
     sel.modules.fill(nullptr);
 
-    bind_stage(HwStage::Fragment, SwStage::Fragment);
+    if (!bind_stage(HwStage::Fragment, SwStage::Fragment)) {
+        // No pixel shader: the fragment state this pipeline reads (clip distance emulation's
+        // discard shader on NVIDIA, sample shading, the rect-list stages' inputs) is this draw's,
+        // not what a previous draw's pixel shader left here. After bbport 0.6-pre1.
+        auto& fs = sel.runtime_infos[static_cast<u32>(SwStage::Fragment)];
+        fs.Initialize(HwStage::Fragment, SwStage::Fragment);
+        fs.hw.fs.clip_distance_emulation = NeedsClipDistanceEmulation(regs, profile);
+    }
 
     const auto* fs_info = sel.infos[static_cast<u32>(SwStage::Fragment)];
     key.mrt_mask = fs_info ? fs_info->mrt_mask : 0u;

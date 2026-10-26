@@ -790,7 +790,12 @@ GUEST_ABI void* SystemFinalize(void* out,void* builder,void* arg3) {
     // Quit to Desktop, last: the game's own Exit Game only goes back to the title.
     AddQuitRow(builder,kSystemQuitRowId);
     hle_call_guest<std::int64_t>(guest_fn(kSystemFinalize),out,builder,arg3);
-    host_log("pc-options: System list includes PC Enhancements%s%s, Quit to Desktop",graphics_page?", PC Graphics / PC Effects / PC Colour":"",camera_page?", PC Camera":"");
+    // Each time the System menu opens: logged when its rows differ from the last time's.
+    static int logged=-1;
+    if (const int rows=(graphics_page?1:0)|(camera_page?2:0); rows!=logged) {
+        logged=rows;
+        host_log("pc-options: System list includes PC Enhancements%s%s, Quit to Desktop",graphics_page?", PC Graphics / PC Effects / PC Colour":"",camera_page?", PC Camera":"");
+    }
     return out;
 }
 // Quit Game on the title menu (after bbhost, src/engine/option_menu.cpp): the title's command list

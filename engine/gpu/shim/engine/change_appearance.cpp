@@ -13,6 +13,7 @@
 #include "cheats.h"
 #include "loading.h"
 #include "render_guard.h"
+#include "game_fixes.h"
 #include "effect_timing.h"
 #include "frame_rate.h"
 #include "online_fixes.h"
@@ -251,10 +252,11 @@ void Install(std::uint8_t* image, std::size_t size) {
     const bool cheats=Cheats::Install(image,size);
     const bool online=OnlineFixes::Install(image,size);
     const bool guard=RenderGuard::Install(image,size);
+    const bool fixes=GameFixes::Install(image,size);
     const bool timing=EffectTiming::Install(image,size);
     const bool frames=FrameRate::Install(image,size);
-    if (!g_frame_on && !camera && !rebirth && !menus && !graphics && !wide && !input && !cheats && !online && !guard && !timing &&
-        !frames) {
+    if (!g_frame_on && !camera && !rebirth && !menus && !graphics && !wide && !input && !cheats && !online && !guard && !fixes &&
+        !timing && !frames) {
         for (auto& hook : hooks) Discard(hook);
         Log("engine enhancements disabled: no compatible feature could be prepared"); return;
     }

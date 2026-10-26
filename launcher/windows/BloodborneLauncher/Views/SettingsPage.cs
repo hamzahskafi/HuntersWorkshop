@@ -175,7 +175,16 @@ namespace BloodborneLauncher.Views
                 L.T("The engine's other player-facing BB_ variables (GPU choice, texture filtering, memory, sound, fixes) as switches, sliders and lists at the engine's defaults: no typing needed"),
                 SmallButton(L.T("Open"), SymbolRegular.Open24, (_, _) => MainWindow.Instance?.Show("engine")), out _));
             var logs = Advanced(L.T("Log, capture and extra variables"));
+            SettingCombo(SymbolRegular.DocumentText24, L.T("Log level"),
+                L.T("How much the game writes into its log: Standard for everyday play, Detailed when asked for a log of something odd, Debug only to chase a specific bug"),
+                Choices.LogLevels, "log_level", logs);
             SettingToggle(SymbolRegular.TextBulletListSquare24, L.T("Frame statistics in the log"), "BB_FRAME_STATS", "frame_stats", logs);
+            SettingCombo(SymbolRegular.Pulse24, L.T("Hitch reports"),
+                L.T("A frame slower than this puts every thread's wait and stack in the log, for stutter reports. Pick about twice your frame time: 50 ms at 30 FPS, 40 at 60, 25 at 90, 20 at 120, 16 at 144 or uncapped. Each report pauses the game about 0.2 s; at most 12 a session, none in the first 20 s or just after a loading screen"),
+                Choices.HitchReports, "hitch_report_ms", logs);
+            SettingToggle(SymbolRegular.XboxController24, L.T("Controller details in the log"),
+                L.T("BB_PAD_LOG: each controller's USB ids, connection and rumble support, disconnects, the game's first vibration request and sticks past their round gate. For controller problems"),
+                "pad_log", logs);
             SettingToggle(SymbolRegular.DeveloperBoard24, L.T("FSR 4 profile in the log"), "BB_FSR4_PROFILE", "fsr_profile", logs);
             SettingToggle(SymbolRegular.Speaker224, L.T("Audio statistics in the log"), "BB_AUDIO_STATS", "audio_stats", logs);
             SettingToggle(SymbolRegular.HourglassHalf24, L.T("Loading profile in the log"),

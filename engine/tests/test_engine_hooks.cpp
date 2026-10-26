@@ -27,6 +27,19 @@ static std::int64_t __attribute__((sysv_abi)) Observe(std::uint64_t, const std::
     return 0;
 }
 
+// Runs the hooked function itself through Hook::original and returns twice its result.
+static BbEngine::Hook wrapped;
+static std::int64_t __attribute__((sysv_abi)) Wrap(std::uint64_t, const std::uint64_t* saved) {
+    const std::int64_t result = BbEngine::Call(wrapped.original, saved[5], saved[4], saved[3], saved[2], saved[1], saved[0]);
+    const_cast<std::uint64_t*>(saved)[-1] = static_cast<std::uint64_t>(result * 2);
+    return 1;
+}
+// Takes the hooked function's place (Replace): ten times the sum.
+static std::int64_t __attribute__((sysv_abi)) Instead(std::int64_t a, std::int64_t b, std::int64_t c, std::int64_t d,
+                                                      std::int64_t e, std::int64_t f) {
+    return 10 * (a + b + c + d + e + f);
+}
+
 int main() {
 #ifdef _WIN32
     auto* image = static_cast<std::uint8_t*>(VirtualAlloc(nullptr, 4096, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE));
@@ -68,6 +81,25 @@ int main() {
     assert(floats[0] == 1.5 && floats[1] == 2.5);
     BbEngine::Discard(hook);
 
+    // The game's own function, run by the callback through the displaced instructions.
+    std::memcpy(image, expected.data(), expected.size());
+    std::memcpy(image + 16, sum, sizeof sum);
+    assert(BbEngine::Prepare(wrapped, image, 4096, 0, expected, Wrap) && wrapped.original);
+    BbEngine::Commit(std::span{&wrapped, 1});
+    assert(BbEngine::Call(reinterpret_cast<std::uint64_t>(image), 1,2,3,4,5,6) == 42);
+    BbEngine::Discard(wrapped);
+
+    // A host function in the game function's place: the site jumps to it, no stub.
+    std::memcpy(image, expected.data(), expected.size());
+    BbEngine::Hook replaced;
+    assert(!BbEngine::Replace(replaced, image, 4096, 0, wrong, reinterpret_cast<const void*>(&Instead)));
+    assert(BbEngine::Replace(replaced, image, 4096, 0, expected, reinterpret_cast<const void*>(&Instead)));
+    assert(!replaced.stub && !std::memcmp(image, expected.data(), expected.size()));
+    BbEngine::Commit(std::span{&replaced, 1});
+    assert(BbEngine::Call(reinterpret_cast<std::uint64_t>(image), 1,2,3,4,5,6) == 210);
+    BbEngine::Discard(replaced);
+    std::memcpy(image, expected.data(), expected.size());
+
     // A seventh argument on the stack, read as the game reads it ([rbp+0x10]):
     // push rbp; mov rbp,rsp; mov rax,[rbp+0x10]; add rax,r9; pop rbp; ret
     const std::uint8_t seventh[] = {0x55,0x48,0x89,0xe5,0x48,0x8b,0x45,0x10,0x4c,0x01,0xc8,0x5d,0xc3};
@@ -94,5 +126,5 @@ int main() {
 #else
     munmap(image, 4096);
 #endif
-    std::puts("PASS: guest ABI arguments (seven with a stack argument), XMM preservation, return slot, byte/range guards, staged hook installation and a redirected tail call");
+    std::puts("PASS: guest ABI arguments (seven with a stack argument), XMM preservation, return slot, byte/range guards, staged hook installation, the game's function run from a callback, a replaced function and a redirected tail call");
 }

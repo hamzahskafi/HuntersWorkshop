@@ -25,6 +25,38 @@ int main(){
     const float diagonal=std::hypot(float(p.lx)-127,float(p.ly)-127);
     h[kBindMoveR]=false;p=PadState{};host_bindings_apply(h,false,p);
     assert(std::abs(diagonal-(127-p.ly))<=1);
+    // With a KeyTurn: W then W+A turns at most 30 degrees a read (15 at 60 reads a second), never 45
+    // at once, to the square's corner; A -> D goes round through forward; a released key keeps the
+    // direction 60 ms; Walk keeps its reach on the way round.
+    {
+        const auto angle=[](const PadState& s){return std::atan2(float(s.ly)-127,float(s.lx)-127);};
+        const auto between=[](float a,float b){return std::abs(std::remainder(b-a,6.2831853f));};
+        KeyTurn turn;std::uint64_t t=1000000;bool k[kBindCount]={};
+        k[kBindMoveF]=true;p=PadState{};host_bindings_apply(k,false,p,&turn,t);assert(p.lx==127 && p.ly==0);
+        float last=angle(p);
+        k[kBindMoveL]=true;
+        for(int i=0;i<10;i++) {
+            t+=16667;p=PadState{};host_bindings_apply(k,false,p,&turn,t);
+            assert(between(last,angle(p))<16*3.1415927f/180);last=angle(p);
+        }
+        assert(p.lx==0 && p.ly==0);
+        k[kBindMoveF]=false;
+        for(int i=0;i<20;i++){t+=16667;p=PadState{};host_bindings_apply(k,false,p,&turn,t);}
+        assert(p.lx==0 && p.ly==127);
+        k[kBindMoveL]=false;k[kBindMoveR]=true;
+        for(int i=0;i<20;i++){t+=16667;p=PadState{};host_bindings_apply(k,false,p,&turn,t);assert(p.ly<=127);}
+        assert(p.lx==254 && p.ly==127);
+        k[kBindMoveR]=false;
+        p=PadState{};host_bindings_apply(k,false,p,&turn,t+30000);assert(p.lx==254 && p.ly==127);
+        p=PadState{};p.lx=10;host_bindings_apply(k,false,p,&turn,t+70000);assert(p.lx==10 && p.ly==127);
+        k[kBindWalk]=k[kBindMoveF]=true;t+=1000000;
+        p=PadState{};host_bindings_apply(k,false,p,&turn,t);assert(p.lx==127 && p.ly==51);
+        k[kBindMoveL]=true;
+        for(int i=0;i<10;i++) {
+            t+=16667;p=PadState{};host_bindings_apply(k,false,p,&turn,t);
+            assert(std::abs(std::hypot(float(p.lx)-127,float(p.ly)-127)-76.2f)<=1);
+        }
+    }
     std::memset(h,0,sizeof h);h[kBindAttack]=true;p=PadState{};host_bindings_apply(h,true,p);
     assert(p.buttons==0x200 && p.r2==255);
     assert(host_bindings_parse("attack","E, Mouse2"));

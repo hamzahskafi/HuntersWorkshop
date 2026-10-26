@@ -211,7 +211,10 @@ extern "C" int bbgpu_pc_input(BbPcPad* d,const bool* keys,int nkeys,int gamepad_
         mouse_edges=0;wheel=0;drag_x=drag_y=0;}
     bool any=buttons!=0;for(int i=0;keys&&i<nkeys;i++)any|=keys[i];
     host_bind_capture_note_held(any);
-    if(!focused || host_text_entry_open() || host_bind_capture_blocking()){p=PadState{};wanted_relative=false;}
+    // The movement keys turn the stick (KeyTurn); keys the window does not have, or a menu reading
+    // them as its d-pad, start it afresh.
+    static KeyTurn key_turn;
+    if(!focused || host_text_entry_open() || host_bind_capture_blocking()){p=PadState{};wanted_relative=false;key_turn=KeyTurn{};}
     else {
         bool held[kBindCount]={};
         if(keys)host_bindings_keys_held(keys,nkeys,held);
@@ -248,7 +251,7 @@ extern "C" int bbgpu_pc_input(BbPcPad* d,const bool* keys,int nkeys,int gamepad_
             const int moves=held[kBindMoveF]+held[kBindMoveB]+held[kBindMoveL]+held[kBindMoveR];
             if(was_sprinting && !sprinting && moves>=2 && reports<20) {
                 ++reports;
-                host_log("Input: Dodge / Sprint key read as let go while moving %s%s%s%s (if you were "
+                host_log("Dodge / Sprint key read as let go while moving %s%s%s%s (if you were "
                          "still holding it, the keyboard drops that key combination)",
                          held[kBindMoveF]?"F":"",held[kBindMoveB]?"B":"",held[kBindMoveL]?"L":"",
                          held[kBindMoveR]?"R":"");
@@ -260,9 +263,9 @@ extern "C" int bbgpu_pc_input(BbPcPad* d,const bool* keys,int nkeys,int gamepad_
             p.buttons|=dpad_held&~dpad_blocked;
             if(keys[SDL_SCANCODE_RETURN])p.buttons|=menu_confirm_button();
             if(keys[SDL_SCANCODE_BACKSPACE])p.buttons|=menu_back_button();
-            if(!free_move)for(int i=kBindMoveF;i<=kBindMoveR;i++)held[i]=false;
+            if(!free_move){for(int i=kBindMoveF;i<=kBindMoveR;i++)held[i]=false;key_turn=KeyTurn{};}
         }
-        host_bindings_apply(held,held[kBindStrongMod],p);
+        host_bindings_apply(held,held[kBindStrongMod],p,&key_turn,SDL_GetTicksNS()/1000);
         const bool preview=menu && s.mouse_menu && BbEngine::ChangeAppearancePreview();
         if(!preview || !(buttons&SDL_BUTTON_LMASK))turning=false;
         if(preview && (edges&SDL_BUTTON_LMASK)) {

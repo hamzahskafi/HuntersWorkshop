@@ -337,7 +337,8 @@ static int split_at(uintptr_t a) {
     if (i==vma_count || vmas[i].start>=a) return 0;
     Vma right=vmas[i];
     right.start=a;
-    if (right.kind==KIND_DIRECT) right.phys+=a-vmas[i].start;
+    /* Flexible memory too: its pages are released and read by offset (flex_free, the backing). */
+    if (right.kind!=KIND_RESERVED) right.phys+=a-vmas[i].start;
     vmas[i].end=a;
     return vma_insert(i+1,right);
 }
@@ -482,7 +483,8 @@ static ABI int32_t direct_allocate(int64_t low, int64_t high, uint64_t size,
     ++allocations; live_bytes += size;
     write_unlock();
     *out = (int64_t)start; /* guest memory: unlocked (see lock) */
-    printf("Runtime: direct allocation offset=0x%" PRIx64 ", size=%" PRIu64 " bytes, type=%d\n", start, size, type);
+    /* The game's memory, allocation by allocation: BB_LOG_LEVEL=detailed (failures always). */
+    if (runtime_log_level()) printf("Runtime: direct allocation offset=0x%" PRIx64 ", size=%" PRIu64 " bytes, type=%d\n", start, size, type);
     return 0;
 }
 static int32_t map_direct_locked(void **out, uint64_t size, int prot, int flags, int64_t physical, uint64_t alignment) {
@@ -501,7 +503,7 @@ static ABI int32_t direct_map(void **out, uint64_t size, int prot, int flags, in
     write_unlock();
     if (!result) *out=address;
     flush_hooks();
-    if (!result) printf("Runtime: mapped direct memory %p, size=%" PRIu64 ", prot=0x%x\n", *out, size, prot);
+    if (!result) { if (runtime_log_level()) printf("Runtime: mapped direct memory %p, size=%" PRIu64 ", prot=0x%x\n", *out, size, prot); }
     else printf("Runtime: mapping direct memory %#" PRIx64 ", size=%" PRIu64 " failed (error %#x)\n", (uint64_t)physical, size, (unsigned)result);
     return result;
 }
@@ -592,7 +594,7 @@ static ABI int32_t map_flexible(void **inout, uint64_t size, int prot, int flags
     write_unlock();
     if (!result) *inout=address;
     flush_hooks();
-    if (!result) printf("Runtime: mapped flexible memory %p, size=%" PRIu64 ", prot=0x%x\n", *inout, size, prot);
+    if (!result) { if (runtime_log_level()) printf("Runtime: mapped flexible memory %p, size=%" PRIu64 ", prot=0x%x\n", *inout, size, prot); }
     else fprintf(stderr,"Runtime: flexible map of %" PRIu64 " bytes failed (0x%x), in use=%" PRIu64 "\n",
                  size, (unsigned)result, flexible_bytes);
     return result;

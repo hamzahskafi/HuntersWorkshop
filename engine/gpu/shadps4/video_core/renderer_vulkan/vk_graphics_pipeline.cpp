@@ -647,10 +647,14 @@ GraphicsPipeline::GraphicsPipeline(
             ready.store(false, std::memory_order_relaxed);
             SubmitPipelineJob(this, [this, job, device, cache = pipeline_cache, name = debug_str] {
                 auto [result, created] = device.createGraphicsPipelineUnique(cache, job->info);
-                ASSERT_MSG(result == vk::Result::eSuccess,
-                           "Failed to create graphics pipeline: {}", vk::to_string(result));
-                pipeline = std::move(created);
-                SetObjectName(device, *pipeline, "Graphics Pipeline {}", name);
+                if (result == vk::Result::eSuccess) {
+                    pipeline = std::move(created);
+                    SetObjectName(device, *pipeline, "Graphics Pipeline {}", name);
+                } else {
+                    // bbport: left without a pipeline (IsFailed): its draws are skipped.
+                    LOG_ERROR(Render_Vulkan, "Failed to create graphics pipeline {}: {}; its draws are skipped",
+                              name, vk::to_string(result));
+                }
                 MarkReady();
             });
             return;
@@ -665,8 +669,13 @@ GraphicsPipeline::GraphicsPipeline(
         throw Serialization::CorruptData{"cached graphics pipeline rejected by the driver: " +
                                          vk::to_string(pipeline_result)};
     }
-    ASSERT_MSG(pipeline_result == vk::Result::eSuccess, "Failed to create graphics pipeline: {}",
-               vk::to_string(pipeline_result));
+    if (pipeline_result != vk::Result::eSuccess) {
+        // bbport: a driver that cannot build one pipeline stopped the game here (code 23); the
+        // pipeline stays empty instead (IsFailed), its draws are skipped and it is not saved.
+        LOG_ERROR(Render_Vulkan, "Failed to create graphics pipeline {}: {}; its draws are skipped",
+                  debug_str, vk::to_string(pipeline_result));
+        return;
+    }
     pipeline = std::move(pipe);
     SetObjectName(device, *pipeline, "Graphics Pipeline {}", debug_str);
 }

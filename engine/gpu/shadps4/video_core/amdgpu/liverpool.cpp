@@ -921,6 +921,9 @@ Liverpool::Task Liverpool::ProcessCeUpdate(std::span<const u32> ccb) {
                 YIELD_CE();
                 RESUME_CE(task);
             }
+            // A finished task stays suspended (final_suspend): its frame is freed here, or every
+            // indirect buffer leaked ~600 bytes for the whole session. As upstream shadPS4 (12c5978f).
+            task.handle.destroy();
             break;
         }
         default:
@@ -1995,6 +1998,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                     YIELD_GFX();
                     RESUME_GFX(task);
                 }
+                task.handle.destroy(); // finished: free its frame (see ProcessCeUpdate)
                 break;
             }
             case PM4ItOpcode::IncrementDeCounter: {
@@ -2169,6 +2173,7 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
                 YIELD_ASC(vqid);
                 RESUME_ASC(task, vqid);
             }
+            task.handle.destroy(); // finished: free its frame (see ProcessCeUpdate)
             break;
         }
         case PM4ItOpcode::DmaData: {

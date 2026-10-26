@@ -274,6 +274,26 @@ void DataBase::Remove(BlobType type, const std::string& name) {
     std::filesystem::remove(path, error);
 }
 
+void DataBase::RemoveQueued(BlobType type, const std::string& name) {
+    if (!IsFolder()) {
+        return;
+    }
+    auto path = cache_path / name;
+    path.replace_extension(GetBlobFileExtension(type));
+    auto request = std::packaged_task<void()>{[path = std::move(path)] {
+        std::error_code error;
+        std::filesystem::remove(path, error);
+    }};
+    {
+        std::scoped_lock lock{m_request};
+        if (!accepting_requests) {
+            return;
+        }
+        req_queue.emplace(std::move(request));
+    }
+    request_cv.notify_one();
+}
+
 void DataBase::Load(BlobType type, const std::string& name, std::vector<u8>& data) {
     if (!opened) {
         return;

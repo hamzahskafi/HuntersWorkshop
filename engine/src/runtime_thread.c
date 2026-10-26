@@ -348,8 +348,13 @@ static int32_t create(GuestThread **out,ThreadAttr **attr_slot,GuestEntry entry,
 #endif
     if (e) { fprintf(stderr,"STOP: host thread creation failed: %d\n",e); exit(21); }
     if (t->detached) host_thread_detach(t->host);
-    host_lock(&lock); ++created; host_unlock(&lock);
-    printf("Runtime: guest thread '%s' created (stack=%llu, prio=%d)\n",t->name,(unsigned long long)stack,t->attr.prio);
+    /* The game's threads as it makes them, its character and cloth workers again at every area
+     * load: BB_LOG_LEVEL=detailed (the 60 s "Load:" line counts them). */
+    host_lock(&lock);
+    ++created;
+    host_unlock(&lock);
+    if (runtime_log_level())
+        printf("Runtime: guest thread '%s' created (stack=%llu, prio=%d)\n",t->name,(unsigned long long)stack,t->attr.prio);
     return 0;
 }
 static ABI int32_t thread_create(GuestThread **out,ThreadAttr **attr,GuestEntry entry,void *argument,const char *name) {

@@ -10,6 +10,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdlib>
 #include <set>
@@ -32,9 +33,28 @@ constexpr std::uint64_t kHeapSizes = 0x4736dd8;  // image offset: the two graphi
 constexpr std::uint64_t kGxRegion = 0x1d9933d;
 constexpr std::uint64_t kGxHeapPs4 = 0x8ef00000;  // GFX_GraphicsPrivate at the PS4 size (kHeapSizes)
 constexpr unsigned kGxRegionGame = 160, kGxRegionDefault = 288, kGxRegionMax = 416;  // MiB
+// The play recording's compression (scripts/patches.py DEFLATE_*): its producer's
+// lea rdi, [rip+...] of the "algorithm=deflate;level=9" the game's five producers share, pointed at
+// the game's own "algorithm=deflate;level=1".
+constexpr std::uint64_t kDeflateSite = 0x19c981f, kDeflateLevel1 = 0x4940254;  // image offsets
 
 using Write = std::pair<std::uint64_t, Bytes>;  // image offset, bytes
 using Writes = std::vector<Write>;
+
+// The game fixes' switches, as the engine reads them (gpu/shim/engine/game_fixes.cpp): BB_GAME_FIXES=0
+// turns them all off, BB_GAME_FIXES_SKIP is a comma list of their names (case and spaces ignored).
+bool GameFixOn(std::string_view name) {
+    if (Env("BB_GAME_FIXES", "") == "0") return false;
+    std::string list;
+    for (const char c : Env("BB_GAME_FIXES_SKIP", ""))
+        if (!std::isspace(static_cast<unsigned char>(c))) list += char(std::tolower(static_cast<unsigned char>(c)));
+    for (std::size_t at = 0; at <= list.size();) {
+        const std::size_t end = std::min(list.find(',', at), list.size());
+        if (std::string_view(list).substr(at, end - at) == name) return false;
+        at = end + 1;
+    }
+    return true;
+}
 
 const std::map<std::string, std::vector<std::string>>& FpsPresets() {
     static const std::map<std::string, std::vector<std::string>> presets{
@@ -892,6 +912,24 @@ PatchResult CompilePatches(const PatchRequest& request) {
             Log("Patches: render pools 1024 KiB each (the game's 256)");
         } else {
             Log("Patches: render pools left at the game's size: this executable differs there");
+        }
+    }
+    // The game compresses its play recording (~300 KB, every ~50 s of play, on the main thread) at
+    // zlib level 9, ~23 ms in one frame. Only that producer is pointed at the game's own level=1
+    // string; the four online producers keep level 9, and inflate reads either. After droogie
+    // (bbhost patches/deflate-level.toml).
+    if (!GameFixOn("deflate")) {
+        Log("Patches: the play recording compressed at the game's level 9 (BB_GAME_FIXES, BB_GAME_FIXES_SKIP)");
+    } else {
+        const Bytes code = FromHex("488d3d5d0ff702");
+        const std::string_view text{"algorithm=deflate;level=1", 26};  // with its terminator
+        if (OriginalBytes(elf, kDeflateSite, code.size()) == code &&
+            OriginalBytes(elf, kDeflateLevel1, text.size()) == Bytes(text.begin(), text.end())) {
+            writes.emplace_back(kDeflateSite + 3,
+                                Le<std::int32_t>(std::int32_t(kDeflateLevel1 - (kDeflateSite + code.size()))));
+            Log("Patches: the play recording compressed at level 1 (the game's own level=1 string)");
+        } else {
+            Log("Patches: the play recording left at level 9: this executable differs there");
         }
     }
     const std::optional<Size> size = request.render_res.empty() ? std::nullopt : RenderSize(settings, request.render_res);

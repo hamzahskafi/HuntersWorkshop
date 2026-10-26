@@ -1021,7 +1021,7 @@ int FixKeys(const fs::path& dir) {
             std::memcpy(&version, bytes.data(), 4);
             std::memcpy(&is_compute, bytes.data() + 4, 4);
         }
-        if (!(version == 5 || version == 6) || is_compute != 0) continue;
+        if (!(version >= 5 && version <= 7) || is_compute != 0) continue;
         auto hashes = KeyStageHashes(bytes);
         Backend::Bindings expected{};
         bool changed = false, ok = true;
@@ -1309,7 +1309,7 @@ int CheckCache(const fs::path& dir) {
             std::memcpy(&version, key.data(), 4);
             std::memcpy(&is_compute, key.data() + 4, 4);
         }
-        if (!(version == 5 || version == 6) || is_compute > 1) { // PipelineKeyVersion 6, legacy 5
+        if (!(version >= 5 && version <= 7) || is_compute > 1) { // PipelineKeyVersion 7, legacy 5 and 6
             ++reasons["key version " + std::to_string(version)];
             continue;
         }

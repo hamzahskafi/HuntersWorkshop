@@ -38,6 +38,7 @@
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_occlusion.h"
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
+#include "video_core/renderer_vulkan/vk_pipeline_serialization.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
 #include "video_core/renderer_vulkan/vk_gpu_profiler.h"
 #include "bbport_threads.h"
@@ -51,6 +52,18 @@
 #include "video_core/texture_cache/texture_cache.h"
 
 namespace Vulkan {
+
+/// bbport: the driver refused the pipeline (Pipeline::IsFailed): its draw or dispatch is left out,
+/// and the first one met takes it out of the disk cache (ForgetPipelineData). Any thread.
+static bool SkipFailed(const Pipeline* pipeline) {
+    if (!pipeline->IsFailed()) {
+        return false;
+    }
+    if (pipeline->TakeFailure()) {
+        ForgetPipelineData(*pipeline);
+    }
+    return true;
+}
 
 static Shader::PushData MakeUserData(const AmdGpu::Regs& regs) {
     // TODO(roamic): Add support for multiple viewports and geometry shaders when ViewportIndex
@@ -2084,12 +2097,20 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     // is missing for those frames.
     vk::Pipeline handle = pipeline->HandleIfReady();
     if (!handle) [[unlikely]] {
-        if (SkipUncompiledDraw(pipeline)) {
+        if (!pipeline->IsFailed()) {
+            if (SkipUncompiledDraw(pipeline)) {
+                ResetBindings(false);
+                scheduler.KickRecording();
+                return;
+            }
+            handle = BindWhenCompiled(pipeline, vk::PipelineBindPoint::eGraphics);
+        }
+        // One the driver refused (before, or while this thread waited for it): left out.
+        if (SkipFailed(pipeline)) {
             ResetBindings(false);
             scheduler.KickRecording();
             return;
         }
-        handle = BindWhenCompiled(pipeline, vk::PipelineBindPoint::eGraphics);
     }
     const u32 num_indices = regs.num_indices;
     const u32 num_instances = regs.num_instances.NumInstances();
@@ -2110,10 +2131,13 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
         if (handle) { // null: bound by the command before (BindWhenCompiled)
             cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, handle);
         }
+        // The command before found it refused by the driver: left out (its query stays empty).
+        const bool refused = !handle && SkipFailed(pipeline);
         if (query.pool) {
             cmdbuf.beginQuery(query.pool, query.index, query.flags);
         }
-        if (is_indexed) {
+        if (refused) {
+        } else if (is_indexed) {
             cmdbuf.drawIndexed(num_indices, num_instances, 0, s32(first_vertex), first_instance);
         } else {
             cmdbuf.draw(num_indices, num_instances, first_vertex, first_instance);
@@ -2264,7 +2288,14 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
     // bbport: never left out (what it draws is decided in GPU memory), bound late instead.
     vk::Pipeline handle = pipeline->HandleIfReady();
     if (!handle) [[unlikely]] {
-        handle = BindWhenCompiled(pipeline, vk::PipelineBindPoint::eGraphics);
+        if (!pipeline->IsFailed()) {
+            handle = BindWhenCompiled(pipeline, vk::PipelineBindPoint::eGraphics);
+        }
+        if (SkipFailed(pipeline)) { // refused by the driver: nothing to draw it with
+            ResetBindings(false);
+            scheduler.KickRecording();
+            return;
+        }
     }
     const vk::Buffer args = buffer->Handle();
     const u64 args_offset = base;
@@ -2286,10 +2317,12 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
         if (handle) { // null: bound by the command before (BindWhenCompiled)
             cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, handle);
         }
+        const bool refused = !handle && SkipFailed(pipeline); // as for direct draws
         if (query.pool) {
             cmdbuf.beginQuery(query.pool, query.index, query.flags);
         }
-        if (is_indexed) {
+        if (refused) {
+        } else if (is_indexed) {
             if (counts) {
                 cmdbuf.drawIndexedIndirectCount(args, args_offset, counts, counts_offset, max_count,
                                                 stride);
@@ -2380,7 +2413,14 @@ void Rasterizer::DispatchRecord(const ComputePipeline* pipeline) {
     // bbport: dispatches are never left out; a compute pipeline still compiling is bound late.
     vk::Pipeline handle = pipeline->HandleIfReady();
     if (!handle) [[unlikely]] {
-        handle = BindWhenCompiled(pipeline, vk::PipelineBindPoint::eCompute);
+        if (!pipeline->IsFailed()) {
+            handle = BindWhenCompiled(pipeline, vk::PipelineBindPoint::eCompute);
+        }
+        if (SkipFailed(pipeline)) { // refused by the driver: the dispatch is left out
+            ResetBindings(true);
+            scheduler.KickRecording();
+            return;
+        }
     }
     const u32 dim_x = cs_program.dim_x, dim_y = cs_program.dim_y, dim_z = cs_program.dim_z;
     if (FrameCapture::Active()) {
@@ -2395,6 +2435,8 @@ void Rasterizer::DispatchRecord(const ComputePipeline* pipeline) {
     scheduler.RecordCrumb(crumb, [=](vk::CommandBuffer cmdbuf) {
         if (handle) { // null: bound by the command before (BindWhenCompiled)
             cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, handle);
+        } else if (SkipFailed(pipeline)) {
+            return; // the command before found it refused by the driver
         }
         cmdbuf.dispatch(dim_x, dim_y, dim_z);
     });
@@ -2549,7 +2591,14 @@ void Rasterizer::DispatchIndirectRecord(const ComputePipeline* pipeline, VAddr a
 
     vk::Pipeline handle = pipeline->HandleIfReady();
     if (!handle) [[unlikely]] {
-        handle = BindWhenCompiled(pipeline, vk::PipelineBindPoint::eCompute);
+        if (!pipeline->IsFailed()) {
+            handle = BindWhenCompiled(pipeline, vk::PipelineBindPoint::eCompute);
+        }
+        if (SkipFailed(pipeline)) { // refused by the driver: the dispatch is left out
+            ResetBindings(true);
+            scheduler.KickRecording();
+            return;
+        }
     }
     const vk::Buffer args = buffer->Handle();
     const u64 args_offset = base;
@@ -2567,6 +2616,8 @@ void Rasterizer::DispatchIndirectRecord(const ComputePipeline* pipeline, VAddr a
         Breadcrumbs::CopyArgs(cmdbuf, args, args_offset, args_slot);
         if (handle) { // null: bound by the command before (BindWhenCompiled)
             cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, handle);
+        } else if (SkipFailed(pipeline)) {
+            return; // the command before found it refused by the driver
         }
         cmdbuf.dispatchIndirect(dispatch_args, dispatch_offset);
     });
@@ -2618,7 +2669,10 @@ vk::Pipeline Rasterizer::BindWhenCompiled(const Pipeline* pipeline,
     // (write faults, readbacks for guest threads) do not wait for the compile.
     pipeline_compile_stats.late_binds.fetch_add(1, std::memory_order_relaxed);
     scheduler.Record([pipeline, bind_point](vk::CommandBuffer cmdbuf) {
-        cmdbuf.bindPipeline(bind_point, pipeline->Handle());
+        // Null: the driver refused it (Pipeline::IsFailed); the draw or dispatch after it is left out.
+        if (const vk::Pipeline handle = pipeline->Handle()) {
+            cmdbuf.bindPipeline(bind_point, handle);
+        }
     });
     return {};
 }

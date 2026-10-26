@@ -8,8 +8,14 @@
 namespace Common::Log {
 static Level threshold() {
     static const Level level = [] {
+        // Unset: from the launcher's Log level (BB_LOG_LEVEL): info at detailed, debug at debug.
         const char* v = std::getenv("BB_GPU_LOG");
-        if (!v) return Level::warn;
+        if (!v) {
+            const char* log_level = std::getenv("BB_LOG_LEVEL");
+            if (log_level && !std::strcmp(log_level, "debug")) return Level::debug;
+            if (log_level && !std::strcmp(log_level, "detailed")) return Level::info;
+            return Level::warn;
+        }
         static const char* names[] = {"trace", "debug", "info", "warning", "error", "critical"};
         for (int i = 0; i < 6; ++i)
             if (!std::strcmp(v, names[i])) return Level(i);

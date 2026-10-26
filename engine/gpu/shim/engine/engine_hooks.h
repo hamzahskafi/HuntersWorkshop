@@ -12,10 +12,20 @@ struct Hook {
     std::uint8_t* site = nullptr;
     std::uint8_t* stub = nullptr;
     std::size_t bytes = 0;
+    // Prepare: the displaced instructions and their jump back, i.e. the game's own function, which
+    // a callback can run itself (Call(hook.original, ...)) and return through the return slot.
+    std::uint64_t original = 0;
+    // Replace: the host function the site jumps to (no stub).
+    std::uint64_t target = 0;
 };
 // All hooks are prepared and checked before any entry is changed. Called at loader startup.
 bool Prepare(Hook& hook, std::uint8_t* image, std::size_t size, std::size_t offset,
              std::span<const std::uint8_t> expected, Callback callback);
+// The site jumps straight to `target`, a host function with the game's calling convention
+// (sysv_abi) that takes the game function's place whole: no stub, no registers saved, for a
+// function the game calls too often for the stub's cost. Committed and discarded as Prepare's.
+bool Replace(Hook& hook, std::uint8_t* image, std::size_t size, std::size_t offset,
+             std::span<const std::uint8_t> expected, const void* target);
 void Discard(Hook& hook);
 // A stub that calls `callback` and then jumps to `resume` (no displaced bytes): for a tail call
 // redirected to it. Null when no page could be had.

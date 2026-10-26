@@ -1,6 +1,6 @@
 # Community fixes: the vetted list and plan
 
-Updated 2026-10-25 (with the A1–A12 integration plan). Hunter's Workshop (HW) started from Lantern Engine 0.9.37 beta 9 (`08173e6`).
+Updated 2026-10-26 (A1–A12 in, for 0.4.0 beta 1). Hunter's Workshop (HW) started from Lantern Engine 0.9.37 beta 9 (`08173e6`).
 This is the analysis of what the other Bloodborne PC projects fixed after that point, checked
 against HW's own code, with what has been done since. Nothing here is merged wholesale: each fix
 is taken on its own, with its author credited.
@@ -13,7 +13,8 @@ Ground rules for this work:
   `README.md` and in its commit.
 - The particle cap (`BB_INDIRECT_CLAMP`) and the fixed-refresh frame lock (`BB_VBLANK_PACING`)
   stay off.
-- The version stays 0.3.0 until the user says otherwise. Linux waits until Windows is done.
+- Work after 0.3.0 goes into the 0.4.x betas; A1–A12 are 0.4.0 beta 1. Linux waits until Windows is
+  done.
 
 Addresses: **patch** addresses are the ones `Bloodborne.xml`, `frame_rate_sites.inc`, bbhost and
 Binary Ninja use (image offset + 0x400000). **Image offsets** are what bbport's `ImageBase + x`,
@@ -27,6 +28,9 @@ HW's `Prepare()` calls and the sampler's `+0x...` print. Each address below says
 | Character creation by mouse, at the title and the Dream mirror | `68c04a1` | Drag on the hunter turns them (right stick), click a slider steps toward that side, drag across a row steps its value, the wheel steps by ten (L1/R1). Right-click stays Back. After Lantern 0.9.37 stable (Awaken). |
 | Hitch report, `BB_HITCH_REPORT_MS=<ms>` | `b5105f1` | Off by default. For a frame over the threshold: every guest thread's wait, and every thread's stack twice 20 ms apart, the busy ones first. No thread is unwound while suspended. At most 12 per session, 3 s apart, none in the first 20 s or within 10 s of a loading screen. |
 | Online summon no longer holds the game while the server answers | `5177bfa` | `sceNpSignalingActivateConnection` returns the connection at once; the session server's address lookup runs on the NP thread (`sig_resolve`, `thd_np.cpp`), then ESTABLISHED and ACTIVE follow as before. The log line `np: signaling: ... resolved ... (conn N, T ms)` gives the time the game used to stand still. |
+| PC memory model off by default (0.4.0 beta 4) | `5f3eed9` | The launcher's default and a one-time switch for existing settings files (`guest_in_place_off_040`); Lantern 0.9.37 beta 4 had turned it on for everyone. The toggle stays. Why, and what a fix would take: `docs/gpu-memory.md`. |
+| B13, B15, B16, B17 (0.4.0 beta 5) | `f09580f`, `1aa7905` | **B13:** the wind's step is a per-frame load of half the frame's (`frame_rate_sites.inc`, Grass), its force weighed by the game's 1/60, the time step read from `[rbp-0x170]`; path B (a model without wind slots) leaves before it moves anything. **B15:** `FrameRate::Tick` looks for AtkParam_Pc 2900931 every 120 frames and makes hit0_Radius 0.6 when it is the game's 0.4 (the Hitbox group). **B16:** the keyboard's left stick turns toward the keys at 900°/s, at most 30° a read, a half turn through forward, 60 ms kept after a release: `KeyTurn` in `gpu/shim/input/bindings.cpp` for the PC controls (the default; 0.4.0, after a review found beta 5 had it only in the legacy keys), `key_move` in `src/runtime_pad.c` with them off. **B17:** a controller stick past the round gate is brought back onto it (`round_gate`, `pad_round_gate=0` turns it off). Tests: frame-rate-test, the table checker against 1.09, test_pad.c, pc-input-test. |
+| 0.4.0: the log level, hitch reports and controller details | (this commit) | **Standard** (the default) writes save mounts only when they change, each thread name once, no semaphores, no 5 s draw counts (unless frame statistics are on) and the job pools' first cache and busy pools only: a 79-minute session from ~2,700 lines to ~700. **Detailed** (`BB_LOG_LEVEL=detailed`) brings them back with the GPU side's info messages; **Debug** adds its debug messages. **Hitch reports** (`BB_HITCH_REPORT_MS`) and **controller details** (`BB_PAD_LOG=1`: ids, connection, rumble, disconnects, the first vibration request, the round gate) in the launcher's Log submenu. A stable launcher over a beta's settings switches frame statistics and the sharp UI off once. Release notes: `docs/release-notes-0.4.0.md`. |
 
 Checked and found already in HW (no change):
 
@@ -46,6 +50,13 @@ Investigated, not changed:
   (`src/win32_compat.h:45`: `_commit` → `FlushFileBuffers`). The logs show it isn't the hitch:
   the game saves every few seconds and almost never hitches, and during the hitches its main
   thread waits on another thread rather than writing. Left as it is.
+- **Controller vibration through DS4Windows** (2026-10-26). A DualSense over Bluetooth, behind
+  DS4Windows' virtual DualShock 4, had never vibrated in HW or Lantern; after a rumble test in
+  DS4Windows it did, in 0.4.0 beta 4 too. Beta 5's logging (`823493c`, reverted) showed the whole
+  path working: SDL's own driver has the virtual pad as wired (`054c:05c4`, HID path, rumble yes),
+  and the game's requests (patch 0x2a9c790, from its vibration update at 0x1395be0; the large motor
+  0–255, the small one 0 or 1) are sent. Whatever stopped it was outside the engine. If it comes
+  back, that commit's logging says which side it is.
 
 ## Current investigation: the 40–120 ms hitches
 
@@ -132,9 +143,17 @@ On in `180526`, `202235`, `205240`, `221249`, `003848`; off in `211729`, `214630
   are small and the routes differed, so it isn't settled.
 - **Off costs CPU that is spare at 60.** Above 60 that changes, and on would matter more.
 - **To settle it:** the same route offline (no summon), 10 minutes each way, hitch report off.
+- **Settled for now (2026-10-26):** off by default since 0.4.0 beta 4; see `docs/gpu-memory.md`.
 
-Side note: Windows' commit headroom read 0.75–1.4 GB in that log. The page file is
-Windows-managed, so Windows grows it when needed; nothing to change.
+### GPU memory work: set aside, written up in `docs/gpu-memory.md` (2026-10-26)
+
+Late frames in play come mostly from the PC memory model's moves: sparse rebinds that wait for the
+GPU, and promotions into VRAM in bursts. A 0.4.0 beta 3 session with the model on had 11 frames
+over 30 ms in ~20 minutes, each inside a burst of moves; the session before it, with the model off,
+had none in ~8.5 minutes. So the model is **off by default since 0.4.0 beta 4**, and the rest is
+skipped for now. `docs/gpu-memory.md` has the evidence, the causes with their code (the model's
+moves, pinning, image memory created per image, residency chunks, the full-screen image), and a
+step-by-step solution, in case it's picked up again.
 
 ## A. Bugs HW has, with sound fixes (recommended)
 
@@ -157,14 +176,46 @@ Suggested first batch: A1–A12, B13 and B15.
 
 ## A1–A12: integration plan
 
-Analysis done 2026-10-25. **Nothing is implemented yet; this waits for a go-ahead.** Addresses in this
-section are image offsets unless marked "patch".
+Analysis done 2026-10-25, and all twelve went in the same day for 0.4.0 beta 1 (built by the user,
+not here). Addresses in this section are image offsets unless marked "patch".
+
+### As built (0.4.0 beta 1)
+
+| # | Commit | Differences from the plan below |
+|---|---|---|
+| Shared | `ebb9026` | As planned: `Hook::original`, `Replace`, `skip_list.h`. |
+| A3 | `c108cd9` | HW has three nested waits, not ayozetr's five: the other two are in code only that fork has. |
+| A6 | `f9e74c9` | As planned. |
+| A9 | `3569d42` | As planned. |
+| A11 | `fe331e3` | As planned; the video and audio reads also return on an empty queue. |
+| A12 | `30a7d10` | As planned. |
+| A8 | `8329a5d` | Two of the three parts were already in HW (the fetch shader kept per stage, a fresh selection per warm-up record). What went in: a draw without a pixel shader gets its own fragment state, and the key version 7 with the NVIDIA rule. |
+| A7 | `af66653` | As planned, with the disk entry removed through the IO queue (`DataBase::RemoveQueued`). |
+| A2 | `de3503b` | As planned. |
+| A5 | `afd6bda` | As planned; the module `game_fixes.cpp` with it. |
+| A4 | `5f74f46` | As planned. |
+| A10 | `c0852fd` | As planned. Test: `fmod-ring-test`. |
+| A1 | `f0dc6cd` | The lock replaced whole, as planned. **ProcessOne is not replaced**: a hook at its entry puts the cache in by a compare-exchange on the list's allocator slot (no queue lock needed), and the cache keeps a lock of its own, so it does not rely on every caller holding the queue lock (all 14 `Append` callers do). ProcessOne, `Append` and `~CSEzWork` are checked whole all the same, and so are the allocator class's 27 methods (alloc and free where expected). 64 caches. Test: `job-pool-test` (not `game-fixes-test`). |
+| Version | `28ab95a` | Launchers and LauncherBuilder 0.4.0-beta.1 (shown as v0.4.0 beta 1); engine id `hunters-workshop-5`. |
+| A1, beta 2 | `ff81dc9` | First game run (2026-10-26): `job_lock` in, `job_nodes` left out. The start program's link step rewrites every `mov rax, fs:[0]` to `gs` (17,127 sites), and `Append` has two of them (+0x4c, +0xbd, both on its out-of-memory path), so its fingerprint failed. The rewritten bytes are accepted too (`0x0d88125c856cf28e`, checked again by hand). Lock, ProcessOne and `~CSEzWork` have no `fs` loads, and no red-zone site or red-zone function touches any of the four. 0.4.0-beta.2, engine id `hunters-workshop-6`. |
+| A1, beta 3 | (this commit) | Beta 2's game run still left `job_nodes` out. On Windows the loader rewrites each `gs:[0]` read once more (`src/probe.c` `patch_tls_reads`): to the TEB slot's displacement, or, past slot 63 (the user's: 93), to a jump to a stub of its own whose address changes every run. So no fixed hash of Append can match. The fingerprint now reads each listed thread-pointer read as the game's `mov rax, fs:[0]` when it holds one of those forms, and checks every other byte as before (the original hash again). The log says which check failed. Checked on the real Append bytes in all four forms; `job-pool-test` covers the forms on synthetic code. 0.4.0-beta.3, engine id `hunters-workshop-7`. |
+
+Fingerprints of game code are checked against the image the engine actually sees: the eboot
+after the start program's patches **and** its link step (`fs`→`gs` loads, red-zone store
+redirects, `start/prepare.cpp`) **and** the Windows loader's own rewrites (`src/probe.c`: thread-
+pointer reads to the TEB slot), not the patch output alone. A1's first fingerprints missed both.
+
+Planned tests not added: A4's and A5's callbacks, A6's case in `test_runtime.c`, and A7/A8's in the
+pipeline tests. They need the full engine build (the runtime and the renderer), which can't be
+made where this was written. Each change was checked by hand against the code it touches instead.
+The ones added (`engine-hooks-test`, `job-pool-test`, `fmod-ring-test`, `test_patches.py`) pass on
+Linux, and `engine-hooks-test` and `job-pool-test` also pass as Windows builds under Wine.
 
 ### What each one touches
 
 | # | Layer | Files | Game sites | How it goes in |
 |---|---|---|---|---|
-| A1 | Game code | new `gpu/shim/engine/job_pool.cpp` | `DLAdaptiveMutex::Lock` 0x20368c0 (whole function, 0xe8 bytes) and `CSEzWork::ProcessOne` 0x2032370 (0x1c2 bytes) replaced; the general allocator's vtable 0x53aefa0 copied, never written | `Replace` (new, below), twice |
+| A1 | Game code | new `gpu/shim/engine/job_pool.cpp` | `DLAdaptiveMutex::Lock` 0x20368c0 (whole function, 0xe8 bytes) replaced; `CSEzWork::ProcessOne` 0x2032370 (0x1c2 bytes) hooked at its entry (as built; the plan replaced it); the general allocator's vtable 0x53aefa0 copied, never written | `Replace` (new, below) and `Prepare` |
 | A2 | Boot patch | `start/patches.cpp`, `scripts/patches.py` | The recording producer's `lea rdi, [string]` at patch 0x1dc981f: its displacement at patch 0x1dc9822, `5d0ff702` → `2e6af702` | A write in the patch list, checked against the original bytes like the render pools |
 | A3 | Renderer | `liverpool.cpp` 920, 1994, 2168 | — | `task.handle.destroy()` after each wait loop |
 | A4 | Game code | new `gpu/shim/engine/game_fixes.cpp` | Runner step 0x1067f60 (17 bytes); the two runner resets 0x1067960 and 0x1067a40 (14 bytes each); give-back 0x1056990; pool 0x54b8788 | `Prepare`; the step through `Hook::original` (new, below) |
@@ -324,7 +375,7 @@ Each commit message names its source the way `68c04a1` did ("After ... (author)"
 
 ### Commit order
 
-Each is built and tested before the next. Version stays 0.3.0.
+Each is built and tested before the next. Version 0.4.0 beta 1.
 
 1. `engine_hooks`: `Hook::original` and `Replace`, with tests.
 2. `skip_list.h`, with `frame_rate.cpp` moved onto it (no change in behaviour).
@@ -379,13 +430,31 @@ In-game checklist, for when you test:
 
 HW already carries 161 of bbhost's 166 frame-rate sites (every redirected load, the physics, AI,
 clip-drive and targeting steps, the pacer targets). These are what bbhost found beyond them.
+B13, B15, B16 and B17 went in for 0.4.0 beta 5 (the table above). B18 waits for an A/B test.
+
+**B14 parked (2026-10-26).** bbhost's effects work is its `decomp/sfx/step_gate.cpp` (1,344 lines) and
+the schedule in `engine/frame_rate.cpp` (`kSfxStepLoad` 0x2377d4a, `g_sfx_carry`). Effects move by time
+(right at any rate) and count part of their lives in updates (the light module's flicker phase +0x30
+and blend +0x110, a node's state edges, emissions, conditions, controllers), which run twice as often
+at 60. The options weighed:
+
+- **A, whole steps:** the effects in whole 1/30 s, the frames between running only each node's
+  containers (sub_2c4ff30 and the light module sub_131e660 held). Counts right, Ebrietas' 1251721 ends
+  without the data workaround, but the effects' own movement then changes 30 times a second. Medium.
+- **B, bbhost's smooth steps:** counts at 30 and movement by the frame's time, through about 30
+  effect classes converted one by one, the ribbons, GPU particle records and the wind. Several times A.
+- **C, the flicker alone:** the light module's update (sub_131e660) with its phase rate (+0x80) as 0
+  and its blend mode (+0x38, +0x3c) as keep on the frames between whole 1/30 s, all put back, a
+  pre-roll's call left alone: lamps and candles flicker 30 steps a second, as on the PS4; nothing else
+  changes. Small. The recommended one, if this is picked up.
+- **D, nothing.** Chosen for now: the Ebrietas data fix covers the effect that never ended.
 
 | # | Fix | What it fixes | Where | Source and credit |
 |---|---|---|---|---|
 | B13 | **Grass and tree wind** | At 30 the game steps the wind 1/60 s a frame (half its pace, with the GX device's +0x100 at 1). HW points that step at the frame's time, so at 60+ the wind runs twice the PS4's pace, and its force, weighted by the same step, bends less and twitches with each frame's length. Fix: the wind's step at half the task step; the force at the authored 1/60. | `sub_2713870`; HW `FRAME_SITE(Grass, 0x2713d8d)`; bbhost's force sites patch 0x27149ea and 0x2714b26 | droogie, bbhost `wind_pace.h`, `frame_rate.cpp` (`b2818b4`, `5cee912`) |
 | B14 | **Effects step** | Effects count part of their lives in updates. With the frame's time as their step, lamp and candle flicker runs at the frame rate rather than 30 a second, and some effects never end (Ebrietas' 1251721 in 1 of 6 attacks without the gate). Fix: whole 1/30 s steps with the rest carried, and the frames between holding what effects count. Would also let HW drop the Ebrietas data workaround (Nexus mod 41's trail). Largest item here. | `SprjSfx::Update` patch 0x2377bd0, its step load 0x2377d4a | droogie, bbhost `sfx_schedule.h`, `decomp/sfx/step_gate.cpp` (`6f735f4`, `9c13c5a`, `5986a4b`, `e4fbb44`) |
 | B15 | Bloodletter L2 | The transformed L2's self-hit (a 0.4 m sphere live for one 30 FPS frame) misses the hand's ragdoll capsule when it trails the pose by a fraction of a frame, so the frenzy aura never comes above 30. Fix: radius 0.6 at the converted rates. | `AtkParam_Pc` 2900931 `hit0_Radius` 0.4 → 0.6 | droogie, bbhost `6f735f4` |
-| B16 | Keyboard sprint turns | Sprint drops when changing direction on the keyboard. Fix: the keyboard stick turns at most ~30° per read, a half turn passes through forward, and a release keeps the direction 60 ms. | `src/runtime_pad.c` | Supermedo `4b930b1`; ayozetr `523c88e` (cassioKenji's measurements); Lantern PR #67 (ikeeasianboy) |
+| B16 | Keyboard sprint turns | Sprint drops when changing direction on the keyboard. Fix: the keyboard stick turns at most ~30° per read, a half turn passes through forward, and a release keeps the direction 60 ms. | `gpu/shim/input/bindings.cpp`, `src/runtime_pad.c` | Supermedo `4b930b1`; ayozetr `523c88e` (cassioKenji's measurements); Lantern PR #67 (ikeeasianboy) |
 | B17 | DS4 diagonals | Some pads report diagonals past the stick's round gate (up to ~1.41× one axis), so the camera turns 2–3× faster there, worse at high FPS. Fix: bring a stick past the round gate back onto it. | `src/runtime_pad.c` | ayozetr `2b8d9e1` (issue #7) |
 | B18 | PS4 float state on game threads | Game threads start with Windows' MXCSR (0x1f80) instead of the PS4's (0x9fc0: flush-to-zero, denormals-are-zero) and x87 control word 0x037f. Needs testing before it ships. | Guest thread start (`src/runtime_thread.c`) | StevenMiller123 and red-prig, shadPS4#3568; via ayozetr `caa9b4b` |
 
@@ -417,7 +486,9 @@ clip-drive and targeting steps, the pacer targets). These are what bbhost found 
   - *Performance Patch* never applies in HW: about 40 of its writes come from another game version
     and land mid-instruction, so HW's checks refuse it.
 - **Lens and camera tuning** (bbhost's "Original" camera, the game's own camera converted from 30
-  instead of Kyo's retune): a feature, not a fix.
+  instead of Kyo's retune): already in HW, from Lantern 0.9.37. The launcher's Graphics > Follow camera,
+  `camera_tuning=original` (the default) or `fps++` (`start/patches.cpp`, `FrameRateFixes`); the lens
+  filter's rate is the frame-rate fixes' Lens group.
 
 ## D. Not recommended, not applicable, or already in HW
 

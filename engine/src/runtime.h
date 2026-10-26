@@ -53,6 +53,10 @@ void runtime_guest_call_sites(uint64_t out[3]);
 /* bbport: times the game's heap asked for more memory (posix_mmap): a sign it leaks. */
 uint64_t runtime_heap_growths(void);
 static inline uint64_t runtime_wait_clock(void) { return host_monotonic_ns(); }
+/* BB_LOG_LEVEL (the launcher's Log level): 0 standard (the default), 1 detailed, 2 debug. Lines
+ * that repeat through a session (every semaphore and thread, every save data mount) are written
+ * from detailed on. */
+int runtime_log_level(void);
 const char *runtime_import_name(const char *name);
 uintptr_t runtime_rwlock_resolve(const char *name);
 void runtime_rwlock_report(void);

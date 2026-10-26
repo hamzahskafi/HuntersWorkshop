@@ -339,6 +339,11 @@ void TileManager::TileImage(Image& in_image, std::span<vk::BufferImageCopy> buff
     // bbport: recorded with copies of the descriptor infos (threaded recording).
     RecordTilingDispatch(GetTilingPipeline(info, true), tiled_buffer_info, linear_buffer_info,
                          params_buffer_info, dim_x);
+    // The dispatch reads the staging range: a later writer reusing it must wait for that read, as
+    // DetileImage's source above. After DarkIzuku (8e0842c).
+    runtime.AccessBuffer(staging.buffer, staging.offset, info.guest_size,
+                         vk::PipelineStageFlagBits2::eComputeShader,
+                         vk::AccessFlagBits2::eShaderRead);
 
     runtime.AccessBuffer(out_buffer, out_offset, info.guest_size,
                          vk::PipelineStageFlagBits2::eComputeShader,

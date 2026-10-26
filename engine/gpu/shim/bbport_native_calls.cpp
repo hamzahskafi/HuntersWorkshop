@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // bbport: direct calls, stage 2 (see bbport_native_calls.h).
 #include "bbport_native_calls.h"
+#include "bbport_log_level.h"
 
 #include <atomic>
 #include <chrono>
@@ -213,7 +214,8 @@ void MaybeReport() {
                       (unsigned long long)unrecorded, (unsigned long long)trace_trailers);
         std::printf("Native calls: %llu draws verified, %llu mismatches%s\n",
                     (unsigned long long)verified, (unsigned long long)mismatches, extra);
-    } else if (mode == Mode::Native) {
+    } else if (mode == Mode::Native && (timing || BbLogLevel() >= 1)) {
+        // Every 5 s: with the frame statistics or from the detailed log level on.
         std::printf("Native calls: %llu draws as records (%llu written, %llu kept as PM4)\n",
                     (unsigned long long)decoded,
                     (unsigned long long)written_records.exchange(0, std::memory_order_relaxed),

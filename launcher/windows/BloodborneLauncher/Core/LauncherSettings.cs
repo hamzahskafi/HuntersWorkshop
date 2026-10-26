@@ -35,6 +35,11 @@ namespace BloodborneLauncher.Core
             ["readbacks"] = "",
             // Beta builds: on (Load switches older files once), so crash logs carry the frame stats.
             ["frame_stats"] = Updater.CurrentBeta > 0,
+            // Settings › Log, capture and extra variables (0.4.0): the log level, hitch reports
+            // (0: off; else ms) and the controller details.
+            ["log_level"] = "standard",
+            ["hitch_report_ms"] = "0",
+            ["pad_log"] = false,
             ["gpu_profile"] = false,
             ["vk_validation"] = false,
             ["extra_env"] = "",
@@ -79,7 +84,9 @@ namespace BloodborneLauncher.Core
             ["exp_frame_fixes"] = true, // the frame-rate corrections at 60 FPS and above (frame_rate.cpp)
             ["exp_frame_timer"] = false, // one frame time for the game and every correction (frame_rate.cpp Step)
             ["exp_hot_pages"] = true,
-            ["exp_guest_in_place"] = true,
+            // 0.4.0 beta 4: off. Its memory moves (sparse rebinds) stall the GPU now and then in play
+            // on NVIDIA; the CPU it saves is spare at 60 FPS (engine/docs/gpu-memory.md).
+            ["exp_guest_in_place"] = false,
             ["exp_native_calls"] = true,
             ["exp_sfx_workaround"] = false,
             ["borderless_fullscreen"] = false,
@@ -149,6 +156,19 @@ namespace BloodborneLauncher.Core
                     if (!saved.ContainsKey(PerfDefaultsMarker))
                         foreach (var (key, value) in PerfDefaults)
                             _data[key] = value;
+                    // 0.4.0 beta 4: the PC memory model off once (beta 4 of 0.9.37 had switched it on
+                    // for everyone); on again only by choice.
+                    if (!saved.ContainsKey(GuestInPlaceOffMarker))
+                        _data["exp_guest_in_place"] = false;
+                    // 0.4.0: a stable launcher over a beta's file (any beta writes frame_stats_beta_on)
+                    // switches off once what betas turn on for testing: the frame statistics and the
+                    // sharp UI. On again only by choice.
+                    if (Updater.CurrentBeta == 0 && saved.ContainsKey("frame_stats_beta_on") &&
+                        !saved.ContainsKey(BetaTestingOffMarker))
+                    {
+                        _data["frame_stats"] = false;
+                        _data["exp_sharp_ui"] = false;
+                    }
                     // Older launchers kept the shadNet password in plain text: encrypted now, and
                     // the file rewritten without it.
                     if (Str("online_password") is { Length: > 0 } plain && !Secret.IsProtected(plain))
@@ -171,16 +191,20 @@ namespace BloodborneLauncher.Core
             _data["legacy_shaders_default_98"] = true;
             _data["occlusion_off_99"] = true;
             _data[PerfDefaultsMarker] = true;
+            _data[GuestInPlaceOffMarker] = true;
+            if (Updater.CurrentBeta == 0) _data[BetaTestingOffMarker] = true;
         }
 
         private const string PerfDefaultsMarker = "perf_defaults_b4";
+        private const string GuestInPlaceOffMarker = "guest_in_place_off_040";
+        private const string BetaTestingOffMarker = "beta_testing_off_040";
 
         /// <summary>0.9.37 beta 4's defaults that older settings files are switched to once.</summary>
         private static readonly (string Key, bool Value)[] PerfDefaults =
         {
             ("exp_frame_pacing", true), ("exp_thread_priority", true), ("exp_sleep_spin", true),
-            ("exp_fast_loading", true), ("exp_hot_pages", true), ("exp_guest_in_place", true),
-            ("exp_native_calls", true), ("legacy_shaders", false),
+            ("exp_fast_loading", true), ("exp_hot_pages", true), ("exp_native_calls", true),
+            ("legacy_shaders", false),
         };
 
         public void Save()
