@@ -154,8 +154,9 @@ bool Install(std::uint8_t* image, std::size_t size) {
     }
     // The work pools' lock, replaced whole (Replace: the game's Lock runs for every heap, GX and
     // queue lock, too often for a stub), and their job lists' node cache.
-    if (on[kJobLock] && !JobPool::LockReady(image, size)) {
-        host_log("Game fixes: job_lock left out: DLAdaptiveMutex::Lock differs from 1.09");
+    const char* why = "";
+    if (on[kJobLock] && !JobPool::LockReady(image, size, &why)) {
+        host_log("Game fixes: job_lock left out: %s", why);
     } else if (on[kJobLock]) {
         Hook hook;
         if (Replace(hook, image, size, JobPool::kLock, JobPool::kLockEntry,
@@ -166,8 +167,8 @@ bool Install(std::uint8_t* image, std::size_t size) {
             host_log("Game fixes: job_lock left out: 0x%zx differs from 1.09", JobPool::kLock);
         }
     }
-    if (on[kJobNodes] && !JobPool::NodesReady(image, size)) {
-        host_log("Game fixes: job_nodes left out: the work pools' code differs from 1.09");
+    if (on[kJobNodes] && !JobPool::NodesReady(image, size, &why)) {
+        host_log("Game fixes: job_nodes left out: %s", why);
     } else {
         prepare(kJobNodes, {{JobPool::kProcessOne, JobPool::kProcessOnePrologue, JobPool::PoolPop}},
                 "job list nodes cached");

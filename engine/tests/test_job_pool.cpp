@@ -4,7 +4,9 @@
 //   the game's Unlock (0x2036a40), many threads, at three spin budgets: exclusion, exact counts, a
 //   free word at the end;
 // - the node cache: pools through a stand-in general allocator, as the game's Append, ProcessOne
-//   and ~CSEzWork use their list's allocator slot.
+//   and ~CSEzWork use their list's allocator slot;
+// - the fingerprints: a thread-pointer read in each of the forms the link step and the Windows
+//   loader leave, on synthetic code.
 #include "engine_hooks.h"
 #include "job_pool.h"
 #include <cassert>
@@ -12,6 +14,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <mutex>
 #include <random>
 #include <thread>
@@ -367,6 +370,37 @@ void NodeCacheRun() {
     assert(Live() == 0);
 }
 
+// A function of synthetic bytes with two thread-pointer reads; each form at the reads gives the
+// game's fingerprint, anything else none or another.
+void FingerprintRun() {
+    std::vector<std::uint8_t> code(0x60);
+    for (std::size_t i = 0; i < code.size(); ++i) code[i] = static_cast<std::uint8_t>(i * 37 + 11);
+    const std::size_t reads[] = {0x10, 0x40};
+    const std::uint8_t fs_read[] = {0x64, 0x48, 0x8b, 0x04, 0x25, 0, 0, 0, 0};
+    for (const std::size_t r : reads) std::memcpy(code.data() + r, fs_read, sizeof fs_read);
+    const auto game = Fingerprint(code.data(), code.size(), reads);
+    assert(game && game == Fingerprint(code.data(), code.size())); // the game's bytes, read as they are
+    const auto with = [&](auto edit) {
+        std::vector<std::uint8_t> v = code;
+        for (const std::size_t r : reads) edit(v.data() + r);
+        return Fingerprint(v.data(), v.size(), reads);
+    };
+    assert(with([](std::uint8_t* p) { p[0] = 0x65; }) == game); // the link step: gs:[0]
+    assert(with([](std::uint8_t* p) { p[0] = 0x65; p[5] = 0xa8; p[6] = 0x14; }) == game); // TEB slot 5
+    assert(with([](std::uint8_t* p) { // past slot 63: jmp to a stub, four nops
+        p[0] = 0xe9;
+        p[1] = 0x78, p[2] = 0x56, p[3] = 0x34, p[4] = 0x12;
+        std::memset(p + 5, 0x90, 4);
+    }) == game);
+    assert(!with([](std::uint8_t* p) { p[0] = 0xe8; }));                      // a call there
+    assert(!with([](std::uint8_t* p) { p[5] = 1; }));                         // fs with a displacement
+    assert(!with([](std::uint8_t* p) { p[0] = 0xe9; p[8] = 0xcc; }));         // a jump without its nops
+    assert(!Fingerprint(code.data(), 0x45, reads));                           // a read past the end
+    std::vector<std::uint8_t> other = code;
+    other[0x30] ^= 1;
+    assert(Fingerprint(other.data(), other.size(), reads) != game); // the rest is still checked
+}
+
 } // namespace
 
 int main() {
@@ -381,4 +415,6 @@ int main() {
     std::puts("PASS: job lock taken again by its holder keeps its sleeper counted");
     NodeCacheRun();
     std::puts("PASS: job list node cache: stand-in, reuse, cap, pass-through, workers, end, race, all taken");
+    FingerprintRun();
+    std::puts("PASS: fingerprints: the game's, the link step's and the Windows loader's thread-pointer reads");
 }

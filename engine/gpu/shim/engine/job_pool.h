@@ -24,6 +24,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <immintrin.h>
+#include <optional>
+#include <span>
 #include <x86intrin.h>
 
 namespace BbEngine::JobPool {
@@ -75,8 +77,18 @@ constexpr std::uint8_t kLockEntry[] = {0x55, 0x48, 0x89, 0xe5, 0x41, 0x57, 0x41,
                                        0x56, 0x41, 0x54, 0x53, 0x49, 0x89, 0xfe};
 // DLAdaptiveMutex::Lock's replacement (Replace: the game's code jumps here). Returns 0, as the game's.
 __attribute__((sysv_abi)) std::int64_t Lock(std::uint64_t mutex, std::uint64_t timeout);
-// 1.09's Lock, whole, and the code it calls.
-bool LockReady(std::uint8_t* image, std::size_t size);
+// 1.09's Lock, whole, and the code it calls. False with `why` saying what differs.
+bool LockReady(std::uint8_t* image, std::size_t size, const char** why);
+
+// ---- Fingerprints -----------------------------------------------------------------------------------
+// The code these rely on is checked whole: FNV-1a over a function's bytes, with the game's thread-
+// pointer reads (`mov rax, fs:[0]`, at `reads`: offsets into the function) read as the game has
+// them. Before the engine starts, the start program's link step makes each one `gs:[0]`, and on
+// Windows the loader then gives it the TEB slot's displacement (`gs:[disp]`) or, past slot 63, a
+// jump to a stub of its own (`jmp rel32` and four `nop`s; src/probe.c patch_tls_reads). Anything
+// else at a read gives no fingerprint.
+std::optional<std::uint64_t> Fingerprint(const std::uint8_t* code, std::size_t size,
+                                         std::span<const std::size_t> reads = {});
 
 // ---- The job list's node cache --------------------------------------------------------------------
 // A pool (NS_SPRJ::CSEzWork): the queue lock at +0x30; the job list's sentinel at +0x18, its count
@@ -125,7 +137,7 @@ constexpr std::uint8_t kProcessOnePrologue[] = {0x55, 0x48, 0x89, 0xe5, 0x41, 0x
 // The hook at ProcessOne's entry (pool in rdi): a pool still on the general allocator adopts a cache.
 __attribute__((sysv_abi)) std::int64_t PoolPop(std::uint64_t, const std::uint64_t* saved);
 // 1.09's ProcessOne, Append, ~CSEzWork and the general allocator's class; keeps the image for
-// PoolPop and sets the caches up.
-bool NodesReady(std::uint8_t* image, std::size_t size);
+// PoolPop and sets the caches up. False with `why` saying what differs or is missing.
+bool NodesReady(std::uint8_t* image, std::size_t size, const char** why);
 
 } // namespace BbEngine::JobPool

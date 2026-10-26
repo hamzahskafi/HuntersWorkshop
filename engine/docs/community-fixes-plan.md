@@ -207,11 +207,12 @@ not here). Addresses in this section are image offsets unless marked "patch".
 | A1 | `f0dc6cd` | The lock replaced whole, as planned. **ProcessOne is not replaced**: a hook at its entry puts the cache in by a compare-exchange on the list's allocator slot (no queue lock needed), and the cache keeps a lock of its own, so it does not rely on every caller holding the queue lock (all 14 `Append` callers do). ProcessOne, `Append` and `~CSEzWork` are checked whole all the same, and so are the allocator class's 27 methods (alloc and free where expected). 64 caches. Test: `job-pool-test` (not `game-fixes-test`). |
 | Version | `28ab95a` | Launchers and LauncherBuilder 0.4.0-beta.1 (shown as v0.4.0 beta 1); engine id `hunters-workshop-5`. |
 | A1, beta 2 | `ff81dc9` | First game run (2026-10-26): `job_lock` in, `job_nodes` left out. The start program's link step rewrites every `mov rax, fs:[0]` to `gs` (17,127 sites), and `Append` has two of them (+0x4c, +0xbd, both on its out-of-memory path), so its fingerprint failed. The rewritten bytes are accepted too (`0x0d88125c856cf28e`, checked again by hand). Lock, ProcessOne and `~CSEzWork` have no `fs` loads, and no red-zone site or red-zone function touches any of the four. 0.4.0-beta.2, engine id `hunters-workshop-6`. |
+| A1, beta 3 | (this commit) | Beta 2's game run still left `job_nodes` out. On Windows the loader rewrites each `gs:[0]` read once more (`src/probe.c` `patch_tls_reads`): to the TEB slot's displacement, or, past slot 63 (the user's: 93), to a jump to a stub of its own whose address changes every run. So no fixed hash of Append can match. The fingerprint now reads each listed thread-pointer read as the game's `mov rax, fs:[0]` when it holds one of those forms, and checks every other byte as before (the original hash again). The log says which check failed. Checked on the real Append bytes in all four forms; `job-pool-test` covers the forms on synthetic code. 0.4.0-beta.3, engine id `hunters-workshop-7`. |
 
 Fingerprints of game code are checked against the image the engine actually sees: the eboot
 after the start program's patches **and** its link step (`fs`→`gs` loads, red-zone store
-redirects, `start/prepare.cpp`), not the patch output alone. A1's first fingerprints missed the
-link step.
+redirects, `start/prepare.cpp`) **and** the Windows loader's own rewrites (`src/probe.c`: thread-
+pointer reads to the TEB slot), not the patch output alone. A1's first fingerprints missed both.
 
 Planned tests not added: A4's and A5's callbacks, A6's case in `test_runtime.c`, and A7/A8's in the
 pipeline tests. They need the full engine build (the runtime and the renderer), which can't be

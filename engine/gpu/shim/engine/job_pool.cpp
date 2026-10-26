@@ -15,20 +15,23 @@ namespace BbEngine::JobPool {
 namespace {
 #define GUEST_ABI __attribute__((sysv_abi))
 
-// FNV-1a over a function's bytes: the replaced and relied-on code is checked whole, not only where
-// a hook goes. None of them holds a relocation.
+// The replaced and relied-on code, checked whole (Fingerprint), not only where a hook goes. None of
+// them holds a relocation; Append has two thread-pointer reads (its out-of-memory path).
 struct Whole {
+    const char* differs; // the log's words when it does
     std::size_t offset, size;
     std::uint64_t hash;
+    std::span<const std::size_t> reads = {};
 };
-constexpr Whole kLockCode = {kLock, 0xe8, 0xd42072c375950c3dull};
+constexpr std::size_t kAppendReads[] = {0x4c, 0xbd};
+constexpr Whole kLockCode = {"DLAdaptiveMutex::Lock differs from 1.09", kLock, 0xe8, 0xd42072c375950c3dull};
 constexpr Whole kNodeCode[] = {
-    {kProcessOne, 0x1c2, 0xcf93e76a74851e7bull}, // CSEzWork::ProcessOne
-    {0x2032780, 0xe9, 0x1198af2d0b7d6d94ull},    // CSEzWorkList::Append
-    {0x2031cf0, 0x3b9, 0xbaac3ee8cf6de4cfull},   // ~CSEzWork
+    {"CSEzWork::ProcessOne differs from 1.09", kProcessOne, 0x1c2, 0xcf93e76a74851e7bull},
+    {"CSEzWorkList::Append differs from 1.09", 0x2032780, 0xe9, 0x1198af2d0b7d6d94ull, kAppendReads},
+    {"~CSEzWork differs from 1.09", 0x2031cf0, 0x3b9, 0xbaac3ee8cf6de4cfull},
 };
-// Append once the start program has rewritten its two `mov rax, fs:[0]` (+0x4c, +0xbd) to gs.
-constexpr Whole kAppendLinked = {0x2032780, 0xe9, 0x0d88125c856cf28eull};
+// mov rax, fs:[0]
+constexpr std::uint8_t kFsRead[] = {0x64, 0x48, 0x8b, 0x04, 0x25, 0x00, 0x00, 0x00, 0x00};
 // What the game's Lock calls: the import stubs of scePthreadSelf and sceKernelWaitSema (each a
 // `jmp [rip + slot]`), and DL_PANIC with its file and text.
 constexpr std::size_t kSelf = 0x2bbfe78, kWaitSema = 0x2bbec78, kPanic = 0x20b55b0;
@@ -59,14 +62,17 @@ bool Report(unsigned n) {
     return n <= 5 || (n & (n - 1)) == 0;
 }
 
-std::uint64_t Fnv(const std::uint8_t* p, std::size_t n) {
-    std::uint64_t h = 0xcbf29ce484222325ull;
-    for (std::size_t i = 0; i < n; ++i) h = (h ^ p[i]) * 0x100000001b3ull;
-    return h;
+// The game's read, the link step's (gs:[0]), the Windows loader's (gs:[disp], or jmp to a stub).
+bool IsThreadPointerRead(const std::uint8_t* p) {
+    if (p[0] == 0xe9) return p[5] == 0x90 && p[6] == 0x90 && p[7] == 0x90 && p[8] == 0x90;
+    if (std::memcmp(p + 1, kFsRead + 1, 4)) return false;
+    return p[0] == 0x65 || (p[0] == 0x64 && !std::memcmp(p + 5, kFsRead + 5, 4));
 }
 
 bool Is(const std::uint8_t* image, std::size_t size, const Whole& code) {
-    return code.offset + code.size <= size && Fnv(image + code.offset, code.size) == code.hash;
+    if (code.offset + code.size > size) return false;
+    const auto print = Fingerprint(image + code.offset, code.size, code.reads);
+    return print && *print == code.hash;
 }
 
 bool IsStub(const std::uint8_t* image, std::size_t size, std::size_t offset) {
@@ -123,8 +129,34 @@ GUEST_ABI std::int64_t Lock(std::uint64_t mutex, std::uint64_t) {
     return 0;
 }
 
-bool LockReady(std::uint8_t* image, std::size_t size) {
-    if (!Is(image, size, kLockCode) || !IsStub(image, size, kSelf) || !IsStub(image, size, kWaitSema)) return false;
+std::optional<std::uint64_t> Fingerprint(const std::uint8_t* code, std::size_t size,
+                                         std::span<const std::size_t> reads) {
+    std::uint64_t h = 0xcbf29ce484222325ull;
+    const auto take = [&h](std::uint8_t byte) { h = (h ^ byte) * 0x100000001b3ull; };
+    std::size_t next = 0;
+    for (std::size_t i = 0; i < size;) {
+        if (next < reads.size() && i == reads[next]) {
+            if (i + sizeof kFsRead > size || !IsThreadPointerRead(code + i)) return std::nullopt;
+            for (const std::uint8_t byte : kFsRead) take(byte);
+            i += sizeof kFsRead;
+            ++next;
+        } else {
+            take(code[i++]);
+        }
+    }
+    if (next != reads.size()) return std::nullopt;
+    return h;
+}
+
+bool LockReady(std::uint8_t* image, std::size_t size, const char** why) {
+    if (!Is(image, size, kLockCode)) {
+        *why = kLockCode.differs;
+        return false;
+    }
+    if (!IsStub(image, size, kSelf) || !IsStub(image, size, kWaitSema)) {
+        *why = "an import stub Lock calls differs from 1.09";
+        return false;
+    }
     g_image = image;
     g_self = reinterpret_cast<SelfFn>(image + kSelf);
     g_wait = reinterpret_cast<WaitFn>(image + kWaitSema);
@@ -272,21 +304,28 @@ GUEST_ABI std::int64_t PoolPop(std::uint64_t, const std::uint64_t* saved) {
     return 0; // the game's ProcessOne runs on
 }
 
-bool NodesReady(std::uint8_t* image, std::size_t size) {
-    for (const Whole& code : kNodeCode)
-        if (!Is(image, size, code) && !(code.offset == kAppendLinked.offset && Is(image, size, kAppendLinked)))
+bool NodesReady(std::uint8_t* image, std::size_t size, const char** why) {
+    for (const Whole& code : kNodeCode) {
+        if (!Is(image, size, code)) {
+            *why = code.differs;
             return false;
+        }
+    }
     // The class: 27 methods (the next word is the padding before the next vtable), the aligned
     // alloc and the free where job_pool.h says.
     const std::uint64_t vtable = reinterpret_cast<std::uint64_t>(image + kAllocatorVtable);
-    if (kAllocatorVtable + 8 * (kVtableSlots + 1) > size || kGeneral + 8 > size) return false;
-    for (int s = 0; s < kVtableSlots; ++s)
-        if (!Word(vtable + 8ull * s)) return false;
-    if (Word(vtable + 8ull * kVtableSlots) != 0 ||
+    bool same = kAllocatorVtable + 8 * (kVtableSlots + 1) <= size && kGeneral + 8 <= size;
+    for (int s = 0; same && s < kVtableSlots; ++s) same = Word(vtable + 8ull * s) != 0;
+    if (!same || Word(vtable + 8ull * kVtableSlots) != 0 ||
         Word(vtable + kAllocSlot) != reinterpret_cast<std::uint64_t>(image + kGeneralAlloc) ||
-        Word(vtable + kFreeSlot) != reinterpret_cast<std::uint64_t>(image + kGeneralFree))
+        Word(vtable + kFreeSlot) != reinterpret_cast<std::uint64_t>(image + kGeneralFree)) {
+        *why = "the general allocator's class differs from 1.09";
         return false;
-    if (!SetUpCaches()) return false;
+    }
+    if (!SetUpCaches()) {
+        *why = "no low memory for the node caches";
+        return false;
+    }
     g_image = image;
     g_vtable = vtable;
     return true;
