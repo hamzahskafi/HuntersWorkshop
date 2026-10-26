@@ -1475,7 +1475,7 @@
   "At 60 FPS and above, ragdolls, physics, cloth, jumps, slopes, sprinting, attack sounds, online movement and timers follow the real frame time, and the timings the FPS++ patches halved or doubled (menu repeat, hit lifetimes, online timers) are the game's own again. Off: the older FPS++ patches above 60. On by default": "60 FPS 及以上，布娃娃、物理、布料、跳跃、斜坡、冲刺、攻击音效、联机移动和计时器按实际帧时间运行，被 FPS++ 补丁减半或加倍的时长（菜单连按间隔、攻击判定时长、联机计时器）恢复为游戏原值。关闭时，60 以上使用旧版 FPS++ 补丁。默认开启",
   "Memory the game rewrites before almost every use is no longer watched for changes, saving up to about 2 ms a frame in busy areas. On by default": "游戏几乎每次使用前都会重写的内存不再被监视变化，在繁忙区域每帧最多可节省约 2 毫秒。默认开启",
   "PC memory model": "PC 内存模型",
-  "The GPU reads the game's memory where it is instead of copies, so far less memory is watched and copied: more of the CPU and GPU used. On by default; turn it off if textures look wrong or the game stutters": "GPU 直接读取游戏内存而不是副本，需要监视和复制的内存大大减少：CPU 和 GPU 的利用率更高。默认开启；如果纹理显示异常或游戏卡顿，请关闭",
+  "The GPU reads the game's memory where it is instead of copies, so far less memory is watched and copied, which saves CPU. Off by default: moving memory between the game's RAM and VRAM stalls the GPU now and then, a late frame every minute or two on an NVIDIA card. Worth trying above 60 FPS or on a slower CPU, where the saving matters": "GPU 直接读取游戏内存而不是副本，需要监视和复制的内存大大减少，从而节省 CPU。默认关闭：在游戏内存与显存之间移动数据时 GPU 会不时停顿，在 NVIDIA 显卡上大约每一两分钟会有一帧延迟。在 60 FPS 以上或 CPU 较慢时值得开启，此时节省的 CPU 更有价值",
   "Native draw calls": "原生绘制调用",
   "The game's draw calls reach the engine directly instead of as console GPU commands it decodes again. On by default; turn it off if something stops drawing": "游戏的绘制调用直接交给引擎，而不是作为需要再次解码的主机 GPU 命令。默认开启；如果有东西不再显示，请关闭",
   "No game folder chosen yet.": "尚未选择游戏文件夹。",

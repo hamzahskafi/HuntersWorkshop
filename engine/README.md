@@ -20,7 +20,8 @@ and [shadPS4](https://github.com/shadps4-emu/shadPS4), and added:
   runtime, saves, files read in place, pads with menu and keyboard bindings);
 - **a direct path away from emulation** ([docs/EMULATION_REMOVAL_PLAN.md](docs/EMULATION_REMOVAL_PLAN.md)):
   draw calls taken from the game's graphics library as records, the PC memory model (the game's
-  memory used by the GPU in place), and a native compiler for the game's shaders
+  memory used by the GPU in place; off by default since 0.4.0 beta 4, [docs/gpu-memory.md](docs/gpu-memory.md)),
+  and a native compiler for the game's shaders
   ([docs/native_shader_compiler.md](docs/native_shader_compiler.md));
 - **renderer performance work**: draw preparation on worker threads, cached render state, pipeline
   cache warm-up with a crash guard, occlusion culling and frame pacing;

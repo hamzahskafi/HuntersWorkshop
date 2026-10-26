@@ -28,6 +28,7 @@ HW's `Prepare()` calls and the sampler's `+0x...` print. Each address below says
 | Character creation by mouse, at the title and the Dream mirror | `68c04a1` | Drag on the hunter turns them (right stick), click a slider steps toward that side, drag across a row steps its value, the wheel steps by ten (L1/R1). Right-click stays Back. After Lantern 0.9.37 stable (Awaken). |
 | Hitch report, `BB_HITCH_REPORT_MS=<ms>` | `b5105f1` | Off by default. For a frame over the threshold: every guest thread's wait, and every thread's stack twice 20 ms apart, the busy ones first. No thread is unwound while suspended. At most 12 per session, 3 s apart, none in the first 20 s or within 10 s of a loading screen. |
 | Online summon no longer holds the game while the server answers | `5177bfa` | `sceNpSignalingActivateConnection` returns the connection at once; the session server's address lookup runs on the NP thread (`sig_resolve`, `thd_np.cpp`), then ESTABLISHED and ACTIVE follow as before. The log line `np: signaling: ... resolved ... (conn N, T ms)` gives the time the game used to stand still. |
+| PC memory model off by default (0.4.0 beta 4) | (this commit) | The launcher's default and a one-time switch for existing settings files (`guest_in_place_off_040`); Lantern 0.9.37 beta 4 had turned it on for everyone. The toggle stays. Why, and what a fix would take: `docs/gpu-memory.md`. |
 
 Checked and found already in HW (no change):
 
@@ -133,36 +134,17 @@ On in `180526`, `202235`, `205240`, `221249`, `003848`; off in `211729`, `214630
   are small and the routes differed, so it isn't settled.
 - **Off costs CPU that is spare at 60.** Above 60 that changes, and on would matter more.
 - **To settle it:** the same route offline (no summon), 10 minutes each way, hitch report off.
+- **Settled for now (2026-10-26):** off by default since 0.4.0 beta 4; see `docs/gpu-memory.md`.
 
-### Set aside: GPU memory work at the moment a frame goes out (2026-10-26)
+### GPU memory work: set aside, written up in `docs/gpu-memory.md` (2026-10-26)
 
-Parked by the user until after A1–A12. Not VRAM pressure: the card never went over 6 of its 8 GB.
-The driver's kernel calls in the stall reports fit memory being created or pinned mid-frame,
-which costs the same however full the card is. From the stall lines' breakdowns:
-
-- **Memory creation.** Many stall frames spent 35–60 ms of thread time allocating GPU memory, in
-  both memory models (up to 233 ms during loads). Each allocation is a call into the driver and the
-  Windows graphics kernel. Streaming a new area asks for the most.
-- **Pinning the game's memory (PC memory model on).** The game's memory is imported for the GPU
-  256 MiB at a time, 14–16 times a session, mostly in the first minutes. 25 of 26 stalls in those
-  sessions' first stretch had one in the same moment, and two in-play stalls did too (40.6 ms in
-  `221249`, 71.1 ms in `003848`).
-- **The full-screen image re-upload** (~10 MB): 41–65 ms with almost no memory creation. Its time
-  goes to the upload and its change checks.
-- **A few stalls have none of these.** For those, the submit itself needs timing.
-
-Fixes this points to, once measured (time each creation, pin and submit, and name it in the stall
-line):
-
-1. **Reuse memory instead of creating it.** Keep larger blocks around and hand out pieces of them,
-   so streaming rarely needs a new allocation.
-2. **Create or pin memory before it's needed,** on a background thread rather than mid-frame.
-   With the PC memory model on, that includes doing the pinning at load rather than in play.
-3. **Spread the full-screen image's upload and checks** over frames, or skip them when nothing
-   changed.
-
-Side note: Windows' commit headroom read 0.75–1.4 GB in that log. The page file is
-Windows-managed, so Windows grows it when needed; nothing to change.
+Late frames in play come mostly from the PC memory model's moves: sparse rebinds that wait for the
+GPU, and promotions into VRAM in bursts. A 0.4.0 beta 3 session with the model on had 11 frames
+over 30 ms in ~20 minutes, each inside a burst of moves; the session before it, with the model off,
+had none in ~8.5 minutes. So the model is **off by default since 0.4.0 beta 4**, and the rest is
+skipped for now. `docs/gpu-memory.md` has the evidence, the causes with their code (the model's
+moves, pinning, image memory created per image, residency chunks, the full-screen image), and a
+step-by-step solution, in case it's picked up again.
 
 ## A. Bugs HW has, with sound fixes (recommended)
 
