@@ -461,7 +461,43 @@ void host_bindings_mouse_held(std::uint32_t buttons, bool held[kBindCount]) {
     note_debug_key(1, held[kBindDebugMenu]);
 }
 
-void host_bindings_apply(const bool held[kBindCount], bool strong, PadState& p) {
+bool KeyTurn::Step(int x, int y, std::uint64_t now, float& out_x, float& out_y) {
+    constexpr double kPi = 3.14159265358979323846;
+    constexpr double kTurnRate = 900.0 * kPi / 180.0, kMaxStep = 30.0 * kPi / 180.0, kHalfTurn = 170.0 * kPi / 180.0;
+    constexpr std::uint64_t kReleaseHold = 60000;
+    if (x == 0 && y == 0) {
+        if (active && now - at < kReleaseHold) {
+            out_x = last_x;
+            out_y = last_y;
+            return true;
+        }
+        active = false;
+        return false;
+    }
+    const double target = std::atan2(static_cast<double>(y), static_cast<double>(x));
+    if (active) {
+        const double diff = std::fmod(target - angle + 3.0 * kPi, 2.0 * kPi) - kPi;  // -pi..pi, the shortest way round
+        const double step = std::fmin(kTurnRate * static_cast<double>(now - at) / 1e6, kMaxStep);
+        double dir = diff > 0 ? 1.0 : -1.0;
+        if (std::fabs(diff) > kHalfTurn) {
+            // A quarter turn counter-clockwise is angle+pi/2; forward is y < 0.
+            const double hy = std::sin(angle + kPi / 2.0), hx = std::cos(angle + kPi / 2.0);
+            dir = hy < -1e-9 ? 1.0 : hy > 1e-9 ? -1.0 : hx > 0 ? 1.0 : -1.0;
+        }
+        if (std::fabs(diff) <= step) angle = target;
+        else angle = std::atan2(std::sin(angle + dir * step), std::cos(angle + dir * step));
+    } else {
+        angle = target;
+    }
+    active = true;
+    at = now;
+    const double c = std::cos(angle), s = std::sin(angle), k = 1.0 / std::fmax(std::fabs(c), std::fabs(s));
+    last_x = out_x = static_cast<float>(c * k);
+    last_y = out_y = static_cast<float>(s * k);
+    return true;
+}
+
+void host_bindings_apply(const bool held[kBindCount], bool strong, PadState& p, KeyTurn* turn, std::uint64_t now) {
     bool any = false;
     for (int a = 0; a < kBindCount; ++a) {
         // The Debug Menu key sets no pad bit: its press was queued when it was
@@ -503,16 +539,19 @@ void host_bindings_apply(const bool held[kBindCount], bool strong, PadState& p) 
     // (as Dark Souls III's keys give) - or, with Walk held, a gentle push the
     // game reads as a walk, a diagonal's two axes shortened so that its reach,
     // and so the walk, is the same. Opposite keys cancel (keys_held above).
+    // With `turn`, the direction on its way to the keys' (KeyTurn).
     const int x = (held[kBindMoveR] ? 1 : 0) - (held[kBindMoveL] ? 1 : 0);
     const int y = (held[kBindMoveB] ? 1 : 0) - (held[kBindMoveF] ? 1 : 0);
-    if (x != 0 || y != 0) {
-        int reach = kStickHigh - kStickRest;
-        if (held[kBindWalk]) {
-            const float r = static_cast<float>(reach) * kWalkPush / (x != 0 && y != 0 ? std::sqrt(2.0f) : 1.0f);
-            reach = static_cast<int>(std::lround(r));
-        }
-        if (x != 0) p.lx = static_cast<std::uint8_t>(kStickRest + x * reach);
-        if (y != 0) p.ly = static_cast<std::uint8_t>(kStickRest + y * reach);
+    float dx = static_cast<float>(x), dy = static_cast<float>(y);
+    if (turn ? turn->Step(x, y, now, dx, dy) : x != 0 || y != 0) {
+        float reach = static_cast<float>(kStickHigh - kStickRest);
+        if (held[kBindWalk]) reach *= kWalkPush / std::hypot(dx, dy);
+        const auto axis = [&](float d) {
+            const long v = std::lround(static_cast<float>(kStickRest) + d * reach);
+            return static_cast<std::uint8_t>(v < kStickLow ? kStickLow : v > kStickHigh ? kStickHigh : v);
+        };
+        if (turn || x != 0) p.lx = axis(dx);
+        if (turn || y != 0) p.ly = axis(dy);
     }
     if (any) p.connected = true;
 }

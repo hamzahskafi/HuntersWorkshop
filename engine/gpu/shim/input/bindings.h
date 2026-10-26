@@ -78,10 +78,32 @@ void host_binding_describe(int action, char* out, std::size_t n);
 // (engine/key_prompts.h). UTF-8.
 void host_binding_prompt(int action, char* out, std::size_t n);
 
+// The movement keys' direction, turned toward the keys' instead of jumping to it,
+// after ayozetr's 523c88e and Supermedo's 4b930b1 (Lantern PR #67 by
+// ikeeasianboy too), measured by cassioKenji (Supermedo/bloodborne_pc#74): the
+// game ends a sprint when the stick turns 45 degrees or more between two reads,
+// and W -> W+A turned 45 at once. It turns at 900 degrees a second, at most 30
+// a read; a half turn (A <-> D, W <-> S) goes through forward (or through the
+// right when both ways are sideways); a released key keeps the last direction
+// for 60 ms, so letting go of one key just before the next is no neutral read.
+// The legacy keys' copy (PC controls off) is key_move in src/runtime_pad.c.
+struct KeyTurn {
+    // x, y: the keys' -1, 0 or 1 (forward is y < 0); now: microseconds. Out:
+    // the direction on the square, the larger axis +-1. False when no movement
+    // key is held nor was just let go of.
+    bool Step(int x, int y, std::uint64_t now, float& out_x, float& out_y);
+    double angle = 0;
+    std::uint64_t at = 0;
+    bool active = false;
+    float last_x = 0, last_y = 0;
+};
+
 // Applies a set of held actions to the pad the game reads. `strong` is the
 // modifier's state, which turns Attack into the strong attack whichever device
-// is holding it.
-void host_bindings_apply(const bool held[kBindCount], bool strong, PadState& p);
+// is holding it. With `turn`, the movement keys turn the left stick (KeyTurn,
+// `now` in microseconds) and hold both its axes; without, they set it at once.
+void host_bindings_apply(const bool held[kBindCount], bool strong, PadState& p,
+                         KeyTurn* turn = nullptr, std::uint64_t now = 0);
 // Actions held on the keyboard, from SDL's key state.
 void host_bindings_keys_held(const bool* keys, int nkeys, bool held[kBindCount]);
 // Actions held on the mouse, from MouseState::buttons (bit n-1 is button n;
