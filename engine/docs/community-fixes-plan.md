@@ -485,7 +485,9 @@ at 60. The options weighed:
   - *Performance Patch* never applies in HW: about 40 of its writes come from another game version
     and land mid-instruction, so HW's checks refuse it.
 - **Lens and camera tuning** (bbhost's "Original" camera, the game's own camera converted from 30
-  instead of Kyo's retune): a feature, not a fix.
+  instead of Kyo's retune): already in HW, from Lantern 0.9.37. The launcher's Graphics > Follow camera,
+  `camera_tuning=original` (the default) or `fps++` (`start/patches.cpp`, `FrameRateFixes`); the lens
+  filter's rate is the frame-rate fixes' Lens group.
 
 ## D. Not recommended, not applicable, or already in HW
 
