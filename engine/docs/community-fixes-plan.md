@@ -48,6 +48,13 @@ Investigated, not changed:
   (`src/win32_compat.h:45`: `_commit` → `FlushFileBuffers`). The logs show it isn't the hitch:
   the game saves every few seconds and almost never hitches, and during the hitches its main
   thread waits on another thread rather than writing. Left as it is.
+- **Controller vibration through DS4Windows** (2026-10-26). A DualSense over Bluetooth, behind
+  DS4Windows' virtual DualShock 4, had never vibrated in HW or Lantern; after a rumble test in
+  DS4Windows it did, in 0.4.0 beta 4 too. Beta 5's logging (`823493c`, reverted) showed the whole
+  path working: SDL's own driver has the virtual pad as wired (`054c:05c4`, HID path, rumble yes),
+  and the game's requests (patch 0x2a9c790, from its vibration update at 0x1395be0; the large motor
+  0–255, the small one 0 or 1) are sent. Whatever stopped it was outside the engine. If it comes
+  back, that commit's logging says which side it is.
 
 ## Current investigation: the 40–120 ms hitches
 
@@ -145,22 +152,6 @@ had none in ~8.5 minutes. So the model is **off by default since 0.4.0 beta 4**,
 skipped for now. `docs/gpu-memory.md` has the evidence, the causes with their code (the model's
 moves, pinning, image memory created per image, residency chunks, the full-screen image), and a
 step-by-step solution, in case it's picked up again.
-
-### Controller vibration through DS4Windows: investigating (2026-10-26)
-
-- **Report:** a DualSense over Bluetooth, behind DS4Windows' virtual DualShock 4 (the DualSense
-  hidden). It vibrates in every other game, and never did in HW or in Lantern.
-- **The game** asks every frame through `scePadSetVibration`, from one place (patch 0x2a9c790,
-  called from its vibration update at 0x1395be0). The large motor carries the strength (0–255); the
-  small one only 0 or 1, an on/off pattern from the PS3 pad, too weak to feel on a DualShock 4.
-- **The engine** hands each request to `SDL_RumbleGamepad` (`src/runtime_pad.c`), and used to drop
-  SDL's answer.
-- **SDL 3.4's PS4 driver** (`SDL_hidapi_ps4.c`) should take the virtual pad as wired and send USB
-  report 0x05, which ViGEm passes on to DS4Windows. The log will say whether it does.
-- **0.4.0 beta 5 logs:**
-  - with each gamepad: its USB ids, SDL's connection type, whether SDL can rumble it, and its
-    device path;
-  - the game's first request with strength, and SDL's first refusals.
 
 ## A. Bugs HW has, with sound fixes (recommended)
 
