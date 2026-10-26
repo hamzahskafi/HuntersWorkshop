@@ -429,8 +429,24 @@ In-game checklist, for when you test:
 
 HW already carries 161 of bbhost's 166 frame-rate sites (every redirected load, the physics, AI,
 clip-drive and targeting steps, the pacer targets). These are what bbhost found beyond them.
-B13, B15, B16 and B17 went in for 0.4.0 beta 5 (the table above); B14 is next, on its own, and B18
-waits for an A/B test.
+B13, B15, B16 and B17 went in for 0.4.0 beta 5 (the table above). B18 waits for an A/B test.
+
+**B14 parked (2026-10-26).** bbhost's effects work is its `decomp/sfx/step_gate.cpp` (1,344 lines) and
+the schedule in `engine/frame_rate.cpp` (`kSfxStepLoad` 0x2377d4a, `g_sfx_carry`). Effects move by time
+(right at any rate) and count part of their lives in updates (the light module's flicker phase +0x30
+and blend +0x110, a node's state edges, emissions, conditions, controllers), which run twice as often
+at 60. The options weighed:
+
+- **A, whole steps:** the effects in whole 1/30 s, the frames between running only each node's
+  containers (sub_2c4ff30 and the light module sub_131e660 held). Counts right, Ebrietas' 1251721 ends
+  without the data workaround, but the effects' own movement then changes 30 times a second. Medium.
+- **B, bbhost's smooth steps:** counts at 30 and movement by the frame's time, through about 30
+  effect classes converted one by one, the ribbons, GPU particle records and the wind. Several times A.
+- **C, the flicker alone:** the light module's update (sub_131e660) with its phase rate (+0x80) as 0
+  and its blend mode (+0x38, +0x3c) as keep on the frames between whole 1/30 s, all put back, a
+  pre-roll's call left alone: lamps and candles flicker 30 steps a second, as on the PS4; nothing else
+  changes. Small. The recommended one, if this is picked up.
+- **D, nothing.** Chosen for now: the Ebrietas data fix covers the effect that never ended.
 
 | # | Fix | What it fixes | Where | Source and credit |
 |---|---|---|---|---|
