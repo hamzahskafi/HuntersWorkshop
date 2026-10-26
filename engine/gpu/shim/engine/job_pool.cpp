@@ -27,6 +27,8 @@ constexpr Whole kNodeCode[] = {
     {0x2032780, 0xe9, 0x1198af2d0b7d6d94ull},    // CSEzWorkList::Append
     {0x2031cf0, 0x3b9, 0xbaac3ee8cf6de4cfull},   // ~CSEzWork
 };
+// Append once the start program has rewritten its two `mov rax, fs:[0]` (+0x4c, +0xbd) to gs.
+constexpr Whole kAppendLinked = {0x2032780, 0xe9, 0x0d88125c856cf28eull};
 // What the game's Lock calls: the import stubs of scePthreadSelf and sceKernelWaitSema (each a
 // `jmp [rip + slot]`), and DL_PANIC with its file and text.
 constexpr std::size_t kSelf = 0x2bbfe78, kWaitSema = 0x2bbec78, kPanic = 0x20b55b0;
@@ -272,7 +274,8 @@ GUEST_ABI std::int64_t PoolPop(std::uint64_t, const std::uint64_t* saved) {
 
 bool NodesReady(std::uint8_t* image, std::size_t size) {
     for (const Whole& code : kNodeCode)
-        if (!Is(image, size, code)) return false;
+        if (!Is(image, size, code) && !(code.offset == kAppendLinked.offset && Is(image, size, kAppendLinked)))
+            return false;
     // The class: 27 methods (the next word is the padding before the next vtable), the aligned
     // alloc and the free where job_pool.h says.
     const std::uint64_t vtable = reinterpret_cast<std::uint64_t>(image + kAllocatorVtable);
