@@ -33,6 +33,18 @@ void host_log(const char* format, ...) {
     va_end(args);
     std::putchar('\n');
 }
+// The param tables: AtkParam_Pc's row 2900931 alone (the Bloodletter's L2 self-hit), hit0_Radius first.
+std::uint32_t g_self_hit_row[4] = {0x3ecccccd, 0, 0, 0};
+bool g_params_loaded = false;
+void* params_row(const char* table, std::uint32_t id, std::size_t* size) {
+    if (!g_params_loaded || std::strcmp(table, "AtkParam_Pc") || id != 2900931) return nullptr;
+    if (size) *size = sizeof g_self_hit_row;
+    return g_self_hit_row;
+}
+bool host_read_safe(const void* p, void* out, std::size_t n) {
+    std::memcpy(out, p, n);
+    return true;
+}
 } // namespace BbEngine
 
 namespace {
@@ -264,7 +276,7 @@ void TestPlayTime() {
 
 void TestTable() {
     Collect();
-    assert(sites.size() == 68 && loads.size() == 30 && values.size() == 38 && counts.size() == 4 &&
+    assert(sites.size() == 70 && loads.size() == 31 && values.size() == 38 && counts.size() == 4 &&
            targets.size() == 5 && cloth_scales.size() == 1 && eases.size() == 2 && required.size() == 2);
 }
 
@@ -283,7 +295,7 @@ void TestSixty() {
 
     for (const Site& s : sites) {
         const auto expect = Hex(s.group == "Cloth" ? s.was : s.now);
-        assert(!std::memcmp(image.at(s.at), expect.data(), expect.size()));
+        assert(image.holds(s, expect)); // the wind's step: a site the Grass load in it points at a slot
     }
     for (const Value& v : values) {
         const float now = image.get<float>(v.at);
@@ -565,6 +577,33 @@ void TestCaveRuns() {
     Free(image.base, Pages(image.size));
 }
 
+// The Bloodletter's L2 self-hit: 0.4 m made 0.6 once the table is loaded (looked for again while it is not),
+// another value left alone, and nothing with the Hitbox group left out.
+void TestSelfHit() {
+    using BbEngine::g_params_loaded;
+    using BbEngine::g_self_hit_row;
+    const auto run = [](const char* skip, std::uint32_t radius, int frames) {
+        const Image image = Build(kSize, true);
+        SetEnv("BB_FPS", "60");
+        SetEnv("BB_FRAME_FIXES_SKIP", skip);
+        g_params_loaded = false;
+        g_self_hit_row[0] = radius;
+        assert(BbEngine::FrameRate::Install(image.base, image.size));
+        SetEnv("BB_FRAME_FIXES_SKIP", nullptr);
+        Protections(image);
+        BbEngine::FrameRate::Tick(); // not loaded yet
+        assert(g_self_hit_row[0] == radius);
+        g_params_loaded = true;
+        for (int i = 0; i < frames; ++i) BbEngine::FrameRate::Tick();
+        return g_self_hit_row[0];
+    };
+    assert(run(nullptr, 0x3ecccccd, 119) == 0x3ecccccd); // looked at again 120 frames later
+    assert(run(nullptr, 0x3ecccccd, 120) == 0x3f19999a); // 0.6
+    assert(run(nullptr, 0x3f000000, 240) == 0x3f000000); // a mod's 0.5 stays
+    assert(run("hitbox", 0x3ecccccd, 240) == 0x3ecccccd);
+    g_params_loaded = false;
+}
+
 int main() {
     TestRated();
     TestPlayTime();
@@ -576,6 +615,7 @@ int main() {
     TestNoRoom();
     TestTimer();
     TestCaveRuns();
+    TestSelfHit();
     std::puts("frame-rate-test: all ok");
     return 0;
 }

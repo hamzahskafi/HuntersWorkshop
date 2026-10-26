@@ -343,6 +343,37 @@ void Update(double seconds) {
     }
 }
 
+// The Bloodletter's transformed L2 (the Hitbox group), after droogie's bbhost (src/engine/frame_rate.cpp,
+// 6f735f4): its frenzy aura comes from one attack that hits only its wielder, AtkParam_Pc 2900931 (selfTarget,
+// no damage), a 0.4 m sphere on the weapon live for one 30 FPS frame of the slam. Posed, it overlaps the right
+// hand's ragdoll capsule by 5 cm; when those trail the pose by a fraction of a frame it misses, so above 30 the
+// aura never came. At 0.6 m it overlaps by 25 cm. hit0_Radius is ATK_PARAM_ST's first field. The tables load
+// at the start and the row is looked at again every 120 frames, for a table loaded again.
+constexpr std::uint32_t kSelfHit = 2900931;
+constexpr std::uint32_t kSelfHitWas = 0x3ecccccd, kSelfHitNow = 0x3f19999a; // 0.4, 0.6
+bool g_self_hit = false; // the Hitbox group in
+int g_self_hit_wait = 0; // frames until the row is looked at again
+
+void SelfHit() {
+    if (!g_self_hit || --g_self_hit_wait > 0) return;
+    g_self_hit_wait = 120;
+    std::size_t bytes = 0;
+    auto* row = static_cast<std::uint8_t*>(params_row("AtkParam_Pc", kSelfHit, &bytes));
+    std::uint32_t radius = 0;
+    if (!row || (bytes && bytes < sizeof radius) || !host_read_safe(row, &radius, sizeof radius) || radius == kSelfHitNow)
+        return; // not loaded yet, or done
+    if (radius != kSelfHitWas) {
+        host_log("Frame rate fixes: AtkParam_Pc %u's hit0_Radius is %g, not the game's 0.4: the Bloodletter's L2 "
+                 "self-hit left as it is", kSelfHit, double(FromBits(radius)));
+        g_self_hit = false;
+        return;
+    }
+    std::memcpy(row, &kSelfHitNow, sizeof kSelfHitNow);
+    host_log("Frame rate fixes: the Bloodletter's L2 self-hit 0.4 -> 0.6 m (AtkParam_Pc %u's hit0_Radius): its "
+             "frenzy aura comes above 30",
+             kSelfHit);
+}
+
 std::int64_t __attribute__((sysv_abi)) StepHook(std::uint64_t, const std::uint64_t* saved) {
     Step(saved[5]); // rdi: the frame pacer (the cave's rbx)
     return 0;
@@ -384,7 +415,8 @@ std::int32_t PlayTime::Add(double seconds) {
 }
 
 bool Install(std::uint8_t* image, std::size_t size) {
-    g_on = g_checked = g_timer = false;
+    g_on = g_checked = g_timer = g_self_hit = false;
+    g_self_hit_wait = 0;
     g_slots.clear();
     g_play_ms = g_step = nullptr;
     g_play = {};
@@ -645,6 +677,7 @@ bool Install(std::uint8_t* image, std::size_t size) {
         return false;
     }
     g_on = !g_slots.empty() || g_play_ms || g_timer;
+    g_self_hit = on[std::size_t(Group::Hitbox)];
     char where[96];
     if (rate.uncapped)
         std::snprintf(where, sizeof where, "uncapped, target %.0f FPS, values for %.0f", rate.target, rate.values);
@@ -657,6 +690,7 @@ bool Install(std::uint8_t* image, std::size_t size) {
 }
 
 void Tick() {
+    SelfHit();
     if (!g_on || g_timer || !Writable()) return; // with the timer, Step from the cave does it
     float step = 0;
     std::memcpy(&step, g_image + (kFrameTime - kBase), sizeof step);

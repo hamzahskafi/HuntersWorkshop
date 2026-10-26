@@ -23,8 +23,24 @@ FRAME_SITE(Clips, 0x1915f65, "c5fa2ac9c5fa1005f3034103c5f259c8488b7b208b80e10100
 FRAME_SITE(Physics, 0x222bcbf, "488d0d6a404c034883c11048898d40feffffc78548feffff8988083d", "488d0d6a404c034883c11048898d40feffffc78548feffff8988883c", "488d0d7a404c0348898d40feffff8b0d35ec5203898d48feffff6690")
 // the Havok physics world step (rigid bodies, ragdolls, breakables): its dt from the frame.
 FRAME_SITE(Physics, 0x1bf9b69, "48c745c000000000c745b88988083d", "48c745c000000000c745b88988883c", "8b05990db6038945b8660f1f440000")
-// grass sway's second path (the list already points the first at the frame's time).
-FRAME_SITE(Grass, 0x2713d8d, "c5fa1025db606102", "c5fa1025736b0403", "c5fa1025736b0403")
+// The wind on grass, trees and whatever else sways (sub_2713870, from each model's draw), after droogie's bbhost
+// (src/engine/wind_pace.h and frame_rate.cpp, b2818b4 and 5cee912). With the GX device's +0x100 at 1, as the
+// game sets it, it moves each model's wind (its gusts' times, the point winds' lives and ramps: xmm4, then
+// [rbp-0x170] and xmm10, t += step) by 1/60 s a frame, and weighs the force it uploads (WindForceAndTime.xyz =
+// V x step, PointWindForce.x = speed x step: xmm14) by the same 1/60. At 30 that is 1/60 s of wind for each 1/30
+// s of the game's. The list points the step at the frame's time: at 60 the wind ran twice the PS4's pace, and its
+// force, weighed by each frame's length, bent half as far and shook with it. The step is half the frame's
+// now (the load below) and the force is weighed by the game's 1/60 again. The other path (0x2713d9a: a model
+// without wind slots) leaves before it moves anything.
+// the step's load (vmovss xmm4, [0x4d29e70: 1/60]), which the list points at the frame's time: the game's back,
+// for the load below to take.
+FRAME_SITE(Grass, 0x2713d8d, "c5fa1025db606102", "c5fa1025736b0403", "c5fa1025db606102")
+// the force's weight: vmovdqa xmm14, [rbp-0x170] (the step) made vmovss xmm14, [0x4d29e70] (1/60).
+FRAME_SITE(Grass, 0x27149ea, "c5796fb590feffff", "", "c57a10357e546102")
+// the wind slots' time took xmm14; it reads the step itself. Before: lea rax, [0x5940df9]; cmp byte [rax], 0;
+// vxorps xmm10; mov r8d, [rbp-0x1b8]; jne +5; vmovdqa xmm10, xmm14. After: mov r8d, [rbp-0x1b8]; vxorps xmm10;
+// cmp byte [0x5940df9], 0; jne +8; vmovdqa xmm10, [rbp-0x170]. rax is written before it is read on every path.
+FRAME_SITE(Grass, 0x2714b26, "488d05ccc22203803800c4412857d2448b8548feffff7505c441796fd6", "", "448b8548feffffc4412857d2803dc0c22203007508c5796f9590feffff")
 // The steps: updates the game hands a fixed 1/30 s step in a step-info (an FD4Time on the stack, its vtable
 // 0x56efd40, the seconds at +8), which the list makes 1/60 at every rate; the step-info's seconds are read
 // from the frame's step instead. Made by tools/re/frame_rate_steps.py, which says how each is rewritten (in
@@ -163,6 +179,8 @@ FRAME_LOAD(Timers, 0x1d08518, 8, 4, 0x4d27fe0, Amount, 1, "c5fa580dc0fa0103", 0x
 FRAME_LOAD(Timers, 0x1d0854c, 8, 4, 0x4d27fe0, Amount, 1, "c5fa580d8cfa0103", 0x3dcccccd)
 // YEBIS's frame time (gx_flip_present): half a 30 fps frame, 1/60.
 FRAME_LOAD(Timers, 0x25d6ae2, 8, 4, 0x4d2979c, Amount, 1, "c5fa101db22c7502", 0x3c888889)
+// the wind's step (sub_2713870, the Grass sites above): 1/60 a 30 fps frame, half the frame's at every rate.
+FRAME_LOAD(Grass, 0x2713d8d, 8, 4, 0x4d29e70, Amount, 1, "c5fa1025db606102", 0x3c888889)
 // the camera lens filter's exposure (vtable 0x56e7bc0, its shader constants): 30 x a / b and its inverse, a
 // frame's worth at 30; the list's 60 is 60's.
 FRAME_LOAD(Lens, 0x125d6e1, 8, 4, 0x4c9f358, Rate, 1, "c5fa10056f1ca403", 0x41f00000)
