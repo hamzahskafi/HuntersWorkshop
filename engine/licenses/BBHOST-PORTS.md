@@ -102,3 +102,8 @@ gpu/shim/engine/fmod_ring.h and fmod_ring.cpp adapt src/engine/fmod_ring.h and f
 the guard, not its detector. The play recording's compression level (start/patches.cpp,
 scripts/patches.py) follows patches/deflate-level.toml, but points only the recording's producer at the
 game's own level=1 string instead of changing the level=9 string all five producers share.
+gpu/shim/engine/frame_rate_sites.inc (the Grass group) follows src/engine/wind_pace.h and frame_rate.cpp's
+wind sites (b2818b4, 5cee912): the wind's step half the frame's, as a per-frame load of the table, and its
+force weighed by the game's 1/60. gpu/shim/engine/frame_rate.cpp's SelfHit follows
+frame_rate_atk_params_loaded (6f735f4): the Bloodletter's L2 self-hit 0.4 -> 0.6 m, found again every 120
+frames through the param lookup above rather than at bbhost's table-load event.

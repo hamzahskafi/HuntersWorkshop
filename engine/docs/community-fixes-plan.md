@@ -28,7 +28,8 @@ HW's `Prepare()` calls and the sampler's `+0x...` print. Each address below says
 | Character creation by mouse, at the title and the Dream mirror | `68c04a1` | Drag on the hunter turns them (right stick), click a slider steps toward that side, drag across a row steps its value, the wheel steps by ten (L1/R1). Right-click stays Back. After Lantern 0.9.37 stable (Awaken). |
 | Hitch report, `BB_HITCH_REPORT_MS=<ms>` | `b5105f1` | Off by default. For a frame over the threshold: every guest thread's wait, and every thread's stack twice 20 ms apart, the busy ones first. No thread is unwound while suspended. At most 12 per session, 3 s apart, none in the first 20 s or within 10 s of a loading screen. |
 | Online summon no longer holds the game while the server answers | `5177bfa` | `sceNpSignalingActivateConnection` returns the connection at once; the session server's address lookup runs on the NP thread (`sig_resolve`, `thd_np.cpp`), then ESTABLISHED and ACTIVE follow as before. The log line `np: signaling: ... resolved ... (conn N, T ms)` gives the time the game used to stand still. |
-| PC memory model off by default (0.4.0 beta 4) | (this commit) | The launcher's default and a one-time switch for existing settings files (`guest_in_place_off_040`); Lantern 0.9.37 beta 4 had turned it on for everyone. The toggle stays. Why, and what a fix would take: `docs/gpu-memory.md`. |
+| PC memory model off by default (0.4.0 beta 4) | `5f3eed9` | The launcher's default and a one-time switch for existing settings files (`guest_in_place_off_040`); Lantern 0.9.37 beta 4 had turned it on for everyone. The toggle stays. Why, and what a fix would take: `docs/gpu-memory.md`. |
+| B13, B15, B16, B17 (0.4.0 beta 5) | (this commit) | **B13:** the wind's step is a per-frame load of half the frame's (`frame_rate_sites.inc`, Grass), its force weighed by the game's 1/60, the time step read from `[rbp-0x170]`; path B (a model without wind slots) leaves before it moves anything. **B15:** `FrameRate::Tick` looks for AtkParam_Pc 2900931 every 120 frames and makes hit0_Radius 0.6 when it is the game's 0.4 (the Hitbox group). **B16:** the keyboard's left stick turns toward the keys at 900°/s, at most 30° a read, a half turn through forward, 60 ms kept after a release (`key_move`). **B17:** a controller stick past the round gate is brought back onto it (`round_gate`, `pad_round_gate=0` turns it off). Tests: frame-rate-test, the table checker against 1.09, test_pad.c. |
 
 Checked and found already in HW (no change):
 
@@ -428,6 +429,8 @@ In-game checklist, for when you test:
 
 HW already carries 161 of bbhost's 166 frame-rate sites (every redirected load, the physics, AI,
 clip-drive and targeting steps, the pacer targets). These are what bbhost found beyond them.
+B13, B15, B16 and B17 went in for 0.4.0 beta 5 (the table above); B14 is next, on its own, and B18
+waits for an A/B test.
 
 | # | Fix | What it fixes | Where | Source and credit |
 |---|---|---|---|---|
