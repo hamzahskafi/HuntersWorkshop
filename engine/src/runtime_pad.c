@@ -9,6 +9,7 @@
 #define _GNU_SOURCE
 #include "runtime.h"
 #include "gpu/bbgpu.h"
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -229,8 +230,9 @@ static Binding bindings[IN_COUNT];
 static int bindings_ready;
 /* bbport: stick options (config.ini): pad_swap_sticks=1 moves with the right stick and looks with
  * the left; pad_invert_look_x / pad_invert_look_y=1 invert the camera stick; pad_deadzone=N
- * (percent, 0-50) ignores small stick movement (worn sticks that drift). */
-static int pad_swap_sticks, pad_invert_look_x, pad_invert_look_y, pad_deadzone;
+ * (percent, 0-50) ignores small stick movement (worn sticks that drift); pad_round_gate=0 passes
+ * the sticks on as they come (default: within a round gate, see round_gate). */
+static int pad_swap_sticks, pad_invert_look_x, pad_invert_look_y, pad_deadzone, pad_round_gate=1;
 
 static void bind_defaults(void) {
     static const struct { int input; SDL_Scancode key; } keys[]={
@@ -285,6 +287,7 @@ static void load_bindings(void) {
             else if (!strncmp(line,"pad_invert_look_x=",18)) pad_invert_look_x=value!=0;
             else if (!strncmp(line,"pad_invert_look_y=",18)) pad_invert_look_y=value!=0;
             else if (!strncmp(line,"pad_deadzone=",13)) pad_deadzone=value<0 ? 0 : value>50 ? 50 : value;
+            else if (!strncmp(line,"pad_round_gate=",15)) pad_round_gate=value!=0;
             continue;
         }
         if ((!keyboard && !pad) || !eq) continue;
@@ -347,6 +350,70 @@ static int pad_value(SDL_Gamepad *g, int input, int in_menu) {
 static uint8_t key_axis(uint8_t value, int negative, int positive) {
     return negative || positive ? (uint8_t)(128-(negative ? 128 : 0)+(positive ? 127 : 0)) : value;
 }
+/* The movement keys as the left stick, after ayozetr's 523c88e and Supermedo's 4b930b1 (Lantern PR
+ * #67 by ikeeasianboy too), measured by cassioKenji (Supermedo/bloodborne_pc#74): the game ends a
+ * sprint when the stick turns 45 degrees or more between two reads, and W -> W+A turned 45 at once.
+ * The direction turns toward the keys' at 900 degrees a second, at most 30 a read; a half turn
+ * (A <-> D, W <-> S) goes through forward (or through the right when both ways are sideways); a
+ * released key keeps the last direction for 60 ms, so letting go of one key just before the next
+ * is no neutral read. A diagonal stays on the square, the larger axis all the way, as the keys
+ * always gave it (the game picks walk or run by the larger axis). move_x / move_y: -1, 0 or 1; out:
+ * -127..127. Returns 0 when no movement key is held (nor just released). */
+#define KEY_PI 3.14159265358979323846
+#define KEY_TURN_RATE (900.0*KEY_PI/180.0)
+#define KEY_MAX_STEP (30.0*KEY_PI/180.0)
+#define KEY_HALF_TURN (170.0*KEY_PI/180.0)
+#define KEY_RELEASE_HOLD_US 60000u
+static int key_move(int move_x, int move_y, uint64_t now, int *out_x, int *out_y) {
+    static double angle; static uint64_t at, released_at; static int active, last_x, last_y;
+    if (!move_x && !move_y) {
+        if (active && now-released_at<KEY_RELEASE_HOLD_US) { *out_x=last_x; *out_y=last_y; return 1; }
+        active=0;
+        return 0;
+    }
+    const double target=atan2((double)move_y,(double)move_x);
+    if (active) {
+        const double diff=fmod(target-angle+3.0*KEY_PI,2.0*KEY_PI)-KEY_PI; /* -pi..pi, the shortest way round */
+        const double step=fmin(KEY_TURN_RATE*(double)(now-at)/1e6,KEY_MAX_STEP);
+        double dir=diff>0 ? 1.0 : -1.0;
+        if (fabs(diff)>KEY_HALF_TURN) {
+            /* A quarter turn counter-clockwise is angle+pi/2; forward is y < 0. */
+            const double hy=sin(angle+KEY_PI/2.0), hx=cos(angle+KEY_PI/2.0);
+            dir=hy<-1e-9 ? 1.0 : hy>1e-9 ? -1.0 : hx>0 ? 1.0 : -1.0;
+        }
+        if (fabs(diff)<=step) angle=target;
+        else angle=atan2(sin(angle+dir*step),cos(angle+dir*step));
+    } else {
+        angle=target;
+    }
+    active=1; at=now; released_at=now;
+    const double c=cos(angle), s=sin(angle), k=127.0/fmax(fabs(c),fabs(s));
+    const long x=lround(c*k), y=lround(s*k);
+    last_x=*out_x=(int)(x<-127 ? -127 : x>127 ? 127 : x);
+    last_y=*out_y=(int)(y<-127 ? -127 : y>127 ? 127 : y);
+    return 1;
+}
+/* After ayozetr's 2b8d9e1 (their issue #7): with a DualShock 4 the camera turned two or three times
+ * faster at one point of a diagonal, more so at a higher frame rate. Some sticks report a diagonal
+ * near the corner of the square, up to ~1.41x one axis's full deflection, which a stick with a round
+ * gate (as the game expects) never does. A stick past the round gate is brought back onto it,
+ * keeping its direction; one axis all the way is left as it is. The log says once how far past it
+ * each stick went, and again when further. */
+static void round_gate(int stick, uint8_t *x, uint8_t *y) {
+    static float reported[2];
+    const float dx=(float)*x-128.0f, dy=(float)*y-128.0f;
+    const float reach=sqrtf(dx*dx+dy*dy);
+    if (reach<=128.0f) return; /* one axis all the way: 0 is 128 from the centre, 255 is 127 */
+    const float past=reach/127.0f;
+    if (past>=1.05f && past>=reported[stick]+0.05f) {
+        reported[stick]=past;
+        printf("Runtime: pad %s stick at %.2fx the round gate's reach, brought back onto it\n",
+               stick ? "right" : "left",(double)past);
+    }
+    const float scale=127.0f/reach;
+    *x=(uint8_t)lrintf(128.0f+dx*scale);
+    *y=(uint8_t)lrintf(128.0f+dy*scale);
+}
 static void apply_keyboard(PadData *d, const bool *k) {
     for (int i=IN_CROSS;i<=IN_RIGHT;++i)
         if (i!=IN_TOUCHPAD && i!=IN_TOUCHPAD_RIGHT && key_down(k,i)) d->buttons|=input_buttons[i];
@@ -354,8 +421,14 @@ static void apply_keyboard(PadData *d, const bool *k) {
     if (key_down(k,IN_TOUCHPAD_RIGHT)) touch_click(d,1);
     if (key_down(k,IN_L2)) d->l2=255;
     if (key_down(k,IN_R2)) d->r2=255;
-    d->left_x=key_axis(d->left_x,key_down(k,IN_MOVE_LEFT),key_down(k,IN_MOVE_RIGHT));
-    d->left_y=key_axis(d->left_y,key_down(k,IN_MOVE_UP),key_down(k,IN_MOVE_DOWN));
+    /* opposite keys held together: right and down win, as key_axis gives them */
+    const int move_x=key_down(k,IN_MOVE_RIGHT) ? 1 : key_down(k,IN_MOVE_LEFT) ? -1 : 0;
+    const int move_y=key_down(k,IN_MOVE_DOWN) ? 1 : key_down(k,IN_MOVE_UP) ? -1 : 0;
+    int stick_x, stick_y;
+    if (key_move(move_x,move_y,now_us(),&stick_x,&stick_y)) {
+        d->left_x=(uint8_t)(128+stick_x);
+        d->left_y=(uint8_t)(128+stick_y);
+    }
     d->right_x=key_axis(d->right_x,key_down(k,IN_LOOK_LEFT),key_down(k,IN_LOOK_RIGHT));
     d->right_y=key_axis(d->right_y,key_down(k,IN_LOOK_UP),key_down(k,IN_LOOK_DOWN));
 }
@@ -396,6 +469,10 @@ static void sample_host(PadData *d) {
         }
         d->left_x=axis(SDL_GetGamepadAxis(g,SDL_GAMEPAD_AXIS_LEFTX)); d->left_y=axis(SDL_GetGamepadAxis(g,SDL_GAMEPAD_AXIS_LEFTY));
         d->right_x=axis(SDL_GetGamepadAxis(g,SDL_GAMEPAD_AXIS_RIGHTX)); d->right_y=axis(SDL_GetGamepadAxis(g,SDL_GAMEPAD_AXIS_RIGHTY));
+        if (pad_round_gate) {
+            round_gate(0,&d->left_x,&d->left_y);
+            round_gate(1,&d->right_x,&d->right_y);
+        }
         if (pad_deadzone) {
             const int dz=pad_deadzone*128/100;
             uint8_t *sticks[4]={&d->left_x,&d->left_y,&d->right_x,&d->right_y};
