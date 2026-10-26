@@ -87,6 +87,19 @@ static int is_preferred(SDL_JoystickID id, const char *want) {
     const char *name=SDL_GetGamepadNameForID(id);
     return !SDL_strcasecmp(guid,want) || (name && SDL_strcasestr(name,want));
 }
+/* What SDL made of a gamepad: its USB ids, how SDL thinks it is connected, whether SDL can rumble
+ * it, and its device path (an HID path when SDL's own driver has it). A DualSense behind DS4Windows'
+ * virtual DualShock 4 never vibrated (0.4.0 beta 4, Lantern before it): this says how SDL talks to
+ * the pad. */
+static void describe_gamepad(SDL_Gamepad *g, char *out, size_t size) {
+    const SDL_JoystickConnectionState state=SDL_GetGamepadConnectionState(g);
+    const char *path=SDL_GetGamepadPath(g);
+    snprintf(out,size,"%04x:%04x, %s, rumble %s, %s",SDL_GetGamepadVendor(g),SDL_GetGamepadProduct(g),
+             state==SDL_JOYSTICK_CONNECTION_WIRED ? "wired"
+             : state==SDL_JOYSTICK_CONNECTION_WIRELESS ? "wireless" : "connection unknown",
+             SDL_GetBooleanProperty(SDL_GetGamepadProperties(g),SDL_PROP_GAMEPAD_CAP_RUMBLE_BOOLEAN,false) ? "yes" : "no",
+             path ? path : "no device path");
+}
 /* bbport: several gamepads at once (also one pad behind a 2.4 GHz receiver that shows as two):
  * without a chosen one, the pad being used takes over, checked five times a second. */
 #define MAX_OTHER_PADS 4
@@ -130,7 +143,9 @@ static void follow_active_pad(void) {
             gamepad=other_pads[slot];
             other_pads[slot]=previous;
             other_pad_ids[slot]=previous ? SDL_GetGamepadID(previous) : 0;
-            printf("Runtime: gamepad in use: %s\n",SDL_GetGamepadName(gamepad));
+            char info[512];
+            describe_gamepad(gamepad,info,sizeof info);
+            printf("Runtime: gamepad in use: %s (%s)\n",SDL_GetGamepadName(gamepad),info);
             break;
         }
     }
@@ -162,8 +177,10 @@ static SDL_Gamepad *current_gamepad(void) {
             on_preferred=want && gamepad && is_preferred(ids[pick],want);
             if (gamepad) {
                 ++connected_count;
-                printf("Runtime: gamepad connected: %s%s\n",SDL_GetGamepadName(gamepad),
-                       !want ? "" : on_preferred ? " (the chosen one)" : " (the chosen one is not connected)");
+                char info[512];
+                describe_gamepad(gamepad,info,sizeof info);
+                printf("Runtime: gamepad connected: %s%s (%s)\n",SDL_GetGamepadName(gamepad),
+                       !want ? "" : on_preferred ? " (the chosen one)" : " (the chosen one is not connected)",info);
             }
         }
         SDL_free(ids);
@@ -637,12 +654,24 @@ static ABI int32_t pad_info(int32_t handle, ControllerInfo *info) {
     host_unlock(&lock);
     return 0;
 }
+/* The game asks every frame (patch 0x2a9c790, from its vibration update at 0x1395be0): the large
+ * motor carries the strength, the small one only 0 or 1, an on/off pattern from the PS3 pad that is
+ * too weak to feel on a DualShock 4, as on the PS4. SDL keeps unchanged values without sending them
+ * again. The game's first request with strength and SDL's first refusals are logged: vibration never
+ * reached some controllers (describe_gamepad), and this says whether the game asked. */
 static ABI int32_t pad_vibration(int32_t handle, const uint8_t *param) {
     if (handle!=PAD_HANDLE || !opened) return ERR_INVALID_HANDLE;
     if (!param) return ERR_INVALID_ARG;
+    static int asked, refused;
     host_lock(&lock);
     SDL_Gamepad *g=current_gamepad();
-    if (g) SDL_RumbleGamepad(g,(uint16_t)(param[0]*257),(uint16_t)(param[1]*257),1000);
+    const bool sent=g && SDL_RumbleGamepad(g,(uint16_t)(param[0]*257),(uint16_t)(param[1]*257),1000);
+    if ((param[0] || param[1]) && !asked++)
+        printf("Runtime: vibration: the game's first request (large motor %u, small %u): %s%s\n",param[0],param[1],
+               sent ? "sent to " : g ? "refused by SDL: " : "no gamepad",
+               sent ? SDL_GetGamepadName(g) : g ? SDL_GetError() : "");
+    else if (g && !sent && refused++<3)
+        printf("Runtime: vibration: refused by SDL (large motor %u, small %u): %s\n",param[0],param[1],SDL_GetError());
     host_unlock(&lock);
     return 0;
 }
