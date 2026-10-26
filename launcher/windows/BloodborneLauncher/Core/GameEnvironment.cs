@@ -142,6 +142,10 @@ namespace BloodborneLauncher.Core
             if (s.Str("draw_pipe") is "0" or "1") env["BB_DRAW_PIPE"] = s.Str("draw_pipe");
             if (s.Str("readbacks") is "0" or "2") env["BB_READBACKS"] = s.Str("readbacks");
             if (s.Bool("frame_stats")) env["BB_FRAME_STATS"] = "1";
+            // The log level (standard is the engine's own, left unset), hitch reports and controller details.
+            if (s.Str("log_level") is "detailed" or "debug") env["BB_LOG_LEVEL"] = s.Str("log_level");
+            if (int.TryParse(s.Str("hitch_report_ms"), out var hitch) && hitch > 0) env["BB_HITCH_REPORT_MS"] = hitch.ToString();
+            if (s.Bool("pad_log")) env["BB_PAD_LOG"] = "1";
             if (s.Bool("fsr_profile")) env["BB_FSR4_PROFILE"] = "1";
             if (s.Bool("audio_stats")) env["BB_AUDIO_STATS"] = "1";
             if (s.Bool("load_profile")) env["BB_SAMPLE_THREADS"] = "load";

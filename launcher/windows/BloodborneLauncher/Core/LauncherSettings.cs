@@ -35,6 +35,11 @@ namespace BloodborneLauncher.Core
             ["readbacks"] = "",
             // Beta builds: on (Load switches older files once), so crash logs carry the frame stats.
             ["frame_stats"] = Updater.CurrentBeta > 0,
+            // Settings › Log, capture and extra variables (0.4.0): the log level, hitch reports
+            // (0: off; else ms) and the controller details.
+            ["log_level"] = "standard",
+            ["hitch_report_ms"] = "0",
+            ["pad_log"] = false,
             ["gpu_profile"] = false,
             ["vk_validation"] = false,
             ["extra_env"] = "",
@@ -155,6 +160,15 @@ namespace BloodborneLauncher.Core
                     // for everyone); on again only by choice.
                     if (!saved.ContainsKey(GuestInPlaceOffMarker))
                         _data["exp_guest_in_place"] = false;
+                    // 0.4.0: a stable launcher over a beta's file (any beta writes frame_stats_beta_on)
+                    // switches off once what betas turn on for testing: the frame statistics and the
+                    // sharp UI. On again only by choice.
+                    if (Updater.CurrentBeta == 0 && saved.ContainsKey("frame_stats_beta_on") &&
+                        !saved.ContainsKey(BetaTestingOffMarker))
+                    {
+                        _data["frame_stats"] = false;
+                        _data["exp_sharp_ui"] = false;
+                    }
                     // Older launchers kept the shadNet password in plain text: encrypted now, and
                     // the file rewritten without it.
                     if (Str("online_password") is { Length: > 0 } plain && !Secret.IsProtected(plain))
@@ -178,10 +192,12 @@ namespace BloodborneLauncher.Core
             _data["occlusion_off_99"] = true;
             _data[PerfDefaultsMarker] = true;
             _data[GuestInPlaceOffMarker] = true;
+            if (Updater.CurrentBeta == 0) _data[BetaTestingOffMarker] = true;
         }
 
         private const string PerfDefaultsMarker = "perf_defaults_b4";
         private const string GuestInPlaceOffMarker = "guest_in_place_off_040";
+        private const string BetaTestingOffMarker = "beta_testing_off_040";
 
         /// <summary>0.9.37 beta 4's defaults that older settings files are switched to once.</summary>
         private static readonly (string Key, bool Value)[] PerfDefaults =
