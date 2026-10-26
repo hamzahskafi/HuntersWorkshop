@@ -93,6 +93,9 @@ fi
 # Frame rate: BB_FPS=uncap (default; vblank 480 Hz, frames shown at once), 60/90/120/144 or 30
 # (unpatched). Above 30 the 60 FPS++ patch, the engine setting the pace and the values for the rate
 # (frame_rate.cpp; BB_FRAME_FIXES=0: the older FPS++ patches above 60). BB_PATCHES adds patch names ("a;b").
+# Fixes for the game's own bugs (gpu/shim/engine/game_fixes.cpp; the recording's compression level in
+# scripts/patches.py): BB_GAME_FIXES=0 leaves them out, BB_GAME_FIXES_SKIP the ones it names (job_lock,
+# job_nodes, job_slots, blur_samples, fmod_ring, deflate).
 fps=${BB_FPS:-uncap}
 # The engine reads it too (fast loading above 60, frame generation's limit with uncapped).
 export BB_FPS=$fps

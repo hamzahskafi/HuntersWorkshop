@@ -1,6 +1,6 @@
 # Community fixes: the vetted list and plan
 
-Updated 2026-10-25 (with the A1–A12 integration plan). Hunter's Workshop (HW) started from Lantern Engine 0.9.37 beta 9 (`08173e6`).
+Updated 2026-10-26 (A1–A12 in, for 0.4.0 beta 1). Hunter's Workshop (HW) started from Lantern Engine 0.9.37 beta 9 (`08173e6`).
 This is the analysis of what the other Bloodborne PC projects fixed after that point, checked
 against HW's own code, with what has been done since. Nothing here is merged wholesale: each fix
 is taken on its own, with its author credited.
@@ -13,7 +13,8 @@ Ground rules for this work:
   `README.md` and in its commit.
 - The particle cap (`BB_INDIRECT_CLAMP`) and the fixed-refresh frame lock (`BB_VBLANK_PACING`)
   stay off.
-- The version stays 0.3.0 until the user says otherwise. Linux waits until Windows is done.
+- Work after 0.3.0 goes into the 0.4.x betas; A1–A12 are 0.4.0 beta 1. Linux waits until Windows is
+  done.
 
 Addresses: **patch** addresses are the ones `Bloodborne.xml`, `frame_rate_sites.inc`, bbhost and
 Binary Ninja use (image offset + 0x400000). **Image offsets** are what bbport's `ImageBase + x`,
@@ -184,14 +185,39 @@ Suggested first batch: A1–A12, B13 and B15.
 
 ## A1–A12: integration plan
 
-Analysis done 2026-10-25. **Nothing is implemented yet; this waits for a go-ahead.** Addresses in this
-section are image offsets unless marked "patch".
+Analysis done 2026-10-25, and all twelve went in the same day for 0.4.0 beta 1 (built by the user,
+not here). Addresses in this section are image offsets unless marked "patch".
+
+### As built (0.4.0 beta 1)
+
+| # | Commit | Differences from the plan below |
+|---|---|---|
+| Shared | `ebb9026` | As planned: `Hook::original`, `Replace`, `skip_list.h`. |
+| A3 | `c108cd9` | HW has three nested waits, not ayozetr's five: the other two are in code only that fork has. |
+| A6 | `f9e74c9` | As planned. |
+| A9 | `3569d42` | As planned. |
+| A11 | `fe331e3` | As planned; the video and audio reads also return on an empty queue. |
+| A12 | `30a7d10` | As planned. |
+| A8 | `8329a5d` | Two of the three parts were already in HW (the fetch shader kept per stage, a fresh selection per warm-up record). What went in: a draw without a pixel shader gets its own fragment state, and the key version 7 with the NVIDIA rule. |
+| A7 | `af66653` | As planned, with the disk entry removed through the IO queue (`DataBase::RemoveQueued`). |
+| A2 | `de3503b` | As planned. |
+| A5 | `afd6bda` | As planned; the module `game_fixes.cpp` with it. |
+| A4 | `5f74f46` | As planned. |
+| A10 | `c0852fd` | As planned. Test: `fmod-ring-test`. |
+| A1 | `f0dc6cd` | The lock replaced whole, as planned. **ProcessOne is not replaced**: a hook at its entry puts the cache in by a compare-exchange on the list's allocator slot (no queue lock needed), and the cache keeps a lock of its own, so it does not rely on every caller holding the queue lock (all 14 `Append` callers do). ProcessOne, `Append` and `~CSEzWork` are checked whole all the same, and so are the allocator class's 27 methods (alloc and free where expected). 64 caches. Test: `job-pool-test` (not `game-fixes-test`). |
+| Version | (this commit) | Launchers and LauncherBuilder 0.4.0-beta.1 (shown as v0.4.0 beta 1); engine id `hunters-workshop-5`. |
+
+Planned tests not added: A4's and A5's callbacks, A6's case in `test_runtime.c`, and A7/A8's in the
+pipeline tests. They need the full engine build (the runtime and the renderer), which can't be
+made where this was written. Each change was checked by hand against the code it touches instead.
+The ones added (`engine-hooks-test`, `job-pool-test`, `fmod-ring-test`, `test_patches.py`) pass on
+Linux, and `engine-hooks-test` and `job-pool-test` also pass as Windows builds under Wine.
 
 ### What each one touches
 
 | # | Layer | Files | Game sites | How it goes in |
 |---|---|---|---|---|
-| A1 | Game code | new `gpu/shim/engine/job_pool.cpp` | `DLAdaptiveMutex::Lock` 0x20368c0 (whole function, 0xe8 bytes) and `CSEzWork::ProcessOne` 0x2032370 (0x1c2 bytes) replaced; the general allocator's vtable 0x53aefa0 copied, never written | `Replace` (new, below), twice |
+| A1 | Game code | new `gpu/shim/engine/job_pool.cpp` | `DLAdaptiveMutex::Lock` 0x20368c0 (whole function, 0xe8 bytes) replaced; `CSEzWork::ProcessOne` 0x2032370 (0x1c2 bytes) hooked at its entry (as built; the plan replaced it); the general allocator's vtable 0x53aefa0 copied, never written | `Replace` (new, below) and `Prepare` |
 | A2 | Boot patch | `start/patches.cpp`, `scripts/patches.py` | The recording producer's `lea rdi, [string]` at patch 0x1dc981f: its displacement at patch 0x1dc9822, `5d0ff702` → `2e6af702` | A write in the patch list, checked against the original bytes like the render pools |
 | A3 | Renderer | `liverpool.cpp` 920, 1994, 2168 | — | `task.handle.destroy()` after each wait loop |
 | A4 | Game code | new `gpu/shim/engine/game_fixes.cpp` | Runner step 0x1067f60 (17 bytes); the two runner resets 0x1067960 and 0x1067a40 (14 bytes each); give-back 0x1056990; pool 0x54b8788 | `Prepare`; the step through `Hook::original` (new, below) |
@@ -351,7 +377,7 @@ Each commit message names its source the way `68c04a1` did ("After ... (author)"
 
 ### Commit order
 
-Each is built and tested before the next. Version stays 0.3.0.
+Each is built and tested before the next. Version 0.4.0 beta 1.
 
 1. `engine_hooks`: `Hook::original` and `Replace`, with tests.
 2. `skip_list.h`, with `frame_rate.cpp` moved onto it (no change in behaviour).

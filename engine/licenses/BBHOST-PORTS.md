@@ -90,3 +90,15 @@ kRated entries. The rest of the list's fixed steps, read entry by entry for 0.3.
 (docs/frame-rate-survey.md), are ours, not bbhost's: the step-infos made to read the frame's step
 (frame_rate_sites.inc's steps, tools/re/frame_rate_steps.py), the steps objects keep, the pacer's first
 target, the camera lens filter's rate, and the durations after the Havok AI's braking limit.
+
+Game fixes source (0.4.0):
+https://github.com/droogie/bbhost/tree/56b868e25b9bb91074db0ab283a83880b4b20d87 (v0.2.19)
+
+gpu/shim/engine/job_pool.cpp adapts src/decomp/sync/adaptive_mutex.cpp (f764eff: DLAdaptiveMutex::Lock
+spinning on a plain load with pause) and the node cache of src/decomp/sync/ez_work.cpp (58af1c8). Here
+the game's ProcessOne stays: the cache goes in at its entry by a compare-exchange on the job list's
+allocator slot and keeps a lock of its own, and the lock compares the owner in its 40 bits.
+gpu/shim/engine/fmod_ring.h and fmod_ring.cpp adapt src/engine/fmod_ring.h and fmod_ring.cpp (f1d4fa3):
+the guard, not its detector. The play recording's compression level (start/patches.cpp,
+scripts/patches.py) follows patches/deflate-level.toml, but points only the recording's producer at the
+game's own level=1 string instead of changing the level=9 string all five producers share.
