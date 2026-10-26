@@ -2,6 +2,7 @@
 #define _GNU_SOURCE
 #include "runtime.h"
 #include <stdlib.h>
+#include <string.h>
 #ifdef _WIN32
 #include <process.h>
 
@@ -171,3 +172,11 @@ void host_sleep_until_ns(uint64_t deadline) {
     while (clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &t, NULL)) {}
 }
 #endif
+int runtime_log_level(void) {
+    static int level=-1;
+    if (level<0) {
+        const char *v=getenv("BB_LOG_LEVEL");
+        level=v && !strcmp(v,"debug") ? 2 : v && !strcmp(v,"detailed") ? 1 : 0;
+    }
+    return level;
+}

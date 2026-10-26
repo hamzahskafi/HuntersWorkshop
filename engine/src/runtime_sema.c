@@ -62,7 +62,7 @@ static ABI int32_t sem_create(uint32_t *out,const char *name,uint32_t attr,
     s->id=next_id++; s->attr=attr; s->count=s->initial=initial; s->maximum=maximum;
     snprintf(s->name,sizeof s->name,"%s",name);
     s->next=registry; registry=s; *out=s->id; ++created;
-    printf("Runtime: semaphore id=%u, attr=%u, initial=%d, max=%d\n",s->id,attr,initial,maximum);
+    if (runtime_log_level()) printf("Runtime: semaphore id=%u, attr=%u, initial=%d, max=%d\n",s->id,attr,initial,maximum);
     host_unlock(&lock);
     return 0;
 }

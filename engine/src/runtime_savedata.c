@@ -183,9 +183,16 @@ static int32_t mount(int32_t user, const char *title, const DirName *dir, uint32
     result->status=exists ? 0 : 1; /* CREATED */
     runtime_file_mount(result->point.data,host);
     ++mounts_done;
+    /* The game mounts its save with each autosave, every few seconds: the standard log has the
+     * line when it differs from the last one (BB_LOG_LEVEL=detailed: every mount). */
+    static char last[160];
+    char line[160];
+    snprintf(line,sizeof line,"Runtime: save data '%s' mounted at %s (%s%s)\n",dir->data,result->point.data,
+             exists ? "existing" : "created",(mode & MODE_RDONLY) ? ", read-only" : "");
+    const int new_line=strcmp(line,last)!=0;
+    if (new_line) memcpy(last,line,sizeof last);
     host_unlock(&lock);
-    printf("Runtime: save data '%s' mounted at %s (%s%s)\n",dir->data,result->point.data,
-           exists ? "existing" : "created",(mode & MODE_RDONLY) ? ", read-only" : "");
+    if (new_line || runtime_log_level()) fputs(line,stdout);
     return 0;
 }
 static ABI int32_t save_mount(const Mount1 *m, MountResult *result) {

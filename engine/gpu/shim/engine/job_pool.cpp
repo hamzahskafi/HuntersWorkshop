@@ -3,6 +3,7 @@
 // higher.
 #include "job_pool.h"
 #include "engine_state.h"
+#include "bbport_log_level.h"
 #include <cstring>
 #include <new>
 
@@ -61,6 +62,9 @@ std::atomic<unsigned> g_adopted{0}, g_ended{0};
 bool Report(unsigned n) {
     return n <= 5 || (n & (n - 1)) == 0;
 }
+// The standard log (BB_LOG_LEVEL): the first pool's cache, and the pools that ended after 100,000
+// node allocations or more (the character and cloth workers', a few each area); detailed: as Report.
+constexpr std::uint64_t kBusyPool = 100000;
 
 // The game's read, the link step's (gs:[0]), the Windows loader's (gs:[disp], or jmp to a stub).
 bool IsThreadPointerRead(const std::uint8_t* p) {
@@ -211,7 +215,7 @@ GUEST_ABI std::uint64_t NodeFree(std::uint64_t cache, std::uint64_t block) {
             node = next;
         }
         const unsigned ended = g_ended.fetch_add(1) + 1;
-        if (Report(ended))
+        if (BbLogLevel() >= 1 ? Report(ended) : hits + misses >= kBusyPool)
             host_log("Game fixes: job pool %#llx ended; its node cache served %llu of %llu node allocations and "
                      "kept %llu of %llu frees (%u pools ended so far)",
                      static_cast<unsigned long long>(pool), static_cast<unsigned long long>(hits),
@@ -278,7 +282,7 @@ bool Adopt(std::uint64_t pool, std::uint64_t general, std::uint64_t vtable) {
             return false;
         }
         const unsigned n = g_adopted.fetch_add(1) + 1;
-        if (Report(n))
+        if (BbLogLevel() >= 1 ? Report(n) : n == 1)
             host_log("Game fixes: job pool %#llx's list nodes now kept by a cache of its own (%u pools so far)",
                      static_cast<unsigned long long>(pool), n);
         return true;

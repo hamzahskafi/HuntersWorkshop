@@ -88,6 +88,26 @@ static int is_preferred(SDL_JoystickID id, const char *want) {
     const char *name=SDL_GetGamepadNameForID(id);
     return !SDL_strcasecmp(guid,want) || (name && SDL_strcasestr(name,want));
 }
+/* BB_PAD_LOG=1 (the launcher's Controller details): with each gamepad connected or taken into use
+ * its USB ids, how SDL sees the connection, whether SDL can rumble it and its device path; gamepads
+ * that disconnect; the game's first vibration request and SDL's refusals; how far past the round
+ * gate a stick went. A DualSense behind DS4Windows' virtual DualShock 4 that never vibrated (0.4.0)
+ * was told apart only by such lines. */
+static int pad_log(void) {
+    static int on=-1;
+    if (on<0) { const char *v=getenv("BB_PAD_LOG"); on=v && v[0]=='1'; }
+    return on;
+}
+static void describe_gamepad(SDL_Gamepad *g, char *out, size_t size) {
+    if (!pad_log()) { out[0]=0; return; }
+    const SDL_JoystickConnectionState state=SDL_GetGamepadConnectionState(g);
+    const char *path=SDL_GetGamepadPath(g);
+    snprintf(out,size," (%04x:%04x, %s, rumble %s, %s)",SDL_GetGamepadVendor(g),SDL_GetGamepadProduct(g),
+             state==SDL_JOYSTICK_CONNECTION_WIRED ? "wired"
+             : state==SDL_JOYSTICK_CONNECTION_WIRELESS ? "wireless" : "connection unknown",
+             SDL_GetBooleanProperty(SDL_GetGamepadProperties(g),SDL_PROP_GAMEPAD_CAP_RUMBLE_BOOLEAN,false) ? "yes" : "no",
+             path ? path : "no device path");
+}
 /* bbport: several gamepads at once (also one pad behind a 2.4 GHz receiver that shows as two):
  * without a chosen one, the pad being used takes over, checked five times a second. */
 #define MAX_OTHER_PADS 4
@@ -107,7 +127,10 @@ static void follow_active_pad(void) {
     if (now-last<200000) return;
     last=now;
     for (int s=0;s<MAX_OTHER_PADS;++s)
-        if (other_pads[s] && !SDL_GamepadConnected(other_pads[s])) { SDL_CloseGamepad(other_pads[s]); other_pads[s]=NULL; }
+        if (other_pads[s] && !SDL_GamepadConnected(other_pads[s])) {
+            if (pad_log()) printf("Runtime: gamepad disconnected: %s\n",SDL_GetGamepadName(other_pads[s]));
+            SDL_CloseGamepad(other_pads[s]); other_pads[s]=NULL;
+        }
     /* bbport: the pad in use keeps the input while it is used too. A pad that shows as two (DS4Windows
      * or Steam Input beside the DualSense) had both active together, and they swapped five times a
      * second for hours ("gamepad in use" 25000 times in one log). */
@@ -131,7 +154,9 @@ static void follow_active_pad(void) {
             gamepad=other_pads[slot];
             other_pads[slot]=previous;
             other_pad_ids[slot]=previous ? SDL_GetGamepadID(previous) : 0;
-            printf("Runtime: gamepad in use: %s\n",SDL_GetGamepadName(gamepad));
+            char info[512];
+            describe_gamepad(gamepad,info,sizeof info);
+            printf("Runtime: gamepad in use: %s%s\n",SDL_GetGamepadName(gamepad),info);
             break;
         }
     }
@@ -144,7 +169,10 @@ static SDL_Gamepad *current_gamepad(void) {
     static int on_preferred; static uint64_t last_scan;
     if (!sdl_ready) sdl_ready = SDL_WasInit(SDL_INIT_GAMEPAD) ? 1 : SDL_InitSubSystem(SDL_INIT_GAMEPAD) ? 1 : -1;
     if (sdl_ready<0) return NULL;
-    if (gamepad && !SDL_GamepadConnected(gamepad)) { SDL_CloseGamepad(gamepad); gamepad=NULL; }
+    if (gamepad && !SDL_GamepadConnected(gamepad)) {
+        if (pad_log()) printf("Runtime: gamepad disconnected: %s\n",SDL_GetGamepadName(gamepad));
+        SDL_CloseGamepad(gamepad); gamepad=NULL;
+    }
     const char *want=preferred_gamepad();
     const uint64_t now=now_us();
     if (!gamepad || (want && !on_preferred && now-last_scan>1000000)) {
@@ -163,8 +191,10 @@ static SDL_Gamepad *current_gamepad(void) {
             on_preferred=want && gamepad && is_preferred(ids[pick],want);
             if (gamepad) {
                 ++connected_count;
-                printf("Runtime: gamepad connected: %s%s\n",SDL_GetGamepadName(gamepad),
-                       !want ? "" : on_preferred ? " (the chosen one)" : " (the chosen one is not connected)");
+                char info[512];
+                describe_gamepad(gamepad,info,sizeof info);
+                printf("Runtime: gamepad connected: %s%s%s\n",SDL_GetGamepadName(gamepad),
+                       !want ? "" : on_preferred ? " (the chosen one)" : " (the chosen one is not connected)",info);
             }
         }
         SDL_free(ids);
@@ -397,15 +427,15 @@ static int key_move(int move_x, int move_y, uint64_t now, int *out_x, int *out_y
  * faster at one point of a diagonal, more so at a higher frame rate. Some sticks report a diagonal
  * near the corner of the square, up to ~1.41x one axis's full deflection, which a stick with a round
  * gate (as the game expects) never does. A stick past the round gate is brought back onto it,
- * keeping its direction; one axis all the way is left as it is. The log says once how far past it
- * each stick went, and again when further. */
+ * keeping its direction; one axis all the way is left as it is. With BB_PAD_LOG=1 the log says once
+ * how far past it each stick went, and again when further. */
 static void round_gate(int stick, uint8_t *x, uint8_t *y) {
     static float reported[2];
     const float dx=(float)*x-128.0f, dy=(float)*y-128.0f;
     const float reach=sqrtf(dx*dx+dy*dy);
     if (reach<=128.0f) return; /* one axis all the way: 0 is 128 from the centre, 255 is 127 */
     const float past=reach/127.0f;
-    if (past>=1.05f && past>=reported[stick]+0.05f) {
+    if (pad_log() && past>=1.05f && past>=reported[stick]+0.05f) {
         reported[stick]=past;
         printf("Runtime: pad %s stick at %.2fx the round gate's reach, brought back onto it\n",
                stick ? "right" : "left",(double)past);
@@ -714,12 +744,25 @@ static ABI int32_t pad_info(int32_t handle, ControllerInfo *info) {
     host_unlock(&lock);
     return 0;
 }
+/* The game asks every frame (patch 0x2a9c790, from its vibration update at 0x1395be0): the large
+ * motor carries the strength, the small one only 0 or 1, an on/off pattern from the PS3 pad too weak
+ * to feel on a DualShock 4, as on the PS4. SDL keeps unchanged values without sending them again.
+ * With BB_PAD_LOG=1: the game's first request with strength, where it went, and SDL's refusals. */
 static ABI int32_t pad_vibration(int32_t handle, const uint8_t *param) {
     if (handle!=PAD_HANDLE || !opened) return ERR_INVALID_HANDLE;
     if (!param) return ERR_INVALID_ARG;
+    static int asked, refused;
     host_lock(&lock);
     SDL_Gamepad *g=current_gamepad();
-    if (g) SDL_RumbleGamepad(g,(uint16_t)(param[0]*257),(uint16_t)(param[1]*257),1000);
+    const bool sent=g && SDL_RumbleGamepad(g,(uint16_t)(param[0]*257),(uint16_t)(param[1]*257),1000);
+    if (pad_log()) {
+        if ((param[0] || param[1]) && !asked++)
+            printf("Runtime: vibration: the game's first request (large motor %u, small %u): %s%s\n",param[0],param[1],
+                   sent ? "sent to " : g ? "refused by SDL: " : "no gamepad",
+                   sent ? SDL_GetGamepadName(g) : g ? SDL_GetError() : "");
+        else if (g && !sent && refused++<3)
+            printf("Runtime: vibration: refused by SDL (large motor %u, small %u): %s\n",param[0],param[1],SDL_GetError());
+    }
     host_unlock(&lock);
     return 0;
 }
