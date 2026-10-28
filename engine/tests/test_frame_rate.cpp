@@ -604,6 +604,63 @@ void TestSelfHit() {
     g_params_loaded = false;
 }
 
+// Lamp and candle flicker (the Flicker group): a stand-in for the light module's update (0x131e660) behind
+// the game's prologue: its phase (+0x30) adds the rate (+0x80), and +0x110 / +0x114 count a call while modes
+// +0x38 / +0x3c are 2 (blending). Each frame steps the frame time, then calls it once.
+struct FlickerRun {
+    float phase, rate;
+    std::uint32_t blends, colour_blends, mode, colour_mode;
+};
+FlickerRun Flicker(const char* skip, double seconds, int frames, bool preroll) {
+    const Image image = Build(kSize, true);
+    image.put(0x131e660, Hex("554889e54157415641554154534881ec58010000"  // the game's prologue
+                             "4889fb"                                    // mov rbx, rdi
+                             "f30f108380000000f30f584330f30f114330"      // phase += rate
+                             "837b38027507838310010000" "01"             // mode 2: +0x110 += 1
+                             "837b3c027507838314010000" "01"             // colour mode 2: +0x114 += 1
+                             "4881c4580100005b415c415d415e415f5dc3"));   // the epilogue
+    SetEnv("BB_FPS", "60");
+    SetEnv("BB_FRAME_FIXES_SKIP", skip);
+    assert(BbEngine::FrameRate::Install(image.base, image.size));
+    SetEnv("BB_FRAME_FIXES_SKIP", nullptr);
+    Protections(image);
+    alignas(16) static std::uint8_t module[0x200];
+    std::memset(module, 0, sizeof module);
+    const float one = 1.0f;
+    const std::uint32_t blending = 2;
+    std::memcpy(module + 0x80, &one, 4);
+    std::memcpy(module + 0x38, &blending, 4);
+    std::memcpy(module + 0x3c, &blending, 4);
+    // A render context: the pre-roll's stand-in (its vtable at 0x56dbd80) or any other.
+    const std::uint64_t context[2] = {preroll ? reinterpret_cast<std::uint64_t>(image.at(0x56dbd80)) : 0x10, 0};
+    using Light = void(__attribute__((sysv_abi)) *)(void*, void*, const void*);
+    const auto light = reinterpret_cast<Light>(image.at(0x131e660));
+    for (int i = 0; i < frames; ++i) {
+        Step(image, seconds);
+        light(module, nullptr, context);
+    }
+    FlickerRun r{};
+    std::memcpy(&r.phase, module + 0x30, 4);
+    std::memcpy(&r.rate, module + 0x80, 4);
+    std::memcpy(&r.blends, module + 0x110, 4);
+    std::memcpy(&r.colour_blends, module + 0x114, 4);
+    std::memcpy(&r.mode, module + 0x38, 4);
+    std::memcpy(&r.colour_mode, module + 0x3c, 4);
+    return r;
+}
+void TestFlicker() {
+    const auto counted = [](const FlickerRun& r, unsigned n) {
+        return r.phase == float(n) && r.blends == n && r.colour_blends == n && r.rate == 1.0f && r.mode == 2 &&
+               r.colour_mode == 2; // what the calls between held, all put back
+    };
+    assert(counted(Flicker(nullptr, 1.0 / 60, 60, false), 30)); // 30 steps a second, as on the PS4
+    const FlickerRun fast = Flicker(nullptr, 1.0 / 144, 144, false);
+    assert(fast.phase >= 29 && fast.phase <= 30 && fast.blends == unsigned(fast.phase));
+    assert(counted(Flicker(nullptr, 1.0 / 20, 20, false), 20));  // below 30: every frame, as the PS4's
+    assert(counted(Flicker(nullptr, 1.0 / 60, 60, true), 60));   // a pre-roll's calls are the game's
+    assert(counted(Flicker("flicker", 1.0 / 60, 60, false), 60)); // left out: every call counts
+}
+
 int main() {
     TestRated();
     TestPlayTime();
@@ -616,6 +673,7 @@ int main() {
     TestTimer();
     TestCaveRuns();
     TestSelfHit();
+    TestFlicker();
     std::puts("frame-rate-test: all ok");
     return 0;
 }

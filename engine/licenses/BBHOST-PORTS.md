@@ -106,4 +106,9 @@ gpu/shim/engine/frame_rate_sites.inc (the Grass group) follows src/engine/wind_p
 wind sites (b2818b4, 5cee912): the wind's step half the frame's, as a per-frame load of the table, and its
 force weighed by the game's 1/60. gpu/shim/engine/frame_rate.cpp's SelfHit follows
 frame_rate_atk_params_loaded (6f735f4): the Bloodletter's L2 self-hit 0.4 -> 0.6 m, found again every 120
-frames through the param lookup above rather than at bbhost's table-load event.
+frames through the param lookup above rather than at bbhost's table-load event. frame_rate.cpp's LightHook
+(the Flicker group) follows src/decomp/sfx/step_gate.cpp's light module (sfx_light_update and
+light_frame_call): on the frames between whole 1/30 s the FFX light module's update runs with its phase
+rate as 0 and a blending mode as keeping, all put back, a pre-roll's call left as the game's. bbhost holds
+the light inside its own effects schedule (whole effect steps); HW keeps the effects at the frame's time
+and counts the whole 1/30 s itself.

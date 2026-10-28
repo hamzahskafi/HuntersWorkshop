@@ -31,6 +31,7 @@
 #include "engine_state.h"
 #include "skip_list.h"
 #include <algorithm>
+#include <atomic>
 #include <array>
 #include <cctype>
 #include <cmath>
@@ -53,12 +54,12 @@ constexpr std::uint32_t kListedTarget = 0x3c888889; // the 60 FPS++ list's 1/60
 
 enum class Group : std::uint8_t {
     Clips, Physics, Grass, Targeting, Jump, Sprint, Slope, Online, Hitbox, Timers, Menus, Durations, PlayTime,
-    Pace, Sound, Cloth, Steps, Lens, Timer, Camera, Count
+    Pace, Sound, Cloth, Steps, Lens, Timer, Camera, Flicker, Count
 };
 constexpr const char* kGroupNames[] = {"clips",  "physics", "grass",  "targeting", "jump",      "sprint",
                                        "slope",  "online",  "hitbox", "timers",    "menus",     "durations",
                                        "playtime", "pace",  "sound",  "cloth",     "steps",     "lens",
-                                       "timer",  "camera"};
+                                       "timer",  "camera",    "flicker"};
 static_assert(std::size(kGroupNames) == std::size_t(Group::Count));
 
 /// How a count follows the rate.
@@ -290,6 +291,53 @@ struct EaseSlot {
 };
 std::vector<EaseSlot> g_eases;
 Hook g_timer_hook;
+
+// Lamp and candle flicker (the Flicker group; B14's option C, after droogie's bbhost: the light module in
+// src/decomp/sfx/step_gate.cpp). The FFX light module's update (0x131e660; module, params, render context)
+// takes its GX light's colour, radius and place from curves at the node's age, which is right at any rate,
+// but counts two things a call: its flicker phase (+0x30) adds the age times its rate (+0x80), and its
+// blends toward their curves (+0x110 when mode +0x38 is 2; the colours and radii when mode +0x3c is 2). At 60
+// the flicker then ran twice the PS4's 30 steps a second. Between whole 1/30 s of frame time the call runs
+// with the rate as 0 and a blending mode as keeping (1), all put back (the phase's bits too: the add of 0
+// could leave a -0, or an infinite age's NaN); a creation's pre-roll (its stand-in render context, vtable
+// 0x56dbd80) is the game's own at every frame. Nothing else of the effects changes.
+constexpr std::uint64_t kLightUpdate = 0x131e660;
+// push rbp; mov rbp, rsp; push r15; push r14; push r13; push r12; push rbx; sub rsp, 0x158
+constexpr std::uint8_t kLightPrologue[] = {0x55, 0x48, 0x89, 0xe5, 0x41, 0x57, 0x41, 0x56, 0x41, 0x55,
+                                           0x41, 0x54, 0x53, 0x48, 0x81, 0xec, 0x58, 0x01, 0x00, 0x00};
+constexpr std::uint64_t kPrerollContext = 0x56dbd80;
+constexpr std::size_t kLightPhase = 0x30, kLightRate = 0x80, kLightMode = 0x38, kLightColourMode = 0x3c;
+Hook g_light_hook;
+bool g_flicker = false;
+std::uint64_t g_preroll = 0;            // the pre-roll's vtable in the image
+double g_light_carry = 0;               // frame time since the last whole 1/30 s
+std::atomic<bool> g_light_whole{true};  // this frame counts a 30 FPS update
+
+std::int64_t __attribute__((sysv_abi)) LightHook(std::uint64_t, const std::uint64_t* saved) {
+    const std::uint64_t module = saved[5], params = saved[4], context = saved[3];
+    if (!module || g_light_whole.load(std::memory_order_relaxed)) return 0; // the game's own call
+    std::uint64_t vtable = 0;
+    if (context) std::memcpy(&vtable, reinterpret_cast<const void*>(context), sizeof vtable);
+    if (vtable == g_preroll) return 0;
+    auto* const m = reinterpret_cast<std::uint8_t*>(module);
+    std::uint32_t phase, rate, mode, colour_mode;
+    std::memcpy(&phase, m + kLightPhase, 4);
+    std::memcpy(&rate, m + kLightRate, 4);
+    std::memcpy(&mode, m + kLightMode, 4);
+    std::memcpy(&colour_mode, m + kLightColourMode, 4);
+    const float zero = 0.0f;
+    const std::uint32_t keep = 1;
+    std::memcpy(m + kLightRate, &zero, 4);
+    if (mode == 2) std::memcpy(m + kLightMode, &keep, 4);
+    if (colour_mode == 2) std::memcpy(m + kLightColourMode, &keep, 4);
+    Call(g_light_hook.original, module, params, context);
+    std::memcpy(m + kLightRate, &rate, 4);
+    std::memcpy(m + kLightMode, &mode, 4);
+    std::memcpy(m + kLightColourMode, &colour_mode, 4);
+    std::memcpy(m + kLightPhase, &phase, 4);
+    const_cast<std::uint64_t*>(saved)[-1] = 0;
+    return 1;
+}
 constexpr std::uint64_t kCave = 0x2418e3d;           // the 60 FPS++ cave, kRequire's first
 constexpr std::uint64_t kCameraSkip = 0x183dc96;     // the FPS++ retune's jump over the game's follow camera
 constexpr std::uint8_t kCameraSkipped[] = {0xe9, 0xd6, 0x05, 0x00, 0x00};
@@ -332,6 +380,15 @@ void WriteSlot(const Slot& s, double seconds);
 
 // A frame of `seconds`: the slots, the play time and the eases.
 void Update(double seconds) {
+    // A whole 1/30 s of frame time since the last: this frame's lights count as a 30 FPS update. A frame of
+    // 1/30 s or longer always does, one update a frame, as when the PS4 runs below 30.
+    if (g_flicker) {
+        constexpr double kThirtieth = 1.0 / 30;
+        g_light_carry += seconds;
+        const bool whole = g_light_carry + 1e-6 >= kThirtieth;
+        if (whole) g_light_carry = std::min(std::max(g_light_carry - kThirtieth, 0.0), kThirtieth - 1e-6);
+        g_light_whole.store(whole, std::memory_order_relaxed);
+    }
     for (const Slot& s : g_slots) WriteSlot(s, seconds);
     if (g_play_ms) {
         const std::int32_t ms = g_play.Add(seconds);
@@ -422,6 +479,10 @@ bool Install(std::uint8_t* image, std::size_t size) {
     g_play = {};
     g_eases.clear();
     Discard(g_timer_hook);
+    Discard(g_light_hook);
+    g_flicker = false;
+    g_light_carry = 0;
+    g_light_whole.store(true, std::memory_order_relaxed);
     if (const char* off = std::getenv("BB_FRAME_FIXES"); off && off[0] == '0') {
         host_log("Frame rate fixes: off (BB_FRAME_FIXES=0)");
         return false;
@@ -667,6 +728,23 @@ bool Install(std::uint8_t* image, std::size_t size) {
         }
     }
 
+    // Lamp and candle flicker: the light module's update hooked (see LightHook).
+    if (on[std::size_t(Group::Flicker)]) {
+        if (Prepare(g_light_hook, image, size, kLightUpdate - kBase, {kLightPrologue, sizeof kLightPrologue},
+                    LightHook)) {
+            Commit({&g_light_hook, 1});
+            g_preroll = reinterpret_cast<std::uint64_t>(at(kPrerollContext));
+            g_flicker = true;
+            ++applied[std::size_t(Group::Flicker)];
+            host_log("Frame rate fixes: lamp and candle flicker at 30 steps a second, as on the PS4 (the light "
+                     "module's flicker and blends held between whole 1/30 s; BB_FRAME_FIXES_SKIP=flicker leaves "
+                     "it out)");
+        } else {
+            host_log("Frame rate fixes: flicker left out: 0x%llx is not 1.09's light module update",
+                     (unsigned long long)kLightUpdate);
+        }
+    }
+
     std::string list;
     for (std::size_t g = 0; g < applied.size(); ++g) {
         if (!applied[g]) continue;
@@ -676,7 +754,7 @@ bool Install(std::uint8_t* image, std::size_t size) {
         host_log("Frame rate fixes: none applied");
         return false;
     }
-    g_on = !g_slots.empty() || g_play_ms || g_timer;
+    g_on = !g_slots.empty() || g_play_ms || g_timer || g_flicker;
     g_self_hit = on[std::size_t(Group::Hitbox)];
     char where[96];
     if (rate.uncapped)
