@@ -131,6 +131,24 @@ class DebugPatchTests(unittest.TestCase):
             (font / 'DbgFont14h.tpf').write_bytes(b'test')
             validate_patch_requirements(names, game)
 
+    def test_debug_camera_and_reflections_leave_live_game_code_alone(self):
+        # Lance McDonald's camera code was written over the function at 0x1de3330, which the game
+        # reaches from a callback it registers at start; Kyo's SSR value sat in the clock function at
+        # 0x4632d0. 0.4.2: the camera's code (its padding left out) is in the empty code area, below
+        # the writes Kyo's FPS lists make there, and SSR reads the game's own 2.0 at 0x4bfc494.
+        base = patches.EBOOT_BASE
+        camera = compile_patches(XML, ['Restore Debug Camera'], '01.09', SEGMENTS)
+        ssr = compile_patches(XML, ['Enable Screen Space Reflections (READ NOTE)'], '01.09', SEGMENTS)
+        for offset, data in camera:
+            self.assertFalse(offset < 0x1de368c - base and offset + len(data) > 0x1de3328 - base, hex(offset + base))
+        code = [(offset, data) for offset, data in camera if offset >= 0x3abbde2 - base]
+        self.assertEqual([offset + base for offset, _ in code], [0x3abbe00])
+        self.assertLessEqual(code[0][0] + len(code[0][1]), 0x3abc208 - base)
+        for offset, data in ssr:
+            self.assertFalse(offset < 0x463300 - base and offset + len(data) > 0x4632d0 - base, hex(offset + base))
+        disp = [data for offset, data in ssr if offset == 0x12a99e1 - base]
+        self.assertEqual(disp, [(0x4bfc494 - 0x12a99e5).to_bytes(4, 'little')])
+
     def test_conflicting_enemy_control_patch_is_rejected(self):
         with self.assertRaisesRegex(ValueError, 'conflicts with Enemy Control'):
             validate_patch_requirements(['Enemy Control', 'Restore Debug Camera'], Path('.'))
