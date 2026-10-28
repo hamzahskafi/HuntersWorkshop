@@ -1084,6 +1084,7 @@ int main(int argc, char **argv) {
     }
     if (!executable_entry) fail("entry is not executable");
     printf("Mapped %" PRIu64 " bytes, %" PRIu64 " segments; applied %" PRIu64 " relocations\n", size, ns, nr);
+    runtime_ps4_fpu(); /* the PS4's floating-point state from the game's first code on */
     if (native_libc) {
         for (uint64_t m=0;m<module_count;++m) {
             int init_executable=0;

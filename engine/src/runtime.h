@@ -72,6 +72,8 @@ void runtime_thread_report(void);
 void runtime_thread_census(uint64_t *made, uint64_t *finished, uint64_t *found, uint64_t *steps);
 void runtime_set_main_tls(const void *data, uint64_t filesz, uint64_t memsz, uint64_t align);
 void runtime_thread_attach_main(void);
+/* The PS4's floating-point state on the calling thread (runtime_thread.c; BB_PS4_FPU=0: not). */
+void runtime_ps4_fpu(void);
 /* The calling thread runs guest code (it has a guest thread record). */
 int runtime_thread_has_record(void);
 /* The calling thread is one of the game's resource loaders (Core.Res.*). */
