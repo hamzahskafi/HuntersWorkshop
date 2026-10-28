@@ -2016,6 +2016,13 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
                 break;
             }
             const VAddr address = buffer.base_address;
+            // Lantern 0.9.38 (Awaken): a small skeleton the GPU wrote has a stale CPU copy, whose
+            // hash would read as standing still: such a draw is not gated.
+            if (role == Motion::BufferRole::SmallSkeleton &&
+                buffer_cache.IsRegionGpuModified(address, size)) {
+                gated = false;
+                break;
+            }
             if (role == Motion::BufferRole::SmallSkeleton &&
                 memory->IsValidGpuMapping(address, 0) &&
                 memory->ClampRangeSize(address, size) == size) {

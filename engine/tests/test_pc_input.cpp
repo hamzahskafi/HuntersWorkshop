@@ -13,6 +13,8 @@ void host_log(const char*,...) {}
 bool debug_menu_active(){return false;}
 uint32_t menu_confirm_button(){return 0x4000;}
 uint32_t menu_back_button(){return 0x2000;}
+static bool in_menu=false;
+bool menu_pointer_in_menu(){return in_menu;}
 int main(){
     host_bindings_load_defaults();
     assert(host_binding_key(kBindWalk)==SDL_SCANCODE_LALT);
@@ -59,6 +61,12 @@ int main(){
     }
     std::memset(h,0,sizeof h);h[kBindAttack]=true;p=PadState{};host_bindings_apply(h,true,p);
     assert(p.buttons==0x200 && p.r2==255);
+    // Menu Confirm and Menu Back press their buttons in menus only: in the world they would be
+    // Interact and Dodge.
+    std::memset(h,0,sizeof h);h[kBindConfirm]=h[kBindBack]=true;p=PadState{};host_bindings_apply(h,false,p);
+    assert(p.buttons==0);
+    in_menu=true;p=PadState{};host_bindings_apply(h,false,p);in_menu=false;
+    assert(p.buttons==(0x4000|0x2000));
     assert(host_bindings_parse("attack","E, Mouse2"));
     assert(host_binding_ini_value(kBindAttack)=="E, Mouse2");
     host_bind_capture_begin(kBindAttack);assert(host_bind_capture_key(SDL_SCANCODE_F));

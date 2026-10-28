@@ -499,11 +499,20 @@ bool KeyTurn::Step(int x, int y, std::uint64_t now, float& out_x, float& out_y) 
 
 void host_bindings_apply(const bool held[kBindCount], bool strong, PadState& p, KeyTurn* turn, std::uint64_t now) {
     bool any = false;
+    int menu = -1;  // menu_pointer_in_menu, asked only when Confirm or Back is held
     for (int a = 0; a < kBindCount; ++a) {
         // The Debug Menu key sets no pad bit: its press was queued when it was
         // read, and the pad read toggles the menu on the game's thread
         // (host_bind_take_debug_toggle).
         if (!held[a] || a == kBindDebugMenu) continue;
+        // Menu Confirm and Menu Back are the menus' keys only (Lantern 0.9.38,
+        // Awaken): in the world their buttons are Interact and Dodge (Cross and
+        // Circle, the region decides which way round), so Enter or Backspace
+        // there talked, picked up or dodged.
+        if (a == kBindConfirm || a == kBindBack) {
+            if (menu < 0) menu = menu_pointer_in_menu() ? 1 : 0;
+            if (menu == 0) continue;
+        }
         any = true;
         std::uint32_t bit = kInfo[a].button;
         // Shift is the strong-attack modifier, as in DS3: one key rather than

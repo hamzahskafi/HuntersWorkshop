@@ -1709,7 +1709,7 @@
   "Long stalls only, at any frame rate": "任何帧率下仅报告长时间停顿",
   "Controller details in the log": "在日志中记录手柄详情",
   "BB_PAD_LOG: each controller's USB ids, connection and rumble support, disconnects, the game's first vibration request and sticks past their round gate. For controller problems": "BB_PAD_LOG：每个手柄的 USB ID、连接方式和振动支持、断开连接、游戏的首次振动请求，以及超出圆形限位的摇杆。用于排查手柄问题",
-  "PS4 floating-point mode (test)": "PS4 浮点模式（测试）",
   "The game's threads handle very small numbers as a PS4 does, rounding them to zero, instead of as Windows does. ": "游戏线程像 PS4 一样处理极小的数（将其归零），而不是按 Windows 的方式。",
-  "Physics and cloth then behave as on the console, and math on those numbers isn't slowed. Off: Windows' way, as before 0.4.1": "物理和布料的表现因此与主机一致，这些数的运算也不会变慢。关闭：Windows 的方式，与 0.4.1 之前相同"
+  "PS4 floating-point mode": "PS4 浮点模式",
+  "Physics and cloth then behave as on the console: with Windows' way, some of Cainhurst's ghosts lose the lower half of their dresses. Off: Windows' way, as before 0.4.1": "物理和布料因此与主机一致：若按 Windows 的方式，该隐赫斯特的部分幽灵会缺失裙子的下半部分。关闭：Windows 的方式，与 0.4.1 之前相同"
 }

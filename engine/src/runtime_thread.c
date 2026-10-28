@@ -312,8 +312,9 @@ static void apply_priority(int prio) {
  * (StevenMiller123, found by red-prig), the values dumped from real hardware: MXCSR 0x9fc0
  * (flush-to-zero and denormals-are-zero on) and the x87 control word 0x037f (64-bit precision).
  * A Windows thread starts with both flags clear (0x1f80) and 53-bit x87 precision: very small
- * values stay as denormals where the PS4 makes them 0, which a physics step can drift on (the
- * Cainhurst ghosts' cloth was reported glitching), and math on denormals is slow on x86. Set on
+ * values stay as denormals where the PS4 makes them 0, which a physics step can drift on: with
+ * the host's state some of Cainhurst's ghosts are drawn without the lower half of their dresses,
+ * and with this they are whole (A/B test, 2026-10-29; no measurable CPU or frame-time cost). Set on
  * the game's main thread before its first code (probe.c) and on each thread it creates; the
  * engine's own threads keep the host's. BB_PS4_FPU=0: the host's state everywhere, as before. */
 void runtime_ps4_fpu(void) {

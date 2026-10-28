@@ -133,9 +133,9 @@ namespace BloodborneLauncher.Core
             OnUnless0("BB_EFFECT_FIXES", Fixes, L.T("Ebrietas effect fix"),
                 L.T("Replaces Ebrietas' trail effect with the one Nexus mod 41 uses, made from your own game files: her rock attacks no longer pile up thousands of rocks ") +
                 L.T("(FPS falling from 90 to 40, crashes before beta 8). Off: the game's own effect. A mod that changes these effect files wins")),
-            OnUnless0("BB_PS4_FPU", Fixes, L.T("PS4 floating-point mode (test)"),
+            OnUnless0("BB_PS4_FPU", Fixes, L.T("PS4 floating-point mode"),
                 L.T("The game's threads handle very small numbers as a PS4 does, rounding them to zero, instead of as Windows does. ") +
-                L.T("Physics and cloth then behave as on the console, and math on those numbers isn't slowed. Off: Windows' way, as before 0.4.1")),
+                L.T("Physics and cloth then behave as on the console: with Windows' way, some of Cainhurst's ghosts lose the lower half of their dresses. Off: Windows' way, as before 0.4.1")),
             Flag("BB_RED_ZONE_FUNCTIONS", Fixes, L.T("Intel effect crash fix (test)"),
                 L.T("For crashes in effects on Intel 12th-14th gen CPUs (Ebrietas, Witch of Hemwick, One Reborn, the Cainhurst " +
                     "cutscene): the two effect ribbon writers keep their data where Windows can't overwrite it. Every effect stays " +
