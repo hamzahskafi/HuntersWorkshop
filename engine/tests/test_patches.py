@@ -614,8 +614,15 @@ class BuiltInSelectionTests(unittest.TestCase):
     def test_a_switched_on_builtin_past_the_eboot_is_left_out_not_fatal(self):
         xml = Path(patches.__file__).resolve().parent.parent / 'patches/Bloodborne.xml'
         segments = [(0, 0x06000000 - patches.EBOOT_BASE)]
-        with contextlib.redirect_stderr(io.StringIO()) as err:
-            self.assertFalse(patches.placeable(xml, 'Performance Patch (perf increase)', '01.09', segments))
+        # As the old Performance Patch did (GitHub issues 28, 29; removed in 0.4.2).
+        with tempfile.TemporaryDirectory() as directory:
+            past = Path(directory) / 'Bloodborne.xml'
+            past.write_text('<?xml version="1.0"?>\n<Patch>\n  <Metadata Title="Bloodborne" Name="Past" Author="x" '
+                            'PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="true">\n    <PatchList>\n'
+                            '      <Line Type="bytes" Address="0x0603AD1A" Value="09"/>\n    </PatchList>\n'
+                            '  </Metadata>\n</Patch>\n', encoding='utf-8')
+            with contextlib.redirect_stderr(io.StringIO()) as err:
+                self.assertFalse(patches.placeable(past, 'Past', '01.09', segments))
         self.assertIn('0x0603AD1A is outside the eboot', err.getvalue())
         self.assertTrue(patches.placeable(xml, 'No Rally Decay', '01.09', segments))
 
