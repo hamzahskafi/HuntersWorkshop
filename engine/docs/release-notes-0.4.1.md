@@ -22,5 +22,5 @@ What changed since 0.4.0, for the release page. The engine work behind each line
 
 ## Launcher
 
-- **Remembers its window size and position,** and fits the screen at high Windows scaling (a
-  1080p screen at 150% or 200%). (GHusr-y5)
+- **The window fits the screen** at high Windows scaling (a 1080p screen at 150% or 200%), still
+  opening fresh and centred each time. (GHusr-y5)
