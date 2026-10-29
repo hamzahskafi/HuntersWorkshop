@@ -125,7 +125,7 @@ CLOTH_LEFT_OUT=((0xB6FBD4,0xB6FBD8),(0xB73F84,0xB73F8D),(0xB73FA8,0xB73FC1),(0x4
 # no list writes), the distance ease (0x4D25E68, 0.1; the lists' 0.025 eased at half speed at 60)
 # and the chase-rate ease (0x4D25E94, 1/30). That conversion is BB_CAMERA_FIX=1 (below).
 #
-# Original (camera_tuning=original in config.ini or BB_CAMERA_TUNING; the retune is the default since 0.4.4) leaves Kyo's retune out: the
+# Original (camera_tuning in config.ini or BB_CAMERA_TUNING, the default) leaves Kyo's retune out: the
 # constructor's defaults, the stores (and the jumps after them: the per-area camera parameters load again),
 # the wall escape and the jump over the game's follow camera, converting the game's own eases from a 30 fps
 # frame, as bbhost's Camera tuning: Original (players saw the retune pull back, lag and widen while
@@ -843,7 +843,7 @@ def main():
     if preset and preset[0] in names:
         fps={'60':60,'90':90,**SCALED_FPS}.get(a.fps)
         if a.fps=='uncap' and on_sixty: fps=UNCAPPED_REFERENCE
-        tuning=os.environ.get('BB_CAMERA_TUNING',read_settings(a.settings).get('camera_tuning','fps++')).lower()
+        tuning=os.environ.get('BB_CAMERA_TUNING',read_settings(a.settings).get('camera_tuning','original')).lower()
         writes=frame_rate_fixes(writes,fps,elf,tuning!='fps++',corrections)
         if fps:
             print('Patches: follow camera '+('as the game has it, its eases converted from 30 FPS' if tuning!='fps++' else

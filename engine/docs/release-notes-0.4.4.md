@@ -5,8 +5,9 @@ What changed since 0.4.3, for the release page. The engine work behind each line
 
 ## Defaults
 
-- **The project's tested settings are the defaults:** depth of field on, the intro skipped, camera
-  tuning FPS++, sharpness 0.20, the FPS counter off, and the unified frame time on (More › Engine).
+- **The project's tested settings are the defaults:** depth of field on, the intro skipped,
+  sharpness 0.20, the FPS counter off, and the unified frame time on (More › Engine). The follow
+  camera stays Original.
   Settings files from earlier versions get the unified frame time turned on once; everything else in
   them stays as it was.
 

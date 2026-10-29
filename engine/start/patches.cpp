@@ -365,8 +365,8 @@ double CameraValue(std::optional<std::uint32_t> field, double value, double fram
 // (kCameraFields, a 40 degree pitch angle among them), the parameter reads replaced by stores
 // of fixed values (kCameraStores: the game's per-area camera parameters never load) and the
 // wall escape at 0x183DCFE; players saw a camera that pulled back, lagged and widened while
-// sprinting (GitHub issue 32). Original (camera_tuning=original or BB_CAMERA_TUNING=original;
-// the retune is the default since 0.4.4) leaves all of them as the game has them and
+// sprinting (GitHub issue 32). Original (the default; camera_tuning=fps++ or
+// BB_CAMERA_TUNING=fps++ keeps the retune) leaves all of them as the game has them and
 // converts the game's own per-frame eases, distance (0.1) and chase rate (1/30), from a 30 FPS
 // frame: the camera of the game at 30 at every rate, as bbhost's Camera tuning: Original. FPS++ above 60 with
 // the frame-rate corrections on: the retune's weights and eases (the constructor's, the stores', the list's
@@ -891,7 +891,7 @@ PatchResult CompilePatches(const PatchRequest& request) {
         else if (request.fps == "90") fps = 90;
         else if (scaled_fps.count(request.fps)) fps = scaled_fps.at(request.fps);
         else if (request.fps == "uncap" && on_sixty) fps = kUncappedReference;
-        const std::string tuning = Lower(Env("BB_CAMERA_TUNING", Setting(settings, "camera_tuning").value_or("fps++")));
+        const std::string tuning = Lower(Env("BB_CAMERA_TUNING", Setting(settings, "camera_tuning").value_or("original")));
         writes = FrameRateFixes(writes, fps, elf, tuning != "fps++", corrections);
         if (fps) Log("Patches: follow camera %s", tuning != "fps++" ? "as the game has it, its eases converted from 30 FPS"
                                                   : corrections && *fps > 60
