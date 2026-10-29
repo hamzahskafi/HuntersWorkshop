@@ -49,9 +49,11 @@ CRASH_GUARDS_ABI void HitDropped(std::uint64_t collector);
 // device (0x21674f0) for a 0x18-byte handle (its allocator at +0xdc10) and the query's 0x80 bytes of results
 // (+0xdc18; 0x26a98a0); out of room it returns false and leaves the handle null. There is no pool of queries
 // to size: both allocators are the game's lock-and-TLSF graphics allocators (0x1fc5ed0, 0x1fc5f30), which every
-// GX object shares, and the query's release (0xe2f020) gives both back. Their heaps are what runs out, and the
-// start program already gives them more room when a scene outgrows the PS4's (start/patches.cpp: above 1080p,
-// highest model detail, screen space reflections). The guard stays for what still runs them out. The render thread's begin (0xe2f130: state 0 -> 2, then the device's begin 0x2169ec0(device, device +
+// GX object shares, and the query's release (0xe2f020) gives both back. What filled them was queries that never
+// finished: with the stand-in occlusion counts written before the DMA that clears each query, the game polled
+// unfinished queries every frame and made new ones in their place until no more could be made (liverpool.cpp,
+// RunZpassDump; the counts in order, BB_ZPASS_IN_ORDER, came with Lantern 0.9.37 beta 7). The guard stays for
+// anything else that runs the heaps out. The render thread's begin (0xe2f130: state 0 -> 2, then the device's begin 0x2169ec0(device, device +
 // 0xb730, handle)) and end (0xe2f160: state 1, the device's end 0x216a070) read the handle: a null one faulted
 // at 0x2169edc on GXRenderThread late in a long session (bbport #336). Here the creation is watched (a failed
 // one's query kept, kFailedSlots of them), and begin and end are ours in place of the game's two short
