@@ -167,6 +167,9 @@ FRAME_LOAD(Online, 0x1925982, 8, 4, 0x4d26478, Rate, 1, "c5e2591dee0a4003", 0x41
 FRAME_LOAD(Physics, 0x1c0f15e, 8, 4, 0x4d275e8, Rate, 1, "c5f2590d82841103", 0x41f00000)
 // the equipment screen's character preview, a step a frame.
 FRAME_LOAD(Menus, 0x19dc1f7, 8, 4, 0x4d26c9c, Step, 1, "c5fa10059daa3403", 0x3d088889)
+// the model preview the stick turns (the character creator, 0x21b2780): yaw and pitch += the stick times
+// 1.5 a frame, twice as fast at 60 (bbport 0.7's model_turn, deadinside28).
+FRAME_LOAD(Menus, 0x21b27b0, 8, 4, 0x4d28dfc, Amount, 1, "c5fa10154466b702", 0x3fc00000)
 // the shop's tab animation, a step a frame.
 FRAME_LOAD(Menus, 0x1b3456e, 8, 4, 0x4d270e4, Step, 1, "c5fa10056e2b1f03", 0x3d088889)
 // ReplayGhostIns::UpdateFade: -0.1 a frame.

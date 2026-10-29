@@ -1136,6 +1136,20 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
         return limit == 0 ? base_limit : limit;
     };
     auto next_flip = std::chrono::steady_clock::now();
+    // A flip waits for its slot, a frame period after the one before: on time (within a quarter of a period)
+    // the slots keep their cadence, so a sleep's overshoot never adds up. After a late flip they start again from
+    // it (after bbport 0.7, deadinside28): a late frame is not followed by an early one (at 30 FPS 48 ms then
+    // 18 ms, a saw in the frame times). BB_PACE_CATCHUP=1: as before, the slots may lag one behind and catch up.
+    static const bool catch_up = [] {
+        const char* env = std::getenv("BB_PACE_CATCHUP");
+        return env && env[0] == '1';
+    }();
+    const auto next_slot = [&](std::chrono::steady_clock::time_point now) {
+        if (catch_up) {
+            return std::max(next_flip + frame_period, now - frame_period);
+        }
+        return now - next_flip <= frame_period / 4 ? next_flip + frame_period : now + frame_period;
+    };
     std::printf("VideoOut: vblank %u Hz, frame limit %u FPS, precise pacing %s\n",
                 EmulatorSettings.GetVblankFrequency(), frame_limit,
                 PrecisePacing::Enabled() ? "on" : "off");
@@ -1347,7 +1361,7 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
         if (flip_slot && vblank_status.count % (main_port.flip_rate + 1) == 0) {
             const auto request = receive_request();
             if (request && frame_limit) {
-                next_flip = std::max(next_flip + frame_period, now - frame_period);
+                next_flip = next_slot(now);
             }
             if (!request) {
                 if (timer.GetTotalWait().count() < 0) { // Dont draw too fast
@@ -1386,7 +1400,7 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
             const auto now = std::chrono::steady_clock::now();
             const auto request = receive_request();
             if (request) {
-                next_flip = std::max(next_flip + frame_period, now - frame_period);
+                next_flip = next_slot(now);
                 Flip(request);
                 FRAME_END;
             }

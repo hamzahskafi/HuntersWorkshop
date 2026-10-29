@@ -276,7 +276,7 @@ void TestPlayTime() {
 
 void TestTable() {
     Collect();
-    assert(sites.size() == 70 && loads.size() == 31 && values.size() == 38 && counts.size() == 4 &&
+    assert(sites.size() == 70 && loads.size() == 32 && values.size() == 38 && counts.size() == 4 &&
            targets.size() == 5 && cloth_scales.size() == 1 && eases.size() == 2 && required.size() == 2);
 }
 
@@ -604,6 +604,41 @@ void TestSelfHit() {
     g_params_loaded = false;
 }
 
+// The cloth's last substep (the ClothStep group): a stand-in for Havok's stiffness factor (0x1567a80) behind the
+// game's prologue that gives back the substep it was called with. Each frame steps the frame time, then calls it
+// as the cloth's helpers do under the list's one substep: substep 0 of the data's `substeps`. The count of calls
+// that came as the last substep.
+int ClothLasts(const char* skip, double seconds, int frames, int substeps, bool listed) {
+    const Image image = Build(kSize, true);
+    // The game's first 14 bytes; mov eax, edx; the epilogue.
+    image.put(0x1567a80, Hex("554889e54157415653" "50" "c5f828d0" "89d0" "4883c4085b415e415f5dc3"));
+    image.put(0xb6e67a, Hex(listed ? "bb01000000909090909090" : "8b581885db7504418b5d20"));
+    SetEnv("BB_FPS", "60");
+    SetEnv("BB_FRAME_FIXES_SKIP", skip);
+    assert(BbEngine::FrameRate::Install(image.base, image.size));
+    SetEnv("BB_FRAME_FIXES_SKIP", nullptr);
+    Protections(image);
+    using Factor = std::int32_t(__attribute__((sysv_abi)) *)(const void*, int, int, int, float, float);
+    const auto factor = reinterpret_cast<Factor>(image.at(0x1567a80));
+    int lasts = 0;
+    for (int i = 0; i < frames; ++i) {
+        Step(image, seconds);
+        const std::int32_t substep = factor(nullptr, 2, 0, substeps, 1.0f, 1.0f);
+        assert(substep == 0 || substep == substeps - 1);
+        lasts += substep == substeps - 1 && substeps > 1;
+    }
+    return lasts;
+}
+void TestClothStep() {
+    assert(ClothLasts(nullptr, 1.0 / 60, 60, 2, true) == 30); // every other frame, as the PS4's two substeps
+    const int fast = ClothLasts(nullptr, 1.0 / 144, 144, 2, true);
+    assert(fast >= 29 && fast <= 30);                         // 30 a second above 60
+    assert(ClothLasts(nullptr, 1.0 / 20, 20, 2, true) == 20);  // a frame of 1/30 s or longer: every one
+    assert(ClothLasts(nullptr, 1.0 / 60, 60, 1, true) == 0);   // one substep in the data: the game's call
+    assert(ClothLasts("clothstep", 1.0 / 60, 60, 2, true) == 0); // left out by name
+    assert(ClothLasts(nullptr, 1.0 / 60, 60, 2, false) == 0);  // without the list's one substep: left out
+}
+
 int main() {
     TestRated();
     TestPlayTime();
@@ -616,6 +651,7 @@ int main() {
     TestTimer();
     TestCaveRuns();
     TestSelfHit();
+    TestClothStep();
     std::puts("frame-rate-test: all ok");
     return 0;
 }

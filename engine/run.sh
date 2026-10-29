@@ -95,7 +95,7 @@ fi
 # (frame_rate.cpp; BB_FRAME_FIXES=0: the older FPS++ patches above 60). BB_PATCHES adds patch names ("a;b").
 # Fixes for the game's own bugs (gpu/shim/engine/game_fixes.cpp; the recording's compression level in
 # scripts/patches.py): BB_GAME_FIXES=0 leaves them out, BB_GAME_FIXES_SKIP the ones it names (job_lock,
-# job_nodes, job_slots, blur_samples, fmod_ring, deflate).
+# job_nodes, job_slots, blur_samples, fmod_ring, hit_cap, gx_query, deflate).
 # The log (the launcher's Settings > Log, capture and extra variables): BB_LOG_LEVEL=detailed brings
 # back every save mount, thread, semaphore and memory map, the draw counts every 5 s, the job pools'
 # caches and the GPU side's info messages (the driver's missing extensions and formats among them);
