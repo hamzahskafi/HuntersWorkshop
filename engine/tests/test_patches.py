@@ -13,7 +13,7 @@ from pathlib import Path
 
 import patches
 
-from patches import (DEFAULT_OFF, EBOOT_BASE, OUTPUT_SIZE, RESOLUTION_TEMPLATE, SCENE_HEIGHT,
+from patches import (DEFAULT_OFF, DEFAULT_ON, EBOOT_BASE, OUTPUT_SIZE, RESOLUTION_TEMPLATE, SCENE_HEIGHT,
                      SCENE_WIDTH, UI_HEIGHT, UI_WIDTH, compile_patches,
                      render_size, resolution_writes, scaled_sizes, effect_patches,
                      validate_patch_requirements, external_patches, external_selection,
@@ -99,7 +99,8 @@ class NativeUiTests(unittest.TestCase):
 class DebugPatchTests(unittest.TestCase):
     def test_camera_patch_is_optional_and_compatible_with_fps_and_debug_menu(self):
         on = {key: '1' for key in DEFAULT_OFF}
-        self.assertEqual(effect_patches({'debug_camera': '0', 'debug_menu': '0', **on}), [])
+        off = {key: '0' for key in DEFAULT_ON}
+        self.assertEqual(effect_patches({'debug_camera': '0', 'debug_menu': '0', **on, **off}), [])
         camera = effect_patches({'debug_camera': '1'})
         writes = compile_patches(XML, camera, '01.09', SEGMENTS)
         self.assertGreater(len(writes), 0)
@@ -111,9 +112,10 @@ class DebugPatchTests(unittest.TestCase):
                         self.assertEqual(camera_bytes[offset+i], byte, patch)
 
     def test_missing_effect_keys_follow_the_engine_defaults(self):
-        self.assertEqual(effect_patches({}), ['Disable Chromatic Aberration', 'Disable DoF',
-                                              'Disable Motion Blur (perf increase)', 'Disable AA'])
-        self.assertNotIn('Disable DoF', effect_patches({'effect_dof': '1'}))
+        self.assertEqual(effect_patches({}), ['Disable Chromatic Aberration',
+                                              'Disable Motion Blur (perf increase)', 'Disable AA', 'Skip Intro'])
+        self.assertIn('Disable DoF', effect_patches({'effect_dof': '0'}))
+        self.assertNotIn('Skip Intro', effect_patches({'skip_intro': '0'}))
 
     def test_debug_menu_checks_both_fonts_but_camera_does_not_need_them(self):
         names = effect_patches({'debug_menu': '1'})

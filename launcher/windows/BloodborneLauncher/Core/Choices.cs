@@ -104,18 +104,19 @@
                 : (1920, 1080);
         }
 
-        // Chromatic aberration, depth of field, motion blur and the game's own anti-aliasing start off:
-        // the picture is clearer without them, and the upscalers anti-alias (players' advice).
+        // Chromatic aberration, motion blur and the game's own anti-aliasing start off: the picture is
+        // clearer without them, and the upscalers anti-alias (players' advice). Depth of field on and the
+        // intros skipped (0.4.4).
         public static readonly Effect[] Effects =
         {
             new("effect_chromatic_aberration", L.T("Chromatic aberration"), false),
-            new("effect_dof", L.T("Depth of field"), false),
+            new("effect_dof", L.T("Depth of field"), true),
             new("effect_motion_blur", L.T("Motion blur"), false),
             new("effect_ssao", L.T("Ambient occlusion (SSAO)"), true),
             new("effect_game_aa", L.T("Game's own anti-aliasing"), false),
             new("effect_dynamic_shadows", L.T("Shadows from dynamic lights"), true),
             new("effect_ssr", L.T("Screen-space reflections"), false, L.T("Not in the original game")),
-            new("skip_intro", L.T("Skip intro videos"), false),
+            new("skip_intro", L.T("Skip intro videos"), true),
             new("debug_camera", L.T("Free camera"), false, L.T("Toggle with Cross + L3 / Space + Z")),
             new("debug_menu", L.T("Debug menu"), false,
                 L.T("Left touchpad / Tab. Needs the adhoc folder from Nexus mod #253 (adhoc/font) in the game's dvdroot_ps4 or as a mod; without it the patch is not applied")),

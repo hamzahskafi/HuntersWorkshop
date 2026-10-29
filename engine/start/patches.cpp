@@ -97,7 +97,10 @@ const std::vector<std::tuple<std::string, const char*, const char*>>& Effects() 
 }
 const std::map<std::string, std::string> kModelLod{
     {"-2", "Model LOD -2 (Highest)"}, {"1", "Model LOD 1 (Lower)"}, {"2", "Model LOD 2 (Lowest)"}};
-const std::set<std::string> kDefaultOff{"effect_chromatic_aberration", "effect_dof", "effect_motion_blur", "effect_game_aa"};
+// A key config.ini doesn't have takes the engine's default (bbport_settings.h Effects): these start off, and
+// the intro videos are skipped (0.4.4: the defaults the project's own tests run with).
+const std::set<std::string> kDefaultOff{"effect_chromatic_aberration", "effect_motion_blur", "effect_game_aa"};
+const std::set<std::string> kDefaultOn{"skip_intro"};
 const std::set<std::string> kBloodborneIds{"CUSA00207", "CUSA00208", "CUSA00299", "CUSA00900", "CUSA01363",
                                            "CUSA03014", "CUSA03023", "CUSA03173", "CUSA03179"};
 
@@ -362,8 +365,8 @@ double CameraValue(std::optional<std::uint32_t> field, double value, double fram
 // (kCameraFields, a 40 degree pitch angle among them), the parameter reads replaced by stores
 // of fixed values (kCameraStores: the game's per-area camera parameters never load) and the
 // wall escape at 0x183DCFE; players saw a camera that pulled back, lagged and widened while
-// sprinting (GitHub issue 32). Original (the default; camera_tuning=fps++ or
-// BB_CAMERA_TUNING=fps++ keeps the retune) leaves all of them as the game has them and
+// sprinting (GitHub issue 32). Original (camera_tuning=original or BB_CAMERA_TUNING=original;
+// the retune is the default since 0.4.4) leaves all of them as the game has them and
 // converts the game's own per-frame eases, distance (0.1) and chase rate (1/30), from a 30 FPS
 // frame: the camera of the game at 30 at every rate, as bbhost's Camera tuning: Original. FPS++ above 60 with
 // the frame-rate corrections on: the retune's weights and eases (the constructor's, the stores', the list's
@@ -514,6 +517,7 @@ std::vector<std::string> EffectPatches(const std::map<std::string, std::string>&
         const auto value = Setting(settings, key);
         if (!value) {
             if (kDefaultOff.count(key) && off) names.push_back(off);
+            if (kDefaultOn.count(key) && on) names.push_back(on);
             continue;
         }
         const char* name = *value == "1" ? on : off;
@@ -887,7 +891,7 @@ PatchResult CompilePatches(const PatchRequest& request) {
         else if (request.fps == "90") fps = 90;
         else if (scaled_fps.count(request.fps)) fps = scaled_fps.at(request.fps);
         else if (request.fps == "uncap" && on_sixty) fps = kUncappedReference;
-        const std::string tuning = Lower(Env("BB_CAMERA_TUNING", Setting(settings, "camera_tuning").value_or("original")));
+        const std::string tuning = Lower(Env("BB_CAMERA_TUNING", Setting(settings, "camera_tuning").value_or("fps++")));
         writes = FrameRateFixes(writes, fps, elf, tuning != "fps++", corrections);
         if (fps) Log("Patches: follow camera %s", tuning != "fps++" ? "as the game has it, its eases converted from 30 FPS"
                                                   : corrections && *fps > 60

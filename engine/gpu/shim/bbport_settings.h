@@ -59,16 +59,16 @@ struct Effect {
     bool default_on;
 };
 inline constexpr Effect Effects[] = {
-    // bbport: chromatic aberration, depth of field, motion blur and the game's own anti-aliasing start
-    // off - a clearer picture, and the upscalers anti-alias.
+    // bbport: chromatic aberration, motion blur and the game's own anti-aliasing start off - a clearer
+    // picture, and the upscalers anti-alias. Depth of field on and the intros skipped (0.4.4).
     {"effect_chromatic_aberration", "Chromatic aberration", "Хроматическая аберрация", false},
-    {"effect_dof", "Depth of field (DoF)", "Глубина резкости (DoF)", false},
+    {"effect_dof", "Depth of field (DoF)", "Глубина резкости (DoF)", true},
     {"effect_motion_blur", "Motion blur", "Размытие в движении", false},
     {"effect_ssao", "Ambient occlusion (SSAO)", "Затенение SSAO", true},
     {"effect_game_aa", "Game's own anti-aliasing", "Собственное сглаживание игры", false},
     {"effect_dynamic_shadows", "Shadows from dynamic lights", "Тени от динамических источников", true},
     {"effect_ssr", "Screen-space reflections (not in original game)", "Отражения SSR (не было в игре)", false},
-    {"skip_intro", "Skip startup intros", "Пропуск заставок при запуске", false},
+    {"skip_intro", "Skip startup intros", "Пропуск заставок при запуске", true},
     {"debug_camera", "Free camera (Cross + L3)", "Свободная камера (Cross + L3)", false},
     {"debug_menu", "Debug menu (requires font files)", "Debug menu (нужны файлы шрифтов)", false},
 };
@@ -170,7 +170,7 @@ struct Values {
     std::atomic<int> dlss_fg_max_frames{0};
     std::atomic<const char*> dlss_fg_problem{nullptr};
     std::atomic<bool> sharpen{true};
-    std::atomic<float> sharpness{0.3f};
+    std::atomic<float> sharpness{0.2f};
     std::atomic<bool> jitter{true};
     std::atomic<bool> reactive{false};
     std::atomic<bool> object_motion{true};
