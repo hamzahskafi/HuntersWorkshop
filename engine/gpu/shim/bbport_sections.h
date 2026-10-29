@@ -57,6 +57,9 @@ enum Id : std::uint32_t {
     Protect,       ///< page protection changes made on this thread (VirtualProtect)
     WaitCopies,    ///< Scheduler::WaitHostCopies: host copies not done yet
     WaitSignals,   ///< Scheduler::WaitDeferredSignals: fences deferred to the recording threads
+    MotionBuffers, ///< object motion: the vertex shader's buffers (role, GPU writes, anchor, hashes)
+    MotionRanges,  ///< object motion: the index range (its cache, or a scan of the index list)
+    MotionHistory, ///< object motion: the gate and the store (History::Moving, PrepareDraw)
     Count,
 };
 inline constexpr const char* Names[Count] = {
@@ -68,8 +71,9 @@ inline constexpr const char* Names[Count] = {
     "tex full", "samplers", "VRAM image sync", "VRAM written", "tex full empty",
     "refresh hash", "refresh obtain", "refresh detile", "refresh upload", "upscaler",
     "upscaler eval", "HLE batch", "HLE obtain", "HLE copy", "VRAM track", "VRAM upload",
-    "protect", "wait copies", "wait fences",
+    "protect", "wait copies", "wait fences", "motion buffers", "motion ranges", "motion history",
 };
+static_assert(Names[Count - 1] != nullptr, "a name for every section");
 inline std::array<std::atomic<std::uint64_t>, Count> cycles{};
 
 /// BB_SECTIONS, read once at startup (a plain global: no initialization guard per scope).

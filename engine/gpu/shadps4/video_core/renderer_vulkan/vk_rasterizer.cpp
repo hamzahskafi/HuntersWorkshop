@@ -2011,6 +2011,7 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
         auto reason = all_motion ? Motion::StoreReason::All : Motion::StoreReason::Moving;
         u64 palette = 0, instance_data = 0;
         Motion::Anchor anchor{};
+        BbSections::Scope buffers_section{BbSections::MotionBuffers};
         for (const auto& resource : vs.buffers) {
             if (resource.IsSpecial()) continue;
             const auto buffer = resource.GetSharp(vs);
@@ -2049,17 +2050,24 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
                 palette = XXH3_64bits_withSeed(data, size, palette);
             }
         }
+        buffers_section.End();
         push_data.motion_param = 0;
-        if (!gated || object_motion->Moving({.shader = vs.pgm_hash,
-                                             .geometry = motion_geometry,
-                                             .indices = index_address,
-                                             .index_count = regs.num_indices,
-                                             .instances = instances,
-                                             .first_instance = first_instance},
-                                            palette, anchor)) {
+        bool store = !gated;
+        if (!store) {
+            BB_SECTION(MotionHistory);
+            store = object_motion->Moving({.shader = vs.pgm_hash,
+                                           .geometry = motion_geometry,
+                                           .indices = index_address,
+                                           .index_count = regs.num_indices,
+                                           .instances = instances,
+                                           .first_instance = first_instance},
+                                          palette, anchor);
+        }
+        if (store) {
             Motion::VertexRange range{base_vertex, regs.num_indices};
             u64 topology = 0;
             if (is_indexed) {
+                BB_SECTION(MotionRanges);
                 range = {};
                 const u64 bytes = u64(regs.num_indices) * index_size;
                 if (index_address && memory->IsValidGpuMapping(index_address, 0) &&
@@ -2084,6 +2092,7 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
                     topology = scanned.topology;
                 }
             }
+            BB_SECTION(MotionHistory);
             push_data.motion_param = object_motion->PrepareDraw({
                 .shader = vs.pgm_hash,
                 .geometry = motion_geometry,

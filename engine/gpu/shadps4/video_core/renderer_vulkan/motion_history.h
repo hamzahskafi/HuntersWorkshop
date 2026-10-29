@@ -7,7 +7,6 @@
 #include <cstdint>
 #include <limits>
 #include <span>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -75,7 +74,7 @@ public:
 
     template <class Scan>
     Result Get(const Key& key, uint64_t frame, Scan&& scan) {
-        auto& entry = entries[key];
+        Entry& entry = Find(key);
         entry.last_use = frame;
         if (entry.valid && frame - entry.verified < Revalidate) {
             ++stats.hits;
@@ -92,10 +91,18 @@ public:
         entry.valid = true;
         return entry.result;
     }
+    /// Forgets the meshes not drawn in the last Unused frames (the table is rebuilt without them).
     void Trim(uint64_t frame) {
-        std::erase_if(entries, [frame](const auto& e) { return frame - e.second.last_use > Unused; });
+        std::vector<Slot> old(slots.size());
+        old.swap(slots);
+        size = 0;
+        for (const Slot& slot : old) {
+            if (slot.used && frame - slot.entry.last_use <= Unused) {
+                Find(slot.key) = slot.entry;
+            }
+        }
     }
-    size_t Size() const { return entries.size(); }
+    size_t Size() const { return size; }
 
 private:
     struct Entry {
@@ -103,15 +110,46 @@ private:
         uint64_t verified{}, last_use{};
         bool valid{};
     };
-    struct KeyHash {
-        size_t operator()(const Key& k) const {
-            uint64_t h = k.address * 0x9e3779b97f4a7c15ULL;
-            h ^= (uint64_t(k.count) << 32 | uint32_t(k.base_vertex)) + (h << 6) + (h >> 2);
-            h ^= uint64_t(k.index_size << 1 | uint32_t(k.restart)) + (h << 6) + (h >> 2);
-            return size_t(h);
-        }
+    // Open addressing (linear probing, at most half full): one lookup per stored draw, and
+    // std::unordered_map's node per mesh cost a cache miss each.
+    struct Slot {
+        Key key;
+        Entry entry;
+        bool used{};
     };
-    std::unordered_map<Key, Entry, KeyHash> entries;
+    static size_t Start(const Key& k) {
+        uint64_t h = k.address * 0x9e3779b97f4a7c15ULL;
+        h ^= (uint64_t(k.count) << 32 | uint32_t(k.base_vertex)) + (h << 6) + (h >> 2);
+        h ^= uint64_t(k.index_size << 1 | uint32_t(k.restart)) + (h << 6) + (h >> 2);
+        h *= 0x9e3779b97f4a7c15ULL;
+        return size_t(h ^ (h >> 29));
+    }
+    Entry& Find(const Key& key) {
+        if ((size + 1) * 2 > slots.size()) {
+            std::vector<Slot> old(slots.empty() ? 256 : slots.size() * 2);
+            old.swap(slots);
+            size = 0;
+            for (const Slot& slot : old) {
+                if (slot.used) {
+                    Find(slot.key) = slot.entry;
+                }
+            }
+        }
+        const size_t mask = slots.size() - 1;
+        for (size_t i = Start(key) & mask;; i = (i + 1) & mask) {
+            Slot& slot = slots[i];
+            if (!slot.used) {
+                slot = {key, {}, true};
+                ++size;
+                return slot.entry;
+            }
+            if (slot.key == key) {
+                return slot.entry;
+            }
+        }
+    }
+    std::vector<Slot> slots;
+    size_t size{};
 };
 
 // Open-addressing map for the per-frame tables of History: entries are keyed per draw and
@@ -306,8 +344,9 @@ public:
     // frame, its hold included.
     bool Moving(GateKey key, uint64_t palette, Anchor anchor = {}) {
         key.occurrence = 0;
-        key.occurrence = gate_occurrences[key]++;
-        const auto* prev = gate_previous.find(key);
+        GateEntry entry{key, GateHashOf(key)};
+        entry.key.occurrence = gate_occurrences[entry]++;
+        const auto* prev = gate_previous.find(entry);
         if (prev && !prev->anchor.Near(anchor)) {
             ++stats.jumped;
             prev = nullptr;
@@ -324,7 +363,7 @@ public:
             ++stats.held;
             last_held = true;
         }
-        gate_current.emplace(key, state);
+        gate_current.emplace(entry, state);
         stats.still += moving ? 0 : 1;
         return moving;
     }
@@ -360,7 +399,7 @@ public:
         if (reason == StoreReason::Moving && last_held) {
             reason = StoreReason::Held;
         }
-        Key key{draw, 0};
+        Key key{draw, 0, DrawHash(draw)};
         key.occurrence = occurrences[key]++;
         const uint64_t count = uint64_t(draw.vertices.count) * draw.instances;
         if (!count || uint64_t(draw.vertices.first) + draw.vertices.count - 1 > INT32_MAX ||
@@ -407,20 +446,25 @@ public:
     uint32_t LastDemand() const { return last_demand; }
 
 private:
+    // A draw's identity is hashed once (DrawHash) for its three lookups (its occurrence, last frame's
+    // store, this frame's); the occurrence is mixed in on top.
     struct Key {
         Draw draw;
         uint32_t occurrence;
+        uint64_t hash; ///< DrawHash(draw)
         bool operator==(const Key&) const = default;
     };
+    static uint64_t DrawHash(const Draw& d) {
+        uint64_t h = 0;
+        const auto mix = [&](uint64_t v) { h ^= v + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2); };
+        mix(d.shader); mix(d.geometry); mix(d.indices); mix(d.topology); mix(d.instance_data);
+        mix(d.index_count); mix(d.instances); mix(d.first_instance);
+        mix(d.vertices.first); mix(d.vertices.count);
+        return h;
+    }
     struct Hash {
         size_t operator()(const Key& key) const {
-            uint64_t h = 0;
-            const auto mix = [&](uint64_t v) { h ^= v + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2); };
-            const auto& d = key.draw;
-            mix(d.shader); mix(d.geometry); mix(d.indices); mix(d.topology); mix(d.instance_data);
-            mix(d.index_count); mix(d.instances); mix(d.first_instance);
-            mix(d.vertices.first); mix(d.vertices.count); mix(key.occurrence);
-            return size_t(h);
+            return size_t(key.hash ^ (uint64_t(key.occurrence) * 0xc2b2ae3d27d4eb4fULL));
         }
     };
     uint32_t capacity{}, used{};
@@ -437,13 +481,22 @@ private:
     };
     FlatMap<Key, Stored, Hash> previous, current;
     FlatMap<Key, uint32_t, Hash> occurrences;
+    // The same for the gate: GateKey hashed once a draw (GateHashOf), its occurrence mixed in.
+    struct GateEntry {
+        GateKey key;
+        uint64_t hash;
+        bool operator==(const GateEntry&) const = default;
+    };
+    static uint64_t GateHashOf(const GateKey& key) {
+        uint64_t h = 0;
+        const auto mix = [&](uint64_t v) { h ^= v + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2); };
+        mix(key.shader); mix(key.geometry); mix(key.indices); mix(key.index_count);
+        mix(key.instances); mix(key.first_instance);
+        return h;
+    }
     struct GateHash {
-        size_t operator()(const GateKey& key) const {
-            uint64_t h = 0;
-            const auto mix = [&](uint64_t v) { h ^= v + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2); };
-            mix(key.shader); mix(key.geometry); mix(key.indices); mix(key.index_count);
-            mix(key.instances); mix(key.first_instance); mix(key.occurrence);
-            return size_t(h);
+        size_t operator()(const GateEntry& entry) const {
+            return size_t(entry.hash ^ (uint64_t(entry.key.occurrence) * 0xc2b2ae3d27d4eb4fULL));
         }
     };
     struct GateState {
@@ -451,8 +504,8 @@ private:
         uint32_t hold{}; ///< further frames this draw keeps its history (Moving)
         Anchor anchor;
     };
-    FlatMap<GateKey, GateState, GateHash> gate_previous, gate_current;
-    FlatMap<GateKey, uint32_t, GateHash> gate_occurrences;
+    FlatMap<GateEntry, GateState, GateHash> gate_previous, gate_current;
+    FlatMap<GateEntry, uint32_t, GateHash> gate_occurrences;
 };
 
 } // namespace Vulkan::Motion
