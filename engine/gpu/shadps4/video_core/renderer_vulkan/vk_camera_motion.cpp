@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "bbport_log_level.h"
 #include "bbport_toggles.h"
 
 #include "video_core/host_shaders/camera_motion_comp.h"
@@ -385,8 +386,13 @@ void CameraMotion::OnDisplayPass(VideoCore::ImageId frame) {
         Overlay(frame);
     }
     if (frame_gbuffer_passes > 1) {
+        // The standard log level: the first such frame's line only; from detailed on, one every 2 s
+        // while they last (a reflection's pass, as over Rom's lake, comes every frame).
+        static bool written = false;
         static auto next = std::chrono::steady_clock::now();
-        if (const auto now = std::chrono::steady_clock::now(); now >= next) {
+        if (const auto now = std::chrono::steady_clock::now();
+            now >= next && (!written || BbLogLevel() >= 1)) {
+            written = true;
             next = now + std::chrono::seconds(2);
             std::printf("Camera motion: %u G-buffer passes this frame, cameras at", frame_gbuffer_passes);
             for (u32 i = 0; i < std::min<u32>(frame_gbuffer_passes, pass_positions.size()); ++i) {
