@@ -2,9 +2,7 @@
 // bbport: frame analyzer. Creating the file named by BB_CAPTURE_TRIGGER records the next full
 // frame: every render pass (targets, depth, draw count, shaders, sampled textures) and compute
 // dispatch, in order, plus the buffer that was presented. Input for placing a temporal
-// upscaler (scene color, depth, motion vectors, UI) in Bloodborne's frame. Each pass also lists
-// its draws (shaders, index count, instances, index buffer address): two captures a step apart
-// show which draw the game stopped submitting when something is missing from the scene.
+// upscaler (scene color, depth, motion vectors, UI) in Bloodborne's frame.
 
 #pragma once
 
@@ -40,7 +38,7 @@ public:
 
     static void BeginPass(const VideoCore::ImageInfo* const* colors, u32 num_colors,
                           const VideoCore::ImageInfo* depth);
-    static void Draw(u64 vs_hash, u64 ps_hash, u32 num_indices, u32 num_instances, VAddr indices = 0);
+    static void Draw(u64 vs_hash, u64 ps_hash, u32 num_indices, u32 num_instances);
     static void Dispatch(u64 cs_hash, u32 x, u32 y, u32 z);
     static void Sampled(const VideoCore::ImageInfo& info, bool storage);
     /// Contents of a bound buffer (first 1 KiB), kept for small passes and a pass's first draw.

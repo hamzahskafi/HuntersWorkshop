@@ -81,8 +81,7 @@ proxies both smaller and larger than the guest allocation. `BB_PRESET_FILE` acce
 
 Frame analyzer: `BB_CAPTURE_TRIGGER=<file> BB_CAPTURE_DIR=<dir>`; creating the file records
 the next frame (boundary: the pass writing a display buffer) — passes, targets, shaders,
-sampled textures, and the first 1 KiB of bound constants for small passes and first draws;
-then each pass's draws in order (shaders, index count, instances, index buffer address).
+sampled textures, and the first 1 KiB of bound constants for small passes and first draws.
 
 ## Bloodborne's frame (1920x1080, Hunter's Dream / Nightmare)
 
