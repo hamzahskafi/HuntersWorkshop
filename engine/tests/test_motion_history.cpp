@@ -103,6 +103,19 @@ int main() {
     History free_room(100);
     free_room.NextFrame();
     assert(free_room.Prepare(small, {}, StoreReason::GpuWritten).store);
+    // The room kept is the busiest ask of the last ReserveFrames frames, not only the last one's: after 60 asked
+    // and then 10, a GPU-written 60 still gives way; once the 60 is ReserveFrames frames old, it has the room.
+    History crowd(100);
+    Draw character = small, prop = small;
+    prop.indices += 100;
+    crowd.Prepare(character, {}, StoreReason::Character); // 60
+    crowd.NextFrame();
+    character.vertices = {0, 10};
+    crowd.Prepare(character, {}, StoreReason::Character);
+    crowd.NextFrame();
+    assert(!crowd.Prepare(prop, {}, StoreReason::GpuWritten).store);
+    for (size_t i = 0; i < History::ReserveFrames - 1; ++i) crowd.NextFrame();
+    assert(crowd.Prepare(prop, {}, StoreReason::GpuWritten).store);
     // A held gate's draw counts as held.
     History reasons(1024);
     reasons.SetHold(1);

@@ -2,6 +2,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -253,6 +254,8 @@ inline const char* StoreReasonName(StoreReason reason) {
 class History {
 public:
     explicit History(uint32_t capacity) : capacity{capacity} {}
+    /// The frames whose busiest ask a GPU-written small skeleton leaves room for (half a second at 60 FPS).
+    static constexpr size_t ReserveFrames = 32;
 
     struct Allocation {
         uint32_t store{}, load{}, vertices{}, instances{}, first_vertex{}, first_instance{};
@@ -270,7 +273,8 @@ public:
     /// The vertices a frame can store; before the first frame (the buffer's size is chosen then).
     void SetCapacity(uint32_t vertices) {
         capacity = vertices;
-        used = demand = ahead = 0;
+        used = demand = ahead = ahead_peak = 0;
+        ahead_frames.fill(0);
     }
     uint32_t Capacity() const { return capacity; }
 
@@ -332,13 +336,14 @@ public:
         gate_previous.swap(gate_current);
         gate_current.clear();
         gate_occurrences.clear();
+        ahead_frames[frame % ahead_frames.size()] = ahead;
+        ahead_peak = *std::max_element(ahead_frames.begin(), ahead_frames.end());
+        ahead = 0;
         ++frame;
         used = 0;
         stats.peak_demand = std::max<uint64_t>(stats.peak_demand, demand);
         last_demand = demand;
         demand = 0;
-        last_ahead = ahead;
-        ahead = 0;
     }
 
     // `reason`: why the draw is prepared; Moving stands for the small-skeleton gate's answer (moving or held:
@@ -346,9 +351,10 @@ public:
     //
     // When room runs short, a small skeleton the GPU wrote gives way: it is stored whether it moves or not (its
     // CPU copy is stale), and most are static props, whose vectors are the camera's anyway. It leaves the room the
-    // other draws asked for last frame and have not asked for yet this frame, so characters, foliage and small
-    // skeletons seen moving are stored first whatever the draw order. (Yharnam, 0.4.3 beta 2: the GPU-written
-    // ones asked for 59% of the vertices.)
+    // other draws asked for in the busiest of the last ReserveFrames frames and have not asked for yet this frame,
+    // so characters, foliage and small skeletons seen moving are stored first whatever the draw order, a crowd
+    // coming into view included. (Yharnam, 0.4.3 beta 2: the GPU-written ones asked for 59% of the vertices; beta
+    // 3, with only last frame's ask kept: characters still lost a draw a frame in the two busiest stretches.)
     Allocation Prepare(const Draw& draw, Anchor anchor = {}, StoreReason reason = StoreReason::All) {
         ++stats.draws;
         if (reason == StoreReason::Moving && last_held) {
@@ -372,7 +378,7 @@ public:
         if (!gives_way) {
             ahead = uint32_t(std::min<uint64_t>(uint64_t(ahead) + count, UINT32_MAX));
         }
-        const uint32_t reserve = gives_way && last_ahead > ahead ? last_ahead - ahead : 0;
+        const uint32_t reserve = gives_way && ahead_peak > ahead ? ahead_peak - ahead : 0;
         if (prev && !prev->anchor.Near(anchor)) {
             ++stats.jumped;
             prev = nullptr;
@@ -419,7 +425,9 @@ private:
     };
     uint32_t capacity{}, used{};
     uint32_t demand{}, last_demand{}; ///< vertices asked for this frame and the last (stored or not)
-    uint32_t ahead{}, last_ahead{};   ///< the same for the draws a GPU-written small skeleton gives way to
+    uint32_t ahead{};                 ///< the same for the draws a GPU-written small skeleton gives way to
+    std::array<uint32_t, ReserveFrames> ahead_frames{}; ///< `ahead` of the last ReserveFrames frames
+    uint32_t ahead_peak{};            ///< the most of them
     bool last_held{};                 ///< the last Moving call's answer came from a hold
     uint32_t hold{}; ///< frames a small skeleton keeps its history after a change (SetHold)
     uint64_t frame{};
