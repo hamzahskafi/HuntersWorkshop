@@ -474,8 +474,10 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
             for (const auto& batch : batches) {
                 BbSections::Scope obtain_scope{BbSections::HleObtain};
                 VideoCore::BufferCache::hle_obtain = BbStats::enabled;
+                VideoCore::BufferCache::copy_source = true;
                 const auto [src_buf, src_buf_offset] = buffer_cache.ObtainBuffer(
                     src_base + batch.src_min, batch.src_max - batch.src_min, false);
+                VideoCore::BufferCache::copy_source = false;
                 const auto [dst_buf, dst_buf_offset] = buffer_cache.ObtainBuffer(
                     dst_base + batch.dst_min, batch.dst_max - batch.dst_min, true);
                 VideoCore::BufferCache::hle_obtain = false;
@@ -533,8 +535,10 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
         // Obtain buffers for the total source and destination ranges.
         BbSections::Scope obtain_scope{BbSections::HleObtain};
         VideoCore::BufferCache::hle_obtain = BbStats::enabled;
+        VideoCore::BufferCache::copy_source = true;
         const auto [src_buf, src_buf_offset] = buffer_cache.ObtainBuffer(
             src_buf_sharp.base_address + src_offset_min, src_offset_max - src_offset_min, false);
+        VideoCore::BufferCache::copy_source = false;
         const auto [dst_buf, dst_buf_offset] = buffer_cache.ObtainBuffer(
             dst_buf_sharp.base_address + dst_offset_min, dst_offset_max - dst_offset_min, true);
         VideoCore::BufferCache::hle_obtain = false;

@@ -56,7 +56,9 @@ inline BufferRole ClassifyBuffer(uint32_t size) {
 // shader bounds every history access by the stored range.
 class IndexRangeCache {
 public:
-    static constexpr uint64_t Revalidate = 32, Unused = 600;
+    // Revalidated every 10 s at 60 (every 32 frames until 0.4.3 beta 5): 3.15 million scans in the logs
+    // since 0.4.0 found no change, and the rescans were 0.22 ms of a frame's 4 on the recording thread.
+    static constexpr uint64_t Revalidate = 600, Unused = 600;
     struct Key {
         uint64_t address{};
         uint32_t count{}, index_size{};
