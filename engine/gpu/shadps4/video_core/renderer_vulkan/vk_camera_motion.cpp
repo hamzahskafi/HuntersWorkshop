@@ -275,6 +275,14 @@ void CameraMotion::OnConstants(const float* data) {
     // bbport: the first constants of each G-buffer pass are its camera. A frame may have more
     // than one such pass (another camera before the main scene): the camera goes with the pass
     // whose depth the motion vectors use (CommitFrameCamera), not with the frame's first pass.
+    // A side pass (OnGBufferPass) keeps the frame's camera; its position is kept for MirroredPasses.
+    if (side_pass) {
+        if (!side_has_position) {
+            side_has_position = true;
+            NotePassPosition(data + 8);
+        }
+        return;
+    }
     if (pass_has_camera) {
         return;
     }
@@ -350,9 +358,12 @@ void CameraMotion::OnConstants(const float* data) {
     }
     pass_has_camera = true;
     frame_has_camera = true;
+    NotePassPosition(pass_camera.view.data());
+}
+
+void CameraMotion::NotePassPosition(const float* v) {
     if (frame_gbuffer_passes <= pass_positions.size() && frame_gbuffer_passes > 0) {
-        // World position of this pass's camera (diagnostics: frames with several passes).
-        const auto& v = pass_camera.view;
+        // World position of this pass's camera (frames with several passes: MirroredPasses, the log).
         pass_positions[frame_gbuffer_passes - 1] = {
             -(v[0] * v[3] + v[4] * v[7] + v[8] * v[11]),
             -(v[1] * v[3] + v[5] * v[7] + v[9] * v[11]),
@@ -361,12 +372,32 @@ void CameraMotion::OnConstants(const float* data) {
 }
 
 void CameraMotion::OnGBufferPass(VideoCore::ImageId depth, float x_sign, float y_sign) {
-    if (depth != depth_id) {
-        // Another depth target: another G-buffer pass, with its own camera.
-        depth_id = depth;
-        pass_has_camera = false;
+    // Each G-buffer draw: a pass is a change of depth target.
+    if (depth == depth_id) {
+        side_pass = false; // the frame's pass (again, after a side pass)
+    } else if (depth == side_depth) {
+        side_pass = true; // the side pass's next draw
+    } else {
+        // Another depth target: another G-buffer pass, with its own camera. One smaller than the frame's
+        // largest so far is a side view (after bbport 0.7, deadinside28: the sewers' water reflection
+        // after the scene): the frame's depth and camera stay, whichever order the game draws them in. Taking
+        // the last pass gave the upscaler the reflection's camera and depth. Passes of one size: the last.
+        const auto& image = texture_cache.GetImage(depth);
+        const u64 area = u64(image.info.size.width) * image.info.size.height;
         ++frame_gbuffer_passes;
+        side_has_position = false;
+        if (depth_id && area < frame_depth_area) {
+            side_pass = true;
+            side_depth = depth;
+            return;
+        }
+        depth_id = depth;
+        frame_depth_area = area;
+        side_pass = false;
+        side_depth = {};
+        pass_has_camera = false;
     }
+    if (side_pass) return; // the viewport signs are the frame's pass's (its camera's projection)
     gbuffer_x_sign = x_sign;
     gbuffer_y_sign = y_sign;
 }
@@ -399,7 +430,7 @@ void CameraMotion::OnDisplayPass(VideoCore::ImageId frame) {
                 std::printf(" (%.2f %.2f %.2f)", pass_positions[i][0], pass_positions[i][1],
                             pass_positions[i][2]);
             }
-            std::printf("; the last pass's camera goes with its depth\n");
+            std::printf("; the largest pass's camera goes with its depth\n");
         }
     }
     if (!frame_has_camera) InvalidateHistory();
@@ -412,6 +443,9 @@ void CameraMotion::OnDisplayPass(VideoCore::ImageId frame) {
     for (auto& position : pass_positions) position.fill(std::numeric_limits<float>::quiet_NaN());
     frame_gbuffer_passes = 0;
     depth_id = {};
+    frame_depth_area = 0;
+    side_pass = false;
+    side_depth = {};
 }
 
 bool CameraMotion::MirroredPasses() const noexcept {

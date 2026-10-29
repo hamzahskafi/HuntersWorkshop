@@ -54,6 +54,23 @@ int main() {
     changed.vertices.first++;
     assert(!history.Prepare(changed).load);
 
+    // Foliage: another set of instances (culling) at the same count is another identity.
+    history.NextFrame();
+    changed = draw;
+    changed.instance_data = 1;
+    history.Prepare(changed);
+    history.NextFrame();
+    changed.instance_data = 2;
+    assert(!history.Prepare(changed).load);
+    // Repeated draws matched by order: a jump means another object, a step the same one.
+    History anchored(64);
+    anchored.NextFrame();
+    anchored.Prepare(draw, {0, 0, 0, true});
+    anchored.Prepare(draw, {5, 0, 0, true});
+    anchored.NextFrame();
+    assert(!anchored.Prepare(draw, {5, 0, 0, true}).load && anchored.stats.jumped == 1);
+    assert(anchored.Prepare(draw, {5.1f, 0, 0, true}).load);
+
     History overflow(32);
     draw.vertices.first = 0;
     draw.vertices.count = INT32_MAX;
@@ -83,6 +100,14 @@ int main() {
     gated.NextFrame();
     assert(!gated.Moving(weapon, 4));     // after a skipped frame: no comparison
     assert(!gated.Moving(weapon, 5));     // second occurrence of the same draw
+    History swapped(1024); // two weapons; the first is culled: the second takes its place
+    swapped.NextFrame();
+    swapped.Moving(weapon, 1, {0, 0, 0, true});
+    swapped.Moving(weapon, 2, {9, 0, 0, true});
+    swapped.NextFrame();
+    assert(!swapped.Moving(weapon, 3, {9, 0, 0, true})); // another weapon: camera motion
+    swapped.NextFrame();
+    assert(swapped.Moving(weapon, 4, {9.1f, 0, 0, true})); // the same one, moving
 
     // Held (BB_OBJECT_MOTION_HOLD): bones that move on some frames only (a weapon on the back)
     // keep storing in between, so the next change finds last frame's positions.
@@ -101,6 +126,16 @@ int main() {
     held.NextFrame();
     held.NextFrame();
     assert(!held.Moving(weapon, 4));      // a skipped frame drops the hold with the comparison
+    // Another object in the held one's place (its anchor jumped) does not inherit the hold.
+    History taken(1024);
+    taken.SetHold(2);
+    taken.Moving(weapon, 1, {0, 0, 0, true});
+    taken.NextFrame();
+    assert(taken.Moving(weapon, 2, {0, 0, 0, true}));  // changed: held for two frames
+    taken.NextFrame();
+    assert(!taken.Moving(weapon, 2, {7, 0, 0, true})); // unchanged, and another object: no hold
+    taken.NextFrame();
+    assert(!taken.Moving(weapon, 2, {7, 0, 0, true}) && taken.stats.held == 0);
     assert(ClassifyBuffer(864) == BufferRole::Other && ClassifyBuffer(416) == BufferRole::Other);
     assert(ClassifyBuffer(96) == BufferRole::SmallSkeleton &&
            ClassifyBuffer(384) == BufferRole::SmallSkeleton);
@@ -127,5 +162,6 @@ int main() {
     assert(JitterPhases(960, 1920) == 32);
     assert(JitterPhases(640, 1920) == 72);
     assert(JitterPhases(0, 1920) == 8);
-    std::puts("Motion history: PASS (ranges, restart, offsets, matching, capacity, gating, index cache, jitter)");
+    std::puts("Motion history: PASS (ranges, restart, offsets, matching, instances, anchors, capacity, gating, "
+              "holds, index cache, jitter)");
 }

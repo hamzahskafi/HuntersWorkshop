@@ -636,6 +636,9 @@ void TestClothStep() {
     assert(ClothLasts(nullptr, 1.0 / 20, 20, 2, true) == 20);  // a frame of 1/30 s or longer: every one
     assert(ClothLasts(nullptr, 1.0 / 60, 60, 1, true) == 0);   // one substep in the data: the game's call
     assert(ClothLasts("clothstep", 1.0 / 60, 60, 2, true) == 0); // left out by name
+    SetEnv("BB_CLOTH_STEP", "0");
+    assert(ClothLasts(nullptr, 1.0 / 60, 60, 2, true) == 0);     // or by its switch
+    SetEnv("BB_CLOTH_STEP", nullptr);
     assert(ClothLasts(nullptr, 1.0 / 60, 60, 2, false) == 0);  // without the list's one substep: left out
 }
 
