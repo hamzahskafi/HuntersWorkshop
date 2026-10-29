@@ -25,6 +25,7 @@
 #include "video_core/renderer_vulkan/vk_occlusion.h"
 #include "video_core/renderer_vulkan/vk_optiscaler.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
+#include "video_core/texture_cache/image.h"
 
 #include <vk_mem_alloc.h>
 
@@ -289,6 +290,7 @@ Instance::~Instance() {
     // bbport: Streamline goes before the device (the presenter's swapchain went already).
     Streamline::Shutdown();
     ImGui::Core::Shutdown(GetDevice());
+    VideoCore::TrimImageMemory(true); // bbport: freed images' memory kept for reuse
     vmaDestroyAllocator(allocator);
 }
 

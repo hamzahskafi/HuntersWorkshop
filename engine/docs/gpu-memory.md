@@ -91,7 +91,8 @@ more get memory of their own, created when the image is and returned to the driv
 freed. bbport chose this to avoid holes in shared VMA blocks (~0.9 GB on an RX 7800 XT). Every
 render target and large texture an area streams in is then a `vkAllocateMemory` and a kernel call.
 This is the `allocation` figure in the stall lines' `of which:` breakdown, for example 22.9 ms of a
-59 ms stall in `20261026_033515` and 35–60 ms in many 0.3.0 stalls.
+59 ms stall in `20261026_033515` and 35–60 ms in many 0.3.0 stalls. (Until 0.4.4 beta 1 those
+figures added up everything since the previous long frame, not the long frame alone: an upper bound.)
 
 ### 4. Arena residency chunks (both models)
 
@@ -112,6 +113,8 @@ Each step goes in on its own, behind a switch, and is measured before the next.
 
 ### Step 1: measure each late frame (no behaviour change)
 
+- *0.4.4 beta 1:* the `of which:` figures are the long frame's own (before, everything since the
+  previous long frame), with the images given new memory, given a freed image's, and checked.
 - **Per-frame figures:** add to the stall line (`core/libraries/videoout/driver.cpp`, `Stall:` and
   its `of which:` line) this frame's:
   - `vkQueueBindSparse` calls, ranges, ms, and how many waited;
@@ -148,8 +151,16 @@ Each step goes in on its own, behind a switch, and is measured before the next.
    size. Streaming then reuses the last area's render targets' memory. Quick experiment first, no
    code: `BB_VMA_DEDICATED_MB=0` (everything in VMA blocks) and `=64`. Compare the `allocation` ms
    and VRAM held.
+   *Done in 0.4.4 beta 1* (`UniqueImage::Create`, `TrimImageMemory`): kept 4 s, up to
+   `BB_IMAGE_REUSE_MB` (256; 0: off), all of it freed when the texture collector is under pressure.
+   Only images the driver doesn't ask dedicated memory for (render targets on some GPUs do): their
+   memory is allocated without being tied to the image (VMA's `CAN_ALIAS`), which reuse needs.
 2. **Keep residency chunks longer.** Raise the idle wait for returning empty 64 MiB chunks, or keep
    one or two empty ones beyond the spare, so the next area doesn't allocate again.
+   *Done in 0.4.4 beta 1* (`FreeEmptyChunks`): with room in VRAM an empty chunk waits 30 s
+   (`BB_VRAM_CHUNK_KEEP_SECONDS`; 0: 5 s as before) and the 64 MiB chunk emptied last stays; while
+   VRAM is tight, 5 s and none kept. Not with the PC memory model, whose evacuations start on free
+   slots.
 3. **Pin at load (model on).** Import every chunk of the game's direct memory while a loading
    screen is up, or at start, rather than at first use in play.
 4. **The full-screen image.** Upload only the pages its write faults marked, or skip the upload

@@ -2,10 +2,12 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "bbport_toggles.h"
+#include <chrono>
 #include <mutex>
 #include <ranges>
 #include <tuple>
 #include <unordered_map>
+#include <vector>
 #include "common/assert.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
@@ -112,19 +114,115 @@ static vk::FormatFeatureFlags2 FormatFeatureFlags(const vk::ImageUsageFlags usag
     return feature_flags;
 }
 
+namespace {
+/// bbport: freed images' memory, kept for the next image of the same size and memory type. An
+/// area load frees and creates hundreds of textures, each a vkFreeMemory and a vkAllocateMemory
+/// in which the driver clears the new memory. Only memory made for no particular image, in
+/// device-local memory (UniqueImage::reusable).
+struct KeptMemory {
+    VmaAllocator allocator;
+    VmaAllocation allocation;
+    vk::DeviceSize size;
+    u32 type;
+    std::chrono::steady_clock::time_point since;
+};
+constexpr auto KeepTime = std::chrono::seconds{4};
+std::mutex kept_mutex;
+std::vector<KeptMemory> kept; // oldest first
+u64 kept_bytes = 0;
+
+u64 KeepLimit() {
+    static const u64 limit = [] {
+        const char* env = std::getenv("BB_IMAGE_REUSE_MB");
+        return std::min<u64>(env ? std::strtoull(env, nullptr, 10) : 256, 4096) << 20;
+    }();
+    return limit;
+}
+
+// Takes kept memory of exactly `size` in one of `type_bits`; null if there is none.
+VmaAllocation TakeKept(VmaAllocator allocator, vk::DeviceSize size, u32 type_bits) {
+    std::scoped_lock lock{kept_mutex};
+    for (auto it = kept.begin(); it != kept.end(); ++it) {
+        if (it->allocator == allocator && it->size == size && ((type_bits >> it->type) & 1)) {
+            const VmaAllocation allocation = it->allocation;
+            kept_bytes -= it->size;
+            kept.erase(it);
+            BbStats::image_kept_bytes.store(kept_bytes, std::memory_order_relaxed);
+            return allocation;
+        }
+    }
+    return VK_NULL_HANDLE;
+}
+
+// Keeps the memory of a freed image, the oldest kept going first when over the limit.
+bool Keep(VmaAllocator allocator, VmaAllocation allocation, vk::DeviceSize size) {
+    if (size > KeepLimit()) {
+        return false;
+    }
+    VmaAllocationInfo info{};
+    vmaGetAllocationInfo(allocator, allocation, &info);
+    std::vector<KeptMemory> freed;
+    {
+        std::scoped_lock lock{kept_mutex};
+        while (!kept.empty() && kept_bytes + size > KeepLimit()) {
+            kept_bytes -= kept.front().size;
+            freed.push_back(kept.front());
+            kept.erase(kept.begin());
+        }
+        kept.push_back({allocator, allocation, size, info.memoryType,
+                        std::chrono::steady_clock::now()});
+        kept_bytes += size;
+        BbStats::image_kept_bytes.store(kept_bytes, std::memory_order_relaxed);
+    }
+    for (const KeptMemory& memory : freed) {
+        vmaFreeMemory(memory.allocator, memory.allocation);
+    }
+    return true;
+}
+
+void Release(UniqueImage& unique) {
+    BbStats::vk_image_bytes.fetch_sub(unique.size_bytes, std::memory_order_relaxed);
+    if (unique.reusable && unique.device &&
+        Keep(unique.allocator, unique.allocation, unique.size_bytes)) {
+        unique.device.destroyImage(unique.image);
+        return;
+    }
+    vmaDestroyImage(unique.allocator, unique.image, unique.allocation);
+}
+} // namespace
+
+void TrimImageMemory(bool all) {
+    if (BbStats::image_kept_bytes.load(std::memory_order_relaxed) == 0) {
+        return;
+    }
+    std::vector<KeptMemory> freed;
+    {
+        std::scoped_lock lock{kept_mutex};
+        const auto now = std::chrono::steady_clock::now();
+        while (!kept.empty() && (all || now - kept.front().since >= KeepTime)) {
+            kept_bytes -= kept.front().size;
+            freed.push_back(kept.front());
+            kept.erase(kept.begin());
+        }
+        BbStats::image_kept_bytes.store(kept_bytes, std::memory_order_relaxed);
+    }
+    for (const KeptMemory& memory : freed) {
+        vmaFreeMemory(memory.allocator, memory.allocation);
+    }
+}
+
 UniqueImage::~UniqueImage() {
     if (image) {
-        BbStats::vk_image_bytes.fetch_sub(size_bytes, std::memory_order_relaxed);
-        vmaDestroyImage(allocator, image, allocation);
+        Release(*this);
     }
 }
 
 void UniqueImage::Destroy() {
     if (image) {
-        BbStats::vk_image_bytes.fetch_sub(size_bytes, std::memory_order_relaxed);
-        vmaDestroyImage(allocator, image, allocation);
+        Release(*this);
         image = vk::Image{};
         allocation = {};
+        reusable = false;
     }
 }
 
@@ -142,8 +240,37 @@ void UniqueImage::Create(const vk::ImageCreateInfo& image_ci) {
     BbStats::Timer timer{BbStats::t_image_alloc}; // through vmaCreateImage
     if (device && dedicated_from != 0) {
         const vk::DeviceImageMemoryRequirements query{.pCreateInfo = &image_ci};
-        if (device.getImageMemoryRequirements(query).memoryRequirements.size >= dedicated_from) {
+        const auto chain = device.getImageMemoryRequirements<vk::MemoryRequirements2,
+                                                             vk::MemoryDedicatedRequirements>(query);
+        const vk::MemoryRequirements& needs = chain.get<vk::MemoryRequirements2>().memoryRequirements;
+        if (needs.size >= dedicated_from) {
             dedicated = VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
+            // Memory not tied to this image, so that the next image of its size can take it when
+            // this one is freed (TrimImageMemory); not where the driver asks for memory made for
+            // the image (render targets on some GPUs).
+            const auto& tied = chain.get<vk::MemoryDedicatedRequirements>();
+            if (KeepLimit() != 0 && !tied.prefersDedicatedAllocation &&
+                !tied.requiresDedicatedAllocation) {
+                dedicated |= VMA_ALLOCATION_CREATE_CAN_ALIAS_BIT;
+                if (const VmaAllocation memory =
+                        TakeKept(allocator, needs.size, needs.memoryTypeBits)) {
+                    auto [made, new_image] = device.createImage(image_ci);
+                    if (made == vk::Result::eSuccess &&
+                        vmaBindImageMemory(allocator, memory, new_image) == VK_SUCCESS) {
+                        image = new_image;
+                        allocation = memory;
+                        size_bytes = needs.size;
+                        reusable = true;
+                        BbStats::vk_image_bytes.fetch_add(size_bytes, std::memory_order_relaxed);
+                        BbStats::image_reuses.fetch_add(1, std::memory_order_relaxed);
+                        return;
+                    }
+                    if (made == vk::Result::eSuccess) {
+                        device.destroyImage(new_image);
+                    }
+                    vmaFreeMemory(allocator, memory);
+                }
+            }
         }
     }
     const VmaAllocationCreateInfo alloc_ci = {
@@ -164,7 +291,13 @@ void UniqueImage::Create(const vk::ImageCreateInfo& image_ci) {
                vk::to_string(vk::Result{result}));
     image = vk::Image{unsafe_image};
     size_bytes = alloc_info.size;
+    if (dedicated & VMA_ALLOCATION_CREATE_CAN_ALIAS_BIT) {
+        VkMemoryPropertyFlags type_flags = 0;
+        vmaGetMemoryTypeProperties(allocator, alloc_info.memoryType, &type_flags);
+        reusable = (type_flags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) != 0;
+    }
     BbStats::vk_image_bytes.fetch_add(size_bytes, std::memory_order_relaxed);
+    BbStats::image_allocs.fetch_add(1, std::memory_order_relaxed);
 }
 
 Image::Image(const Vulkan::Instance& instance, Vulkan::Runtime& runtime_,

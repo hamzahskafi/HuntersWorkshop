@@ -1274,6 +1274,7 @@ void TextureCache::RefreshImage(Image& image) {
         return;
     }
     BbStats::Timer timer{BbStats::t_refresh};
+    BbStats::image_checks.fetch_add(1, std::memory_order_relaxed);
 
     RENDERER_TRACE;
     TRACE_HINT(fmt::format("{:x}:{:x}", image.info.guest_address, image.info.guest_size));
@@ -1615,6 +1616,9 @@ void TextureCache::GarbageCollectImages() {
     }
     BbStats::gc_used_bytes.store(total_used_memory, std::memory_order_relaxed);
     BbStats::gc_trigger_bytes.store(trigger_gc_memory, std::memory_order_relaxed);
+    // bbport: freed images' memory kept for reuse goes once it has waited a few seconds, and all
+    // of it under pressure, before any image is freed for room.
+    TrimImageMemory(total_used_memory >= pressure_gc_memory);
     // bbport: gc_tick (one per guest submission, hundreds a second) at each of the last 64
     // seconds, for ages in seconds. The usage compared is all of our VRAM, not only images: on a
     // discrete GPU it stays over the trigger, where an age of 16 ticks (~3 frames) evicted every

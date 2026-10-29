@@ -2039,11 +2039,35 @@ void BufferCache::EvictIdleCopies(u32 now) {
 
 void BufferCache::FreeEmptyChunks(u32 now) {
     // Chunks without blocks for 5 s, the rebinds away from them long done: back to the driver.
+    // bbport: with room in VRAM, BB_VRAM_CHUNK_KEEP_SECONDS (30) instead, and the 64 MiB chunk
+    // emptied last stays: blocks coming back (an area entered again) take its slots instead of
+    // new memory the driver clears first. While VRAM is tight, or with 0: 5 s, none kept. Not with
+    // the PC memory model: its evacuations (ProcessIdleBlocks) start on free slots, which an empty
+    // chunk adds to.
+    static const u32 keep_seconds = [] {
+        const char* env = std::getenv("BB_VRAM_CHUNK_KEEP_SECONDS");
+        return env && env[0] ? u32(std::strtoul(env, nullptr, 10)) : 30u;
+    }();
+    const bool room = keep_seconds != 0 && !GuestInPlace() &&
+                      vram_level.load(std::memory_order_relaxed) == 0;
+    const u32 wait = room ? std::max(keep_seconds, 5u) : 5u;
+    VkDeviceMemory spare = VK_NULL_HANDLE;
+    if (room) {
+        u32 newest = 0;
+        for (const auto& [memory, chunk] : residency_chunks) {
+            if (chunk.used == 0 && chunk.size == 64_MB &&
+                memory != static_cast<VkDeviceMemory>(residency_memory) &&
+                (spare == VK_NULL_HANDLE || chunk.empty_second >= newest)) {
+                spare = memory;
+                newest = chunk.empty_second;
+            }
+        }
+    }
     for (auto it = residency_chunks.begin(); it != residency_chunks.end();) {
         const ResidencyChunk& chunk = it->second;
         const VkDeviceMemory memory = it->first;
         if (chunk.used != 0 || memory == static_cast<VkDeviceMemory>(residency_memory) ||
-            now - chunk.empty_second < 5 || !pending_binds.empty() ||
+            memory == spare || now - chunk.empty_second < wait || !pending_binds.empty() ||
             !scheduler.GetWorkSemaphore()->IsFree(chunk.empty_tick + 1)) {
             ++it;
             continue;
