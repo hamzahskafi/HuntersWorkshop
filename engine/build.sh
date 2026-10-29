@@ -133,6 +133,9 @@ if [[ -n $windows ]]; then
     link=(-Wl,--disable-dynamicbase,--disable-high-entropy-va -lwinmm -lws2_32 -lpsapi -flto=thin
           -Wl,--thinlto-cache-dir="$PWD/out/thinlto-cache" -Wl,--thinlto-jobs="${BB_JOBS:-all}"
           -Wl,--thinlto-cache-policy=cache_size_bytes=6g:prune_after=1209600s)
+    # PGO: the code is optimized here, so -pgso=false (gpu/CMakeLists.txt: code the profile never
+    # ran is not optimized for size instead) has to reach this link too, not only the compiles.
+    if [[ $pgo == use ]]; then link+=(-Wl,-mllvm,-pgso=false); fi
 fi
 # Third-party decoders: compiled once, without this project's -Werror policy.
 atrac9=(third_party/LibAtrac9/C/src/*.c)
