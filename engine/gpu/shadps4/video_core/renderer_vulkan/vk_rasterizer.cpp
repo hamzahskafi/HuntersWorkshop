@@ -2003,44 +2003,71 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
             const char* value = std::getenv("BB_OBJECT_MOTION_ALL");
             return value && value[0] == '1';
         }();
+        // bbport 0.7 (deadinside28): instanced draws (foliage) hash their per-instance matrices into
+        // the draw's identity, and every draw anchors its object by its first bone's translation
+        // (Motion::Draw, Motion::Anchor): another object in a culled one's place is not matched.
+        const u32 instances = regs.num_instances.NumInstances();
         bool gated = !all_motion;
-        u64 palette = 0;
+        auto reason = all_motion ? Motion::StoreReason::All : Motion::StoreReason::Moving;
+        u64 palette = 0, instance_data = 0;
+        Motion::Anchor anchor{};
+        BbSections::Scope buffers_section{BbSections::MotionBuffers};
         for (const auto& resource : vs.buffers) {
             if (resource.IsSpecial()) continue;
             const auto buffer = resource.GetSharp(vs);
             const u32 size = buffer.GetSize();
             if (!buffer.Valid() || buffer.GetStride() != 16) continue;
             const auto role = Motion::ClassifyBuffer(size);
+            if (role == Motion::BufferRole::Other) continue;
+            const VAddr address = buffer.base_address;
+            // Read only what the CPU holds current: memory the GPU wrote has a stale CPU copy, and
+            // with CPU reads of GPU data set to Precise (BB_READBACKS=2) a read of it would wait
+            // for the GPU thread, which may be waiting for this one.
+            const bool gpu_written = buffer_cache.IsRegionGpuModified(address, size);
+            const bool readable = !gpu_written && memory->IsValidGpuMapping(address, 0) &&
+                                  memory->ClampRangeSize(address, size) == size;
+            const auto* data = reinterpret_cast<const float*>(address);
+            if (readable) {
+                if (!anchor.valid) {
+                    anchor = {data[3], data[7], data[11], true}; // a 3x4 matrix's translation
+                }
+                // The instances' 3x4 world matrices (48 bytes each) up to the instance count; past
+                // them and in the other buffers the game leaves per-frame data.
+                if (instances > 1 && size % 48 == 0) {
+                    instance_data = XXH3_64bits_withSeed(
+                        data, std::min<u64>(size, u64(instances) * 48), instance_data | 1);
+                }
+            }
             if (role == Motion::BufferRole::Skeleton) {
                 gated = false;
-                break;
-            }
-            const VAddr address = buffer.base_address;
-            // Lantern 0.9.38 (Awaken): a small skeleton the GPU wrote has a stale CPU copy, whose
-            // hash would read as standing still: such a draw is not gated.
-            if (role == Motion::BufferRole::SmallSkeleton &&
-                buffer_cache.IsRegionGpuModified(address, size)) {
+                reason = Motion::StoreReason::Character;
+            } else if (gated && gpu_written) {
+                // Lantern 0.9.38 (Awaken): a small skeleton the GPU wrote has a stale CPU copy,
+                // whose hash would read as standing still: such a draw is not gated.
                 gated = false;
-                break;
-            }
-            if (role == Motion::BufferRole::SmallSkeleton &&
-                memory->IsValidGpuMapping(address, 0) &&
-                memory->ClampRangeSize(address, size) == size) {
-                palette = XXH3_64bits_withSeed(reinterpret_cast<const void*>(address), size,
-                                               palette);
+                reason = Motion::StoreReason::GpuWritten;
+            } else if (gated && readable) {
+                palette = XXH3_64bits_withSeed(data, size, palette);
             }
         }
+        buffers_section.End();
         push_data.motion_param = 0;
-        if (!gated || object_motion->Moving({.shader = vs.pgm_hash,
-                                             .geometry = motion_geometry,
-                                             .indices = index_address,
-                                             .index_count = regs.num_indices,
-                                             .instances = regs.num_instances.NumInstances(),
-                                             .first_instance = first_instance},
-                                            palette)) {
+        bool store = !gated;
+        if (!store) {
+            BB_SECTION(MotionHistory);
+            store = object_motion->Moving({.shader = vs.pgm_hash,
+                                           .geometry = motion_geometry,
+                                           .indices = index_address,
+                                           .index_count = regs.num_indices,
+                                           .instances = instances,
+                                           .first_instance = first_instance},
+                                          palette, anchor);
+        }
+        if (store) {
             Motion::VertexRange range{base_vertex, regs.num_indices};
             u64 topology = 0;
             if (is_indexed) {
+                BB_SECTION(MotionRanges);
                 range = {};
                 const u64 bytes = u64(regs.num_indices) * index_size;
                 if (index_address && memory->IsValidGpuMapping(index_address, 0) &&
@@ -2065,16 +2092,18 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
                     topology = scanned.topology;
                 }
             }
+            BB_SECTION(MotionHistory);
             push_data.motion_param = object_motion->PrepareDraw({
                 .shader = vs.pgm_hash,
                 .geometry = motion_geometry,
                 .indices = index_address,
                 .topology = topology,
+                .instance_data = instance_data,
                 .index_count = regs.num_indices,
-                .instances = regs.num_instances.NumInstances(),
+                .instances = instances,
                 .first_instance = first_instance,
                 .vertices = range,
-            });
+            }, anchor, reason);
         }
     }
     pipeline->BindResources(set_writes, push_data, {image_infos.data(), image_infos.size()},
@@ -3409,17 +3438,34 @@ bool Rasterizer::IsComputeImageClear(const Pipeline* pipeline) {
         return false;
     }
 
-    // Find image the buffer alias
-    const auto image1_id =
+    // Find image the buffer alias: the whole image, or one layer of an array or cube (bbport 0.7,
+    // deadinside28). A point light's shadow cube is cleared a face at a time; the game's shader
+    // writes only memory, which marks an image to be uploaded again only from its first byte
+    // (InvalidateMemoryFromGPU), and then the whole cube over the faces the GPU drew: the faces kept
+    // other shadows, wedges of light under lamps. BB_CLEAR_LAYERS=0: whole images only, as before.
+    static const bool layers = [] {
+        const char* env = std::getenv("BB_CLEAR_LAYERS");
+        return !(env && env[0] == '0');
+    }();
+    VideoCore::ImageId image1_id =
         texture_cache.FindImageFromRange(buf1.base_address, buf1.GetSize(), false);
+    u32 layer = 0;
+    bool one_layer = false;
+    if (layers && (!image1_id || texture_cache.GetImage(image1_id).info.guest_size != buf1.GetSize())) {
+        if (const auto layer_id =
+                texture_cache.FindImageLayer(buf1.base_address, buf1.GetSize(), layer)) {
+            image1_id = layer_id;
+            one_layer = true;
+        }
+    }
     if (!image1_id) {
         return false;
     }
 
     // Image clear must be valid
     VideoCore::Image& image1 = texture_cache.GetImage(image1_id);
-    if (image1.info.guest_size != buf1.GetSize() || image1.info.num_bits != buf1_bpp ||
-        image1.info.props.is_depth) {
+    if ((!one_layer && image1.info.guest_size != buf1.GetSize()) ||
+        image1.info.num_bits != buf1_bpp || image1.info.props.is_depth) {
         return false;
     }
 
@@ -3428,14 +3474,11 @@ bool Rasterizer::IsComputeImageClear(const Pipeline* pipeline) {
     const vk::ClearValue clear = {
         .color = {.float32 = std::array<float, 4>{values[0], values[1], values[2], values[3]}},
     };
-    const VideoCore::SubresourceRange range = {
-        .base =
-            {
-                .level = 0,
-                .layer = 0,
-            },
-        .extent = image1.info.resources,
-    };
+    const VideoCore::SubresourceRange range =
+        one_layer ? VideoCore::SubresourceRange{.base = {.level = 0, .layer = layer},
+                                                .extent = {.levels = 1, .layers = 1}}
+                  : VideoCore::SubresourceRange{.base = {.level = 0, .layer = 0},
+                                                .extent = image1.info.resources};
     runtime.ClearImage(&image1, range, clear);
     return true;
 }

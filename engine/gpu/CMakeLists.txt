@@ -404,6 +404,11 @@ target_link_libraries(job-pool-test PRIVATE Threads::Threads)
 add_executable(fmod-ring-test EXCLUDE_FROM_ALL ../tests/test_fmod_ring.cpp)
 target_compile_options(fmod-ring-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(fmod-ring-test PRIVATE ..)
+# The hit collector cap and the GX occlusion query guard against stand-ins for the game's functions.
+add_executable(crash-guards-test EXCLUDE_FROM_ALL ../tests/test_crash_guards.cpp shim/engine/crash_guards.cpp
+    shim/engine/engine_hooks.cpp)
+target_compile_options(crash-guards-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(crash-guards-test PRIVATE shim shim/engine)
 # Local game-derived native menu assets. No game data is embedded in this tool.
 find_package(ZLIB REQUIRED)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS

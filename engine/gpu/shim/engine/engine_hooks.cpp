@@ -178,6 +178,34 @@ std::uint8_t* TailStub(Callback callback, std::uint64_t resume) {
     return page;
 }
 
+bool Divert(Hook& hook, std::uint8_t* image, std::size_t size, std::size_t offset,
+            std::span<const std::uint8_t> expected, std::span<const std::uint8_t> code) {
+    if (!image || code.empty() || code.size() > 4096 || expected.size() < 14 || expected.size() > 128 ||
+        offset > size || expected.size() > size - offset ||
+        std::memcmp(image + offset, expected.data(), expected.size()) != 0) return false;
+#ifdef _WIN32
+    auto* page = static_cast<std::uint8_t*>(VirtualAlloc(nullptr, 4096, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+    if (!page) return false;
+#else
+    auto* page = static_cast<std::uint8_t*>(mmap(nullptr, 4096, PROT_READ | PROT_WRITE,
+        MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+    if (page == MAP_FAILED) return false;
+#endif
+    hook = {image + offset, page, expected.size()};
+    std::memcpy(page, code.data(), code.size());
+#ifdef _WIN32
+    DWORD previous = 0;
+    if (!VirtualProtect(page, 4096, PAGE_EXECUTE_READ, &previous) ||
+        !FlushInstructionCache(GetCurrentProcess(), page, 4096)) {
+        Discard(hook); return false;
+    }
+#else
+    if (mprotect(page, 4096, PROT_READ | PROT_EXEC)) { Discard(hook); return false; }
+    __builtin___clear_cache(reinterpret_cast<char*>(page), reinterpret_cast<char*>(page + 4096));
+#endif
+    return true;
+}
+
 void FreeStub(std::uint8_t* stub) {
     if (!stub) return;
 #ifdef _WIN32

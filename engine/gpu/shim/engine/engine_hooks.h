@@ -26,6 +26,11 @@ bool Prepare(Hook& hook, std::uint8_t* image, std::size_t size, std::size_t offs
 // function the game calls too often for the stub's cost. Committed and discarded as Prepare's.
 bool Replace(Hook& hook, std::uint8_t* image, std::size_t size, std::size_t offset,
              std::span<const std::uint8_t> expected, const void* target);
+// The site jumps to `code`, copied into a page of its own: a cave of a few instructions for a site that runs too
+// often for a stub. The cave does the displaced instructions' work itself and leaves by its own jumps (absolute:
+// the page is anywhere). Committed and discarded as Prepare's.
+bool Divert(Hook& hook, std::uint8_t* image, std::size_t size, std::size_t offset,
+            std::span<const std::uint8_t> expected, std::span<const std::uint8_t> code);
 void Discard(Hook& hook);
 // A stub that calls `callback` and then jumps to `resume` (no displaced bytes): for a tail call
 // redirected to it. Null when no page could be had.

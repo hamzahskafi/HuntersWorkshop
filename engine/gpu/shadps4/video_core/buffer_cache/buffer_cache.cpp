@@ -1100,7 +1100,20 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
         }
     }
     // For read-only buffers use device local stream buffer to reduce renderpass breaks.
-    if (!is_written && size <= STREAM_THRESHOLD && !IsRegionGpuModified(device_addr, size)) {
+    // The copy shader's sources too, up to 64 KiB (BB_HLE_STREAM_KB; 16 or less: as any buffer):
+    // the game writes them into its per-frame upload area just before the copy, which reads them
+    // once. Its merged spans (BB_COPY_MERGE_KB) mostly exceeded STREAM_THRESHOLD, so the tracked
+    // path walked, uploaded and write-protected them, and the game's next lap over those pages
+    // faulted: 38% of all write faults (its memcpy, 0x26adb90), and 18% more from the copy's range
+    // list beside them (0x26b2810; 0.4.3 beta 5's profile). Here they are copied as they are, on
+    // the copy threads, which guest fences wait for. A span the GPU wrote stays on the tracked path.
+    static const u64 copy_source_limit = [] {
+        const char* env = std::getenv("BB_HLE_STREAM_KB");
+        const u64 kib = env ? std::strtoull(env, nullptr, 10) : 64;
+        return std::max<u64>(std::min<u64>(kib, 1024) * 1024, STREAM_THRESHOLD);
+    }();
+    const u64 stream_limit = copy_source ? copy_source_limit : STREAM_THRESHOLD;
+    if (!is_written && size <= stream_limit && !IsRegionGpuModified(device_addr, size)) {
         BB_SECTION(ObtainStream);
         note_hle(1);
         if (stats) {

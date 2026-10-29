@@ -53,12 +53,12 @@ constexpr std::uint32_t kListedTarget = 0x3c888889; // the 60 FPS++ list's 1/60
 
 enum class Group : std::uint8_t {
     Clips, Physics, Grass, Targeting, Jump, Sprint, Slope, Online, Hitbox, Timers, Menus, Durations, PlayTime,
-    Pace, Sound, Cloth, Steps, Lens, Timer, Camera, Count
+    Pace, Sound, Cloth, Steps, Lens, Timer, Camera, ClothStep, Count
 };
 constexpr const char* kGroupNames[] = {"clips",  "physics", "grass",  "targeting", "jump",      "sprint",
                                        "slope",  "online",  "hitbox", "timers",    "menus",     "durations",
                                        "playtime", "pace",  "sound",  "cloth",     "steps",     "lens",
-                                       "timer",  "camera"};
+                                       "timer",  "camera",    "clothstep"};
 static_assert(std::size(kGroupNames) == std::size_t(Group::Count));
 
 /// How a count follows the rate.
@@ -290,6 +290,43 @@ struct EaseSlot {
 };
 std::vector<EaseSlot> g_eases;
 Hook g_timer_hook;
+
+// The cloth's last substep (the ClothStep group). The 60 FPS++ list solves each cloth once a frame (0xb6e67a: the
+// substep count made 1) where the PS4 at 30 solved it twice, each 1/60 s: at 60 the same solves at the same times.
+// But the cloth's two constraint helpers (0xb71f60, 0xb72180) read the count again from the cloth's data for
+// Havok's stiffness factor (0x1567a80; set, mode, substep, substeps, a, b), 2, with the substep the loop's, always
+// 0. Constraint sets that adapt (mode 2) of types 5 and 10 act on a frame's last substep only (substeps - 1 ==
+// substep), so they never acted, and type 8's share, (substep + 1) / substeps, stayed at its first half. On a frame
+// that completes a whole 1/30 s the call gets the last substep's number: at 60 the frames alternate as the PS4's two
+// substeps did, above 60 the last comes 30 times a second, and a frame of 1/30 s or longer is always one. Every
+// other constraint's factor does not depend on the substep and stays the game's. The factor's entry jumps to a
+// cave (ClothCave) that reads this frame's answer from a per-frame slot of ours: no stub, a few instructions a
+// call. (bbport 0.7, deadinside28, found the cloth's factor; it replaces it for its own frame rate instead.) The
+// group's site (frame_rate_sites.inc) is the count's other reader, the cloth's damping.
+constexpr std::uint64_t kClothFactor = 0x1567a80;
+// push rbp; mov rbp, rsp; push r15; push r14; push rbx; push rax; vmovaps xmm2, xmm0 (the cave's jump's 14 bytes)
+constexpr std::uint8_t kClothFactorPrologue[] = {0x55, 0x48, 0x89, 0xe5, 0x41, 0x57, 0x41,
+                                                 0x56, 0x53, 0x50, 0xc5, 0xf8, 0x28, 0xd0};
+constexpr std::uint64_t kClothSubsteps = 0xb6e67a; // the 60 FPS++ list's one substep: mov ebx, 1
+constexpr std::uint8_t kClothOneSubstep[] = {0xbb, 0x01, 0x00, 0x00, 0x00, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90};
+Hook g_cloth_hook;
+std::uint8_t* g_cloth_last = nullptr; // the slot: 1 when this frame's solves are the last substep's
+double g_cloth_carry = 0;             // frame time since the last whole 1/30 s
+
+// test edx, edx (the substep); jne game; cmp ecx, 1 (the substeps); jle game; movabs rax, slot; cmp byte [rax], 0;
+// je game; lea edx, [rcx - 1]; game: the prologue; jmp [rip + 0] to the factor past it. rax is free at the entry
+// (the prologue's push rax only keeps the stack aligned).
+std::array<std::uint8_t, 55> ClothCave(std::uint64_t slot, std::uint64_t resume) {
+    std::array<std::uint8_t, 55> cave = {0x85, 0xd2, 0x75, 0x17, 0x83, 0xf9, 0x01, 0x7e, 0x12, 0x48, 0xb8};
+    std::memcpy(cave.data() + 11, &slot, 8);
+    const std::uint8_t last[] = {0x80, 0x38, 0x00, 0x74, 0x03, 0x8d, 0x51, 0xff};
+    std::memcpy(cave.data() + 19, last, sizeof last);
+    std::memcpy(cave.data() + 27, kClothFactorPrologue, sizeof kClothFactorPrologue);
+    const std::uint8_t jump[] = {0xff, 0x25, 0, 0, 0, 0};
+    std::memcpy(cave.data() + 41, jump, sizeof jump);
+    std::memcpy(cave.data() + 47, &resume, 8);
+    return cave;
+}
 constexpr std::uint64_t kCave = 0x2418e3d;           // the 60 FPS++ cave, kRequire's first
 constexpr std::uint64_t kCameraSkip = 0x183dc96;     // the FPS++ retune's jump over the game's follow camera
 constexpr std::uint8_t kCameraSkipped[] = {0xe9, 0xd6, 0x05, 0x00, 0x00};
@@ -300,7 +337,7 @@ constexpr double kLongest = 1.0 / 30;                // and its ceiling, as the 
 bool Writable() {
     if (g_checked) return g_on;
     g_checked = true;
-    const void* slots = g_step ? g_step : g_slots.empty() ? g_play_ms : g_slots.front().at;
+    const void* slots = g_step ? g_step : !g_slots.empty() ? g_slots.front().at : g_play_ms ? g_play_ms : g_cloth_last;
     bool writable = true;
 #ifdef _WIN32
     MEMORY_BASIC_INFORMATION info{};
@@ -330,8 +367,16 @@ bool Writable() {
 
 void WriteSlot(const Slot& s, double seconds);
 
-// A frame of `seconds`: the slots, the play time and the eases.
+// A frame of `seconds`: the cloth's substep, the slots, the play time and the eases.
 void Update(double seconds) {
+    if (g_cloth_last) {
+        // A whole 1/30 s of frame time since the last: this frame's solves are the last substep's.
+        constexpr double kThirtieth = 1.0 / 30;
+        g_cloth_carry += seconds;
+        const bool last = g_cloth_carry + 1e-6 >= kThirtieth;
+        if (last) g_cloth_carry = std::min(std::max(g_cloth_carry - kThirtieth, 0.0), kThirtieth - 1e-6);
+        *g_cloth_last = last;
+    }
     for (const Slot& s : g_slots) WriteSlot(s, seconds);
     if (g_play_ms) {
         const std::int32_t ms = g_play.Add(seconds);
@@ -422,6 +467,9 @@ bool Install(std::uint8_t* image, std::size_t size) {
     g_play = {};
     g_eases.clear();
     Discard(g_timer_hook);
+    Discard(g_cloth_hook);
+    g_cloth_last = nullptr;
+    g_cloth_carry = 0;
     if (const char* off = std::getenv("BB_FRAME_FIXES"); off && off[0] == '0') {
         host_log("Frame rate fixes: off (BB_FRAME_FIXES=0)");
         return false;
@@ -451,6 +499,10 @@ bool Install(std::uint8_t* image, std::size_t size) {
     on.fill(true);
     for (const std::string& name : SkipList("BB_FRAME_FIXES_SKIP", kGroupNames, on))
         host_log("Frame rate fixes: no group \"%s\" to skip", name.c_str());
+    // The cloth's last substep: BB_CLOTH_STEP=0 leaves it out too (the launcher's Game fixes, for its A/B test).
+    if (const char* cloth = std::getenv("BB_CLOTH_STEP"); cloth && cloth[0] == '0') {
+        on[std::size_t(Group::ClothStep)] = false;
+    }
     // The frame timer and the camera's per-frame eases with it: only when asked for (the launcher's Experimental).
     if (const char* timer = std::getenv("BB_FRAME_TIMER"); !timer || timer[0] != '1') {
         on[std::size_t(Group::Timer)] = on[std::size_t(Group::Camera)] = false;
@@ -461,6 +513,13 @@ bool Install(std::uint8_t* image, std::size_t size) {
         host_log("Frame rate fixes: %s left out: 0x%llx holds neither 1.09's bytes nor the 60 FPS++ list's",
                  kGroupNames[std::size_t(g)], (unsigned long long)address);
     };
+    // The cloth's corrections follow the list's one substep a frame: without it, none of them.
+    const std::vector<std::uint8_t> one_substep(std::begin(kClothOneSubstep), std::end(kClothOneSubstep));
+    if (on[std::size_t(Group::ClothStep)] && !holds(kClothSubsteps, one_substep)) {
+        on[std::size_t(Group::ClothStep)] = false;
+        host_log("Frame rate fixes: clothstep left out: 0x%llx is not the 60 FPS++ list's one cloth substep",
+                 (unsigned long long)kClothSubsteps);
+    }
 
     // The pacer's target first: without all of them the game keeps the list's 1/60, and what follows is for 60.
     const auto target_bits = [&] { return ToBits(float(1.0 / rate.target)); };
@@ -536,6 +595,7 @@ bool Install(std::uint8_t* image, std::size_t size) {
     for (const Load& l : kLoads) slots += on[std::size_t(l.group)];
     for (const PlayTimeSite& p : kPlayTime) slots += on[std::size_t(p.group)];
     if (on[std::size_t(Group::Timer)]) slots += 1 + (on[std::size_t(Group::Camera)] ? std::size(kEases) : 0);
+    slots += on[std::size_t(Group::ClothStep)];
     const std::size_t first = (kDataEnd + kSlot - 1) & ~(kSlot - 1), end = (kDataEnd + kPage - 1) & ~(kPage - 1);
     bool per_frame = end <= size && first + slots * kSlot <= end;
     for (std::size_t i = kDataEnd; per_frame && i < end; ++i) per_frame = image[i] == 0;
@@ -667,6 +727,23 @@ bool Install(std::uint8_t* image, std::size_t size) {
         }
     }
 
+    // The cloth's last substep: Havok's stiffness factor's cave (ClothCave) and its slot. (Its damping is a site.)
+    if (on[std::size_t(Group::ClothStep)] && per_frame) {
+        const auto cave = ClothCave(reinterpret_cast<std::uint64_t>(next),
+                                    reinterpret_cast<std::uint64_t>(at(kClothFactor) + sizeof kClothFactorPrologue));
+        if (Divert(g_cloth_hook, image, size, kClothFactor - kBase,
+                   {kClothFactorPrologue, sizeof kClothFactorPrologue}, cave)) {
+            *next = 0; // the list's until the first frame
+            g_cloth_last = next;
+            next += kSlot;
+            Commit({&g_cloth_hook, 1});
+            ++applied[std::size_t(Group::ClothStep)];
+        } else {
+            host_log("Frame rate fixes: the cloth's last substep left out: 0x%llx is not 1.09's cloth stiffness factor",
+                     (unsigned long long)kClothFactor);
+        }
+    }
+
     std::string list;
     for (std::size_t g = 0; g < applied.size(); ++g) {
         if (!applied[g]) continue;
@@ -676,7 +753,7 @@ bool Install(std::uint8_t* image, std::size_t size) {
         host_log("Frame rate fixes: none applied");
         return false;
     }
-    g_on = !g_slots.empty() || g_play_ms || g_timer;
+    g_on = !g_slots.empty() || g_play_ms || g_timer || g_cloth_last;
     g_self_hit = on[std::size_t(Group::Hitbox)];
     char where[96];
     if (rate.uncapped)
@@ -684,7 +761,7 @@ bool Install(std::uint8_t* image, std::size_t size) {
     else
         std::snprintf(where, sizeof where, "at %.0f FPS", rate.values);
     host_log("Frame rate fixes: on %s (%s); %zu per-frame values at guest+0x%zx%s", where, list.c_str(),
-             g_slots.size() + (g_play_ms ? 1 : 0) + g_eases.size() + (g_step ? 1 : 0), first,
+             g_slots.size() + (g_play_ms ? 1 : 0) + g_eases.size() + (g_step ? 1 : 0) + (g_cloth_last ? 1 : 0), first,
              g_timer ? "; the frame timer ours: one step for the game and every value" : "");
     return true;
 }

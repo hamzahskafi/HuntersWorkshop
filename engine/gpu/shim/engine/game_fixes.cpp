@@ -3,6 +3,7 @@
 // switches (BB_GAME_FIXES, BB_GAME_FIXES_SKIP) are read here; the start program reads the same for
 // its write (deflate, start/patches.cpp). Image offsets below; Binary Ninja's are 0x400000 higher.
 #include "game_fixes.h"
+#include "crash_guards.h"
 #include "engine_hooks.h"
 #include "engine_state.h"
 #include "fmod_ring.h"
@@ -21,9 +22,9 @@ namespace BbEngine::GameFixes {
 namespace {
 #define GUEST_ABI __attribute__((sysv_abi))
 
-enum Fix { kJobLock, kJobNodes, kJobSlots, kBlurSamples, kFmodRing, kDeflate, kFixCount };
-constexpr const char* kFixNames[kFixCount] = {"job_lock", "job_nodes", "job_slots", "blur_samples", "fmod_ring",
-                                              "deflate"};
+enum Fix { kJobLock, kJobNodes, kJobSlots, kBlurSamples, kFmodRing, kHitCap, kGxQuery, kDeflate, kFixCount };
+constexpr const char* kFixNames[kFixCount] = {"job_lock",  "job_nodes", "job_slots", "blur_samples", "fmod_ring",
+                                              "hit_cap",   "gx_query",  "deflate"};
 
 // The first few, then at powers of two.
 bool Report(unsigned n) {
@@ -178,6 +179,43 @@ bool Install(std::uint8_t* image, std::size_t size) {
     } else {
         prepare(kFmodRing, {{FmodRing::kPoolFree, FmodRing::kPoolFreePrologue, FmodRing::PoolFree}},
                 "FMOD's sound ring guarded");
+    }
+
+    // Havok's hit collectors capped (a cave on their growth), and the GX occlusion queries: their creation
+    // watched, their begin and end ours in place of the game's (Replace: two short functions whole). See
+    // crash_guards.h.
+    if (on[kHitCap]) {
+        Hook hook;
+        std::uint8_t cave[CrashGuards::kHitCaveSize];
+        CrashGuards::HitCave(reinterpret_cast<std::uint64_t>(image), cave);
+        const std::span<const std::uint8_t> push = CrashGuards::kHitPushCode;
+        const bool game = CrashGuards::kHitPush <= size && push.size() <= size - CrashGuards::kHitPush &&
+                          !std::memcmp(image + CrashGuards::kHitPush, push.data(), push.size());
+        if (game && Divert(hook, image, size, CrashGuards::kHitGrow,
+                           push.subspan(CrashGuards::kHitGrow - CrashGuards::kHitPush, CrashGuards::kHitGrowBytes),
+                           cave)) {
+            hooks.push_back(hook);
+            placed.emplace_back("physics hit collectors capped");
+        } else {
+            host_log("Game fixes: hit_cap left out: 0x%zx differs from 1.09", CrashGuards::kHitGrow);
+        }
+    }
+    if (on[kGxQuery]) {
+        Hook begin, end;
+        if (!Replace(begin, image, size, CrashGuards::kQueryBegin, CrashGuards::kQueryBeginCode,
+                     reinterpret_cast<const void*>(&CrashGuards::QueryBegin)) ||
+            !Replace(end, image, size, CrashGuards::kQueryEnd, CrashGuards::kQueryEndCode,
+                     reinterpret_cast<const void*>(&CrashGuards::QueryEnd))) {
+            host_log("Game fixes: gx_query left out: the queries' begin or end differs from 1.09");
+        } else if (prepare(kGxQuery, {{CrashGuards::kQueryCreate, CrashGuards::kQueryCreateEntry,
+                                       CrashGuards::QueryCreated}},
+                           "GX occlusion queries guarded")) {
+            CrashGuards::SetQueryGame(hooks.back().original,
+                                      reinterpret_cast<std::uint64_t>(image + CrashGuards::kDeviceBegin),
+                                      reinterpret_cast<std::uint64_t>(image + CrashGuards::kDeviceEnd));
+            hooks.push_back(begin);
+            hooks.push_back(end);
+        }
     }
 
     Commit(hooks);

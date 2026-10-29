@@ -38,7 +38,9 @@ the selection still has to be checked visually.
 - The key includes every vertex stream description, the shader, the address and a hash of the index
   contents, the vertex range, the instances and the number among identical draws. A topology change
   or a skipped frame resets that history.
-- The budget is 4194304 positions a frame; the two arrays together take 128 MiB instead of 64 MiB.
+- The budget is 4194304 positions a frame, 8388608 on 6 GB cards and up (0.4.3; `BB_OBJECT_MOTION_VERTICES=<millions>`);
+  the two arrays together take 128 MiB, or 256 MiB. When it runs short, small skeletons the GPU wrote give way to
+  the other draws (`History::Prepare`).
   When memory runs out, camera vectors remain. The log shows saves, matches, missing history, lack
   of memory and invalid ranges separately.
 - Vertex-to-vertex barriers were added, a wait for the GPU before reusing host parameters, coherent

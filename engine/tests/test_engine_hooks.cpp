@@ -40,6 +40,17 @@ static std::int64_t __attribute__((sysv_abi)) Instead(std::int64_t a, std::int64
     return 10 * (a + b + c + d + e + f);
 }
 
+// Writes test code into the image. Commit leaves a page it wrote read and execute only on Linux (WriteCode),
+// as the loader's protections will; the test's own writes open it again first.
+static void Put(std::uint8_t* at, const void* bytes, std::size_t n) {
+#ifndef _WIN32
+    auto* const page = reinterpret_cast<std::uint8_t*>(reinterpret_cast<std::uintptr_t>(at) & ~std::uintptr_t(4095));
+    const int opened = mprotect(page, 4096, PROT_READ | PROT_WRITE | PROT_EXEC);
+    assert(opened == 0);
+#endif
+    std::memcpy(at, bytes, n);
+}
+
 int main() {
 #ifdef _WIN32
     auto* image = static_cast<std::uint8_t*>(VirtualAlloc(nullptr, 4096, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE));
@@ -49,11 +60,11 @@ int main() {
 #endif
     assert(image);
     std::array<std::uint8_t, 16> expected; expected.fill(0x90);
-    std::memcpy(image, expected.data(), expected.size());
+    Put(image, expected.data(), expected.size());
     // mov rax,rdi; add rax,rsi; add rax,rdx; add rax,rcx; add rax,r8; add rax,r9; ret
     const std::uint8_t sum[] = {0x48,0x89,0xf8,0x48,0x01,0xf0,0x48,0x01,0xd0,0x48,0x01,0xc8,
                                0x4c,0x01,0xc0,0x4c,0x01,0xc8,0xc3};
-    std::memcpy(image + 16, sum, sizeof sum);
+    Put(image + 16, sum, sizeof sum);
     BbEngine::Hook hook;
     auto wrong = expected; wrong[0] = 0xcc;
     assert(!BbEngine::Prepare(hook, image, 4096, 0, wrong, Observe));
@@ -71,9 +82,9 @@ int main() {
     skip = false;
     BbEngine::Discard(hook);
 
-    std::memcpy(image, expected.data(), expected.size());
+    Put(image, expected.data(), expected.size());
     const std::uint8_t add_float[] = {0xf2,0x0f,0x58,0xc1,0xc3}; // addsd xmm0,xmm1; ret
-    std::memcpy(image + 16, add_float, sizeof add_float);
+    Put(image + 16, add_float, sizeof add_float);
     assert(BbEngine::Prepare(hook, image, 4096, 0, expected, Observe));
     BbEngine::Commit(std::span{&hook, 1});
     using Floating = double (__attribute__((sysv_abi)) *)(double,double);
@@ -82,15 +93,15 @@ int main() {
     BbEngine::Discard(hook);
 
     // The game's own function, run by the callback through the displaced instructions.
-    std::memcpy(image, expected.data(), expected.size());
-    std::memcpy(image + 16, sum, sizeof sum);
+    Put(image, expected.data(), expected.size());
+    Put(image + 16, sum, sizeof sum);
     assert(BbEngine::Prepare(wrapped, image, 4096, 0, expected, Wrap) && wrapped.original);
     BbEngine::Commit(std::span{&wrapped, 1});
     assert(BbEngine::Call(reinterpret_cast<std::uint64_t>(image), 1,2,3,4,5,6) == 42);
     BbEngine::Discard(wrapped);
 
     // A host function in the game function's place: the site jumps to it, no stub.
-    std::memcpy(image, expected.data(), expected.size());
+    Put(image, expected.data(), expected.size());
     BbEngine::Hook replaced;
     assert(!BbEngine::Replace(replaced, image, 4096, 0, wrong, reinterpret_cast<const void*>(&Instead)));
     assert(BbEngine::Replace(replaced, image, 4096, 0, expected, reinterpret_cast<const void*>(&Instead)));
@@ -98,18 +109,32 @@ int main() {
     BbEngine::Commit(std::span{&replaced, 1});
     assert(BbEngine::Call(reinterpret_cast<std::uint64_t>(image), 1,2,3,4,5,6) == 210);
     BbEngine::Discard(replaced);
-    std::memcpy(image, expected.data(), expected.size());
+    Put(image, expected.data(), expected.size());
+
+    // A cave in the site's place: add rdi, 100; then on to the instructions after the site (jmp [rip+0]).
+    Put(image + 16, sum, sizeof sum);
+    std::uint8_t cave[18] = {0x48, 0x83, 0xc7, 0x64, 0xff, 0x25, 0, 0, 0, 0};
+    const auto after = reinterpret_cast<std::uint64_t>(image + 16);
+    std::memcpy(cave + 10, &after, 8);
+    BbEngine::Hook diverted;
+    assert(!BbEngine::Divert(diverted, image, 4096, 0, wrong, cave));
+    assert(BbEngine::Divert(diverted, image, 4096, 0, expected, cave) && diverted.stub);
+    assert(!std::memcmp(image, expected.data(), expected.size()));
+    BbEngine::Commit(std::span{&diverted, 1});
+    assert(BbEngine::Call(reinterpret_cast<std::uint64_t>(image), 1,2,3,4,5,6) == 121);
+    BbEngine::Discard(diverted);
+    Put(image, expected.data(), expected.size());
 
     // A seventh argument on the stack, read as the game reads it ([rbp+0x10]):
     // push rbp; mov rbp,rsp; mov rax,[rbp+0x10]; add rax,r9; pop rbp; ret
     const std::uint8_t seventh[] = {0x55,0x48,0x89,0xe5,0x48,0x8b,0x45,0x10,0x4c,0x01,0xc8,0x5d,0xc3};
-    std::memcpy(image + 0x100, seventh, sizeof seventh);
+    Put(image + 0x100, seventh, sizeof seventh);
     assert(BbEngine::Call(reinterpret_cast<std::uint64_t>(image + 0x100), 1,2,3,4,5,6,70) == 76);
 
     // A redirected tail call (the fog table's upload): its jmp rel32 goes to padding that jumps on
     // to a stub, which calls the host and then the jump's target with the arguments intact.
     calls = 0;
-    std::memcpy(image + 16, sum, sizeof sum);
+    Put(image + 16, sum, sizeof sum);
     auto* stub = BbEngine::TailStub(Observe, reinterpret_cast<std::uint64_t>(image + 16));
     assert(stub);
     std::uint8_t* p = image + 0x210; *p++ = 0x49; *p++ = 0xbb;  // movabs r11, stub; jmp r11
@@ -117,7 +142,7 @@ int main() {
     std::memcpy(p, &target, 8); p += 8; *p++ = 0x41; *p++ = 0xff; *p = 0xe3;
     image[0x200] = 0xe9;
     const std::int32_t rel = 0x210 - (0x200 + 5);
-    std::memcpy(image + 0x201, &rel, 4);
+    Put(image + 0x201, &rel, 4);
     assert(BbEngine::Call(reinterpret_cast<std::uint64_t>(image + 0x200), 1,2,3,4,5,6) == 21);
     assert(calls == 1 && arguments == (std::array<std::uint64_t,6>{1,2,3,4,5,6}));
     BbEngine::FreeStub(stub);
@@ -126,5 +151,5 @@ int main() {
 #else
     munmap(image, 4096);
 #endif
-    std::puts("PASS: guest ABI arguments (seven with a stack argument), XMM preservation, return slot, byte/range guards, staged hook installation, the game's function run from a callback, a replaced function and a redirected tail call");
+    std::puts("PASS: guest ABI arguments (seven with a stack argument), XMM preservation, return slot, byte/range guards, staged hook installation, the game's function run from a callback, a replaced function, a cave and a redirected tail call");
 }

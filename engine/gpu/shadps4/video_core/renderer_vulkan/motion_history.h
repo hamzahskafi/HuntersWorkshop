@@ -2,11 +2,11 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <limits>
 #include <span>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -56,7 +56,9 @@ inline BufferRole ClassifyBuffer(uint32_t size) {
 // shader bounds every history access by the stored range.
 class IndexRangeCache {
 public:
-    static constexpr uint64_t Revalidate = 32, Unused = 600;
+    // Revalidated every 10 s at 60 (every 32 frames until 0.4.3 beta 5): 3.15 million scans in the logs
+    // since 0.4.0 found no change, and the rescans were 0.22 ms of a frame's 4 on the recording thread.
+    static constexpr uint64_t Revalidate = 600, Unused = 600;
     struct Key {
         uint64_t address{};
         uint32_t count{}, index_size{};
@@ -74,7 +76,7 @@ public:
 
     template <class Scan>
     Result Get(const Key& key, uint64_t frame, Scan&& scan) {
-        auto& entry = entries[key];
+        Entry& entry = Find(key);
         entry.last_use = frame;
         if (entry.valid && frame - entry.verified < Revalidate) {
             ++stats.hits;
@@ -91,10 +93,18 @@ public:
         entry.valid = true;
         return entry.result;
     }
+    /// Forgets the meshes not drawn in the last Unused frames (the table is rebuilt without them).
     void Trim(uint64_t frame) {
-        std::erase_if(entries, [frame](const auto& e) { return frame - e.second.last_use > Unused; });
+        std::vector<Slot> old(slots.size());
+        old.swap(slots);
+        size = 0;
+        for (const Slot& slot : old) {
+            if (slot.used && frame - slot.entry.last_use <= Unused) {
+                Find(slot.key) = slot.entry;
+            }
+        }
     }
-    size_t Size() const { return entries.size(); }
+    size_t Size() const { return size; }
 
 private:
     struct Entry {
@@ -102,15 +112,46 @@ private:
         uint64_t verified{}, last_use{};
         bool valid{};
     };
-    struct KeyHash {
-        size_t operator()(const Key& k) const {
-            uint64_t h = k.address * 0x9e3779b97f4a7c15ULL;
-            h ^= (uint64_t(k.count) << 32 | uint32_t(k.base_vertex)) + (h << 6) + (h >> 2);
-            h ^= uint64_t(k.index_size << 1 | uint32_t(k.restart)) + (h << 6) + (h >> 2);
-            return size_t(h);
-        }
+    // Open addressing (linear probing, at most half full): one lookup per stored draw, and
+    // std::unordered_map's node per mesh cost a cache miss each.
+    struct Slot {
+        Key key;
+        Entry entry;
+        bool used{};
     };
-    std::unordered_map<Key, Entry, KeyHash> entries;
+    static size_t Start(const Key& k) {
+        uint64_t h = k.address * 0x9e3779b97f4a7c15ULL;
+        h ^= (uint64_t(k.count) << 32 | uint32_t(k.base_vertex)) + (h << 6) + (h >> 2);
+        h ^= uint64_t(k.index_size << 1 | uint32_t(k.restart)) + (h << 6) + (h >> 2);
+        h *= 0x9e3779b97f4a7c15ULL;
+        return size_t(h ^ (h >> 29));
+    }
+    Entry& Find(const Key& key) {
+        if ((size + 1) * 2 > slots.size()) {
+            std::vector<Slot> old(slots.empty() ? 256 : slots.size() * 2);
+            old.swap(slots);
+            size = 0;
+            for (const Slot& slot : old) {
+                if (slot.used) {
+                    Find(slot.key) = slot.entry;
+                }
+            }
+        }
+        const size_t mask = slots.size() - 1;
+        for (size_t i = Start(key) & mask;; i = (i + 1) & mask) {
+            Slot& slot = slots[i];
+            if (!slot.used) {
+                slot = {key, {}, true};
+                ++size;
+                return slot.entry;
+            }
+            if (slot.key == key) {
+                return slot.entry;
+            }
+        }
+    }
+    std::vector<Slot> slots;
+    size_t size{};
 };
 
 // Open-addressing map for the per-frame tables of History: entries are keyed per draw and
@@ -211,26 +252,71 @@ inline uint32_t JitterPhases(uint32_t render_width, uint32_t output_width) {
     return uint32_t(std::clamp(std::ceil(8.0 * ratio * ratio), 8.0, 256.0));
 }
 
+// Instanced draws (the game's foliage: up to 64 bushes or flowers a draw) also carry a hash of their
+// per-instance matrices: culling changes which objects the instances are as the camera turns, often at the
+// same instance count, and instance i then read another bush's positions (bbport 0.7, deadinside28: frame
+// generation drew bushes where there are none; the upscalers smeared them).
 struct Draw {
-    uint64_t shader{}, geometry{}, indices{}, topology{};
+    uint64_t shader{}, geometry{}, indices{}, topology{}, instance_data{};
     uint32_t index_count{}, instances{}, first_instance{};
     VertexRange vertices;
     bool operator==(const Draw& rhs) const = default;
 };
+
+// Where a draw's object is (its first bone's translation, world space). Repeated draws of one mesh are
+// matched by their order; a match whose object jumped further than MaxStep since last frame is another
+// object (an earlier one was culled) and gets camera vectors instead (bbport 0.7).
+struct Anchor {
+    float x{}, y{}, z{};
+    bool valid{};
+    static constexpr float MaxStep = 0.5f;
+    bool Near(const Anchor& other) const {
+        if (!valid || !other.valid) {
+            return true;
+        }
+        const float dx = x - other.x, dy = y - other.y, dz = z - other.z;
+        return dx * dx + dy * dy + dz * dz <= MaxStep * MaxStep;
+    }
+};
+
+// Why a draw's positions were stored (History::Prepare): a character-size skeleton, a small skeleton the GPU
+// wrote (its CPU copy is stale: Lantern 0.9.38's rule), a small skeleton whose bones changed or that is held
+// after a change, or every draw (BB_OBJECT_MOTION_ALL). Counted for the frame statistics' motion line.
+enum class StoreReason : uint8_t { Character, GpuWritten, Moving, Held, All, Count };
+inline const char* StoreReasonName(StoreReason reason) {
+    static constexpr const char* names[] = {"characters", "GPU-written small", "moving small", "held small",
+                                            "all"};
+    return names[size_t(reason)];
+}
 
 // CPU bookkeeping shared with the regression test. Draw identity includes topology and
 // offsets: a reused index buffer or another submesh must never read uninitialised history.
 class History {
 public:
     explicit History(uint32_t capacity) : capacity{capacity} {}
+    /// The frames whose busiest ask a GPU-written small skeleton leaves room for (half a second at 60 FPS).
+    static constexpr size_t ReserveFrames = 32;
 
     struct Allocation {
         uint32_t store{}, load{}, vertices{}, instances{}, first_vertex{}, first_instance{};
     };
     struct Stats {
         uint64_t draws{}, stored{}, loaded{}, unmatched{}, exhausted{}, invalid{}, still{},
-            held{};
+            held{}, jumped{};
+        /// By StoreReason: draws prepared, the vertices they asked for (stored or not), capacity skips.
+        uint64_t reason_draws[size_t(StoreReason::Count)]{};
+        uint64_t reason_vertices[size_t(StoreReason::Count)]{};
+        uint64_t reason_skips[size_t(StoreReason::Count)]{};
+        uint64_t peak_demand{}; ///< the most a finished frame asked for (Demand)
     } stats;
+
+    /// The vertices a frame can store; before the first frame (the buffer's size is chosen then).
+    void SetCapacity(uint32_t vertices) {
+        capacity = vertices;
+        used = demand = ahead = ahead_peak = 0;
+        ahead_frames.fill(0);
+    }
+    uint32_t Capacity() const { return capacity; }
 
     // A small skeleton (weapon, prop; most are static world pieces) only needs history
     // while its bone palette changes: with last frame's bones its motion is the camera's.
@@ -256,12 +342,20 @@ public:
         bool operator==(const GateKey&) const = default;
     };
     void SetHold(uint32_t frames) { hold = frames; }
-    bool Moving(GateKey key, uint64_t palette) {
+    // Another object in the draw's place (its anchor jumped: an earlier one was culled) has no previous
+    // frame, its hold included.
+    bool Moving(GateKey key, uint64_t palette, Anchor anchor = {}) {
         key.occurrence = 0;
-        key.occurrence = gate_occurrences[key]++;
-        const auto* prev = gate_previous.find(key);
-        GateState state{palette, 0};
+        GateEntry entry{key, GateHashOf(key)};
+        entry.key.occurrence = gate_occurrences[entry]++;
+        const auto* prev = gate_previous.find(entry);
+        if (prev && !prev->anchor.Near(anchor)) {
+            ++stats.jumped;
+            prev = nullptr;
+        }
+        GateState state{palette, 0, anchor};
         bool moving = false;
+        last_held = false;
         if (prev && prev->palette != palette) {
             moving = true;
             state.hold = hold;
@@ -269,8 +363,9 @@ public:
             moving = true; // unchanged, but changed within the last `hold` frames
             state.hold = prev->hold - 1;
             ++stats.held;
+            last_held = true;
         }
-        gate_current.emplace(key, state);
+        gate_current.emplace(entry, state);
         stats.still += moving ? 0 : 1;
         return moving;
     }
@@ -282,13 +377,31 @@ public:
         gate_previous.swap(gate_current);
         gate_current.clear();
         gate_occurrences.clear();
+        ahead_frames[frame % ahead_frames.size()] = ahead;
+        ahead_peak = *std::max_element(ahead_frames.begin(), ahead_frames.end());
+        ahead = 0;
         ++frame;
         used = 0;
+        stats.peak_demand = std::max<uint64_t>(stats.peak_demand, demand);
+        last_demand = demand;
+        demand = 0;
     }
 
-    Allocation Prepare(const Draw& draw) {
+    // `reason`: why the draw is prepared; Moving stands for the small-skeleton gate's answer (moving or held:
+    // the last Moving call says which).
+    //
+    // When room runs short, a small skeleton the GPU wrote gives way: it is stored whether it moves or not (its
+    // CPU copy is stale), and most are static props, whose vectors are the camera's anyway. It leaves the room the
+    // other draws asked for in the busiest of the last ReserveFrames frames and have not asked for yet this frame,
+    // so characters, foliage and small skeletons seen moving are stored first whatever the draw order, a crowd
+    // coming into view included. (Yharnam, 0.4.3 beta 2: the GPU-written ones asked for 59% of the vertices; beta
+    // 3, with only last frame's ask kept: characters still lost a draw a frame in the two busiest stretches.)
+    Allocation Prepare(const Draw& draw, Anchor anchor = {}, StoreReason reason = StoreReason::All) {
         ++stats.draws;
-        Key key{draw, 0};
+        if (reason == StoreReason::Moving && last_held) {
+            reason = StoreReason::Held;
+        }
+        Key key{draw, 0, DrawHash(draw)};
         key.occurrence = occurrences[key]++;
         const uint64_t count = uint64_t(draw.vertices.count) * draw.instances;
         if (!count || uint64_t(draw.vertices.first) + draw.vertices.count - 1 > INT32_MAX ||
@@ -299,61 +412,102 @@ public:
         const auto* prev = previous.find(key);
         Allocation result{0, 0, draw.vertices.count, draw.instances,
                           draw.vertices.first, draw.first_instance};
+        ++stats.reason_draws[size_t(reason)];
+        stats.reason_vertices[size_t(reason)] += count;
+        demand = uint32_t(std::min<uint64_t>(uint64_t(demand) + count, UINT32_MAX));
+        const bool gives_way = reason == StoreReason::GpuWritten;
+        if (!gives_way) {
+            ahead = uint32_t(std::min<uint64_t>(uint64_t(ahead) + count, UINT32_MAX));
+        }
+        const uint32_t reserve = gives_way && ahead_peak > ahead ? ahead_peak - ahead : 0;
+        if (prev && !prev->anchor.Near(anchor)) {
+            ++stats.jumped;
+            prev = nullptr;
+        }
         if (prev) {
-            result.load = *prev;
+            result.load = prev->store;
             ++stats.loaded;
         } else {
             ++stats.unmatched;
         }
-        if (count <= capacity - used) {
+        if (count + reserve <= capacity - used) {
             result.store = 1 + uint32_t(frame & 1) * capacity + used;
             used += uint32_t(count);
-            current.emplace(key, result.store);
+            current.emplace(key, Stored{result.store, anchor});
             ++stats.stored;
         } else {
             ++stats.exhausted;
+            ++stats.reason_skips[size_t(reason)];
         }
         return result;
     }
 
     uint32_t Used() const { return used; }
+    /// The vertices this frame's draws asked for, stored or not (Used is what fit); the last frame's after NextFrame.
+    uint32_t Demand() const { return demand; }
+    uint32_t LastDemand() const { return last_demand; }
 
 private:
+    // A draw's identity is hashed once (DrawHash) for its three lookups (its occurrence, last frame's
+    // store, this frame's); the occurrence is mixed in on top.
     struct Key {
         Draw draw;
         uint32_t occurrence;
+        uint64_t hash; ///< DrawHash(draw)
         bool operator==(const Key&) const = default;
     };
+    static uint64_t DrawHash(const Draw& d) {
+        uint64_t h = 0;
+        const auto mix = [&](uint64_t v) { h ^= v + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2); };
+        mix(d.shader); mix(d.geometry); mix(d.indices); mix(d.topology); mix(d.instance_data);
+        mix(d.index_count); mix(d.instances); mix(d.first_instance);
+        mix(d.vertices.first); mix(d.vertices.count);
+        return h;
+    }
     struct Hash {
         size_t operator()(const Key& key) const {
-            uint64_t h = 0;
-            const auto mix = [&](uint64_t v) { h ^= v + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2); };
-            const auto& d = key.draw;
-            mix(d.shader); mix(d.geometry); mix(d.indices); mix(d.topology);
-            mix(d.index_count); mix(d.instances); mix(d.first_instance);
-            mix(d.vertices.first); mix(d.vertices.count); mix(key.occurrence);
-            return size_t(h);
+            return size_t(key.hash ^ (uint64_t(key.occurrence) * 0xc2b2ae3d27d4eb4fULL));
         }
     };
     uint32_t capacity{}, used{};
+    uint32_t demand{}, last_demand{}; ///< vertices asked for this frame and the last (stored or not)
+    uint32_t ahead{};                 ///< the same for the draws a GPU-written small skeleton gives way to
+    std::array<uint32_t, ReserveFrames> ahead_frames{}; ///< `ahead` of the last ReserveFrames frames
+    uint32_t ahead_peak{};            ///< the most of them
+    bool last_held{};                 ///< the last Moving call's answer came from a hold
     uint32_t hold{}; ///< frames a small skeleton keeps its history after a change (SetHold)
     uint64_t frame{};
-    FlatMap<Key, uint32_t, Hash> previous, current, occurrences;
+    struct Stored {
+        uint32_t store{};
+        Anchor anchor;
+    };
+    FlatMap<Key, Stored, Hash> previous, current;
+    FlatMap<Key, uint32_t, Hash> occurrences;
+    // The same for the gate: GateKey hashed once a draw (GateHashOf), its occurrence mixed in.
+    struct GateEntry {
+        GateKey key;
+        uint64_t hash;
+        bool operator==(const GateEntry&) const = default;
+    };
+    static uint64_t GateHashOf(const GateKey& key) {
+        uint64_t h = 0;
+        const auto mix = [&](uint64_t v) { h ^= v + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2); };
+        mix(key.shader); mix(key.geometry); mix(key.indices); mix(key.index_count);
+        mix(key.instances); mix(key.first_instance);
+        return h;
+    }
     struct GateHash {
-        size_t operator()(const GateKey& key) const {
-            uint64_t h = 0;
-            const auto mix = [&](uint64_t v) { h ^= v + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2); };
-            mix(key.shader); mix(key.geometry); mix(key.indices); mix(key.index_count);
-            mix(key.instances); mix(key.first_instance); mix(key.occurrence);
-            return size_t(h);
+        size_t operator()(const GateEntry& entry) const {
+            return size_t(entry.hash ^ (uint64_t(entry.key.occurrence) * 0xc2b2ae3d27d4eb4fULL));
         }
     };
     struct GateState {
         uint64_t palette{};
         uint32_t hold{}; ///< further frames this draw keeps its history (Moving)
+        Anchor anchor;
     };
-    FlatMap<GateKey, GateState, GateHash> gate_previous, gate_current;
-    FlatMap<GateKey, uint32_t, GateHash> gate_occurrences;
+    FlatMap<GateEntry, GateState, GateHash> gate_previous, gate_current;
+    FlatMap<GateEntry, uint32_t, GateHash> gate_occurrences;
 };
 
 } // namespace Vulkan::Motion

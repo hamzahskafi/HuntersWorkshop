@@ -138,10 +138,16 @@ private:
     bool last_frame_reflection = false;
     /// The frame's passes are the world and its mirror image (pass_positions).
     [[nodiscard]] bool MirroredPasses() const noexcept;
+    /// The world position of a pass's camera from its view matrix (3x4), into pass_positions.
+    void NotePassPosition(const float* view);
     void CommitFrameCamera();
     std::array<float, 2> jitter{}, previous_jitter{};
     std::array<u32, 2> render_size{};
     VideoCore::ImageId depth_id{};
+    u64 frame_depth_area = 0;        ///< width x height of depth_id, the frame's largest pass (OnGBufferPass)
+    bool side_pass = false;          ///< in a G-buffer pass smaller than the frame's: its camera not taken
+    VideoCore::ImageId side_depth{}; ///< that pass's depth target
+    bool side_has_position = false;  ///< the side pass's camera position noted (pass_positions)
     float gbuffer_x_sign = 1.0f; ///< bbport: signs of the G-buffer viewport scales (OnGBufferPass)
     float gbuffer_y_sign = 1.0f;
 

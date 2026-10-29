@@ -54,6 +54,85 @@ int main() {
     changed.vertices.first++;
     assert(!history.Prepare(changed).load);
 
+    // Foliage: another set of instances (culling) at the same count is another identity.
+    history.NextFrame();
+    changed = draw;
+    changed.instance_data = 1;
+    history.Prepare(changed);
+    history.NextFrame();
+    changed.instance_data = 2;
+    assert(!history.Prepare(changed).load);
+    // Repeated draws matched by order: a jump means another object, a step the same one.
+    History anchored(64);
+    anchored.NextFrame();
+    anchored.Prepare(draw, {0, 0, 0, true});
+    anchored.Prepare(draw, {5, 0, 0, true});
+    anchored.NextFrame();
+    assert(!anchored.Prepare(draw, {5, 0, 0, true}).load && anchored.stats.jumped == 1);
+    assert(anchored.Prepare(draw, {5.1f, 0, 0, true}).load);
+
+    // Why draws are stored, and the frame's ask against what fits (the frame statistics' breakdown).
+    History asked(100);
+    asked.NextFrame();
+    Draw small = draw;
+    small.vertices = {0, 60};
+    small.instances = 1;
+    asked.Prepare(small, {}, StoreReason::Character);
+    small.indices++;
+    asked.Prepare(small, {}, StoreReason::GpuWritten); // 120 asked, 100 fit: this one skipped
+    assert(asked.Demand() == 120 && asked.Used() == 60);
+    assert(asked.stats.reason_draws[size_t(StoreReason::Character)] == 1 &&
+           asked.stats.reason_vertices[size_t(StoreReason::GpuWritten)] == 60 &&
+           asked.stats.reason_skips[size_t(StoreReason::GpuWritten)] == 1 &&
+           asked.stats.reason_skips[size_t(StoreReason::Character)] == 0);
+    asked.NextFrame();
+    assert(asked.LastDemand() == 120 && asked.Demand() == 0 && asked.stats.peak_demand == 120);
+    // Short of room, a GPU-written small skeleton gives way: the others asked for 60 last frame, so one asking
+    // for 60 first is skipped and one asking for 40 fits beside the 60 still to come.
+    small.indices++;
+    assert(!asked.Prepare(small, {}, StoreReason::GpuWritten).store);
+    Draw forty = small;
+    forty.indices++;
+    forty.vertices = {0, 40};
+    assert(asked.Prepare(forty, {}, StoreReason::GpuWritten).store);
+    small.indices++;
+    assert(asked.Prepare(small, {}, StoreReason::Character).store && asked.Used() == 100);
+    asked.NextFrame();
+    assert(asked.stats.peak_demand == 160); // 60 + 40 + 60 asked
+    // With nothing asked for by the others, a GPU-written one has the room.
+    History free_room(100);
+    free_room.NextFrame();
+    assert(free_room.Prepare(small, {}, StoreReason::GpuWritten).store);
+    // The room kept is the busiest ask of the last ReserveFrames frames, not only the last one's: after 60 asked
+    // and then 10, a GPU-written 60 still gives way; once the 60 is ReserveFrames frames old, it has the room.
+    History crowd(100);
+    Draw character = small, prop = small;
+    prop.indices += 100;
+    crowd.Prepare(character, {}, StoreReason::Character); // 60
+    crowd.NextFrame();
+    character.vertices = {0, 10};
+    crowd.Prepare(character, {}, StoreReason::Character);
+    crowd.NextFrame();
+    assert(!crowd.Prepare(prop, {}, StoreReason::GpuWritten).store);
+    for (size_t i = 0; i < History::ReserveFrames - 1; ++i) crowd.NextFrame();
+    assert(crowd.Prepare(prop, {}, StoreReason::GpuWritten).store);
+    // A held gate's draw counts as held.
+    History reasons(1024);
+    reasons.SetHold(1);
+    const History::GateKey key{.shader = 9, .index_count = 3, .instances = 1};
+    reasons.Moving(key, 1);
+    reasons.NextFrame();
+    reasons.Moving(key, 2);                       // changed
+    reasons.Prepare(small, {}, StoreReason::Moving);
+    reasons.NextFrame();
+    reasons.Moving(key, 2);                       // unchanged, held
+    reasons.Prepare(small, {}, StoreReason::Moving);
+    assert(reasons.stats.reason_draws[size_t(StoreReason::Moving)] == 1 &&
+           reasons.stats.reason_draws[size_t(StoreReason::Held)] == 1);
+    History sized(8);
+    sized.SetCapacity(1 << 20);
+    assert(sized.Capacity() == (1u << 20));
+
     History overflow(32);
     draw.vertices.first = 0;
     draw.vertices.count = INT32_MAX;
@@ -83,6 +162,14 @@ int main() {
     gated.NextFrame();
     assert(!gated.Moving(weapon, 4));     // after a skipped frame: no comparison
     assert(!gated.Moving(weapon, 5));     // second occurrence of the same draw
+    History swapped(1024); // two weapons; the first is culled: the second takes its place
+    swapped.NextFrame();
+    swapped.Moving(weapon, 1, {0, 0, 0, true});
+    swapped.Moving(weapon, 2, {9, 0, 0, true});
+    swapped.NextFrame();
+    assert(!swapped.Moving(weapon, 3, {9, 0, 0, true})); // another weapon: camera motion
+    swapped.NextFrame();
+    assert(swapped.Moving(weapon, 4, {9.1f, 0, 0, true})); // the same one, moving
 
     // Held (BB_OBJECT_MOTION_HOLD): bones that move on some frames only (a weapon on the back)
     // keep storing in between, so the next change finds last frame's positions.
@@ -101,6 +188,16 @@ int main() {
     held.NextFrame();
     held.NextFrame();
     assert(!held.Moving(weapon, 4));      // a skipped frame drops the hold with the comparison
+    // Another object in the held one's place (its anchor jumped) does not inherit the hold.
+    History taken(1024);
+    taken.SetHold(2);
+    taken.Moving(weapon, 1, {0, 0, 0, true});
+    taken.NextFrame();
+    assert(taken.Moving(weapon, 2, {0, 0, 0, true}));  // changed: held for two frames
+    taken.NextFrame();
+    assert(!taken.Moving(weapon, 2, {7, 0, 0, true})); // unchanged, and another object: no hold
+    taken.NextFrame();
+    assert(!taken.Moving(weapon, 2, {7, 0, 0, true}) && taken.stats.held == 0);
     assert(ClassifyBuffer(864) == BufferRole::Other && ClassifyBuffer(416) == BufferRole::Other);
     assert(ClassifyBuffer(96) == BufferRole::SmallSkeleton &&
            ClassifyBuffer(384) == BufferRole::SmallSkeleton);
@@ -127,5 +224,6 @@ int main() {
     assert(JitterPhases(960, 1920) == 32);
     assert(JitterPhases(640, 1920) == 72);
     assert(JitterPhases(0, 1920) == 8);
-    std::puts("Motion history: PASS (ranges, restart, offsets, matching, capacity, gating, index cache, jitter)");
+    std::puts("Motion history: PASS (ranges, restart, offsets, matching, instances, anchors, capacity, gating, "
+              "holds, reasons, giving way, index cache, jitter)");
 }

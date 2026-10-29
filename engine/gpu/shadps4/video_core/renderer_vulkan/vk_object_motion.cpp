@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "video_core/renderer_vulkan/vk_object_motion.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -88,11 +89,19 @@ ObjectMotion::ObjectMotion(const Instance& instance_, Scheduler& scheduler_)
         std::printf("Object motion: vertexPipelineStoresAndAtomics unsupported, off\n");
         return;
     }
+    // The positions' size (vk_object_motion.h): by the VRAM budget, or BB_OBJECT_MOTION_VERTICES (millions).
+    if (const char* value = std::getenv("BB_OBJECT_MOTION_VERTICES"); value && value[0]) {
+        const unsigned long millions = std::strtoul(value, nullptr, 10);
+        positions_per_frame = u32(std::clamp<unsigned long>(millions, 1, 64)) << 20;
+    } else if (instance.GetTotalMemoryBudget() >= (u64(4) << 30)) {
+        positions_per_frame = 8u << 20; // 6 GB cards and up (a 6 GB card's budget is about 4.5 GiB)
+    }
+    history.SetCapacity(positions_per_frame);
     void* mapped = nullptr;
     u64 params_address = 0, positions_address = 0;
     if (!CreateBuffer(instance, vk::DeviceSize(1 + FrameSlots * ParamsPerFrame) * 32, true,
                       params_buffer, params_allocation, &mapped, params_address) ||
-        !CreateBuffer(instance, vk::DeviceSize(1 + 2 * PositionsPerFrame) * 16, false,
+        !CreateBuffer(instance, vk::DeviceSize(1 + 2 * u64(positions_per_frame)) * 16, false,
                       positions_buffer, positions_allocation, nullptr, positions_address)) {
         std::printf("Object motion: buffer creation failed, off\n");
         return;
@@ -156,8 +165,10 @@ ObjectMotion::ObjectMotion(const Instance& instance_, Scheduler& scheduler_)
     }();
     history.SetHold(hold);
     enabled = true;
-    std::printf("Object motion: on (%u vertices per frame, moved small skeletons held %u frames)\n",
-                PositionsPerFrame, hold);
+    std::printf("Object motion: on (%u vertices per frame, %llu MiB of VRAM; moved small skeletons held %u "
+                "frames)\n",
+                positions_per_frame,
+                (unsigned long long)((u64(1 + 2 * u64(positions_per_frame)) * 16) >> 20), hold);
 }
 
 ObjectMotion::~ObjectMotion() {
@@ -181,18 +192,35 @@ void ObjectMotion::OnFrameStart() {
     if (BbStats::enabled && (frame % 600) == 0 && history.stats.draws) {
         const auto& s = history.stats;
         // bbport: "held" counts small-skeleton draws kept in history though their palette did
-        // not change this frame (BB_OBJECT_MOTION_HOLD); they are part of "draws".
+        // not change this frame (BB_OBJECT_MOTION_HOLD); they are part of "draws". "jumped": matches
+        // whose object moved more than half a metre, another object (Motion::Anchor).
         std::printf("Object motion: %llu draws, %llu stored, %llu with history, %llu unmatched, "
-                    "%llu capacity skips, %llu invalid, %llu still, %llu held (600 frames); last frame "
+                    "%llu capacity skips, %llu invalid, %llu still, %llu held, %llu jumped (600 frames); "
+                    "last frame "
                     "%u/%u vertices; index ranges %llu reused, %llu scanned (%llu found changed), "
                     "%zu cached\n",
                     (unsigned long long)s.draws, (unsigned long long)s.stored,
                     (unsigned long long)s.loaded, (unsigned long long)s.unmatched,
                     (unsigned long long)s.exhausted, (unsigned long long)s.invalid,
                     (unsigned long long)s.still, (unsigned long long)s.held,
-                    history.Used(), PositionsPerFrame, (unsigned long long)index_ranges.stats.hits,
+                    (unsigned long long)s.jumped, history.Used(), positions_per_frame, (unsigned long long)index_ranges.stats.hits,
                     (unsigned long long)index_ranges.stats.scans,
                     (unsigned long long)index_ranges.stats.stale, index_ranges.Size());
+        // What asked for storage, a frame on average over the 600: draws, the vertices they asked for (stored
+        // or not) and those skipped for capacity; then the busiest frame's ask against what fits.
+        char by[512];
+        int at = 0;
+        for (size_t r = 0; r < size_t(Motion::StoreReason::Count); ++r) {
+            if (!s.reason_draws[r] || at >= int(sizeof(by))) continue;
+            at += std::snprintf(by + at, sizeof(by) - at, "%s%s %.0f draws, %.2f M vertices (%.0f skipped)",
+                                at ? "; " : "", Motion::StoreReasonName(Motion::StoreReason(r)),
+                                double(s.reason_draws[r]) / 600, double(s.reason_vertices[r]) / 600 / (1 << 20),
+                                double(s.reason_skips[r]) / 600);
+        }
+        std::printf("Object motion: a frame stores %s; the busiest frame asked for %.2f M of %.2f M vertices\n",
+                    at ? by : "nothing",
+                    double(std::max<u64>(s.peak_demand, history.Demand())) / (1 << 20),
+                    double(positions_per_frame) / (1 << 20));
         index_ranges.stats = {};
         history.stats = {};
     }
@@ -225,11 +253,11 @@ void ObjectMotion::OnFrameStart() {
     });
 }
 
-u32 ObjectMotion::PrepareDraw(const DrawInfo& draw) {
+u32 ObjectMotion::PrepareDraw(const DrawInfo& draw, Motion::Anchor anchor, Motion::StoreReason reason) {
     if (!enabled || BbToggle::Disabled(1u << 29) || params_used >= ParamsPerFrame) {
         return 0;
     }
-    const auto allocation = history.Prepare(draw);
+    const auto allocation = history.Prepare(draw, anchor, reason);
     u32 flags = (allocation.store ? Shader::MotionVectors::FlagStore : 0) |
                 (allocation.load ? Shader::MotionVectors::FlagLoad : 0);
     if (!flags) {

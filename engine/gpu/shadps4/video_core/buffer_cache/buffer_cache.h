@@ -125,6 +125,10 @@ public:
     /// them on the draw recording thread), counted by path: [read, written] x [in place, stream
     /// copy, VRAM], with their bytes.
     static inline bool hle_obtain = false;
+    /// The copy shader's source spans (vk_shader_hle.cpp), set around their ObtainBuffer calls:
+    /// read-only data the game wrote just before the copy and reads once. Up to
+    /// CopySourceStreamLimit they take the stream path, untracked (see ObtainBuffer).
+    static inline thread_local bool copy_source = false;
     static inline std::array<u64, 6> hle_path_calls{}, hle_path_bytes{};
 
     /// Finds a buffer for the specified region.
