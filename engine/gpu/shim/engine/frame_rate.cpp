@@ -24,7 +24,7 @@
 // frame into 0x575a908, which the list's sites read. Without the frame timer the values here follow that
 // copy, worked out at the start of the next frame (the frame hook, at the pacer's entry): a frame late and
 // eased, so after a long frame they catch up over 10 to 15 frames while the task step has already. With it
-// (BB_FRAME_TIMER=1) the cave calls ours: the same step as the task step's, from the same measurement, into
+// (the default; BB_FRAME_TIMER=0 leaves it out) the cave calls ours: the same step as the task step's, from the same measurement, into
 // the task step, 0x575a908 and every value here before the frame's tasks run - one step for all of it.
 #include "frame_rate.h"
 #include "engine_hooks.h"
@@ -503,8 +503,9 @@ bool Install(std::uint8_t* image, std::size_t size) {
     if (const char* cloth = std::getenv("BB_CLOTH_STEP"); cloth && cloth[0] == '0') {
         on[std::size_t(Group::ClothStep)] = false;
     }
-    // The frame timer and the camera's per-frame eases with it: only when asked for (the launcher's Experimental).
-    if (const char* timer = std::getenv("BB_FRAME_TIMER"); !timer || timer[0] != '1') {
+    // The frame timer and the camera's per-frame eases with it: on unless BB_FRAME_TIMER=0 (0.4.4: the default,
+    // after every log from 0.3.0 to 0.4.3 ran with it).
+    if (const char* timer = std::getenv("BB_FRAME_TIMER"); timer && timer[0] == '0') {
         on[std::size_t(Group::Timer)] = on[std::size_t(Group::Camera)] = false;
     }
     const auto fail = [&](Group g, std::uint64_t address) {

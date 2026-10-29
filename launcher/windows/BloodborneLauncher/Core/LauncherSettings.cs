@@ -82,7 +82,7 @@ namespace BloodborneLauncher.Core
             ["exp_async_pipelines"] = true,
             ["exp_fast_loading"] = true, // does nothing at 30 or 60 FPS (loading.cpp)
             ["exp_frame_fixes"] = true, // the frame-rate corrections at 60 FPS and above (frame_rate.cpp)
-            ["exp_frame_timer"] = false, // one frame time for the game and every correction (frame_rate.cpp Step)
+            ["exp_frame_timer"] = true, // one frame time for the game and every correction (frame_rate.cpp Step)
             ["exp_hot_pages"] = true,
             // 0.4.0 beta 4: off. Its memory moves (sparse rebinds) stall the GPU now and then in play
             // on NVIDIA; the CPU it saves is spare at 60 FPS (engine/docs/gpu-memory.md).
@@ -160,6 +160,10 @@ namespace BloodborneLauncher.Core
                     // for everyone); on again only by choice.
                     if (!saved.ContainsKey(GuestInPlaceOffMarker))
                         _data["exp_guest_in_place"] = false;
+                    // 0.4.4: the unified frame time on once (every test log from 0.3.0 to 0.4.3 ran with it,
+                    // the default since); off again only by choice.
+                    if (!saved.ContainsKey(FrameTimerOnMarker))
+                        _data["exp_frame_timer"] = true;
                     // 0.4.0: a stable launcher over a beta's file (any beta writes frame_stats_beta_on)
                     // switches off once what betas turn on for testing: the frame statistics and the
                     // sharp UI. On again only by choice.
@@ -192,11 +196,13 @@ namespace BloodborneLauncher.Core
             _data["occlusion_off_99"] = true;
             _data[PerfDefaultsMarker] = true;
             _data[GuestInPlaceOffMarker] = true;
+            _data[FrameTimerOnMarker] = true;
             if (Updater.CurrentBeta == 0) _data[BetaTestingOffMarker] = true;
         }
 
         private const string PerfDefaultsMarker = "perf_defaults_b4";
         private const string GuestInPlaceOffMarker = "guest_in_place_off_040";
+        private const string FrameTimerOnMarker = "frame_timer_on_044";
         private const string BetaTestingOffMarker = "beta_testing_off_040";
 
         /// <summary>0.9.37 beta 4's defaults that older settings files are switched to once.</summary>

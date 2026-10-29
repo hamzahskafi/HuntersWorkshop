@@ -80,7 +80,7 @@ namespace BloodborneLauncher.Views
                 L.T("At 60 FPS and above, ragdolls, physics, cloth, jumps, slopes, sprinting, attack sounds, online movement and timers follow the real frame time, and the timings the FPS++ patches halved or doubled (menu repeat, hit lifetimes, online timers) are the game's own again. Off: the older FPS++ patches above 60. On by default"),
                 "exp_frame_fixes", exp);
             SettingToggle(SymbolRegular.ArrowSync24, L.T("Unified frame time"),
-                L.T("Needs Frame rate corrections. The game and every correction use one frame time, the frame's own, in the same frame, instead of the corrections following a smoothed copy one frame late: after a stutter, ragdolls, physics, jumps, timers and the camera's easing catch up at once rather than over 10 to 15 frames. Off by default while it is tested"),
+                L.T("Needs Frame rate corrections. The game and every correction use one frame time, the frame's own, in the same frame, instead of the corrections following a smoothed copy one frame late: after a stutter, ragdolls, physics, jumps, timers and the camera's easing catch up at once rather than over 10 to 15 frames. On by default"),
                 "exp_frame_timer", exp);
             SettingToggle(SymbolRegular.Flash24, L.T("Fewer memory write checks"),
                 L.T("Memory the game rewrites before almost every use is no longer watched for changes, saving up to about 2 ms a frame in busy areas. On by default"),

@@ -472,9 +472,9 @@ void TestTimer() {
             constexpr std::uint64_t kCave = 0x2418e3d, kSkip = 0x183dc96;
             if (retune) image.put(kSkip, {0xe9, 0xd6, 0x05, 0x00, 0x00});
             SetEnv("BB_FPS", fps);
-            SetEnv("BB_FRAME_TIMER", "1");
+            SetEnv("BB_FRAME_TIMER", nullptr); // the default: on
             assert(BbEngine::FrameRate::Install(image.base, image.size));
-            SetEnv("BB_FRAME_TIMER", nullptr);
+            SetEnv("BB_FRAME_TIMER", "0");
             Protections(image);
             const double rate = fps[0] == '6' ? 60 : 120;
             // push rdi; mov rdi, rbx; jmp [rip+0] to the hook; pop rdi; movss xmm0, [step]; movss [rbp-0x38], xmm0.
@@ -550,7 +550,7 @@ void TestCaveRuns() {
     SetEnv("BB_FPS", "60");
     SetEnv("BB_FRAME_TIMER", "1");
     assert(BbEngine::FrameRate::Install(image.base, image.size));
-    SetEnv("BB_FRAME_TIMER", nullptr);
+    SetEnv("BB_FRAME_TIMER", "0");
     Protections(image);
     // A ret where the task function goes on (its page opened for it: code pages are read and execute).
     std::uint8_t* const page = image.at(kCave + 46) - (reinterpret_cast<std::uintptr_t>(image.at(kCave + 46)) % kPage);
@@ -649,6 +649,7 @@ void TestClothStep() {
 }
 
 int main() {
+    SetEnv("BB_FRAME_TIMER", "0"); // the tests without the frame timer; TestTimer and TestCaveRuns turn it on
     TestRated();
     TestPlayTime();
     TestTable();
