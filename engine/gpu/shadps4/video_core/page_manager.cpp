@@ -3,6 +3,7 @@
 
 #include <boost/container/small_vector.hpp>
 #include "bbport_copy.h"
+#include "bbport_gx_ring.h"
 #include "bbport_sections.h"
 #include "bbport_threads.h"
 #include "bbport_toggles.h"
@@ -249,9 +250,10 @@ void PageManager::ReportFaultSites() {
     std::sort(rows.begin(), rows.begin() + n, [](const Row& a, const Row& b) { return a.count > b.count; });
     std::printf("Write fault sites (guest code, this window): %llu faults", (unsigned long long)total);
     for (std::size_t i = 0; i < std::min<std::size_t>(n, 12); ++i) {
-        std::printf("%s %s (from +%#llx) %llu at %#llx", i ? ";" : ":",
+        std::printf("%s %s (from +%#llx) %llu at %#llx%s", i ? ";" : ":",
                     SiteName(rows[i].rip).c_str(), (unsigned long long)rows[i].caller,
-                    (unsigned long long)rows[i].count, (unsigned long long)rows[i].address);
+                    (unsigned long long)rows[i].count, (unsigned long long)rows[i].address,
+                    BbGxRing::Contains(rows[i].address, 1) ? " (GX range allocator)" : "");
     }
     std::printf("\n");
 }

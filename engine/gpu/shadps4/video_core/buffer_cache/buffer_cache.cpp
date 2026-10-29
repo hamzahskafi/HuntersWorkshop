@@ -18,6 +18,7 @@
 #include "bbport_free_check.h"
 #include "bbport_guest_memory.h"
 #include "bbport_guest_hooks.h"
+#include "bbport_gx_ring.h"
 #include "common/alignment.h"
 #include "core/memory.h"
 #include "video_core/amdgpu/liverpool.h"
@@ -1112,7 +1113,23 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
         const u64 kib = env ? std::strtoull(env, nullptr, 10) : 64;
         return std::max<u64>(std::min<u64>(kib, 1024) * 1024, STREAM_THRESHOLD);
     }();
-    const u64 stream_limit = copy_source ? copy_source_limit : STREAM_THRESHOLD;
+    // And any read-only buffer in the game's GX range allocator (bbport_gx_ring.h), up to 256 KiB
+    // (BB_GX_RING_STREAM_KB; 0: as before): the memory the game rewrites for the GPU every frame
+    // (per-draw parameters, CPU-deformed vertices, the upload area), whose tracked uploads were
+    // most of the write faults left after the copy shader's sources (0.4.3's profile). Not texel
+    // buffers, which the image path may serve. Looked for until the game has made its device.
+    static const u64 gx_ring_limit = [] {
+        const char* env = std::getenv("BB_GX_RING_STREAM_KB");
+        const u64 kib = env ? std::strtoull(env, nullptr, 10) : 256;
+        return kib ? std::max<u64>(std::min<u64>(kib, 4096) * 1024, STREAM_THRESHOLD) : 0;
+    }();
+    u64 stream_limit = copy_source ? copy_source_limit : STREAM_THRESHOLD;
+    if (gx_ring_limit && !is_written && !is_texel_buffer && size > stream_limit && size <= gx_ring_limit) {
+        thread_local u32 ring_looks = 0;
+        if (BbGxRing::Known() || ((++ring_looks & 255) == 0 && BbGxRing::Find())) {
+            if (BbGxRing::Contains(device_addr, size)) stream_limit = gx_ring_limit;
+        }
+    }
     if (!is_written && size <= stream_limit && !IsRegionGpuModified(device_addr, size)) {
         BB_SECTION(ObtainStream);
         note_hle(1);

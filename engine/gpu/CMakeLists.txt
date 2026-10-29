@@ -404,6 +404,10 @@ target_link_libraries(job-pool-test PRIVATE Threads::Threads)
 add_executable(fmod-ring-test EXCLUDE_FROM_ALL ../tests/test_fmod_ring.cpp)
 target_compile_options(fmod-ring-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(fmod-ring-test PRIVATE ..)
+# The game's GX range allocator region, read from a stand-in for the game at the loader's address.
+add_executable(gx-ring-test EXCLUDE_FROM_ALL ../tests/test_gx_ring.cpp shim/bbport_gx_ring.cpp)
+target_compile_options(gx-ring-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(gx-ring-test PRIVATE shim)
 # The hit collector cap and the GX occlusion query guard against stand-ins for the game's functions.
 add_executable(crash-guards-test EXCLUDE_FROM_ALL ../tests/test_crash_guards.cpp shim/engine/crash_guards.cpp
     shim/engine/engine_hooks.cpp)
