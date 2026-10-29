@@ -120,6 +120,14 @@ FRAME_SITE(Cloth, 0xb41f4e, "c5f8294580", "", "e921000000")
 FRAME_SITE(Cloth, 0xb41f72, "7317488d0505fd06044889010f318941084883c11048894b08", "", "eb17c5f85905849d1f04c5f8294580e9cdffffff9090909090")
 FRAME_SITE(Cloth, 0xb420ee, "c5f82945a0", "", "e921000000")
 FRAME_SITE(Cloth, 0xb42112, "7317488d0595fb06044889010f318941084883c11048894b08", "", "eb17c5f85905e49b1f04c5f82945a0e9cdffffff9090909090")
+// The cloth's damping (0xb6fb90, the cloth's operator that runs before its solve): a factor a substep,
+// powf(1 - the data's damping, the substep's seconds), which the integrator (0xb73df0) applies at each substep.
+// It takes the substep's seconds as the frame's over the data's substep count, 2, which it reads itself. With the
+// list's one substep a frame (0xb6e67a) a substep is the whole frame: its damping was for half of it, so the cloth
+// lost its swing half as fast as on the PS4. The count read as 1 here too (the ClothStep group, frame_rate.cpp:
+// mov eax, 1 over the read and its fallback to the world's default). The rescale of the cloth's last positions
+// when the frame's time changes, in the same function, takes the ratio of two substeps and is the same either way.
+FRAME_SITE(ClothStep, 0xb6fbf0, "8b401885c07504418b4720", "", "b801000000660f1f440000")
 
 // FRAME_LOAD(group, instruction, length, displacement offset, constant, kind, lanes, the instruction's bytes,
 // the constant's value in each lane): a value the game means "a frame" by, read from a slot of ours that

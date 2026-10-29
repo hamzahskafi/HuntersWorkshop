@@ -22,12 +22,12 @@ class FrameRateSitesTests(unittest.TestCase):
 
     def test_every_entry_is_parsed(self):
         counts = {k: len(v) for k, v in self.entries.items()}
-        self.assertEqual(counts, {'sites': 70, 'loads': 32, 'values': 38, 'counts': 4, 'targets': 5, 'cloth_scales': 1,
+        self.assertEqual(counts, {'sites': 71, 'loads': 32, 'values': 38, 'counts': 4, 'targets': 5, 'cloth_scales': 1,
                                   'eases': 2, 'require': 2, 'play': 1})
         text = frame_rate_check.INC.read_text()
         self.assertEqual(sum(text.count(f'\n{m}(') for m in ('FRAME_SITE', 'FRAME_LOAD', 'FRAME_VALUE', 'FRAME_COUNT',
                                                                'FRAME_TARGET', 'FRAME_CLOTH_SCALE', 'FRAME_EASE',
-                                                               'FRAME_REQUIRE', 'FRAME_PLAY_TIME')), 155)
+                                                               'FRAME_REQUIRE', 'FRAME_PLAY_TIME')), 156)
 
     def test_a_wrong_entry_fails(self):
         wrong = copy.deepcopy(self.entries)

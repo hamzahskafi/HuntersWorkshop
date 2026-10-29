@@ -71,6 +71,39 @@ int main() {
     assert(!anchored.Prepare(draw, {5, 0, 0, true}).load && anchored.stats.jumped == 1);
     assert(anchored.Prepare(draw, {5.1f, 0, 0, true}).load);
 
+    // Why draws are stored, and the frame's ask against what fits (the frame statistics' breakdown).
+    History asked(100);
+    asked.NextFrame();
+    Draw small = draw;
+    small.vertices = {0, 60};
+    small.instances = 1;
+    asked.Prepare(small, {}, StoreReason::Character);
+    small.indices++;
+    asked.Prepare(small, {}, StoreReason::GpuWritten); // 120 asked, 100 fit: this one skipped
+    assert(asked.Demand() == 120 && asked.Used() == 60);
+    assert(asked.stats.reason_draws[size_t(StoreReason::Character)] == 1 &&
+           asked.stats.reason_vertices[size_t(StoreReason::GpuWritten)] == 60 &&
+           asked.stats.reason_skips[size_t(StoreReason::GpuWritten)] == 1 &&
+           asked.stats.reason_skips[size_t(StoreReason::Character)] == 0);
+    asked.NextFrame();
+    assert(asked.LastDemand() == 120 && asked.Demand() == 0);
+    // A held gate's draw counts as held.
+    History reasons(1024);
+    reasons.SetHold(1);
+    const History::GateKey key{.shader = 9, .index_count = 3, .instances = 1};
+    reasons.Moving(key, 1);
+    reasons.NextFrame();
+    reasons.Moving(key, 2);                       // changed
+    reasons.Prepare(small, {}, StoreReason::Moving);
+    reasons.NextFrame();
+    reasons.Moving(key, 2);                       // unchanged, held
+    reasons.Prepare(small, {}, StoreReason::Moving);
+    assert(reasons.stats.reason_draws[size_t(StoreReason::Moving)] == 1 &&
+           reasons.stats.reason_draws[size_t(StoreReason::Held)] == 1);
+    History sized(8);
+    sized.SetCapacity(1 << 20);
+    assert(sized.Capacity() == (1u << 20));
+
     History overflow(32);
     draw.vertices.first = 0;
     draw.vertices.count = INT32_MAX;
@@ -163,5 +196,5 @@ int main() {
     assert(JitterPhases(640, 1920) == 72);
     assert(JitterPhases(0, 1920) == 8);
     std::puts("Motion history: PASS (ranges, restart, offsets, matching, instances, anchors, capacity, gating, "
-              "holds, index cache, jitter)");
+              "holds, reasons, index cache, jitter)");
 }

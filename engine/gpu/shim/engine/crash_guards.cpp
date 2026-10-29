@@ -6,6 +6,7 @@
 #include <array>
 #include <atomic>
 #include <cstring>
+#include <initializer_list>
 
 namespace BbEngine::CrashGuards {
 namespace {
@@ -62,19 +63,40 @@ bool Create(std::uint64_t query, std::uint64_t kind) {
 }
 } // namespace
 
-bool HitFull(std::uint64_t collector) {
-    const auto count = Load<std::int32_t>(collector + kHitCount);
-    return count >= kHitCap || (count > 0 && !Load<std::uint64_t>(collector + kHitData));
+void HitCave(std::uint64_t image, std::uint8_t (&cave)[kHitCaveSize]) {
+    std::uint8_t* c = cave;
+    const auto put = [&](std::initializer_list<std::uint8_t> bytes) {
+        for (const std::uint8_t b : bytes) *c++ = b;
+    };
+    const auto put64 = [&](std::uint64_t value) {
+        std::memcpy(c, &value, 8);
+        c += 8;
+    };
+    const auto jump = [&](std::uint64_t to) { // jmp [rip + 0]; the address
+        put({0xff, 0x25, 0, 0, 0, 0});
+        put64(to);
+    };
+    const auto cap = static_cast<std::uint32_t>(kHitCap);
+    put({0x41, 0x81, 0x7e, 0x28, std::uint8_t(cap), std::uint8_t(cap >> 8), std::uint8_t(cap >> 16),
+         std::uint8_t(cap >> 24)}); // cmp dword [r14 + 0x28], kHitCap
+    put({0x73, 4 + 10 + 5 + 14});   // jae full
+    put({0x49, 0x8d, 0x76, 0x20});  // lea rsi, [r14 + 0x20]
+    put({0x48, 0xbf});              // movabs rdi, the allocator
+    put64(image + kHitAllocator);
+    put({0xba, 0x60, 0, 0, 0});     // mov edx, 0x60
+    jump(image + kHitGrowCall);
+    put({0x4c, 0x89, 0xf7});        // full: mov rdi, r14
+    put({0x48, 0xb8});              // movabs rax, HitDropped
+    put64(reinterpret_cast<std::uint64_t>(&HitDropped));
+    put({0xff, 0xd0});              // call rax (rsp is 16-byte aligned here: three pushes after the call)
+    jump(image + kHitReturn);
 }
 
-CRASH_GUARDS_ABI std::int64_t HitPush(std::uint64_t, const std::uint64_t* saved) {
-    const std::uint64_t collector = saved[5];
-    if (!collector || !HitFull(collector)) return 0; // the game's push
+CRASH_GUARDS_ABI void HitDropped(std::uint64_t collector) {
     const unsigned n = g_hits_dropped.fetch_add(1) + 1;
     if (Report(n))
         host_log("Game fixes: a physics hit collector full (%d hits): a hit dropped (%u so far)",
                  Load<std::int32_t>(collector + kHitCount), n);
-    return 1; // skipped; the push returns nothing
 }
 
 void SetQueryGame(std::uint64_t create, std::uint64_t device_begin, std::uint64_t device_end) {

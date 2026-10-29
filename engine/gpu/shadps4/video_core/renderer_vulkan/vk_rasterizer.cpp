@@ -2008,6 +2008,7 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
         // (Motion::Draw, Motion::Anchor): another object in a culled one's place is not matched.
         const u32 instances = regs.num_instances.NumInstances();
         bool gated = !all_motion;
+        auto reason = all_motion ? Motion::StoreReason::All : Motion::StoreReason::Moving;
         u64 palette = 0, instance_data = 0;
         Motion::Anchor anchor{};
         for (const auto& resource : vs.buffers) {
@@ -2018,7 +2019,11 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
             const auto role = Motion::ClassifyBuffer(size);
             if (role == Motion::BufferRole::Other) continue;
             const VAddr address = buffer.base_address;
-            const bool readable = memory->IsValidGpuMapping(address, 0) &&
+            // Read only what the CPU holds current: memory the GPU wrote has a stale CPU copy, and
+            // with CPU reads of GPU data set to Precise (BB_READBACKS=2) a read of it would wait
+            // for the GPU thread, which may be waiting for this one.
+            const bool gpu_written = buffer_cache.IsRegionGpuModified(address, size);
+            const bool readable = !gpu_written && memory->IsValidGpuMapping(address, 0) &&
                                   memory->ClampRangeSize(address, size) == size;
             const auto* data = reinterpret_cast<const float*>(address);
             if (readable) {
@@ -2034,10 +2039,12 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
             }
             if (role == Motion::BufferRole::Skeleton) {
                 gated = false;
-            } else if (gated && buffer_cache.IsRegionGpuModified(address, size)) {
+                reason = Motion::StoreReason::Character;
+            } else if (gated && gpu_written) {
                 // Lantern 0.9.38 (Awaken): a small skeleton the GPU wrote has a stale CPU copy,
                 // whose hash would read as standing still: such a draw is not gated.
                 gated = false;
+                reason = Motion::StoreReason::GpuWritten;
             } else if (gated && readable) {
                 palette = XXH3_64bits_withSeed(data, size, palette);
             }
@@ -2087,7 +2094,7 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
                 .instances = instances,
                 .first_instance = first_instance,
                 .vertices = range,
-            }, anchor);
+            }, anchor, reason);
         }
     }
     pipeline->BindResources(set_writes, push_data, {image_infos.data(), image_infos.size()},

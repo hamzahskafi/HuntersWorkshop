@@ -137,7 +137,7 @@ namespace BloodborneLauncher.Core
                 L.T("The game's threads handle very small numbers as a PS4 does, rounding them to zero, instead of as Windows does. ") +
                 L.T("Physics and cloth then behave as on the console: with Windows' way, some of Cainhurst's ghosts lose the lower half of their dresses. Off: Windows' way, as before 0.4.2")),
             OnUnless0("BB_CLOTH_STEP", Fixes, L.T("Cloth as on the PS4 (test)"),
-                L.T("Some of the cloth's constraints act once a 30 FPS frame, on the PS4's second cloth solve; the 60 FPS patch left them out. ") +
+                L.T("Some of the cloth's constraints act once a 30 FPS frame, on the PS4's second cloth solve, and the cloth settles as fast as on the PS4; the 60 FPS patch left those constraints out and halved its damping. ") +
                 L.T("For the side-by-side test, watch a coat or a dress move with it on and off. Off: the cloth as before 0.4.3")),
             Flag("BB_RED_ZONE_FUNCTIONS", Fixes, L.T("Intel effect crash fix (test)"),
                 L.T("For crashes in effects on Intel 12th-14th gen CPUs (Ebrietas, Witch of Hemwick, One Reborn, the Cainhurst " +

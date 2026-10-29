@@ -237,6 +237,7 @@ Image Build(std::size_t size, bool listed) {
         std::memcpy(image.at(e.constant), listed ? &e.listed : &e.game, 4);
     }
     image.put(play_time.first, Hex(play_time.second));
+    image.put(0xb6e67a, Hex(listed ? "bb01000000909090909090" : "8b581885db7504418b5d20")); // the cloth's substeps
     return image;
 }
 // The loader's protections after Install (probe.c): all closed, then the game's code and data segments
@@ -276,7 +277,7 @@ void TestPlayTime() {
 
 void TestTable() {
     Collect();
-    assert(sites.size() == 70 && loads.size() == 32 && values.size() == 38 && counts.size() == 4 &&
+    assert(sites.size() == 71 && loads.size() == 32 && values.size() == 38 && counts.size() == 4 &&
            targets.size() == 5 && cloth_scales.size() == 1 && eases.size() == 2 && required.size() == 2);
 }
 
@@ -427,7 +428,9 @@ void TestNoRoom() {
         assert(BbEngine::FrameRate::Install(image.base, image.size));
         const bool ninety = fps[0] == '9';
         for (const Site& s : sites) {
-            const auto expect = Hex(s.group == "Cloth" && !ninety ? s.was : s.now);
+            // The game's bytes, not the list's: the cloth's damping as the game has it, without its one substep.
+            const bool game = (s.group == "Cloth" && !ninety) || s.group == "ClothStep";
+            const auto expect = Hex(game ? s.was : s.now);
             assert(!std::memcmp(image.at(s.at), expect.data(), expect.size()));
         }
         for (const Load& l : loads) {
@@ -607,7 +610,8 @@ void TestSelfHit() {
 // The cloth's last substep (the ClothStep group): a stand-in for Havok's stiffness factor (0x1567a80) behind the
 // game's prologue that gives back the substep it was called with. Each frame steps the frame time, then calls it
 // as the cloth's helpers do under the list's one substep: substep 0 of the data's `substeps`. The count of calls
-// that came as the last substep.
+// that came as the last substep; g_damped, whether the group's other site, the damping's count, went in.
+bool g_damped = false;
 int ClothLasts(const char* skip, double seconds, int frames, int substeps, bool listed) {
     const Image image = Build(kSize, true);
     // The game's first 14 bytes; mov eax, edx; the epilogue.
@@ -618,6 +622,8 @@ int ClothLasts(const char* skip, double seconds, int frames, int substeps, bool 
     assert(BbEngine::FrameRate::Install(image.base, image.size));
     SetEnv("BB_FRAME_FIXES_SKIP", nullptr);
     Protections(image);
+    for (const Site& s : sites)
+        if (s.group == "ClothStep") g_damped = image.holds(s, Hex(s.now));
     using Factor = std::int32_t(__attribute__((sysv_abi)) *)(const void*, int, int, int, float, float);
     const auto factor = reinterpret_cast<Factor>(image.at(0x1567a80));
     int lasts = 0;
@@ -630,16 +636,16 @@ int ClothLasts(const char* skip, double seconds, int frames, int substeps, bool 
     return lasts;
 }
 void TestClothStep() {
-    assert(ClothLasts(nullptr, 1.0 / 60, 60, 2, true) == 30); // every other frame, as the PS4's two substeps
+    assert(ClothLasts(nullptr, 1.0 / 60, 60, 2, true) == 30 && g_damped); // every other frame, as the PS4's two substeps
     const int fast = ClothLasts(nullptr, 1.0 / 144, 144, 2, true);
     assert(fast >= 29 && fast <= 30);                         // 30 a second above 60
     assert(ClothLasts(nullptr, 1.0 / 20, 20, 2, true) == 20);  // a frame of 1/30 s or longer: every one
     assert(ClothLasts(nullptr, 1.0 / 60, 60, 1, true) == 0);   // one substep in the data: the game's call
-    assert(ClothLasts("clothstep", 1.0 / 60, 60, 2, true) == 0); // left out by name
+    assert(ClothLasts("clothstep", 1.0 / 60, 60, 2, true) == 0 && !g_damped); // left out by name
     SetEnv("BB_CLOTH_STEP", "0");
-    assert(ClothLasts(nullptr, 1.0 / 60, 60, 2, true) == 0);     // or by its switch
+    assert(ClothLasts(nullptr, 1.0 / 60, 60, 2, true) == 0 && !g_damped);     // or by its switch
     SetEnv("BB_CLOTH_STEP", nullptr);
-    assert(ClothLasts(nullptr, 1.0 / 60, 60, 2, false) == 0);  // without the list's one substep: left out
+    assert(ClothLasts(nullptr, 1.0 / 60, 60, 2, false) == 0 && !g_damped);  // without the list's one substep
 }
 
 int main() {

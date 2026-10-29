@@ -111,6 +111,20 @@ int main() {
     BbEngine::Discard(replaced);
     Put(image, expected.data(), expected.size());
 
+    // A cave in the site's place: add rdi, 100; then on to the instructions after the site (jmp [rip+0]).
+    Put(image + 16, sum, sizeof sum);
+    std::uint8_t cave[18] = {0x48, 0x83, 0xc7, 0x64, 0xff, 0x25, 0, 0, 0, 0};
+    const auto after = reinterpret_cast<std::uint64_t>(image + 16);
+    std::memcpy(cave + 10, &after, 8);
+    BbEngine::Hook diverted;
+    assert(!BbEngine::Divert(diverted, image, 4096, 0, wrong, cave));
+    assert(BbEngine::Divert(diverted, image, 4096, 0, expected, cave) && diverted.stub);
+    assert(!std::memcmp(image, expected.data(), expected.size()));
+    BbEngine::Commit(std::span{&diverted, 1});
+    assert(BbEngine::Call(reinterpret_cast<std::uint64_t>(image), 1,2,3,4,5,6) == 121);
+    BbEngine::Discard(diverted);
+    Put(image, expected.data(), expected.size());
+
     // A seventh argument on the stack, read as the game reads it ([rbp+0x10]):
     // push rbp; mov rbp,rsp; mov rax,[rbp+0x10]; add rax,r9; pop rbp; ret
     const std::uint8_t seventh[] = {0x55,0x48,0x89,0xe5,0x48,0x8b,0x45,0x10,0x4c,0x01,0xc8,0x5d,0xc3};
@@ -137,5 +151,5 @@ int main() {
 #else
     munmap(image, 4096);
 #endif
-    std::puts("PASS: guest ABI arguments (seven with a stack argument), XMM preservation, return slot, byte/range guards, staged hook installation, the game's function run from a callback, a replaced function and a redirected tail call");
+    std::puts("PASS: guest ABI arguments (seven with a stack argument), XMM preservation, return slot, byte/range guards, staged hook installation, the game's function run from a callback, a replaced function, a cave and a redirected tail call");
 }

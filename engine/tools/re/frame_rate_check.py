@@ -24,7 +24,7 @@ INC = ROOT / 'gpu/shim/engine/frame_rate_sites.inc'
 BASE = 0x400000
 DATA_END = 0x56d30f4  # 1.09: the end of its data segment (frame_rate.cpp's kDataEnd; the slots follow it)
 GROUPS = ('Clips', 'Physics', 'Grass', 'Targeting', 'Jump', 'Sprint', 'Slope', 'Online', 'Hitbox', 'Timers', 'Menus',
-          'Durations', 'PlayTime', 'Sound', 'Cloth', 'Steps', 'Lens')
+          'Durations', 'PlayTime', 'Sound', 'Cloth', 'Steps', 'Lens', 'ClothStep')
 KINDS = ('Step', 'Amount', 'Decay', 'Keep', 'Rate', 'Game', 'Cloth')
 COUNTS = ('Frames', 'Micros', 'Digits')
 SIXTIETH = 0x3c888889

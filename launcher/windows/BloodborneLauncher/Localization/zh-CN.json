@@ -1713,6 +1713,6 @@
   "PS4 floating-point mode": "PS4 浮点模式",
   "Physics and cloth then behave as on the console: with Windows' way, some of Cainhurst's ghosts lose the lower half of their dresses. Off: Windows' way, as before 0.4.2": "物理和布料因此与主机一致：若按 Windows 的方式，该隐赫斯特的部分幽灵会缺失裙子的下半部分。关闭：Windows 的方式，与 0.4.2 之前相同",
   "Cloth as on the PS4 (test)": "布料与 PS4 一致（测试）",
-  "Some of the cloth's constraints act once a 30 FPS frame, on the PS4's second cloth solve; the 60 FPS patch left them out. ": "布料的部分约束在每个 30 FPS 帧中作用一次，即 PS4 的第二次布料求解；60 FPS 补丁遗漏了它们。",
+  "Some of the cloth's constraints act once a 30 FPS frame, on the PS4's second cloth solve, and the cloth settles as fast as on the PS4; the 60 FPS patch left those constraints out and halved its damping. ": "布料的部分约束在每个 30 FPS 帧中作用一次，即 PS4 的第二次布料求解，布料的摆动衰减也与 PS4 一样快；60 FPS 补丁遗漏了这些约束，并将其阻尼减半。",
   "For the side-by-side test, watch a coat or a dress move with it on and off. Off: the cloth as before 0.4.3": "对比测试时，分别开启和关闭此项，观察外套或裙子的摆动。关闭：布料与 0.4.3 之前相同"
 }

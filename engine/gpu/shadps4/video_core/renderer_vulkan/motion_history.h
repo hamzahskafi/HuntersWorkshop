@@ -238,6 +238,16 @@ struct Anchor {
     }
 };
 
+// Why a draw's positions were stored (History::Prepare): a character-size skeleton, a small skeleton the GPU
+// wrote (its CPU copy is stale: Lantern 0.9.38's rule), a small skeleton whose bones changed or that is held
+// after a change, or every draw (BB_OBJECT_MOTION_ALL). Counted for the frame statistics' motion line.
+enum class StoreReason : uint8_t { Character, GpuWritten, Moving, Held, All, Count };
+inline const char* StoreReasonName(StoreReason reason) {
+    static constexpr const char* names[] = {"characters", "GPU-written small", "moving small", "held small",
+                                            "all"};
+    return names[size_t(reason)];
+}
+
 // CPU bookkeeping shared with the regression test. Draw identity includes topology and
 // offsets: a reused index buffer or another submesh must never read uninitialised history.
 class History {
@@ -250,7 +260,18 @@ public:
     struct Stats {
         uint64_t draws{}, stored{}, loaded{}, unmatched{}, exhausted{}, invalid{}, still{},
             held{}, jumped{};
+        /// By StoreReason: draws prepared, the vertices they asked for (stored or not), capacity skips.
+        uint64_t reason_draws[size_t(StoreReason::Count)]{};
+        uint64_t reason_vertices[size_t(StoreReason::Count)]{};
+        uint64_t reason_skips[size_t(StoreReason::Count)]{};
     } stats;
+
+    /// The vertices a frame can store; before the first frame (the buffer's size is chosen then).
+    void SetCapacity(uint32_t vertices) {
+        capacity = vertices;
+        used = demand = 0;
+    }
+    uint32_t Capacity() const { return capacity; }
 
     // A small skeleton (weapon, prop; most are static world pieces) only needs history
     // while its bone palette changes: with last frame's bones its motion is the camera's.
@@ -288,6 +309,7 @@ public:
         }
         GateState state{palette, 0, anchor};
         bool moving = false;
+        last_held = false;
         if (prev && prev->palette != palette) {
             moving = true;
             state.hold = hold;
@@ -295,6 +317,7 @@ public:
             moving = true; // unchanged, but changed within the last `hold` frames
             state.hold = prev->hold - 1;
             ++stats.held;
+            last_held = true;
         }
         gate_current.emplace(key, state);
         stats.still += moving ? 0 : 1;
@@ -310,10 +333,17 @@ public:
         gate_occurrences.clear();
         ++frame;
         used = 0;
+        last_demand = demand;
+        demand = 0;
     }
 
-    Allocation Prepare(const Draw& draw, Anchor anchor = {}) {
+    // `reason`: why the draw is prepared; Moving stands for the small-skeleton gate's answer (moving or held:
+    // the last Moving call says which).
+    Allocation Prepare(const Draw& draw, Anchor anchor = {}, StoreReason reason = StoreReason::All) {
         ++stats.draws;
+        if (reason == StoreReason::Moving && last_held) {
+            reason = StoreReason::Held;
+        }
         Key key{draw, 0};
         key.occurrence = occurrences[key]++;
         const uint64_t count = uint64_t(draw.vertices.count) * draw.instances;
@@ -325,6 +355,9 @@ public:
         const auto* prev = previous.find(key);
         Allocation result{0, 0, draw.vertices.count, draw.instances,
                           draw.vertices.first, draw.first_instance};
+        ++stats.reason_draws[size_t(reason)];
+        stats.reason_vertices[size_t(reason)] += count;
+        demand = uint32_t(std::min<uint64_t>(uint64_t(demand) + count, UINT32_MAX));
         if (prev && !prev->anchor.Near(anchor)) {
             ++stats.jumped;
             prev = nullptr;
@@ -342,11 +375,15 @@ public:
             ++stats.stored;
         } else {
             ++stats.exhausted;
+            ++stats.reason_skips[size_t(reason)];
         }
         return result;
     }
 
     uint32_t Used() const { return used; }
+    /// The vertices this frame's draws asked for, stored or not (Used is what fit); the last frame's after NextFrame.
+    uint32_t Demand() const { return demand; }
+    uint32_t LastDemand() const { return last_demand; }
 
 private:
     struct Key {
@@ -366,6 +403,8 @@ private:
         }
     };
     uint32_t capacity{}, used{};
+    uint32_t demand{}, last_demand{}; ///< vertices asked for this frame and the last (stored or not)
+    bool last_held{};                 ///< the last Moving call's answer came from a hold
     uint32_t hold{}; ///< frames a small skeleton keeps its history after a change (SetHold)
     uint64_t frame{};
     struct Stored {

@@ -181,10 +181,25 @@ bool Install(std::uint8_t* image, std::size_t size) {
                 "FMOD's sound ring guarded");
     }
 
-    // Havok's hit collectors capped, and the GX occlusion queries: their creation watched, their begin and end
-    // ours in place of the game's (Replace: two short functions whole). See crash_guards.h.
-    prepare(kHitCap, {{CrashGuards::kHitPush, CrashGuards::kHitPushEntry, CrashGuards::HitPush}},
-            "physics hit collectors capped");
+    // Havok's hit collectors capped (a cave on their growth), and the GX occlusion queries: their creation
+    // watched, their begin and end ours in place of the game's (Replace: two short functions whole). See
+    // crash_guards.h.
+    if (on[kHitCap]) {
+        Hook hook;
+        std::uint8_t cave[CrashGuards::kHitCaveSize];
+        CrashGuards::HitCave(reinterpret_cast<std::uint64_t>(image), cave);
+        const std::span<const std::uint8_t> push = CrashGuards::kHitPushCode;
+        const bool game = CrashGuards::kHitPush <= size && push.size() <= size - CrashGuards::kHitPush &&
+                          !std::memcmp(image + CrashGuards::kHitPush, push.data(), push.size());
+        if (game && Divert(hook, image, size, CrashGuards::kHitGrow,
+                           push.subspan(CrashGuards::kHitGrow - CrashGuards::kHitPush, CrashGuards::kHitGrowBytes),
+                           cave)) {
+            hooks.push_back(hook);
+            placed.emplace_back("physics hit collectors capped");
+        } else {
+            host_log("Game fixes: hit_cap left out: 0x%zx differs from 1.09", CrashGuards::kHitGrow);
+        }
+    }
     if (on[kGxQuery]) {
         Hook begin, end;
         if (!Replace(begin, image, size, CrashGuards::kQueryBegin, CrashGuards::kQueryBeginCode,
