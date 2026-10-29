@@ -32,7 +32,9 @@ struct Entry {
     std::vector<std::pair<Target, bool>> sampled; ///< textures (false) and storage images (true)
     std::string note;
     std::vector<std::string> buffers; ///< dumped constants, per draw
+    std::vector<std::string> list;    ///< every draw, in order (up to kListed)
 };
+constexpr size_t kListed = 8192;
 
 // GPU thread only.
 std::vector<Entry> entries;
@@ -119,6 +121,9 @@ void Write(VAddr presented) {
         }
         for (const auto& b : e.buffers) {
             std::fprintf(f, "%s\n", b.c_str());
+        }
+        for (const auto& d : e.list) {
+            std::fprintf(f, "%s\n", d.c_str());
         }
     }
     std::fclose(f);
@@ -212,13 +217,17 @@ void FrameCapture::BeginPass(const VideoCore::ImageInfo* const* colors, u32 num_
     pass_open = true;
 }
 
-void FrameCapture::Draw(u64 vs_hash, u64 ps_hash, u32 num_indices, u32 num_instances) {
+void FrameCapture::Draw(u64 vs_hash, u64 ps_hash, u32 num_indices, u32 num_instances, VAddr indices) {
     if (state.load(std::memory_order_relaxed) != Recording || entries.empty() ||
         entries.back().compute) {
         return;
     }
     auto& e = entries.back();
     ++e.draws;
+    if (e.list.size() < kListed) {
+        e.list.push_back(std::format("  draw {:4} vs {:016x} ps {:016x} indices {} instances {} at {:#x}",
+                                     e.draws, vs_hash, ps_hash, num_indices, num_instances, indices));
+    }
     e.indices += u64(num_indices) * std::max(num_instances, 1u);
     AddShader(e, vs_hash);
     AddShader(e, ps_hash);
