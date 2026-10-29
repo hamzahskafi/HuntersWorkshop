@@ -102,8 +102,9 @@ private:
     static constexpr u32 FrameSlots = 4;
     static constexpr u32 ParamsPerFrame = 8192;
     // Positions (device local): two halves (current/previous frame) of vec4; element 0 is reserved.
-    // 4 Mi vertices a frame, 8 Mi with 6 GiB of VRAM or more: Yharnam's crowds asked for over 4 Mi
-    // (0.4.2: up to ~400 draws a frame lost their history). BB_OBJECT_MOTION_VERTICES=<millions>.
+    // 4 Mi vertices a frame, 8 Mi with a VRAM budget of 4 GiB or more (6 GB cards): Yharnam's crowds
+    // asked for over 4 Mi (0.4.2: up to ~400 draws a frame lost their history).
+    // BB_OBJECT_MOTION_VERTICES=<millions>.
     u32 positions_per_frame = 4u << 20;
     Motion::History history{4u << 20};
     Motion::IndexRangeCache index_ranges;

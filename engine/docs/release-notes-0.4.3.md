@@ -25,11 +25,13 @@ What changed since 0.4.2, for the release page. The engine work behind each line
   runs out is capped (SrShadowy; via bbport 0.7), and a GX occlusion query whose creation ran out of
   room is made again instead of crashing the render thread (bbport #336, whp199). Since beta 2 the cap
   is checked only when the list grows, not for every hit.
-- **Motion vectors in busy scenes (beta 2).** On graphics cards with 8 GB or more, the motion
-  vectors keep room for twice as many vertices a frame: in Yharnam's streets many objects ran out
-  of room and got no motion of their own, which DLSS and FSR show as ghosting. With frame
-  statistics on, the log now says what took the room. With Precise GPU readbacks, the motion code
-  no longer reads memory the GPU is still writing, which could hang the game.
+- **Motion vectors in busy scenes.** On graphics cards with 6 GB or more, the motion vectors keep
+  room for twice as many vertices a frame: in Yharnam's streets many objects ran out of room and got
+  no motion of their own, which DLSS and FSR show as ghosting. When room still runs short, characters,
+  foliage and objects seen moving come first; the props that give way are mostly static, and their
+  motion is the camera's anyway. With frame statistics on, the log says what took the room and the
+  busiest frame's need. With Precise GPU readbacks, the motion code no longer reads memory the GPU is
+  still writing, which could hang the game.
 - **Character creator:** the model turns at the PS4's speed at 60 FPS (twice as fast before).
   (bbport 0.7, deadinside28)
 - **Frame limiter:** after a late frame the next one waits its full time instead of coming early.

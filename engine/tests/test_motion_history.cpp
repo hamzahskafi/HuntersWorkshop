@@ -86,7 +86,23 @@ int main() {
            asked.stats.reason_skips[size_t(StoreReason::GpuWritten)] == 1 &&
            asked.stats.reason_skips[size_t(StoreReason::Character)] == 0);
     asked.NextFrame();
-    assert(asked.LastDemand() == 120 && asked.Demand() == 0);
+    assert(asked.LastDemand() == 120 && asked.Demand() == 0 && asked.stats.peak_demand == 120);
+    // Short of room, a GPU-written small skeleton gives way: the others asked for 60 last frame, so one asking
+    // for 60 first is skipped and one asking for 40 fits beside the 60 still to come.
+    small.indices++;
+    assert(!asked.Prepare(small, {}, StoreReason::GpuWritten).store);
+    Draw forty = small;
+    forty.indices++;
+    forty.vertices = {0, 40};
+    assert(asked.Prepare(forty, {}, StoreReason::GpuWritten).store);
+    small.indices++;
+    assert(asked.Prepare(small, {}, StoreReason::Character).store && asked.Used() == 100);
+    asked.NextFrame();
+    assert(asked.stats.peak_demand == 160); // 60 + 40 + 60 asked
+    // With nothing asked for by the others, a GPU-written one has the room.
+    History free_room(100);
+    free_room.NextFrame();
+    assert(free_room.Prepare(small, {}, StoreReason::GpuWritten).store);
     // A held gate's draw counts as held.
     History reasons(1024);
     reasons.SetHold(1);
@@ -196,5 +212,5 @@ int main() {
     assert(JitterPhases(640, 1920) == 72);
     assert(JitterPhases(0, 1920) == 8);
     std::puts("Motion history: PASS (ranges, restart, offsets, matching, instances, anchors, capacity, gating, "
-              "holds, reasons, index cache, jitter)");
+              "holds, reasons, giving way, index cache, jitter)");
 }

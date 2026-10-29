@@ -93,8 +93,8 @@ ObjectMotion::ObjectMotion(const Instance& instance_, Scheduler& scheduler_)
     if (const char* value = std::getenv("BB_OBJECT_MOTION_VERTICES"); value && value[0]) {
         const unsigned long millions = std::strtoul(value, nullptr, 10);
         positions_per_frame = u32(std::clamp<unsigned long>(millions, 1, 64)) << 20;
-    } else if (instance.GetTotalMemoryBudget() >= (u64(6) << 30)) {
-        positions_per_frame = 8u << 20;
+    } else if (instance.GetTotalMemoryBudget() >= (u64(4) << 30)) {
+        positions_per_frame = 8u << 20; // 6 GB cards and up (a 6 GB card's budget is about 4.5 GiB)
     }
     history.SetCapacity(positions_per_frame);
     void* mapped = nullptr;
@@ -207,7 +207,7 @@ void ObjectMotion::OnFrameStart() {
                     (unsigned long long)index_ranges.stats.scans,
                     (unsigned long long)index_ranges.stats.stale, index_ranges.Size());
         // What asked for storage, a frame on average over the 600: draws, the vertices they asked for (stored
-        // or not) and those skipped for capacity; then the last frame's ask against what fits.
+        // or not) and those skipped for capacity; then the busiest frame's ask against what fits.
         char by[512];
         int at = 0;
         for (size_t r = 0; r < size_t(Motion::StoreReason::Count); ++r) {
@@ -217,8 +217,9 @@ void ObjectMotion::OnFrameStart() {
                                 double(s.reason_draws[r]) / 600, double(s.reason_vertices[r]) / 600 / (1 << 20),
                                 double(s.reason_skips[r]) / 600);
         }
-        std::printf("Object motion: a frame stores %s; the last frame asked for %.2f M of %.2f M vertices\n",
-                    at ? by : "nothing", double(history.Demand()) / (1 << 20),
+        std::printf("Object motion: a frame stores %s; the busiest frame asked for %.2f M of %.2f M vertices\n",
+                    at ? by : "nothing",
+                    double(std::max<u64>(s.peak_demand, history.Demand())) / (1 << 20),
                     double(positions_per_frame) / (1 << 20));
         index_ranges.stats = {};
         history.stats = {};
