@@ -36,3 +36,12 @@ What changed since 0.4.2, for the release page. The engine work behind each line
   before). (bbport 0.7, deadinside28)
 - **Frame limiter:** after a late frame the next one waits its full time instead of coming early.
   (after bbport 0.7)
+
+## Performance
+
+- **Less CPU work in busy areas.** The data the game copies into place every frame is now copied
+  once where it is used, instead of being write-protected and watched page by page: about half the
+  memory write faults and page-protection calls, and 12% less work on the thread that records the
+  frame's draws (measured at about 1,060 draws a frame).
+- **Motion vectors' bookkeeping halved.** A mesh's vertex range is checked again every 10 seconds
+  instead of every half second: in every test log, no check had ever found one changed.
