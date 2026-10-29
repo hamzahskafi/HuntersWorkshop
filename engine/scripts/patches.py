@@ -690,7 +690,7 @@ def builtin_selection(xml, config):
 
 def placeable(xml, name, app_version, segments):
     """Whether a built-in patch switched on in the Mods page fits this eboot. One that doesn't
-    (Performance Patch writes past its end: GitHub issues 28, 29) is left out, as an external
+    (the old Performance Patch wrote past its end: GitHub issues 28, 29) is left out, as an external
     patch would be, instead of stopping the launch."""
     try:
         compile_patches(xml,[name],app_version,segments)

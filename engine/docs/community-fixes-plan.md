@@ -31,6 +31,10 @@ HW's `Prepare()` calls and the sampler's `+0x...` print. Each address below says
 | PC memory model off by default (0.4.0 beta 4) | `5f3eed9` | The launcher's default and a one-time switch for existing settings files (`guest_in_place_off_040`); Lantern 0.9.37 beta 4 had turned it on for everyone. The toggle stays. Why, and what a fix would take: `docs/gpu-memory.md`. |
 | B13, B15, B16, B17 (0.4.0 beta 5) | `f09580f`, `1aa7905` | **B13:** the wind's step is a per-frame load of half the frame's (`frame_rate_sites.inc`, Grass), its force weighed by the game's 1/60, the time step read from `[rbp-0x170]`; path B (a model without wind slots) leaves before it moves anything. **B15:** `FrameRate::Tick` looks for AtkParam_Pc 2900931 every 120 frames and makes hit0_Radius 0.6 when it is the game's 0.4 (the Hitbox group). **B16:** the keyboard's left stick turns toward the keys at 900°/s, at most 30° a read, a half turn through forward, 60 ms kept after a release: `KeyTurn` in `gpu/shim/input/bindings.cpp` for the PC controls (the default; 0.4.0, after a review found beta 5 had it only in the legacy keys), `key_move` in `src/runtime_pad.c` with them off. **B17:** a controller stick past the round gate is brought back onto it (`round_gate`, `pad_round_gate=0` turns it off). Tests: frame-rate-test, the table checker against 1.09, test_pad.c, pc-input-test. |
 | 0.4.0: the log level, hitch reports and controller details | (this commit) | **Standard** (the default) writes save mounts only when they change, each thread name once, no semaphores, no 5 s draw counts (unless frame statistics are on) and the job pools' first cache and busy pools only: a 79-minute session from ~2,700 lines to ~700. **Detailed** (`BB_LOG_LEVEL=detailed`) brings them back with the GPU side's info messages; **Debug** adds its debug messages. **Hitch reports** (`BB_HITCH_REPORT_MS`) and **controller details** (`BB_PAD_LOG=1`: ids, connection, rumble, disconnects, the first vibration request, the round gate) in the launcher's Log submenu. A stable launcher over a beta's settings switches frame statistics and the sharp UI off once. Release notes: `docs/release-notes-0.4.0.md`. |
+| B18 (0.4.1 beta 1) | (this commit) | The game's threads get the PS4's floating-point state: MXCSR 0x9fc0 (flush-to-zero, denormals-are-zero) and x87 control word 0x037f, the values dumped from hardware (shadPS4#3568, via ayozetr `caa9b4b`). `runtime_ps4_fpu` in `src/runtime_thread.c`: on the main thread before the game's first code (`probe.c`) and at the start of every thread the game creates (THD's dispatcher, which runs the network callbacks, is one); the engine's own threads keep the host's. On by default for the beta's A/B test; `BB_PS4_FPU=0` (the launcher's Game fixes › PS4 floating-point mode) keeps the host's. The log's first line on it gives the host's values. Test: runtime-test (the calling thread, a denormal read as 0, and a created thread). **Confirmed (A/B, 2026-10-29, the same route through Cainhurst and the Hunter's Dream):** with the host's state some of Cainhurst's ghosts were drawn without the lower half of their dresses, every time; with the PS4's they were whole. No measurable cost: 60.0 FPS and 0 frames over 1.5x the median both ways, CPU within the runs' own spread (3.4 against 3.6 cores in Cainhurst, 2.8-2.9 against 2.7-2.8 idle in the Dream). The host's state Windows gave: MXCSR 0x1fa1 (0x1f80 with the invalid and precision flags left by the engine's start), x87 0x27f (53-bit). Beta 2: the launcher's toggle no longer says "(test)". |
+| 0.4.1 beta 2: from Lantern 0.9.38 | (this commit) | Awaken's: the camera motion shader gives NaN or infinite motion as none and clamps the rest to four screens (`camera_motion.comp`); a pass camera with a NaN or infinite value is not valid (`vk_camera_motion.cpp`); a small skeleton the GPU wrote (`IsRegionGpuModified`) is not gated by its stale CPU copy's hash (`vk_rasterizer.cpp`); Menu Confirm and Menu Back press their buttons in menus only (`host_bindings_apply`: in the world Return and Backspace were Interact and Dodge; pc-input-test). DLSS 310.9.16 (EthanBlazkowicz, Lantern #81), and `tools/fetch_dlss.sh` replaces a DLSS of another version (`out/DLSS-VERSION.txt`; Lantern's kept any file present). The launcher's default window fits the screen at high Windows scaling (GHusr-y5, Lantern #78; WPF launcher; not its remembering the window's size and place: the launcher opens fresh and centred). |
+| 0.4.2 beta 1: community patches, fixed our way | `2d35920`, `3fd3f38` | Checked against the 1.09 eboot.elf (every function from `.eh_frame_hdr` disassembled, the loader's relocations read). **Restore Debug Camera** (Lance McDonald) wrote 868 bytes over the function at 0x1de3330, which the game reaches from a callback a startup initialiser stores (0x1d5f2b6 -> 0x1d5dee0 -> 0x1dbe340 -> 0x1de3330); 483 bytes of it were no-ops. His 71 instructions, unchanged, now sit at 0x3abbe00-0x3abbf80 in the empty code area (patch 0x3abbde2-0x3abcdc6), every branch re-aimed and decoded again; the two hook jumps at 0x19729ab and 0x19729ba point there. **Enable Screen Space Reflections** (Kyo): its 2.0 sat in the clock function at 0x4632d0 (nothing calls it: harmless); the instruction at 0x12a99dd now reads the game's own 2.0 at 0x4bfc494 (read by seven of its instructions; no patch, table or per-frame load of ours touches it), one write fewer. **Performance Patch** removed: it never applied (writes past the executable; GitHub issues 28, 29). **Enemy Control** (stagvant) unchanged: Lantern's "dropped null check" is not there; its 32-bit string addresses only matter on an assert path after which the game itself crashes, and its unchecked value only on a lookup the game treats as an error. **Kept by decision:** 9 of our frame-rate table's 244 writes (and the same in Kyo's FPS lists) land where nothing reads in 1.09 (0x47df584 and 8 at 0x3abc208-0x3abcb20, from another game version); patches using the empty area stay below 0x3abc208. Lantern's remakes of these patches were not taken. test_patches.py (52). |
+| B14, option C: taken back out (0.4.2 beta 2) | (this commit) | In for 0.4.2 beta 1 (`49cb563`), out again: side by side the flicker held at 30 steps a second could not be told from the game's own at 60, and it was one more hook on a game function. B14 is closed; bbhost's light module stays a reference. With the hook left out (`BB_FRAME_FIXES_SKIP=flicker`) beta 1 lost the GPU every time on loading one save in Yharnam (a write where no memory is bound, after the presenter's post process); that crash is followed up on its own. |
 
 Checked and found already in HW (no change):
 
@@ -430,7 +434,7 @@ In-game checklist, for when you test:
 
 HW already carries 161 of bbhost's 166 frame-rate sites (every redirected load, the physics, AI,
 clip-drive and targeting steps, the pacer targets). These are what bbhost found beyond them.
-B13, B15, B16 and B17 went in for 0.4.0 beta 5 (the table above). B18 waits for an A/B test.
+B13, B15, B16 and B17 went in for 0.4.0 beta 5, and B18 for 0.4.1 beta 1 with a switch for its A/B test (the table above).
 
 **B14 parked (2026-10-26).** bbhost's effects work is its `decomp/sfx/step_gate.cpp` (1,344 lines) and
 the schedule in `engine/frame_rate.cpp` (`kSfxStepLoad` 0x2377d4a, `g_sfx_carry`). Effects move by time
@@ -448,6 +452,8 @@ at 60. The options weighed:
   pre-roll's call left alone: lamps and candles flicker 30 steps a second, as on the PS4; nothing else
   changes. Small. The recommended one, if this is picked up.
 - **D, nothing.** Chosen for now: the Ebrietas data fix covers the effect that never ended.
+
+**C tried in 0.4.2 beta 1 and taken back out (2026-10-29):** side by side its flicker could not be told from the game's own at 60, so it did not earn a hook on a game function. D stands, and B14 is closed.
 
 | # | Fix | What it fixes | Where | Source and credit |
 |---|---|---|---|---|
@@ -519,6 +525,18 @@ pacing drift (`PrecisePacing::Cadence`), early Z, 1 MiB render pools, PM4 type-0
 the Intel 12th-gen red zone, occlusion counts in order, the SRT walker's fault handling, stale
 vertex inputs, indexed indirect index buffers, the out-of-order flip IRQ, the Windows commit limit
 (`BB_POOL_LAZY`), and the online certificate trust and kept-alive retry.
+
+## Lantern 0.9.38, reviewed (2026-10-29)
+
+Taken for 0.4.1 beta 2: the table above. Already in HW: the native frame rate (HW's own table since 0.3.0;
+every site Lantern's `NATIVE_FRAME_RATE.md` lists is in `frame_rate_sites.inc`, the 90 list's effect step
+and the uncapped list's step in the start's patches), and the cutscene freeze fix (`job_slots.cpp`: HW's
+A4 hooks the same runner, its destroy and its reset). Not taken for now: FSR 4 from the AMD driver
+(RX 9000, Lantern still testing it; port if AMD players ask), the memory retry limit (the PC memory model
+only, off by default in HW), the game status and Discord presence, the Extra Messenger Skins patch
+(distpade; optional, cosmetic), muting while the window is in the background, the PC menus off switch, the
+cheats' online message, the Wayland scale hint (Linux later), the Russian PC menus (GHusr-y5; HW's menu
+builder has changed too much to copy) and the Help & FAQ redesign.
 
 ## Smoothness leads (for the smoothness phase)
 

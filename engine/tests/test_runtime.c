@@ -325,6 +325,29 @@ static void rw_timeouts(void) {
     assert(rw_unlock(&f.lock)==0);
     fixture_destroy(&f);
 }
+/* The PS4's floating-point state (shadPS4#3568; ayozetr caa9b4b): flush-to-zero and
+ * denormals-are-zero on the calling thread, and on a thread the game creates. */
+typedef int32_t (ABI *ThreadCreate)(void **,void **,void *(ABI *)(void *),void *,const char *);
+typedef int32_t (ABI *ThreadJoin)(void *,void **);
+static ABI void *fpu_worker(void *seen) {
+    __asm__ volatile("stmxcsr %0" : "=m"(*(uint32_t *)seen));
+    return NULL;
+}
+static void ps4_fpu(void) {
+    uint32_t host, mxcsr, seen=0; uint16_t cw;
+    __asm__ volatile("stmxcsr %0" : "=m"(host));
+    runtime_ps4_fpu();
+    __asm__ volatile("stmxcsr %0" : "=m"(mxcsr));
+    __asm__ volatile("fnstcw %0" : "=m"(cw));
+    assert(mxcsr==0x9fc0 && cw==0x037f);
+    volatile float tiny=1e-39f; /* a denormal: 0 with denormals-are-zero */
+    assert(tiny*2.0f==0.0f);
+    __asm__ volatile("ldmxcsr %0" : : "m"(host));
+    void *thread=NULL;
+    assert(GET(ThreadCreate,"6UgtwV+0zb4#p#J")(&thread,NULL,fpu_worker,&seen,"fpu")==0);
+    assert(GET(ThreadJoin,"onNY9Byn-W8#p#J")(thread,NULL)==0);
+    assert(seen==0x9fc0);
+}
 int main(int argc,char **argv) {
     runtime_start(0); assert(runtime_resolve("bzQExy189ZI#q#q",0)==0);
     runtime_start(1);
@@ -351,7 +374,7 @@ int main(int argc,char **argv) {
     if (argc>1 && !strcmp(argv[1],"--rwlock-concurrency")) { rw_concurrency(); return 0; }
     if (argc>1 && !strcmp(argv[1],"--rwlock-timeouts")) { rw_timeouts(); return 0; }
     libc_support(); posix_mutexes(); wall_time(); exit_handlers(); guards(); mutexes(); direct_memory(); memory_primitives();
-    rw_lifecycle(); rw_concurrency(); rw_timeouts();
-    puts("PASS: callback lifecycle, guard ABI, mutex errors, shared direct memory, memory primitives, resolver scope");
+    rw_lifecycle(); rw_concurrency(); rw_timeouts(); ps4_fpu();
+    puts("PASS: callback lifecycle, guard ABI, mutex errors, shared direct memory, memory primitives, resolver scope, the PS4's floating-point state");
     return 0;
 }

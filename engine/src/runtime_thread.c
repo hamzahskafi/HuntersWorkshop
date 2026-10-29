@@ -308,8 +308,41 @@ static void apply_priority(int prio) {
         printf("Runtime: audio threads (priority %d-%d) %s\n",256,HIGH_PRIO_LAST,
                enabled ? "above the game's other threads" : "at normal priority (BB_AUDIO_THREAD_PRIORITY=0)");
 }
+/* The PS4's floating-point state on the game's threads, after ayozetr's caa9b4b and shadPS4#3568
+ * (StevenMiller123, found by red-prig), the values dumped from real hardware: MXCSR 0x9fc0
+ * (flush-to-zero and denormals-are-zero on) and the x87 control word 0x037f (64-bit precision).
+ * A Windows thread starts with both flags clear (0x1f80) and 53-bit x87 precision: very small
+ * values stay as denormals where the PS4 makes them 0, which a physics step can drift on: with
+ * the host's state some of Cainhurst's ghosts are drawn without the lower half of their dresses,
+ * and with this they are whole (A/B test, 2026-10-29; no measurable CPU or frame-time cost). Set on
+ * the game's main thread before its first code (probe.c) and on each thread it creates; the
+ * engine's own threads keep the host's. BB_PS4_FPU=0: the host's state everywhere, as before. */
+void runtime_ps4_fpu(void) {
+#if defined(__x86_64__)
+    static int enabled=-1;
+    if (enabled<0) { const char *e=getenv("BB_PS4_FPU"); enabled=!(e && e[0]=='0'); }
+    static int noted;
+    if (!__atomic_exchange_n(&noted,1,__ATOMIC_RELAXED)) {
+        uint32_t host_mxcsr; uint16_t host_cw;
+        __asm__ volatile("stmxcsr %0" : "=m"(host_mxcsr));
+        __asm__ volatile("fnstcw %0" : "=m"(host_cw));
+        if (enabled)
+            printf("Runtime: the game's threads use the PS4's floating-point state (MXCSR 0x9fc0, x87 0x037f; "
+                   "the host's %#x, %#x; BB_PS4_FPU=0 keeps the host's)\n",(unsigned)host_mxcsr,(unsigned)host_cw);
+        else
+            printf("Runtime: the game's threads keep the host's floating-point state (MXCSR %#x, x87 %#x; "
+                   "BB_PS4_FPU=0)\n",(unsigned)host_mxcsr,(unsigned)host_cw);
+    }
+    if (!enabled) return;
+    const uint32_t mxcsr=0x9fc0;
+    const uint16_t cw=0x037f;
+    __asm__ volatile("ldmxcsr %0" : : "m"(mxcsr));
+    __asm__ volatile("fldcw %0" : : "m"(cw));
+#endif
+}
 static void *host_start(void *p) {
     GuestThread *t=p;
+    runtime_ps4_fpu();
     attach(t);
     set_host_name(t->name);
     if (t->attr.prio<=HIGH_PRIO_LAST) apply_priority(t->attr.prio);

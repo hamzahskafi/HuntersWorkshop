@@ -32,6 +32,7 @@ namespace BloodborneLauncher
             ws.GameCrashed += OnGameCrashed;
             ws.SignInRefused += OnSignInRefused;
             ws.Initialise();
+            FitToScreen();
             KeyDown += Window_KeyDown;
             PreviewMouseDown += Window_PreviewMouseDown;
             Deactivated += (_, _) => SearchResults.Visibility = Visibility.Collapsed;
@@ -483,6 +484,25 @@ namespace BloodborneLauncher
                 if (ResizeMode != ResizeMode.NoResize)
                     chrome.ResizeBorderThickness = new Thickness(8);
                 chrome.CaptionHeight = 34;
+            }
+        }
+
+        /// <summary>The default size, made to fit the screen: 1040 x 780 does not fit a 1080p screen
+        /// at 150% or 200% Windows scaling. The window opens fresh and centred every time (after
+        /// GHusr-y5's Lantern pull request #78, without its remembering the window).</summary>
+        private void FitToScreen()
+        {
+            try
+            {
+                var work = SystemParameters.WorkArea;
+                MinWidth = Math.Min(MinWidth, work.Width - 16);
+                MinHeight = Math.Min(MinHeight, work.Height - 16);
+                Width = Math.Max(MinWidth, Math.Min(Width, work.Width - 16));
+                Height = Math.Max(MinHeight, Math.Min(Height, work.Height - 16));
+            }
+            catch (Exception)
+            {
+                // The default size.
             }
         }
 
