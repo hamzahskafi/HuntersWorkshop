@@ -7,7 +7,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>Build Launcher</AssemblyName>
     <RootNamespace>BloodborneLauncher.Builder</RootNamespace>
-    <Version>0.4.4-beta.12</Version>
+    <Version>0.4.4-beta.13</Version>
     <ApplicationIcon>app.ico</ApplicationIcon>
   </PropertyGroup>
 

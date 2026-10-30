@@ -7,6 +7,7 @@
 #include "bbport_platform.h"
 #include <bit>
 #include <map>
+#include <set>
 #include <thread>
 #include <unordered_set>
 #include <xxhash.h>
@@ -3484,6 +3485,46 @@ bool Rasterizer::IsComputeMetaClear(const Pipeline* pipeline) {
     return false;
 }
 
+namespace {
+// BB_COPY_SHADER_IMAGES=0: the copy shader over render targets is taken as an image copy only at
+// exactly an image's size between two existing images, the source found first by its buffer
+// slot (as before 0.4.4 beta 13).
+bool CopyShaderImagesWide() {
+    static const bool on = [] {
+        const char* env = std::getenv("BB_COPY_SHADER_IMAGES");
+        return !(env && env[0] == '0');
+    }();
+    return on;
+}
+
+// Frame statistics: the game's dword copy shaders (cs 3d5ebf4e: render targets copied through
+// memory), a second, by how they were done. One thread at a time runs them (BindResources).
+struct ImageCopyStats {
+    u64 exact = 0, padded = 0, made = 0, through_memory = 0;
+    std::chrono::steady_clock::time_point window = std::chrono::steady_clock::now();
+};
+ImageCopyStats image_copy_stats;
+
+void CountImageCopy(u64 ImageCopyStats::*outcome) {
+    if (!BbStats::enabled) {
+        return;
+    }
+    auto& stats = image_copy_stats;
+    ++(stats.*outcome);
+    const auto now = std::chrono::steady_clock::now();
+    if (now - stats.window < std::chrono::seconds(5)) {
+        return;
+    }
+    const double seconds = std::chrono::duration<double>(now - stats.window).count();
+    std::printf("Copy shaders per second: %.1f done as image copies (%.1f of them with bytes past "
+                "the image, %.1f into an image made for it), %.1f run through memory\n",
+                (stats.exact + stats.padded + stats.made) / seconds,
+                stats.padded / seconds, stats.made / seconds, stats.through_memory / seconds);
+    stats = ImageCopyStats{};
+    stats.window = now;
+}
+} // namespace
+
 bool Rasterizer::IsComputeImageCopy(const Pipeline* pipeline) {
     if (!pipeline->IsCompute()) {
         return false;
@@ -3509,31 +3550,157 @@ bool Rasterizer::IsComputeImageCopy(const Pipeline* pipeline) {
     if (buf0.GetSize() != buf1.GetSize() || cs_pgm.dim_x != (buf0.GetSize() / 256)) {
         return false;
     }
+    const u64 size = buf0.GetSize();
 
-    // Find images the buffer alias
-    const auto image0_id = texture_cache.FindImageFromRange(buf0.base_address, buf0.GetSize());
-    if (!image0_id) {
+    // A copy of 1 MiB or more left to the shader is said once per reason and size with frame
+    // statistics on, with the images found (as bbport's BB_IMAGE_COPY_LOG).
+    const auto reject = [&](int why, const VideoCore::Image* a, const VideoCore::Image* b) {
+        CountImageCopy(&ImageCopyStats::through_memory);
+        if (!BbStats::enabled || size < 1_MB) {
+            return false;
+        }
+        static std::mutex mutex;
+        static std::set<std::pair<int, u64>> told;
+        std::scoped_lock lock{mutex};
+        if (told.size() >= 24 || !told.emplace(why, size).second) {
+            return false;
+        }
+        const auto describe = [](const VideoCore::Image* image) {
+            if (!image) {
+                return std::string{"none"};
+            }
+            const auto& i = image->info;
+            return fmt::format("{} {}x{} guest {:#x} at {:#x}, pitch {}, {} bits, flags {:#x}",
+                               vk::to_string(i.pixel_format), i.size.width, i.size.height,
+                               i.guest_size, i.guest_address, i.pitch, i.num_bits,
+                               u32(image->flags));
+        };
+        static constexpr const char* reasons[] = {
+            "",
+            "no source image",
+            "no destination image",
+            "no image made at the destination",
+            "the images differ",
+            "the copy reaches past the image",
+            "source and destination overlap",
+        };
+        const VAddr from = desc0.is_written ? buf1.base_address : buf0.base_address;
+        const VAddr to = desc0.is_written ? buf0.base_address : buf1.base_address;
+        if (!a) {
+            // No image holding current data: the one there, if any, with its flags.
+            if (const auto there = texture_cache.FindImageFromRange(from, size, false)) {
+                a = &texture_cache.GetImage(there);
+            }
+        }
+        std::printf("Copy shader run through memory (%s): %#llx -> %#llx, %llu bytes; source %s; "
+                    "destination %s\n",
+                    reasons[why], static_cast<unsigned long long>(from),
+                    static_cast<unsigned long long>(to), static_cast<unsigned long long>(size),
+                    describe(a).c_str(), describe(b).c_str());
         return false;
-    }
-    const auto image1_id =
-        texture_cache.FindImageFromRange(buf1.base_address, buf1.GetSize(), false);
-    if (!image1_id) {
-        return false;
+    };
+
+    if (!CopyShaderImagesWide()) {
+        // Find images the buffer alias
+        const auto image0_id = texture_cache.FindImageFromRange(buf0.base_address, size);
+        if (!image0_id) {
+            return reject(1, nullptr, nullptr);
+        }
+        const auto image1_id = texture_cache.FindImageFromRange(buf1.base_address, size, false);
+        if (!image1_id) {
+            return reject(2, &texture_cache.GetImage(image0_id), nullptr);
+        }
+
+        // Image copy must be valid
+        VideoCore::Image& image0 = texture_cache.GetImage(image0_id);
+        VideoCore::Image& image1 = texture_cache.GetImage(image1_id);
+        if (image0.info.guest_size != image1.info.guest_size ||
+            image0.info.pitch != image1.info.pitch || image0.info.guest_size != size ||
+            image0.info.num_bits != image1.info.num_bits) {
+            return reject(4, &image0, &image1);
+        }
+
+        // Perform image copy
+        VideoCore::Image& src_image = desc0.is_written ? image1 : image0;
+        VideoCore::Image& dst_image = desc0.is_written ? image0 : image1;
+        runtime.CopyColorAndDepth(&src_image, &dst_image);
+        CountImageCopy(&ImageCopyStats::exact);
+        return true;
     }
 
-    // Image copy must be valid
-    VideoCore::Image& image0 = texture_cache.GetImage(image0_id);
-    VideoCore::Image& image1 = texture_cache.GetImage(image1_id);
-    if (image0.info.guest_size != image1.info.guest_size ||
-        image0.info.pitch != image1.info.pitch || image0.info.guest_size != buf0.GetSize() ||
-        image0.info.num_bits != image1.info.num_bits) {
-        return false;
+    // From bbport 0.7 (deadinside28): bytes past the image, a stencil plane after a depth image, and
+    // a destination made where there is no image yet. The source is the buffer the shader reads,
+    // an image holding the GPU's current data (written by the GPU, no newer memory); the
+    // destination is any image there. Before, that test was on the first buffer slot whichever
+    // way the copy went, so with the destination there, one uploaded from memory and never
+    // written by the GPU failed it.
+    const AmdGpu::Buffer& src_buf = desc0.is_written ? buf1 : buf0;
+    const AmdGpu::Buffer& dst_buf = desc0.is_written ? buf0 : buf1;
+    if (src_buf.base_address < dst_buf.base_address + size &&
+        dst_buf.base_address < src_buf.base_address + size) {
+        return reject(6, nullptr, nullptr);
     }
-
-    // Perform image copy
-    VideoCore::Image& src_image = desc0.is_written ? image1 : image0;
-    VideoCore::Image& dst_image = desc0.is_written ? image0 : image1;
-    runtime.CopyColorAndDepth(&src_image, &dst_image);
+    const auto src_id = texture_cache.FindImageFromRange(src_buf.base_address, size);
+    if (!src_id) {
+        return reject(1, nullptr, nullptr);
+    }
+    VideoCore::Image& src = texture_cache.GetImage(src_id);
+    // The buffers may run past the image, padding up to the next one (the light shafts' 960x540
+    // targets are copied as 0x241800 bytes of 0x240000): those bytes are copied as a buffer. A
+    // depth image with stencil may be copied with its stencil plane after it: the destination (a
+    // colour image of the depth, R32F) takes the depth, the rest goes as a buffer.
+    const u64 image_size = src.info.guest_size;
+    const u64 max_tail = src.info.props.has_stencil ? image_size / 2 : 64_KB;
+    if (size < image_size || size - image_size > max_tail) {
+        return reject(5, &src, nullptr);
+    }
+    auto dst_id = texture_cache.FindImageFromRange(dst_buf.base_address, image_size, false);
+    bool made = false;
+    if (!dst_id) {
+        // The destination is no image yet: one like the source is made there (the game reads it as
+        // a texture later, its copy of a target for the next frame). Through memory this meant
+        // tiling the target into the game's memory, and uploading it again where it is read.
+        // Colour sources only: a depth image's info carries its stencil plane's address.
+        if (src.info.props.is_depth || src.info.num_samples != 1) {
+            return reject(2, &src, nullptr);
+        }
+        runtime.BeforeImageAccess();
+        VideoCore::TextureCache::ImageDesc desc{};
+        desc.info = src.info;
+        desc.info.guest_address = dst_buf.base_address;
+        // The source's metadata (CMASK, FMASK) stays its own.
+        desc.info.meta_info = {};
+        desc.type = VideoCore::TextureCache::BindingType::Texture;
+        dst_id = texture_cache.FindImage(desc, true);
+        if (!dst_id) {
+            return reject(3, &texture_cache.GetImage(src_id), nullptr);
+        }
+        made = true;
+    }
+    // FindImage may have moved the images: both are looked up again.
+    VideoCore::Image& source = texture_cache.GetImage(src_id);
+    VideoCore::Image& dst = texture_cache.GetImage(dst_id);
+    if (src_id == dst_id || image_size != dst.info.guest_size ||
+        source.info.pitch != dst.info.pitch || source.info.num_bits != dst.info.num_bits ||
+        (dst.info.props.has_stencil && size - image_size > 64_KB)) {
+        return reject(4, &source, &dst);
+    }
+    runtime.BeforeImageAccess();
+    runtime.CopyColorAndDepth(&source, &dst);
+    if (const u64 tail = size - image_size) {
+        const VAddr src_tail = src_buf.base_address + image_size;
+        const VAddr dst_tail = dst_buf.base_address + image_size;
+        const auto [src_buffer, src_offset] =
+            buffer_cache.ObtainBuffer(src_tail, static_cast<u32>(tail), false);
+        const auto [dst_buffer, dst_offset] =
+            buffer_cache.ObtainBuffer(dst_tail, static_cast<u32>(tail), true);
+        const vk::BufferCopy copy{src_offset, dst_offset, tail};
+        runtime.CopyBuffer(src_buffer, dst_buffer, {&copy, 1});
+        texture_cache.InvalidateMemoryFromGPU(dst_tail, tail);
+        CountImageCopy(made ? &ImageCopyStats::made : &ImageCopyStats::padded);
+        return true;
+    }
+    CountImageCopy(made ? &ImageCopyStats::made : &ImageCopyStats::exact);
     return true;
 }
 

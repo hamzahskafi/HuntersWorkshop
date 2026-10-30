@@ -545,6 +545,8 @@ G-buffer target; two 960x540 targets): 8 dispatches, and each needs the image do
 the buffer, the proxy resolved and the destination image uploaded again. Recognizing copies
 whose source is an image and turning them into image copies (or a proxy-sized copy) would remove
 most of that. Skipping the dispatches blacks out the scene, so the copies are needed.
+Hunter's Workshop 0.4.4 beta 13 extends that detector (`IsComputeImageCopy`) to the copies it
+missed, after bbport 0.7 (`docs/community-fixes-plan.md`).
 
 ### Fixed: guest heap corruption with the draw pipeline (2026-10-01)
 
