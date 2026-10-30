@@ -9,7 +9,7 @@
     <AssemblyName>Hunters Workshop</AssemblyName>
     <RootNamespace>BloodborneLauncher</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>0.4.4-beta.7</Version>
+    <Version>0.4.4-beta.8</Version>
     <ApplicationIcon>app.ico</ApplicationIcon>
   </PropertyGroup>
 
