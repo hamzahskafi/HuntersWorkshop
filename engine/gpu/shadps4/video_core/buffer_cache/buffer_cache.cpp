@@ -568,14 +568,17 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
         std::printf("Guest memory: the PC memory model is off with this driver; the GPU uses copies "
                     "in VRAM (as BB_GUEST_IN_PLACE=0)\n");
     }
-    // bbport BB_GX_IN_PLACE (default on): the game's GX region in place once it exists. With the
-    // PC memory model it already is (its own rules).
+    // bbport BB_GX_IN_PLACE (default on; Windows: the region is imported from the game's memory
+    // pool, which Linux cannot yet): the game's GX region in place once it exists. With the PC
+    // memory model it already is (its own rules).
+#ifdef _WIN32
     if (!GuestInPlace()) {
         const char* gx = std::getenv("BB_GX_IN_PLACE");
         if (!(gx && gx[0] == '0')) {
             gx_state.store(u8(GxState::Waiting), std::memory_order_relaxed);
         }
     }
+#endif
     if (GuestInPlace()) {
         static BufferCache* hooked_cache = this;
         BbGuestHooks::Install([](u64 address, u64 size) { hooked_cache->NoteFreshRange(address, size); });

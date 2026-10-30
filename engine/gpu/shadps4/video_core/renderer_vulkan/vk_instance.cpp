@@ -487,9 +487,17 @@ bool Instance::CreateDevice() {
     // bbport: guest direct memory allocated here and mapped by the runtime (BbGuestMemory).
     guest_memory_export = add_extension(VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME) &&
                           add_extension(VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME);
-    // bbport: on Windows the GPU imports the game's memory itself (BbGuestMemory, the PC memory
-    // model); only asked for with it, so the default path keeps the device as it was.
-    if (const char* env = std::getenv("BB_GUEST_IN_PLACE"); env && env[0] == '1') {
+    // bbport: on Windows the GPU imports the game's memory itself (BbGuestMemory): all of it with
+    // the PC memory model, the game's GX region otherwise (BB_GX_IN_PLACE, default on; the buffer
+    // cache's upload heap). Not asked for when neither is on, so that path keeps the device as it was.
+    const char* in_place = std::getenv("BB_GUEST_IN_PLACE");
+#ifdef _WIN32
+    const char* gx_in_place = std::getenv("BB_GX_IN_PLACE");
+    const bool gx_region = !(gx_in_place && gx_in_place[0] == '0');
+#else
+    const bool gx_region = false; // no import of the region on Linux yet (BbGuestMemory::ImportRange)
+#endif
+    if ((in_place && in_place[0] == '1') || gx_region) {
         guest_memory_import = add_extension(VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME);
     }
     // bbport: FSR 4 v07 INT8 (vk_temporal_upscaler): quad derivatives in compute shaders.
