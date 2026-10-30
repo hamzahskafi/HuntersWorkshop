@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "bbport_free_check.h"
+#include "bbport_gx_ring.h"
 
 #include <algorithm>
 #include <array>
@@ -549,13 +550,17 @@ void Check(u64 address, u64 size, const void* data, Source source, u64 seq) {
         if (latency > 20000000) {
             late_20ms.fetch_add(1, std::memory_order_relaxed);
         }
-        // Honest labels (BB_GUEST_IN_PLACE, BB_HONEST_LABELS) are written once the GPU has done the
-        // work: tens of ms after the recording thread are normal there; only stalls are reported.
+        // Honest labels (BB_GUEST_IN_PLACE, BB_GX_IN_PLACE, BB_HONEST_LABELS; as
+        // Rasterizer::HonestLabels decides) are written once the GPU has done the work: tens of ms
+        // after the recording thread are normal there; only stalls are reported.
         static const u64 report_ns = [] {
             const char* in_place = std::getenv("BB_GUEST_IN_PLACE");
             const char* honest = std::getenv("BB_HONEST_LABELS");
-            return (in_place && in_place[0] == '1') || (honest && honest[0] == '1') ? 500000000ull
-                                                                                      : 50000000ull;
+            const bool reads_in_place =
+                (in_place && in_place[0] == '1') || BbGxRing::InPlaceWanted();
+            const bool on = honest ? honest[0] == '1' || (honest[0] != '0' && reads_in_place)
+                                   : reads_in_place;
+            return on ? 500000000ull : 50000000ull;
         }();
         if (latency > 50000000) {
             late_50ms.fetch_add(1, std::memory_order_relaxed);

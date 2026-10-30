@@ -19,6 +19,7 @@
 #include "bbport_toggles.h"
 #include "bbport_write_log.h"
 #include "bbport_free_check.h"
+#include "bbport_gx_ring.h"
 #include "bbport_guest_memory.h"
 #include "video_core/renderer_vulkan/vk_frame_capture.h"
 #include "common/hash.h"
@@ -140,12 +141,21 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_, Runtime
 Rasterizer::~Rasterizer() = default;
 
 bool Rasterizer::HonestLabels() {
+    // On whenever the GPU reads game memory in place (the PC memory model, the GX region): the
+    // game reuses that memory once a fence says the GPU is done with it, so a fence written when
+    // the work is only recorded lets the game overwrite data the GPU has yet to read (the GX
+    // range allocator's collector, 0x26aa860, returns a range once the state it keeps for it
+    // reads done). BB_HONEST_LABELS=0 turns it off for testing only.
     static const bool on = [] {
         const char* env = std::getenv("BB_HONEST_LABELS");
-        const bool enabled = (env && env[0] == '1') || VideoCore::GuestInPlace();
+        const bool in_place = VideoCore::GuestInPlace() || BbGxRing::InPlaceWanted();
+        const bool enabled = env ? env[0] == '1' || (env[0] != '0' && in_place) : in_place;
         if (enabled) {
             std::printf("GPU: fences written when the GPU has finished the work before them "
-                        "(BB_HONEST_LABELS=1)\n");
+                        "(game memory read in place, or BB_HONEST_LABELS=1)\n");
+        } else if (in_place) {
+            std::printf("GPU: fences written when the work is recorded (BB_HONEST_LABELS=0) though "
+                        "game memory is read in place: for testing only\n");
         }
         return enabled;
     }();

@@ -571,14 +571,9 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
     // bbport BB_GX_IN_PLACE (default on; Windows: the region is imported from the game's memory
     // pool, which Linux cannot yet): the game's GX region in place once it exists. With the PC
     // memory model it already is (its own rules).
-#ifdef _WIN32
-    if (!GuestInPlace()) {
-        const char* gx = std::getenv("BB_GX_IN_PLACE");
-        if (!(gx && gx[0] == '0')) {
-            gx_state.store(u8(GxState::Waiting), std::memory_order_relaxed);
-        }
+    if (!GuestInPlace() && BbGxRing::InPlaceWanted()) {
+        gx_state.store(u8(GxState::Waiting), std::memory_order_relaxed);
     }
-#endif
     if (GuestInPlace()) {
         static BufferCache* hooked_cache = this;
         BbGuestHooks::Install([](u64 address, u64 size) { hooked_cache->NoteFreshRange(address, size); });

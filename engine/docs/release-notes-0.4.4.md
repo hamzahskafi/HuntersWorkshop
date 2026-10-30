@@ -1,7 +1,7 @@
 # Hunter's Workshop 0.4.4
 
 What changed since 0.4.3, for the release page. The engine work behind each line is in
-`docs/community-fixes-plan.md` and `docs/gpu-memory.md`. (In progress: beta 6. Lines marked
+`docs/community-fixes-plan.md` and `docs/gpu-memory.md`. (In progress: beta 7. Lines marked
 *to be measured* wait for a test log before the release says what they bring.)
 
 ## Defaults
@@ -18,11 +18,13 @@ What changed since 0.4.3, for the release page. The engine work behind each line
   the GPU every frame (per-draw parameters, CPU-animated vertices, its upload area; 288 MiB) is now
   used by the GPU in place, as a PC game's upload heap: no write protection, write faults, uploads
   or VRAM copy for it. The game makes it once at start; the engine takes it from there and binds it
-  once, never moving it. Small read-only pieces of it are still copied when used. In play, write
-  faults went from about 900 a second to about 1, and the time spent re-protecting memory from
-  about 0.45 ms a frame to almost none (RTX 3070 Ti, 60 FPS). Frame rate, pacing and VRAM are as
-  before. The GPU's own time with it is *to be measured*. More › Engine has no switch for it yet;
-  `BB_GX_IN_PLACE=0` turns it off.
+  once, never moving it. Small read-only pieces of it are still copied when used. As with the PC
+  memory model, the game is told the GPU has finished a frame's work only once it has, so it cannot
+  reuse memory the GPU has yet to read. In play, write faults went from about 900 a second to
+  about 1, and the time spent re-protecting memory from about 0.45 ms a frame to almost none (RTX
+  3070 Ti, 60 FPS); frame rate, pacing and VRAM were as before (beta 6, before that fence change;
+  with it *to be measured*). The GPU's own time with it is *to be measured*. More › Engine has no
+  switch for it yet; `BB_GX_IN_PLACE=0` turns it off.
 - **Game-data memory** (*to be measured*). Memory for the game's data in VRAM is kept longer when it
   empties while VRAM has room. In beta 1 a tester saw about 1 GB less VRAM in dense areas, and
   smoother play there, than with 0.4.3; which change did it is not known yet.

@@ -188,6 +188,14 @@ writes not done yet count as GPU-modified (`WriteTicks`). A binding over the reg
 import (at most 10 s); a failed import, or the game unmapping the region, leaves it tracked as
 before. Unlike the model, nothing moves: no sparse rebinds in play, the cause of its late frames.
 
+Fences (beta 7): read in place, the region is read when the GPU runs the work, not when it is
+recorded, so the game must not see a fence for that work before the GPU has done it: it reuses
+the range allocator's memory by them (the collector at 0x26aa860 returns a range once its state
+reads done). The engine's default writes labels at recording; with the region in place it now
+writes them once the GPU has finished, as the PC memory model always has (`BB_HONEST_LABELS`, on
+whenever `BbGxRing::InPlaceWanted`). Beta 6 ran without it: lighting and other flicker in
+Central Yharnam and a screen-wide purple flash, gone with `BB_HONEST_LABELS=1` on the same build.
+
 Measured (beta 6, `20261030_042617`, about 20 minutes, RTX 3070 Ti, against beta 4's
 `20261030_033513`): the import took 70 ms and the region was bound in one run before the title
 screen. In play, write faults went from a median of 911 a second to 1, and protection time from

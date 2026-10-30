@@ -10,9 +10,26 @@
 
 #include <atomic>
 #include <cstdint>
+#include <cstdlib>
 
 namespace BbGxRing {
 inline std::atomic<std::uint64_t> g_start{0}, g_end{0};
+
+/// BB_GX_IN_PLACE (default on): the region is to be read in place. Windows only, where the GPU
+/// imports it (BbGuestMemory::ImportRange); elsewhere it stays tracked. Decided at start, before
+/// the region exists: the device's import extension and the fences' timing
+/// (Rasterizer::HonestLabels) follow it even if the region is never found or its import fails.
+inline bool InPlaceWanted() {
+#ifdef _WIN32
+    static const bool on = [] {
+        const char* env = std::getenv("BB_GX_IN_PLACE");
+        return !(env && env[0] == '0');
+    }();
+    return on;
+#else
+    return false;
+#endif
+}
 
 /// The region the init makes of the base and size it is given: the base rounded up to 16 bytes,
 /// the size less that and rounded down to 16 (0x26a9b5e..0x26a9b88).
