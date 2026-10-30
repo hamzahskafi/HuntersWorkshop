@@ -130,6 +130,10 @@ public:
     /// CopySourceStreamLimit they take the stream path, untracked (see ObtainBuffer).
     static inline thread_local bool copy_source = false;
     static inline std::array<u64, 6> hle_path_calls{}, hle_path_bytes{};
+    /// Read-only buffers in the game's GX range allocator past the usual stream limits
+    /// (BB_GX_RING_STREAM_KB): copied when used, with their bytes; and those kept on the tracked
+    /// path because the GPU wrote them.
+    static inline std::atomic<u64> gx_ring_streams{0}, gx_ring_stream_bytes{0}, gx_ring_gpu_kept{0};
 
     /// Finds a buffer for the specified region.
     [[nodiscard]] std::pair<const Buffer*, u64> ObtainBuffer(VAddr device_addr, u32 size,

@@ -435,6 +435,22 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
                 }
             }
             std::printf("\n");
+            // The game's GX range allocator past the usual limits (BufferCache::ObtainBuffer).
+            static u64 ring_calls_before, ring_bytes_before, ring_kept_before;
+            const u64 ring_calls = BufferCache::gx_ring_streams.load(std::memory_order_relaxed);
+            const u64 ring_bytes = BufferCache::gx_ring_stream_bytes.load(std::memory_order_relaxed);
+            const u64 ring_kept = BufferCache::gx_ring_gpu_kept.load(std::memory_order_relaxed);
+            if (ring_calls != ring_calls_before || ring_kept != ring_kept_before) {
+                const u64 calls = ring_calls - ring_calls_before;
+                std::printf("  GX region buffers copied when used: %.0f/s, %.1f KiB each, %.1f MB/s; %.0f/s "
+                            "kept tracked (the GPU wrote them)\n",
+                            calls / seconds, calls ? (ring_bytes - ring_bytes_before) / 1024.0 / calls : 0.0,
+                            (ring_bytes - ring_bytes_before) / 1e6 / seconds,
+                            (ring_kept - ring_kept_before) / seconds);
+            }
+            ring_calls_before = ring_calls;
+            ring_bytes_before = ring_bytes;
+            ring_kept_before = ring_kept;
             path_calls_before = BufferCache::hle_path_calls;
             path_bytes_before = BufferCache::hle_path_bytes;
             window = now;

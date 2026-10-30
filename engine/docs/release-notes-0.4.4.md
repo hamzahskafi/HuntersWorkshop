@@ -1,7 +1,8 @@
 # Hunter's Workshop 0.4.4
 
 What changed since 0.4.3, for the release page. The engine work behind each line is in
-`docs/community-fixes-plan.md` and `docs/gpu-memory.md`. (In progress: beta 1.)
+`docs/community-fixes-plan.md` and `docs/gpu-memory.md`. (In progress: beta 2. Lines marked
+*to be measured* wait for a test log before the release says what they bring.)
 
 ## Defaults
 
@@ -13,12 +14,15 @@ What changed since 0.4.3, for the release page. The engine work behind each line
 
 ## Performance
 
-- **Less CPU work every frame.** The memory the game rewrites for the GPU every frame (per-draw
-  parameters, CPU-animated vertices, its upload area) is copied where it is used instead of being
-  write-protected and watched page by page.
-- **Fewer hitches when an area loads.** A freed texture's memory is kept a few seconds for the next
-  texture of the same size, instead of being given back to the driver and asked for again; the
-  memory for the game's data in VRAM is kept longer when it empties while VRAM has room.
+- **Less CPU work every frame** (*to be measured*: on from beta 2; beta 1 had it switched off by a
+  bug). The memory the game rewrites for the GPU every frame (per-draw parameters, CPU-animated
+  vertices, its upload area) is copied where it is used instead of being write-protected and
+  watched page by page.
+- **Texture and game-data memory** (*to be measured*). A freed large texture's memory is kept a few
+  seconds for the next texture of the same size (beta 1: rarely used, 3 of 19,305 new images), and
+  memory for the game's data in VRAM is kept longer when it empties while VRAM has room. In beta 1 a
+  tester saw about 1 GB less VRAM in dense areas, and smoother play there, than with 0.4.3; which
+  change did it is not known yet.
 
 ## Fixes
 
@@ -30,3 +34,5 @@ What changed since 0.4.3, for the release page. The engine work behind each line
 - Long-frame reports (frame statistics on) now give the long frame's own figures, with how many
   images got new memory, reused memory or had their data checked.
 - The frame capture lists every draw of each pass.
+- Windows logs give VRAM once a minute: the game's use against the driver's budget, and the
+  engine's part of it.

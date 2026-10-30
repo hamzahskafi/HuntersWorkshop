@@ -155,6 +155,8 @@ Each step goes in on its own, behind a switch, and is measured before the next.
    `BB_IMAGE_REUSE_MB` (256; 0: off), all of it freed when the texture collector is under pressure.
    Only images the driver doesn't ask dedicated memory for (render targets on some GPUs do): their
    memory is allocated without being tied to the image (VMA's `CAN_ALIAS`), which reuse needs.
+   Beta 1's log (RTX 3070 Ti, ~19 minutes, two area changes): 3 reuses of 19,305 new images, 0 to
+   10 MiB kept: the large textures stay loaded, and small images come from VMA blocks anyway.
 2. **Keep residency chunks longer.** Raise the idle wait for returning empty 64 MiB chunks, or keep
    one or two empty ones beyond the spare, so the next area doesn't allocate again.
    *Done in 0.4.4 beta 1* (`FreeEmptyChunks`): with room in VRAM an empty chunk waits 30 s

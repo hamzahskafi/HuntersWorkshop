@@ -1124,15 +1124,25 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
         return kib ? std::max<u64>(std::min<u64>(kib, 4096) * 1024, STREAM_THRESHOLD) : 0;
     }();
     u64 stream_limit = copy_source ? copy_source_limit : STREAM_THRESHOLD;
+    bool gx_ring = false;
     if (gx_ring_limit && !is_written && !is_texel_buffer && size > stream_limit && size <= gx_ring_limit) {
         thread_local u32 ring_looks = 0;
         if (BbGxRing::Known() || ((++ring_looks & 255) == 0 && BbGxRing::Find())) {
-            if (BbGxRing::Contains(device_addr, size)) stream_limit = gx_ring_limit;
+            gx_ring = BbGxRing::Contains(device_addr, size);
+            if (gx_ring) stream_limit = gx_ring_limit;
         }
     }
-    if (!is_written && size <= stream_limit && !IsRegionGpuModified(device_addr, size)) {
+    const bool gpu_written = !is_written && size <= stream_limit && IsRegionGpuModified(device_addr, size);
+    if (gx_ring && gpu_written) {
+        gx_ring_gpu_kept.fetch_add(1, std::memory_order_relaxed);
+    }
+    if (!is_written && size <= stream_limit && !gpu_written) {
         BB_SECTION(ObtainStream);
         note_hle(1);
+        if (gx_ring) {
+            gx_ring_streams.fetch_add(1, std::memory_order_relaxed);
+            gx_ring_stream_bytes.fetch_add(size, std::memory_order_relaxed);
+        }
         if (stats) {
             auto& region = Stats().regions[RegionKey(device_addr)];
             ++region.stream_count;
