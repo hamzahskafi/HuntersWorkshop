@@ -1,6 +1,6 @@
 # Community fixes: the vetted list and plan
 
-Updated 2026-10-26 (A1–A12 in, for 0.4.0 beta 1). Hunter's Workshop (HW) started from Lantern Engine 0.9.37 beta 9 (`08173e6`).
+Updated 2026-10-30 (0.4.4 through beta 12; A1–A12 in since 0.4.0 beta 1). Hunter's Workshop (HW) started from Lantern Engine 0.9.37 beta 9 (`08173e6`).
 This is the analysis of what the other Bloodborne PC projects fixed after that point, checked
 against HW's own code, with what has been done since. Nothing here is merged wholesale: each fix
 is taken on its own, with its author credited.

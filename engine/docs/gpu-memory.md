@@ -196,7 +196,7 @@ writes them once the GPU has finished, as the PC memory model always has (`BB_HO
 whenever `BbGxRing::InPlaceWanted`). Beta 6 ran without it: lighting and other flicker in
 Central Yharnam and a screen-wide purple flash, gone with `BB_HONEST_LABELS=1` on the same build.
 
-When the work goes to the GPU (betas 9 and 10). A fence the game waits for is written once the GPU
+When the work goes to the GPU (betas 9 to 12). A fence the game waits for is written once the GPU
 has done the work before it, so that work must be submitted. Until beta 8 it went out at the end of
 a guest submission when the GPU had finished everything, else once 2 ms had passed since the last
 submission (`BB_HONEST_FLUSH_US`), and the GPU command thread submitted everything once it had been
