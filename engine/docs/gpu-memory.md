@@ -219,13 +219,19 @@ only. Beta 10 has no timing at all:
   left the GPU idle about 25 us in beta 9's profile, for less work than it already has. With nothing
   more on its way (the GPU command thread waiting for the game), at once: the GPU command thread
   hands the announcement over when it runs out of work, or when the announcement wakes it.
-- The frame's end (`sceGnmSubmitDone`) submits. Beta 11 puts the frame's retirement into that
-  submission when it is due then (the GPU command thread decides, `TakeDecodedFrame`): beta 9
-  sent two back to back, the second all but empty, and beta 10's merge, made on the recording
-  thread only when the second task was already queued, left the GPU profile at 4 switches a
-  frame. When the frame's last submission is decoded after the frame end, its retirement still
-  goes on its own, at once: held, later work would join its submission and the game wait
-  longer. Frame statistics give the share retired with the frame end.
+- The frame's end (`sceGnmSubmitDone`) submits, with the frame's retirement in the same
+  submission. The game ends a frame right after its last submission, before the GPU command
+  thread has decoded it (beta 11's first log: the retirement went alone in every frame). So the
+  frame end is done at the frame's boundary, as that submission's decoding ends
+  (`EndFrameAtBoundary`): the frame's cache work, its retirement and one submission in one task
+  (`FrameEndTask`), and that submission's own end check is left out, as the frame end submits
+  right after it (`EndsSignalledFrame`). Before, the retirement went alone there and the frame
+  end only once the GPU command thread ran out of work, sometimes after decoding the next frame's
+  first submissions: two submissions back to back (betas 9 to 11; beta 10's merge on the
+  recording thread found the tasks in the other order). When the game ends the frame after its
+  submissions are all decoded, the frame end takes the retirement as well (`TakeDecodedFrame`).
+  A later frame end already asked for keeps its own, as before. Frame statistics give the share
+  retired with the frame end.
 - Fence work with nothing to announce it and the recording thread idle is submitted by the GPU
   command thread at once: a trigger missing somewhere, counted (expected 0).
 

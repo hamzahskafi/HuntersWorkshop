@@ -324,6 +324,18 @@ private:
     /// The newest frame whose graphics submissions are all decoded, taken off frame_ends (0:
     /// none): reported finished by the caller (the frame end's task, or SignalDecodedFrames).
     u64 TakeDecodedFrame();
+    /// BB_PIPE_SIGNALS, GPU command thread. The game usually ends a frame (sceGnmSubmitDone) right
+    /// after its last submission, before this thread has decoded it. Its frame end is then done
+    /// at its boundary, as that submission's decoding ends: the frame's cache work, its
+    /// retirement and one submission in one task (FrameEndTask), instead of the retirement alone
+    /// there and the frame end once this thread runs out of work (the profile's two submissions
+    /// back to back, 0.4.4 beta 9 to 11). False, and as before, when the game has not ended the
+    /// frame yet or has ended a later one too.
+    bool EndFrameAtBoundary();
+    /// Whether the submission whose decoding is ending is the last of a frame the game has
+    /// already ended (EndFrameAtBoundary follows it): its own end check (SubmitForSignals) is left
+    /// out, as the frame end submits right after it.
+    bool EndsSignalledFrame();
     /// BB_HONEST_LABELS: GPU idle once the GPU has finished the work up to `generation` and nothing
     /// was submitted since (the interrupt, work_retired).
     void SignalGpuIdle(u64 generation);

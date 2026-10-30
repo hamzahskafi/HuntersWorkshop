@@ -166,6 +166,20 @@ bool SubmitEndTasks() {
     return on;
 }
 
+/// BB_PIPE_SIGNALS: the frame end (sceGnmSubmitDone): the frame's cache work, and its retirement
+/// when it goes with it (`data`: the frame, 0 for none), then one submission.
+void FrameEndTask(Vulkan::Rasterizer& r, const u8* data) {
+    u64 frame;
+    std::memcpy(&frame, data, sizeof(frame));
+    r.OnSubmit();
+    if (frame != 0) {
+        BbStats::retired_with_end.fetch_add(1, std::memory_order_relaxed);
+        BbTimeline::Note(BbTimeline::PipeTask, 7, r.CurrentTick());
+        r.SignalAfterGpu([frame] { Libraries::GnmDriver::NoteFramesRetired(frame); });
+    }
+    r.Flush();
+}
+
 /// BB_PIPE_SIGNALS: frames whose work is all recorded (the draw pipe passed it), retired once the
 /// GPU has executed it, whatever is decoded after (Liverpool::SignalDecodedFrames).
 void FramesRetiredTask(Vulkan::Rasterizer& self, const u8* data) {
@@ -311,7 +325,7 @@ void Liverpool::Process(std::stop_token stoken) {
                     submit_cv.notify_all();
                 }
                 // BB_SUBMIT_LOCK=frame: the last submission of a frame (any queue) is decoded.
-                if (frame_end) {
+                if (frame_end && !EndFrameAtBoundary()) {
                     SignalDecodedFrames();
                 }
             }
@@ -354,30 +368,13 @@ void Liverpool::Process(std::stop_token stoken) {
             if (rasterizer && (rasterizer->PipeSignals() || end_tasks)) {
                 // BB_PIPE_SIGNALS: the frame's cache work runs on the recording thread after the
                 // frame (this thread decodes the next one meanwhile instead of waiting for it).
-                // The frame's retirement goes with it when due now (its submissions all decoded):
-                // one submission, the frame's work and its cache work before the signal, as
-                // before. Two back to back left the GPU idle between them (~25 us a frame, 0.4.4
-                // beta 9's profile); beta 10 merged them only when the second task was already
-                // queued, and the GPU profile kept both. When the frame's last submission is
-                // decoded after this call, its retirement goes on its own, as soon as it is
-                // (SignalDecodedFrames, in the loop above): holding it for the next submission
-                // would let later work into its submission and the game wait longer for it.
-                // Counted (frame statistics).
+                // Here when the frame's submissions were all decoded before the game ended it (the
+                // retirement goes with it: TakeDecodedFrame), or the end was not taken at the
+                // frame's boundary in the loop above (EndFrameAtBoundary). Counted (frame
+                // statistics: frames retired with the frame end).
                 const u64 retired = rasterizer->PipeSignals() ? TakeDecodedFrame() : 0;
-                rasterizer->RunInOrder(
-                    [](Vulkan::Rasterizer& r, const u8* data) {
-                        u64 frame;
-                        std::memcpy(&frame, data, sizeof(frame));
-                        r.OnSubmit();
-                        if (frame != 0) {
-                            BbStats::retired_with_end.fetch_add(1, std::memory_order_relaxed);
-                            BbTimeline::Note(BbTimeline::PipeTask, 7, r.CurrentTick());
-                            r.SignalAfterGpu(
-                                [frame] { Libraries::GnmDriver::NoteFramesRetired(frame); });
-                        }
-                        r.Flush();
-                    },
-                    &retired, sizeof(retired), BbToggle::PipelinedTasks, true, "SubmitDone");
+                rasterizer->RunInOrder(&FrameEndTask, &retired, sizeof(retired),
+                                       BbToggle::PipelinedTasks, true, "SubmitDone");
             } else if (rasterizer) {
                 rasterizer->OnSubmit();
                 rasterizer->Flush();
@@ -2119,7 +2116,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
     if (draw_prep) {
         draw_prep->EndSubmission();
     }
-    if (rasterizer && seq != NoSeq) {
+    if (rasterizer && seq != NoSeq && !EndsSignalledFrame()) {
         rasterizer->SubmitForSignals();
     }
     if (seq != NoSeq && BbStats::enabled) {
@@ -2468,7 +2465,7 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
     // (Before 0.4.4 beta 10 it waited for the next graphics submission, a fence wait on the GPU,
     // or this thread to be idle for 0.2 ms.)
     if constexpr (!is_indirect) {
-        if (rasterizer) {
+        if (rasterizer && !EndsSignalledFrame()) {
             rasterizer->SubmitForSignals();
         }
     }
@@ -2552,6 +2549,36 @@ void Liverpool::SubmitGfx(std::span<const u32> dcb, std::span<const u32> ccb) {
     BbTimeline::Note(BbTimeline::GuestSubmit, 0, submissions_total);
     work_retired = false;
     submit_cv.notify_one();
+}
+
+bool Liverpool::EndsSignalledFrame() {
+    if (!rasterizer || !rasterizer->PipeSignals()) {
+        return false;
+    }
+    std::scoped_lock lk{submit_mutex};
+    return submit_done && frame_ends.size() == 1 && frame_ends.front().first <= decoded_total + 1;
+}
+
+bool Liverpool::EndFrameAtBoundary() {
+    if (!rasterizer || !rasterizer->PipeSignals()) {
+        return false;
+    }
+    u64 frame;
+    {
+        std::scoped_lock lk{submit_mutex};
+        // Only the one frame end the game has asked for: a later one keeps submit_done for itself.
+        if (!submit_done || frame_ends.size() != 1 || frame_ends.front().first > decoded_total) {
+            return false;
+        }
+        frame = frame_ends.front().second;
+        frame_ends.pop_front();
+        submit_done = false;
+    }
+    VideoCore::EndCapture();
+    rasterizer->RunInOrder(&FrameEndTask, &frame, sizeof(frame), BbToggle::PipelinedTasks, true,
+                           "SubmitDone");
+    VideoCore::StartCapture();
+    return true;
 }
 
 u64 Liverpool::TakeDecodedFrame() {
