@@ -19,8 +19,7 @@ bool NoteRegion(std::uint64_t start, std::uint64_t end) {
     g_end.store(end, std::memory_order_relaxed);
     g_start.store(start, std::memory_order_release);
     if (!g_logged.exchange(true)) {
-        std::printf("GPU memory: the game's GX range allocator at %#llx..%#llx (%llu MiB): read-only buffers in "
-                    "it are copied when used, not tracked (BB_GX_RING_STREAM_KB=0: tracked as before)\n",
+        std::printf("GPU memory: the game's GX range allocator at %#llx..%#llx (%llu MiB)\n",
                     (unsigned long long)start, (unsigned long long)end, (unsigned long long)((end - start) >> 20));
     }
     return true;

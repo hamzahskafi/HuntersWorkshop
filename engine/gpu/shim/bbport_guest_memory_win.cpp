@@ -186,6 +186,25 @@ void Install(const Vulkan::Instance& instance) {
                 (unsigned long long)(ChunkSize >> 20));
 }
 
+bool ImportRange(const Vulkan::Instance& instance, std::uint64_t phys, std::uint64_t size,
+                 vk::Buffer& buffer, vk::DeviceMemory& memory, const char** failed_step) {
+    if (!Usable(instance)) { // the self-test: sets vk_instance and the types an import may use
+        *failed_step = "the driver's import of system memory (see above)";
+        return false;
+    }
+    u64 direct_size = 0;
+    unsigned char* backing = runtime_memory_backing(&direct_size);
+    if (!backing || phys + size > direct_size) {
+        *failed_step = "finding it in the game's memory pool";
+        return false;
+    }
+    if (win_mem_commit(phys, size) != 0) {
+        *failed_step = "committing its pages";
+        return false;
+    }
+    return Import(backing + phys, size, buffer, memory, failed_step);
+}
+
 namespace {
 std::array<bool, MaxChunks> queued{};
 

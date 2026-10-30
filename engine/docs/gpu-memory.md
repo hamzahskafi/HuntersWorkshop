@@ -151,12 +151,10 @@ Each step goes in on its own, behind a switch, and is measured before the next.
    size. Streaming then reuses the last area's render targets' memory. Quick experiment first, no
    code: `BB_VMA_DEDICATED_MB=0` (everything in VMA blocks) and `=64`. Compare the `allocation` ms
    and VRAM held.
-   *Done in 0.4.4 beta 1* (`UniqueImage::Create`, `TrimImageMemory`): kept 4 s, up to
-   `BB_IMAGE_REUSE_MB` (256; 0: off), all of it freed when the texture collector is under pressure.
-   Only images the driver doesn't ask dedicated memory for (render targets on some GPUs do): their
-   memory is allocated without being tied to the image (VMA's `CAN_ALIAS`), which reuse needs.
-   Beta 1's log (RTX 3070 Ti, ~19 minutes, two area changes): 3 reuses of 19,305 new images, 0 to
-   10 MiB kept: the large textures stay loaded, and small images come from VMA blocks anyway.
+   *Tried in 0.4.4 betas 1 to 4, removed in beta 5*: freed dedicated memory kept 4 s for the next
+   image of its size (VMA `CAN_ALIAS` allocations, `BB_IMAGE_REUSE_MB`). 3 to 4 reuses in 15,000 to
+   22,000 new images a session (RTX 3070 Ti): the large textures stay loaded, and small images come
+   from VMA blocks anyway. Not worth its code.
 2. **Keep residency chunks longer.** Raise the idle wait for returning empty 64 MiB chunks, or keep
    one or two empty ones beyond the spare, so the next area doesn't allocate again.
    *Done in 0.4.4 beta 1* (`FreeEmptyChunks`): with room in VRAM an empty chunk waits 30 s
@@ -168,6 +166,26 @@ Each step goes in on its own, behind a switch, and is measured before the next.
 4. **The full-screen image.** Upload only the pages its write faults marked, or skip the upload
    when a cheap checksum of the written pages is unchanged. Failing that, spread its hash and
    upload over two frames.
+
+### The GX region as an upload heap (0.4.4 beta 5)
+
+The game's per-frame GPU data lives in one region it makes at start: its GX range allocator
+(288 MiB with HW's patch). 0.4.4 beta 4 found it (a hook on its init, `engine/gx_region.cpp`) and
+showed that nearly every remaining write fault is inside it, and that the game binds it either in
+pieces of 16 KiB or less (already copied) or in spans of about 4 MiB (tracked: walked, the written
+pages uploaded, re-protected, faulted again at the game's next write).
+
+`BB_GX_IN_PLACE` (default on, not with the PC memory model, which has its own rules) treats it as a
+PC game's upload heap: its whole blocks are imported for the GPU once, as they are
+(`BbGuestMemory::ImportRange`: VK_EXT_external_memory_host over the game's memory pool, on a
+thread of its own as soon as the region exists), and bound to that memory at first use, never
+moved. What is bound inside it then takes the PC memory model's in-place path (`ObtainBuffer`):
+no tracking, uploads or VRAM copy; small read-only bindings are still copied when bound (commands
+decoded later may change them on the CPU); the command processor's writes into it (WriteData,
+DMA) are recorded on the GPU in stream order (`CommandWriteTarget`, `DmaMayWriteOnCpu`), and GPU
+writes not done yet count as GPU-modified (`WriteTicks`). A binding over the region waits for the
+import (at most 10 s); a failed import, or the game unmapping the region, leaves it tracked as
+before. Unlike the model, nothing moves: no sparse rebinds in play, the cause of its late frames.
 
 ### Step 4: verify, then decide the default
 

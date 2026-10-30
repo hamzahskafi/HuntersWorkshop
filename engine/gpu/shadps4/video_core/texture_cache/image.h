@@ -50,8 +50,7 @@ struct UniqueImage {
         : device{other.device}, allocator{std::exchange(other.allocator, VK_NULL_HANDLE)},
           allocation{std::exchange(other.allocation, VK_NULL_HANDLE)},
           image{std::exchange(other.image, VK_NULL_HANDLE)}, image_ci{std::move(other.image_ci)},
-          size_bytes{std::exchange(other.size_bytes, 0)},
-          reusable{std::exchange(other.reusable, false)} {}
+          size_bytes{std::exchange(other.size_bytes, 0)} {}
     UniqueImage& operator=(UniqueImage&& other) {
         if (this == &other) return *this;
         Destroy();
@@ -61,7 +60,6 @@ struct UniqueImage {
         allocation = std::exchange(other.allocation, VK_NULL_HANDLE);
         image_ci = std::move(other.image_ci);
         size_bytes = std::exchange(other.size_bytes, 0);
-        reusable = std::exchange(other.reusable, false);
         return *this;
     }
 
@@ -84,15 +82,7 @@ public:
     vk::Image image{};
     vk::ImageCreateInfo image_ci{};
     vk::DeviceSize size_bytes{};
-    /// bbport: memory of its own, in device-local memory, not tied to this image: kept for the
-    /// next image of its size when this one is freed (see TrimImageMemory).
-    bool reusable{};
 };
-
-/// bbport: freed images' memory is kept for a few seconds for the next image of the same size and
-/// memory type (BB_IMAGE_REUSE_MB, 256; 0: freed at once). Frees what has waited long enough, or
-/// everything when `all` (VRAM pressure: the texture collector is freeing images for room).
-void TrimImageMemory(bool all);
 
 struct Image {
     explicit Image(const Vulkan::Instance& instance, Vulkan::Runtime& runtime,

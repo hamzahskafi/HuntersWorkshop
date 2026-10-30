@@ -130,12 +130,17 @@ public:
     /// CopySourceStreamLimit they take the stream path, untracked (see ObtainBuffer).
     static inline thread_local bool copy_source = false;
     static inline std::array<u64, 6> hle_path_calls{}, hle_path_bytes{};
-    /// Bindings inside the game's GX range allocator, by kind, with their bytes (the stats, in
-    /// vk_shader_hle.cpp): GxSmall read-only within the usual stream limits (copied anyway), GxCopied
-    /// read-only up to BB_GX_RING_STREAM_KB (copied by its rule), GxGpuWritten such ones the GPU wrote
-    /// (tracked), GxLarge read-only and larger (tracked), GxTexel, GxWritten.
-    enum GxUse : u32 { GxSmall, GxCopied, GxGpuWritten, GxLarge, GxTexel, GxWritten, GxUses };
+    /// Bindings inside the game's GX region (bbport_gx_ring.h), by how they are served, with their
+    /// bytes (the stats, in vk_shader_hle.cpp): small read-only ones copied (the stream path), read,
+    /// texel and written ones in place (BB_GX_IN_PLACE), and tracked ones (not in place: before
+    /// the import, without it, or across the region's edge).
+    enum GxUse : u32 { GxCopied, GxInPlace, GxTexel, GxWritten, GxTracked, GxUses };
     static inline std::array<std::atomic<u64>, GxUses> gx_ring_calls{}, gx_ring_bytes{};
+    /// bbport: whether bindings may be in place: with the PC memory model, or once the game's GX
+    /// region is bound in place (BB_GX_IN_PLACE).
+    [[nodiscard]] bool InPlaceActive() const noexcept {
+        return GuestInPlace() || gx_ready.load(std::memory_order_acquire);
+    }
 
     /// Finds a buffer for the specified region.
     [[nodiscard]] std::pair<const Buffer*, u64> ObtainBuffer(VAddr device_addr, u32 size,
@@ -216,7 +221,7 @@ public:
     void NoteCpuWriteRange(VAddr addr, u64 size);
     /// Whether any part of the range is.
     [[nodiscard]] bool IsAnyInPlace(VAddr addr, u64 size) const {
-        return GuestInPlace() && size != 0 &&
+        return InPlaceActive() && size != 0 &&
                in_place_blocks.Overlaps(addr >> block_shift, ((addr + size - 1) >> block_shift) + 1);
     }
 
@@ -614,6 +619,36 @@ private:
     /// largest buffer): the game's memory in one arena, never migrated (GetArena).
     u64 arena_group_pages{1};
     u32 blocks_per_arena_page_shift{};
+
+    /// bbport BB_GX_IN_PLACE (default on, not with the PC memory model): the game's GX region as a
+    /// PC upload heap. Once the game has made it (BbGxRing), its whole blocks [gx_first, gx_end)
+    /// are imported for the GPU as they are (BbGuestMemory::ImportRange, on a thread of its own)
+    /// and bound to that memory at first use, for good: what is bound inside it is read and
+    /// written in place, with no write tracking, uploads or VRAM copy; small read-only bindings
+    /// are still copied when bound (the stream path). A binding over the region waits for the
+    /// import; one that fails leaves the region tracked as before.
+    enum class GxState : u8 { Off, Waiting, Importing, Imported, Ready, Failed };
+    std::atomic<u8> gx_state{u8(GxState::Off)};
+    std::atomic<bool> gx_ready{false}, gx_unmapped{false};
+    u64 gx_first = 0, gx_end = 0; ///< blocks
+    vk::Buffer gx_buffer{};
+    vk::DeviceMemory gx_memory{};
+    void PollGxRegion(VAddr addr, u64 size);
+    void StartGxImport();
+    [[nodiscard]] bool InGxRegion(VAddr addr, u64 size) const noexcept {
+        return gx_ready.load(std::memory_order_acquire) && size != 0 &&
+               (addr >> block_shift) >= gx_first && ((addr + size - 1) >> block_shift) < gx_end;
+    }
+    [[nodiscard]] bool GxOverlaps(VAddr addr, u64 size) const noexcept {
+        return gx_ready.load(std::memory_order_acquire) && size != 0 &&
+               (addr >> block_shift) < gx_end && ((addr + size - 1) >> block_shift) >= gx_first;
+    }
+    static void CountGxUse(GxUse use, u64 size) {
+        gx_ring_calls[use].fetch_add(1, std::memory_order_relaxed);
+        gx_ring_bytes[use].fetch_add(size, std::memory_order_relaxed);
+    }
+    /// The import's thread; last, so that it is waited for before anything it writes goes.
+    std::future<void> gx_import;
 };
 
 } // namespace VideoCore

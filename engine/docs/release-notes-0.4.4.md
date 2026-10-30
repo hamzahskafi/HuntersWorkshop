@@ -1,7 +1,7 @@
 # Hunter's Workshop 0.4.4
 
 What changed since 0.4.3, for the release page. The engine work behind each line is in
-`docs/community-fixes-plan.md` and `docs/gpu-memory.md`. (In progress: after beta 4. Lines marked
+`docs/community-fixes-plan.md` and `docs/gpu-memory.md`. (In progress: beta 5. Lines marked
 *to be measured* wait for a test log before the release says what they bring.)
 
 ## Defaults
@@ -14,11 +14,15 @@ What changed since 0.4.3, for the release page. The engine work behind each line
 
 ## Performance
 
-- **Texture and game-data memory** (*to be measured*). A freed large texture's memory is kept a few
-  seconds for the next texture of the same size (beta 1: rarely used, 3 of 19,305 new images), and
-  memory for the game's data in VRAM is kept longer when it empties while VRAM has room. In beta 1 a
-  tester saw about 1 GB less VRAM in dense areas, and smoother play there, than with 0.4.3; which
-  change did it is not known yet.
+- **The game's per-frame GPU data read where the game writes it** (*to be measured*). The memory the
+  game rewrites for the GPU every frame (per-draw parameters, CPU-animated vertices, its upload area;
+  288 MiB) is now used by the GPU in place, as a PC game's upload heap: no write protection, write
+  faults, uploads or VRAM copy for it. The game makes it once at start; the engine takes it from
+  there and binds it once, never moving it. Small read-only pieces of it are still copied when used.
+  More › Engine has no switch for it yet; `BB_GX_IN_PLACE=0` turns it off.
+- **Game-data memory** (*to be measured*). Memory for the game's data in VRAM is kept longer when it
+  empties while VRAM has room. In beta 1 a tester saw about 1 GB less VRAM in dense areas, and
+  smoother play there, than with 0.4.3; which change did it is not known yet.
 
 ## Fixes
 
@@ -28,9 +32,10 @@ What changed since 0.4.3, for the release page. The engine work behind each line
 ## For testers
 
 - Long-frame reports (frame statistics on) now give the long frame's own figures, with how many
-  images got new memory, reused memory or had their data checked.
+  images were made or had their data checked.
 - The frame capture lists every draw of each pass.
 - Windows logs give VRAM once a minute: the game's use against the driver's budget, and the
   engine's part of it.
 - The log names the game's per-frame GPU memory (its GX range allocator) as the game makes it,
-  marks the write faults inside it, and counts how the game binds it (with frame statistics).
+  says when it is in place, marks write faults inside it, and counts how the game's bindings of it
+  are served (with frame statistics).

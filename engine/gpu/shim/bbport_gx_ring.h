@@ -3,9 +3,9 @@
 // (per-draw shader parameters, CPU-deformed vertices, the graphics device's per-frame upload area,
 // the copy shader's sources and range lists). The game makes it once, when it creates its graphics
 // device: the allocator's init (image 0x26a9b50, one caller) is given a base and a size, and a hook
-// on its entry (engine/gx_region.cpp) hands them here. The buffer cache copies read-only buffers
-// inside it when they are used (BufferCache::ObtainBuffer): the game rewrites them before each use,
-// and tracking them only cost write faults and re-protection.
+// on its entry (engine/gx_region.cpp) hands them here. The buffer cache binds it in place, as a PC
+// game's upload heap (BB_GX_IN_PLACE, BufferCache::PollGxRegion): the game rewrites it every frame,
+// and tracking it cost write faults, uploads and re-protection.
 #pragma once
 
 #include <atomic>

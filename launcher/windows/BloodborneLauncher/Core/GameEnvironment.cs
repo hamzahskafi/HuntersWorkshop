@@ -217,6 +217,7 @@ namespace BloodborneLauncher.Core
                 env["BB_FRAME_TIMER"] = "0";
                 env.Remove("BB_HOT_PAGES");
                 env.Remove("BB_GUEST_IN_PLACE");
+                env["BB_GX_IN_PLACE"] = "0"; // the game's GX region tracked as before
                 env.Remove("BB_NATIVE_CALLS");
                 env["BB_PRECISE_PACING"] = "0";
                 env["BB_VBLANK_PACING"] = "0";

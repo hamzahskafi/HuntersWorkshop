@@ -49,4 +49,10 @@ bool PcModelGpu(const Vulkan::Instance& instance);
 void Install(const Vulkan::Instance& instance);
 /// The chunk holding direct memory address `phys`, or null.
 const Chunk* Find(std::uint64_t phys);
+/// One range of direct memory imported for the GPU as it is, whatever the memory model: a buffer
+/// and memory over [phys, phys + size) (the game's GX region as an upload heap, BufferCache).
+/// Pins its pages: slow (about a second for 256 MiB), so not on a thread the game waits for.
+/// False, with the step that failed, where the driver cannot (or on Linux, not yet).
+bool ImportRange(const Vulkan::Instance& instance, std::uint64_t phys, std::uint64_t size,
+                 vk::Buffer& buffer, vk::DeviceMemory& memory, const char** failed_step);
 } // namespace BbGuestMemory

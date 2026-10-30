@@ -250,6 +250,12 @@ void Install(const Vulkan::Instance& instance) {
     std::printf("Guest memory: direct memory chunks come from Vulkan (BB_GUEST_GPU_MEMORY=1)\n");
 }
 
+bool ImportRange(const Vulkan::Instance&, std::uint64_t, std::uint64_t, vk::Buffer&, vk::DeviceMemory&,
+                 const char** failed_step) {
+    *failed_step = "Linux (its direct memory comes from Vulkan only with the PC memory model)";
+    return false;
+}
+
 const Chunk* Find(std::uint64_t phys) {
     std::scoped_lock lk{mutex};
     // The last chunk starting at or below phys.

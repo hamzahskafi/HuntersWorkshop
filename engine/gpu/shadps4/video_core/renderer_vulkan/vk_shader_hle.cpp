@@ -446,9 +446,9 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
                 gx_any += gx_calls[i] - gx_calls_before[i];
             }
             if (gx_any) {
-                const char* gx_names[BufferCache::GxUses] = {
-                    "read, small (copied anyway)", "read, copied by its rule", "read, GPU-written (tracked)",
-                    "read, larger (tracked)", "texel (tracked)", "written"};
+                const char* gx_names[BufferCache::GxUses] = {"read, small (copied)", "read in place",
+                                                             "texel in place", "written in place",
+                                                             "tracked (not in place)"};
                 std::printf("  GX region bindings:");
                 for (u32 i = 0; i < BufferCache::GxUses; ++i) {
                     const u64 calls = gx_calls[i] - gx_calls_before[i];

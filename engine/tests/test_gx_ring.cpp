@@ -70,11 +70,11 @@ int main() {
     std::memcpy(image + kInit, other, sizeof other);
     assert(!BbEngine::GxRegion::Install(image, kSize));
 
-    // BB_GX_RING_STREAM_KB=0: no hook either.
+    // BB_GX_IN_PLACE=0: no hook either.
     std::memcpy(image + kInit, kStandIn, sizeof kStandIn);
-    SetEnv("BB_GX_RING_STREAM_KB", "0");
+    SetEnv("BB_GX_IN_PLACE", "0");
     assert(!BbEngine::GxRegion::Install(image, kSize));
-    SetEnv("BB_GX_RING_STREAM_KB", nullptr);
+    SetEnv("BB_GX_IN_PLACE", nullptr);
 
     // 1.09: hooked; the game's call (the device's base and size in rdx and rcx) gives the region, and the
     // init itself still runs and returns.

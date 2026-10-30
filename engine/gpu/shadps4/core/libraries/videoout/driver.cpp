@@ -398,16 +398,11 @@ static void LogRam() {
     }
     const auto mib = [](u64 bytes) { return static_cast<unsigned long long>(bytes >> 20); };
     std::printf("Memory: game %llu MiB in RAM (%llu MiB committed, peak %llu MiB); PC %llu of %llu "
-                "MiB free, %llu MiB commit left; GPU images %llu MiB, %llu MiB cached in %llu; "
-                "freed images' memory kept %llu MiB, %llu images given new memory, %llu a freed "
-                "one's\n",
+                "MiB free, %llu MiB commit left; GPU images %llu MiB, %llu MiB cached in %llu\n",
                 mib(m.working_set), mib(m.private_bytes), mib(m.peak_working_set), mib(m.free_phys),
                 mib(m.total_phys), mib(m.commit_left), mib(BbStats::vk_image_bytes.load()),
                 mib(BbStats::live_image_bytes.load()),
-                static_cast<unsigned long long>(BbStats::live_images.load()),
-                mib(BbStats::image_kept_bytes.load()),
-                static_cast<unsigned long long>(BbStats::image_allocs.load()),
-                static_cast<unsigned long long>(BbStats::image_reuses.load()));
+                static_cast<unsigned long long>(BbStats::live_images.load()));
 #ifdef _WIN32
     // bbport: VRAM, once a minute: the driver's count of the game's use against its budget (what an
     // overlay shows), then the engine's part of it: VMA's blocks, images, the game's data in VRAM.
@@ -641,26 +636,23 @@ void VideoOutDriver::Flip(const Request& req) {
                         static_cast<unsigned long long>(vol - last_vol));
         }
         // bbport: the parts of image create and refresh (texture loading), and how many images
-        // were given new memory, took a freed image's memory, or had their guest data checked.
-        // Taken every frame: a long frame's figures are its own, not everything since the last.
-        static u64 last_parts[5], last_allocs, last_reuses, last_checks;
+        // were given memory or had their guest data checked. Taken every frame: a long frame's
+        // figures are its own, not everything since the last.
+        static u64 last_parts[5], last_allocs, last_checks;
         const u64 parts[5] = {BbStats::t_image_query.load(), BbStats::t_image_alloc.load(),
                               BbStats::t_refresh_hash.load(), BbStats::t_refresh_obtain.load(),
                               BbStats::t_refresh_detile.load()};
-        const u64 allocs = BbStats::image_allocs.load(), reuses = BbStats::image_reuses.load(),
-                  checks = BbStats::image_checks.load();
+        const u64 allocs = BbStats::image_allocs.load(), checks = BbStats::image_checks.load();
         if (frame_ms > 40.0 && last_gpu_ns != 0) {
             std::printf("       ms in: resident %.1f, protect %.1f, image create %.1f, "
                         "image refresh %.1f, staging %.1f, waiting for host copies %.1f\n",
                         (t_now[0] - last_t[0]) / 1e6, (t_now[1] - last_t[1]) / 1e6,
                         (t_now[2] - last_t[2]) / 1e6, (t_now[3] - last_t[3]) / 1e6,
                         (t_now[4] - last_t[4]) / 1e6, (t_now[5] - last_t[5]) / 1e6);
-            std::printf("       of which: format query %.1f, allocation %.1f (%llu new, %llu "
-                        "reused); hashing %.1f, source data %.1f, detiling %.1f (%llu images "
-                        "checked)\n",
+            std::printf("       of which: format query %.1f, allocation %.1f (%llu images); "
+                        "hashing %.1f, source data %.1f, detiling %.1f (%llu images checked)\n",
                         (parts[0] - last_parts[0]) / 1e6, (parts[1] - last_parts[1]) / 1e6,
                         static_cast<unsigned long long>(allocs - last_allocs),
-                        static_cast<unsigned long long>(reuses - last_reuses),
                         (parts[2] - last_parts[2]) / 1e6, (parts[3] - last_parts[3]) / 1e6,
                         (parts[4] - last_parts[4]) / 1e6,
                         static_cast<unsigned long long>(checks - last_checks));
@@ -676,7 +668,6 @@ void VideoOutDriver::Flip(const Request& req) {
         }
         std::copy(std::begin(parts), std::end(parts), std::begin(last_parts));
         last_allocs = allocs;
-        last_reuses = reuses;
         last_checks = checks;
         last_pc = pc;
         last_pp = pp;

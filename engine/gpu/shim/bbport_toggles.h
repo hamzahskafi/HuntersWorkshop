@@ -165,11 +165,9 @@ inline std::atomic<std::uint64_t> t_resident{0}, t_protect{0}, t_image_create{0}
 /// Image(), and RefreshImage's hashes, source buffer and detiling.
 inline std::atomic<std::uint64_t> t_image_query{0}, t_image_alloc{0}, t_refresh_hash{0},
     t_refresh_obtain{0}, t_refresh_detile{0};
-/// Image memory: new allocations, memory taken back from freed images (UniqueImage::Create), and
-/// images whose guest data was checked for changes (RefreshImage). Counted always (long frames).
-inline std::atomic<std::uint64_t> image_allocs{0}, image_reuses{0}, image_checks{0};
-/// Freed images' memory kept for the next image of its size (texture_cache/image.cpp).
-inline std::atomic<std::uint64_t> image_kept_bytes{0};
+/// Images given memory (UniqueImage::Create) and images whose guest data was checked for changes
+/// (RefreshImage). Counted always (long frames).
+inline std::atomic<std::uint64_t> image_allocs{0}, image_checks{0};
 /// Diagnostics are collected only with BB_FRAME_STATS=1.
 inline const bool enabled = [] {
     const char* env = std::getenv("BB_FRAME_STATS");

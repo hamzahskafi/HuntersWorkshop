@@ -256,7 +256,7 @@ bool Rasterizer::HasUnsubmittedSignals() {
 }
 
 bool Rasterizer::WriteGuestMemory(VAddr address, const void* data, u32 size) {
-    if (!VideoCore::GuestInPlace() || size == 0 || (address | size) % 4 != 0) {
+    if (!buffer_cache.InPlaceActive() || size == 0 || (address | size) % 4 != 0) {
         return false;
     }
     const auto [buffer, offset] = buffer_cache.ObtainBuffer(address, size, true);
@@ -272,7 +272,9 @@ bool Rasterizer::WriteDataOnGpu(VAddr address, const void* data, u32 size) {
         const char* env = std::getenv("BB_GPU_COMMAND_WRITES");
         return !env || env[0] != '0';
     }();
-    if (!enabled || !VideoCore::GuestInPlace() || size == 0 || (address | size) % 4 != 0) {
+    // bbport: with the PC memory model, or inside the game's GX region in place (BB_GX_IN_PLACE):
+    // the GPU reads that memory as it is, so a write must land in stream order too.
+    if (!enabled || !buffer_cache.InPlaceActive() || size == 0 || (address | size) % 4 != 0) {
         return false;
     }
     const auto target = buffer_cache.CommandWriteTarget(address, size);
@@ -5186,8 +5188,9 @@ void Rasterizer::FillBuffer(VAddr address, u32 num_bytes, u32 value, bool is_gds
 
 bool Rasterizer::DmaMayWriteOnCpu(VAddr dst, u32 num_bytes) {
     // The first condition of both: false only where they record a GPU fill or copy. The model
-    // of 0.3 keeps its waits (the new memory and translation model only).
-    if (!VideoCore::GuestInPlace()) {
+    // of 0.3 keeps its waits (the new memory and translation model, or memory in place: the
+    // game's GX region, BB_GX_IN_PLACE).
+    if (!buffer_cache.InPlaceActive()) {
         return true;
     }
     return !buffer_cache.IsAnyInPlace(dst, num_bytes) &&

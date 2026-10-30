@@ -5,7 +5,7 @@
 #include <cstdint>
 
 namespace BbEngine::GxRegion {
-/// Loader start, after the executable is verified. Commits its own hook. BB_GX_RING_STREAM_KB=0
-/// leaves it out (the region then stays unknown and is tracked as before).
+/// Loader start, after the executable is verified. Commits its own hook. BB_GX_IN_PLACE=0 leaves it
+/// out (the region then stays unknown and is tracked as before).
 bool Install(std::uint8_t* image, std::size_t size);
 } // namespace BbEngine::GxRegion
