@@ -15,12 +15,17 @@
 #include <sys/mman.h>
 #endif
 
+namespace {
+constexpr std::uint64_t kBase = 0x800000000ull, kSize = 0x5541000; // up to the device's holder
+}
+
+// As the engine's memory table: the game's mappings only, never its image (the loader's own): the
+// image's code and data must be read through SetImage's range. Other test memory reads as mapped.
 extern "C" std::uint64_t runtime_memory_clamp(std::uintptr_t address, std::uint64_t size) {
-    return address ? size : 0; // everything the test maps is readable
+    return address && (address < kBase || address >= kBase + kSize) ? size : 0;
 }
 
 namespace {
-constexpr std::uint64_t kBase = 0x800000000ull, kSize = 0x5541000; // up to the device's holder
 
 void Put(std::uint64_t offset, std::initializer_list<unsigned char> bytes) {
     std::memcpy(reinterpret_cast<void*>(kBase + offset), bytes.begin(), bytes.size());
@@ -49,11 +54,18 @@ int main() {
     Put(0x26a9b7d, {0x48, 0x89, 0x83, 0xb8, 0x00, 0x00, 0x00});
     Put(0x26a9b88, {0x48, 0x89, 0x83, 0xc0, 0x00, 0x00, 0x00});
 
+    // Before the loader placed the image: not looked at, and looked for again later.
+    assert(!BbGxRing::Find() && !BbGxRing::Known());
+    BbGxRing::SetImage(reinterpret_cast<const std::uint8_t*>(kBase), kSize);
+
     // Before the game made its device: not found, and looked for again later.
     assert(!BbGxRing::Find() && !BbGxRing::Known());
 
-    // The objects, in the image's spare room: holder -> device; device + 0xb3e0 -> range allocator.
-    const std::uint64_t holder = kBase + 0x1000, device = kBase + 0x10000, ring = kBase + 0x30000;
+    // The objects: holder -> device in the image's spare room; device + 0xb3e0 -> the range allocator,
+    // in memory the game mapped (outside the image).
+    static std::uint64_t ring_object[0x100 / 8];
+    const std::uint64_t holder = kBase + 0x1000, device = kBase + 0x10000;
+    const auto ring = reinterpret_cast<std::uint64_t>(ring_object);
     Put64(kBase + 0x55406c8, holder);
     Put64(holder, device);
     Put64(device + 0xb3e0, ring);

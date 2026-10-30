@@ -12,8 +12,6 @@ extern "C" std::uint64_t runtime_memory_clamp(std::uintptr_t address, std::uint6
 namespace BbGxRing {
 namespace {
 using u64 = std::uint64_t;
-constexpr u64 ImageBase = 0x800000000ull; // where the loader maps the game (bbport_guest_hooks)
-
 constexpr u64 DeviceHolder = 0x55406c8; // the graphics device, behind one more pointer
 constexpr u64 UploadAllocator = 0xb3e0; // in the device: its per-frame upload allocator
 constexpr u64 RegionStart = 0xb8, RegionEnd = 0xc0, RegionSize = 0xd0; // in the range allocator
@@ -33,8 +31,21 @@ constexpr std::array<Code, 4> kCode{{
     {0x26a9b88, {0x48, 0x89, 0x83, 0xc0, 0x00, 0x00, 0x00}},
 }};
 
+std::atomic<const std::uint8_t*> g_image{nullptr};
+std::atomic<u64> g_image_size{0};
+
+// Inside the image (its code, data and bss), or in memory the game mapped.
+bool Readable(u64 address, u64 size) {
+    const u64 image = reinterpret_cast<u64>(g_image.load(std::memory_order_acquire));
+    const u64 image_size = g_image_size.load(std::memory_order_relaxed);
+    if (image && address >= image && address - image <= image_size && image_size - (address - image) >= size) {
+        return true;
+    }
+    return address && runtime_memory_clamp(address, size) >= size;
+}
+
 bool Read(u64 address, u64& out) {
-    if (!address || runtime_memory_clamp(address, sizeof out) < sizeof out) return false;
+    if (!Readable(address, sizeof out)) return false;
     std::memcpy(&out, reinterpret_cast<const void*>(address), sizeof out);
     return true;
 }
@@ -44,27 +55,42 @@ std::atomic<int> g_state{0};
 std::atomic<bool> g_logged{false};
 } // namespace
 
+void SetImage(const std::uint8_t* image, std::uint64_t size) {
+    g_image_size.store(size, std::memory_order_relaxed);
+    g_image.store(image, std::memory_order_release);
+}
+
 bool Find() {
     if (Known()) return true;
     int state = g_state.load(std::memory_order_acquire);
     if (state < 0) return false;
     if (state == 0) {
+        if (!g_image.load(std::memory_order_acquire)) {
+            return false; // the loader has not placed the image yet
+        }
         const char* env = std::getenv("BB_GX_RING_STREAM_KB");
-        bool fine = !(env && std::strtoull(env, nullptr, 10) == 0);
+        const bool off = env && std::strtoull(env, nullptr, 10) == 0;
+        const u64 base = reinterpret_cast<u64>(g_image.load(std::memory_order_relaxed));
+        const Code* differs = nullptr;
         for (const Code& c : kCode) {
-            if (!fine) break;
-            const u64 at = ImageBase + c.offset;
-            fine = runtime_memory_clamp(at, c.bytes.size()) >= c.bytes.size() &&
-                   !std::memcmp(reinterpret_cast<const void*>(at), c.bytes.data(), c.bytes.size());
+            const u64 at = base + c.offset;
+            if (!Readable(at, c.bytes.size()) ||
+                std::memcmp(reinterpret_cast<const void*>(at), c.bytes.data(), c.bytes.size())) {
+                differs = &c;
+                break;
+            }
         }
-        if (!fine && !(env && std::strtoull(env, nullptr, 10) == 0)) {
-            std::printf("GPU memory: the game's GX range allocator not looked for (its code differs from 1.09)\n");
+        if (differs && !off) {
+            std::printf("GPU memory: the game's GX range allocator not looked for (its code at +%#llx differs "
+                        "from 1.09)\n",
+                        (unsigned long long)differs->offset);
         }
-        g_state.store(fine ? 1 : -1, std::memory_order_release);
-        if (!fine) return false;
+        g_state.store(differs || off ? -1 : 1, std::memory_order_release);
+        if (differs || off) return false;
     }
+    const u64 base = reinterpret_cast<u64>(g_image.load(std::memory_order_relaxed));
     u64 holder = 0, device = 0, ring = 0, start = 0, end = 0, size = 0;
-    if (!Read(ImageBase + DeviceHolder, holder) || !Read(holder, device) ||
+    if (!Read(base + DeviceHolder, holder) || !Read(holder, device) ||
         !Read(device + UploadAllocator, ring) || !Read(ring + RegionStart, start) ||
         !Read(ring + RegionEnd, end) || !Read(ring + RegionSize, size)) {
         return false; // not made yet
