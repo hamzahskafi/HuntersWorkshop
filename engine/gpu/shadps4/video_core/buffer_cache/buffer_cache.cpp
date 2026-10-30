@@ -1194,7 +1194,9 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
         BB_SECTION(ObtainStream);
         note_hle(1);
         if (gx_edge) {
-            CountGxUse(device_addr < (gx_first << block_shift) ? GxEdgeCopied : GxTailCopied, size);
+            const bool first_edge = device_addr < (gx_first << block_shift);
+            CountGxUse(first_edge ? GxEdgeCopied : GxTailCopied, size);
+            NoteGxEdge(device_addr, size, first_edge, is_texel_buffer);
         } else if (in_gx_region) {
             CountGxUse(GxCopied, size);
         }
@@ -3314,6 +3316,23 @@ void BufferCache::NoteBeforeGx(VAddr addr, u64 size) {
                 (unsigned long long)addr, (unsigned long long)size, (unsigned long long)gx_head);
 }
 
+void BufferCache::NoteGxEdge(VAddr addr, u64 size, bool first_edge, bool texel) {
+    if (gx_edge_noted[first_edge ? 0 : 1].exchange(true, std::memory_order_relaxed)) {
+        return;
+    }
+    const VAddr end = addr + size;
+    std::printf("GPU memory: the first binding across the GX region's %s edge: %#llx, %llu bytes%s; "
+                "it begins %lld bytes from the region's first byte and ends %lld bytes from the "
+                "byte after its last (%s); the region's buffer is %#llx-%#llx\n",
+                first_edge ? "first" : "last", (unsigned long long)addr, (unsigned long long)size,
+                texel ? " (texel buffer)" : "", (long long)(addr - gx_head),
+                (long long)(end - gx_tail),
+                end <= gx_tail && addr >= gx_head ? "inside the region"
+                                                  : "reaching beyond the region",
+                (unsigned long long)(gx_first << block_shift),
+                (unsigned long long)(gx_end << block_shift));
+}
+
 void BufferCache::GxArenaBound() {
     if (gx_arena.exchange(true) || !gx_own.load(std::memory_order_acquire)) {
         return; // done before, or the arena is the region's way in (BB_GX_OWN_BUFFER=0)
@@ -3374,6 +3393,7 @@ void BufferCache::StartGxImport() {
     gx_first = first;
     gx_end = stop;
     gx_head = start;
+    gx_tail = end;
     const u64 bytes = (stop - first) << block_shift;
     gx_import = std::async(std::launch::async, [this, phys, bytes] {
         const auto began = std::chrono::steady_clock::now();

@@ -642,7 +642,13 @@ private:
     std::atomic<bool> gx_ready{false}, gx_unmapped{false};
     u64 gx_first = 0, gx_end = 0; ///< blocks
     VAddr gx_head = 0;            ///< the region's first byte (BbGxRing::g_start)
+    VAddr gx_tail = 0;            ///< the byte after its last (BbGxRing::g_end)
     std::atomic<bool> gx_before_noted{false};
+    std::array<std::atomic<bool>, 2> gx_edge_noted{};
+    /// The first binding across each edge of the region's buffer (copied when bound): logged once,
+    /// with where it begins and ends against the region, to tell a binding of the region's own
+    /// bytes in its partly covered end blocks from one running beyond the game's allocation.
+    void NoteGxEdge(VAddr addr, u64 size, bool first_edge, bool texel);
     /// A binding in the region's first block before the region itself (bytes the game's allocation
     /// puts in front of it: 64 in 1.09): logged once, as nothing of the game's GPU work should.
     void NoteBeforeGx(VAddr addr, u64 size);

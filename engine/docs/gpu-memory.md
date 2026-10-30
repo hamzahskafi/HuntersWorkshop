@@ -289,7 +289,13 @@ Should that block not be one run of memory with the rest, the import begins at t
 before (logged). The block holding the region's last 64 bytes stays out: the rest of it is the
 game's next allocation, and the page table cannot point part of a block elsewhere. Bindings across
 an edge are counted by edge (`read across its first edge`, expected 0; `read across its last
-edge`, only bindings reaching the region's last 64 bytes). Across the edge, part in the buffer and
+edge`, only bindings reaching the region's last 64 bytes). Beta 10's first log
+(`20261030_182328`): in play none at the first edge (30 to 100 a second in beta 9) and almost
+none at the last; at the title one a frame at the last (160 KiB, 19 MB/s), which beta 9's figure
+was too (taken then for the first). The first binding across each edge is logged once
+(`NoteGxEdge`), with where it ends against the region: inside it (its last 64 bytes, which a
+page more of import could serve in place) or beyond it (a binding running past the game's
+allocation, rightly copied). Across the edge, part in the buffer and
 part outside: read-only bindings up to 8 MiB are copied when bound (the stream path,
 `GxEdgeCopied`, `GxTailCopied`); anything else that needs the arena there (a GPU write across the
 edge, a shader's page fault there) binds the arena's blocks to the import as before
