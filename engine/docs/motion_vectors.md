@@ -124,3 +124,16 @@ Changes:
 
 Measured in `out/motion-gated.log`: ~225 saved draws and ~600 "still" ones a frame, no overflow,
 58–80 FPS in game scenes. Whether the trail on the saw is gone still needs a visual check.
+
+## Small skeletons the GPU wrote (Hunter's Workshop 0.4.4 beta 14)
+
+Lantern 0.9.38's rule stores every small skeleton whose bone palette the GPU wrote, every frame:
+the palette's CPU copy is stale, so the gate cannot compare it with the last frame's. In the dense
+area facing its lamps that was 360 draws and 3.7 M vertices a frame (77 and 1.3 M facing the room),
+and object motion cost about 0.8 ms of GPU time there (`docs/community-fixes-plan.md`, beta 14).
+The game's copy shader writes many of its constants from its own memory: `motion_copy_sources.h`
+records where each of the copy shader's ranges came from, and a palette written by one of them is
+compared through its source, which the CPU holds (`BB_MOTION_GPU_SMALL=source`; `store`, the
+default, keeps the old rule; `camera` stores none, for measuring). With frame statistics the motion
+report counts those draws, how many came from the copy shader, and how many of those were as in
+the last frame.

@@ -21,6 +21,7 @@
 #include "bbport_toggles.h"
 #include "video_core/renderer_vulkan/vk_gpu_profiler.h"
 #include "video_core/renderer_vulkan/vk_gpu_savings.h"
+#include "video_core/renderer_vulkan/motion_copy_sources.h"
 
 extern std::unique_ptr<AmdGpu::Liverpool> liverpool;
 
@@ -368,6 +369,11 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
         const u32 local_src_offset = src_idx * buf_stride;
         const u32 local_size = (end + 1) * buf_stride;
         copies.emplace_back(local_src_offset, local_dst_offset, local_size);
+    }
+    // 0.4.4 beta 14: where each range came from, for object motion's small skeletons whose palette
+    // the GPU wrote (Motion::CopySources).
+    if (auto& sources = Motion::CopySources::Get(); sources.Wanted()) {
+        sources.Record(src_buf_sharp.base_address, dst_buf_sharp.base_address, copies);
     }
 
     // bbport: 64 KiB instead of 64 MiB. The copies are a few KiB spread over up to 57 MiB, and

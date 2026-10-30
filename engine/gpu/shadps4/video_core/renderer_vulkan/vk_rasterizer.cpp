@@ -21,6 +21,7 @@
 #include "bbport_write_log.h"
 #include "bbport_free_check.h"
 #include "bbport_gx_ring.h"
+#include "video_core/renderer_vulkan/motion_copy_sources.h"
 #include "bbport_guest_memory.h"
 #include "video_core/renderer_vulkan/vk_frame_capture.h"
 #include "common/hash.h"
@@ -2121,6 +2122,13 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
         auto reason = all_motion ? Motion::StoreReason::All : Motion::StoreReason::Moving;
         u64 palette = 0, instance_data = 0;
         Motion::Anchor anchor{};
+        // 0.4.4 beta 14: small skeletons the GPU wrote (BB_MOTION_GPU_SMALL, Motion::GpuSmall).
+        static const Motion::GpuSmall gpu_small_mode = Motion::GpuSmallMode();
+        auto& copy_sources = Motion::CopySources::Get();
+        const bool trace_sources = copy_sources.Wanted();
+        bool gpu_small = false, traced = true;
+        u64 source_hash = 0;
+        Motion::Anchor source_anchor{};
         BbSections::Scope buffers_section{BbSections::MotionBuffers};
         for (const auto& resource : vs.buffers) {
             if (resource.IsSpecial()) continue;
@@ -2153,17 +2161,55 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
                 reason = Motion::StoreReason::Character;
             } else if (gated && gpu_written) {
                 // Lantern 0.9.38 (Awaken): a small skeleton the GPU wrote has a stale CPU copy,
-                // whose hash would read as standing still: such a draw is not gated.
-                gated = false;
-                reason = Motion::StoreReason::GpuWritten;
+                // whose hash would read as standing still: such a draw is not gated (below).
+                // 0.4.4 beta 14: where the copy shader wrote it, its source is the game's memory,
+                // current on the CPU (Motion::CopySources).
+                gpu_small = true;
+                if (trace_sources) {
+                    const VAddr source = copy_sources.Source(address, size);
+                    const bool current = source && memory->IsValidGpuMapping(source, 0) &&
+                                         memory->ClampRangeSize(source, size) == size &&
+                                         !buffer_cache.IsRegionGpuModified(source, size);
+                    if (current) {
+                        const auto* bones = reinterpret_cast<const float*>(source);
+                        if (!source_anchor.valid) {
+                            source_anchor = {bones[3], bones[7], bones[11], true};
+                        }
+                        source_hash = XXH3_64bits_withSeed(bones, size, source_hash);
+                    } else {
+                        traced = false;
+                    }
+                }
             } else if (gated && readable) {
                 palette = XXH3_64bits_withSeed(data, size, palette);
             }
         }
         buffers_section.End();
+        bool camera_only = false;
+        if (gpu_small && gated) {
+            traced = traced && trace_sources;
+            if (BbStats::enabled) {
+                const u64 identity[] = {vs.pgm_hash, motion_geometry, index_address,
+                                        u64(regs.num_indices) << 32 | instances, first_instance};
+                Motion::GpuSmallStats::Get().Note(XXH3_64bits(identity, sizeof(identity)), traced,
+                                                  source_hash);
+            }
+            if (gpu_small_mode == Motion::GpuSmall::Camera) {
+                camera_only = true; // measuring: camera vectors only
+            } else if (gpu_small_mode == Motion::GpuSmall::Source && traced) {
+                // Gated like a palette the CPU holds: compared with the last frame's below.
+                palette = XXH3_64bits_withSeed(&source_hash, sizeof(source_hash), palette);
+                if (!anchor.valid) {
+                    anchor = source_anchor;
+                }
+            } else {
+                gated = false;
+                reason = Motion::StoreReason::GpuWritten;
+            }
+        }
         push_data.motion_param = 0;
         bool store = !gated;
-        if (!store) {
+        if (!store && !camera_only) {
             BB_SECTION(MotionHistory);
             store = object_motion->Moving({.shader = vs.pgm_hash,
                                            .geometry = motion_geometry,

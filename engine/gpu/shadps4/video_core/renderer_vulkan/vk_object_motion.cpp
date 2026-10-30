@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "video_core/renderer_vulkan/vk_object_motion.h"
+#include "video_core/renderer_vulkan/motion_copy_sources.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -169,6 +170,14 @@ ObjectMotion::ObjectMotion(const Instance& instance_, Scheduler& scheduler_)
                 "frames)\n",
                 positions_per_frame,
                 (unsigned long long)((u64(1 + 2 * u64(positions_per_frame)) * 16) >> 20), hold);
+    // 0.4.4 beta 14: small skeletons the GPU wrote (Motion::GpuSmall).
+    if (Motion::GpuSmallMode() == Motion::GpuSmall::Source) {
+        std::printf("Object motion: small skeletons the GPU wrote compared with the last frame "
+                    "through the copy shader's source where it wrote them (BB_MOTION_GPU_SMALL=source)\n");
+    } else if (Motion::GpuSmallMode() == Motion::GpuSmall::Camera) {
+        std::printf("Object motion: small skeletons the GPU wrote get camera vectors only, for "
+                    "measuring (BB_MOTION_GPU_SMALL=camera)\n");
+    }
 }
 
 ObjectMotion::~ObjectMotion() {
@@ -186,8 +195,17 @@ ObjectMotion::~ObjectMotion() {
 }
 
 void ObjectMotion::OnFrameStart() {
+    // 0.4.4 beta 14: the copy shader's ranges are recorded while they are looked at (frame
+    // statistics, or BB_MOTION_GPU_SMALL=source), this frame's and the last.
+    auto& copy_sources = Motion::CopySources::Get();
+    copy_sources.SetWanted(enabled && (BbStats::enabled ||
+                                       Motion::GpuSmallMode() == Motion::GpuSmall::Source));
+    copy_sources.NextFrame();
     if (!enabled) {
         return;
+    }
+    if (BbStats::enabled) {
+        Motion::GpuSmallStats::Get().NextFrame();
     }
     if (BbStats::enabled && (frame % 600) == 0 && history.stats.draws) {
         const auto& s = history.stats;
@@ -221,6 +239,7 @@ void ObjectMotion::OnFrameStart() {
                     at ? by : "nothing",
                     double(std::max<u64>(s.peak_demand, history.Demand())) / (1 << 20),
                     double(positions_per_frame) / (1 << 20));
+        Motion::GpuSmallStats::Get().Report();
         index_ranges.stats = {};
         history.stats = {};
     }
