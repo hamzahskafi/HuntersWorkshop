@@ -151,3 +151,14 @@ the last frame.
 - Next, once measured: previous positions from last frame's bone and model constants (a second pass
   of the vertex shader's position) instead of stored vertices, which stay for vertices that change.
 
+## Small skeletons the GPU wrote, gated by their newest write (Hunter's Workshop 0.4.4 beta 16)
+
+Of beta 15's 360 small skeletons a frame whose palette the GPU wrote (facing the lamps of the dense
+area), 3 came from the copy shader this frame or the last: the rest were GPU-written earlier, and a
+page stays GPU-modified until the CPU writes it again. Every GPU write of tracked memory is now
+numbered per 4 KiB page where its pages become GPU-modified (`GpuWriteStamps`,
+`MemoryTracker::ForEachUploadRange`), and such a palette is gated by the number of its newest write
+as a palette the CPU holds is by its contents: not written since the last frame, it did not change
+and gets the camera vector; written since, it is stored and held as moved bones are.
+`BB_MOTION_GPU_SMALL=store` stores them every frame, as before.
+

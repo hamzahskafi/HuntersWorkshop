@@ -1509,6 +1509,13 @@ bool BufferCache::IsRegionGpuModified(VAddr addr, size_t size) {
     return false;
 }
 
+u64 BufferCache::GpuWriteVersion(VAddr addr, u64 size) {
+    if (!memory_tracker->IsRegionGpuModified(addr, size)) {
+        return ~u64{0};
+    }
+    return GpuWriteStamps::Get().Last(addr, size);
+}
+
 void BufferCache::ProcessFaultBuffer() {
     fault_manager->ProcessFaultBuffer();
 }

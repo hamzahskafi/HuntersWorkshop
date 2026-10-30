@@ -2126,8 +2126,12 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
         static const Motion::GpuSmall gpu_small_mode = Motion::GpuSmallMode();
         auto& copy_sources = Motion::CopySources::Get();
         const bool trace_sources = copy_sources.Wanted();
-        bool gpu_small = false, traced = true;
-        u64 source_hash = 0;
+        // 0.4.4 beta 16: their newest GPU write, numbered while object motion is on with frame
+        // statistics or the version mode (VideoCore::GpuWriteStamps).
+        const bool track_versions =
+            BbStats::enabled || gpu_small_mode == Motion::GpuSmall::Version;
+        bool gpu_small = false, traced = true, versioned = true;
+        u64 source_hash = 0, version_hash = 0;
         Motion::Anchor source_anchor{};
         BbSections::Scope buffers_section{BbSections::MotionBuffers};
         for (const auto& resource : vs.buffers) {
@@ -2165,6 +2169,16 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
                 // 0.4.4 beta 14: where the copy shader wrote it, its source is the game's memory,
                 // current on the CPU (Motion::CopySources).
                 gpu_small = true;
+                // 0.4.4 beta 16: the number of its newest GPU write (the memory tracker's
+                // GPU-modified pages); unknown for a write in place not done yet.
+                if (track_versions) {
+                    const u64 version = buffer_cache.GpuWriteVersion(address, size);
+                    if (version == ~u64{0}) {
+                        versioned = false;
+                    } else {
+                        version_hash = XXH3_64bits_withSeed(&version, sizeof(version), version_hash);
+                    }
+                }
                 if (trace_sources) {
                     const VAddr source = copy_sources.Source(address, size);
                     const bool current = source && memory->IsValidGpuMapping(source, 0) &&
@@ -2188,14 +2202,24 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
         bool camera_only = false;
         if (gpu_small && gated) {
             traced = traced && trace_sources;
+            versioned = versioned && track_versions;
             if (BbStats::enabled) {
                 const u64 identity[] = {vs.pgm_hash, motion_geometry, index_address,
                                         u64(regs.num_indices) << 32 | instances, first_instance};
-                Motion::GpuSmallStats::Get().Note(XXH3_64bits(identity, sizeof(identity)), traced,
-                                                  source_hash);
+                Motion::GpuSmallStats::Get().Note(XXH3_64bits(identity, sizeof(identity)),
+                                                  versioned, version_hash, traced, source_hash);
             }
             if (gpu_small_mode == Motion::GpuSmall::Camera) {
                 camera_only = true; // measuring: camera vectors only
+            } else if (gpu_small_mode == Motion::GpuSmall::Version && versioned) {
+                // 0.4.4 beta 16: gated like a palette the CPU holds, its newest GPU write standing
+                // for its contents: compared with the last frame's below, moved bones held as
+                // there (History::Moving). Not written since the last frame, it did not change,
+                // and the camera vector is exact.
+                palette = XXH3_64bits_withSeed(&version_hash, sizeof(version_hash), palette);
+                if (!anchor.valid) {
+                    anchor = source_anchor;
+                }
             } else if (gpu_small_mode == Motion::GpuSmall::Source && traced) {
                 // Gated like a palette the CPU holds: compared with the last frame's below.
                 palette = XXH3_64bits_withSeed(&source_hash, sizeof(source_hash), palette);

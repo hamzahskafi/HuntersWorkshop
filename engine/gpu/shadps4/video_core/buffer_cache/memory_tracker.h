@@ -13,6 +13,7 @@
 #include "common/debug.h"
 #include "common/types.h"
 #include "core/emulator_settings.h"
+#include "video_core/buffer_cache/gpu_write_stamps.h"
 #include "video_core/buffer_cache/region_manager.h"
 
 namespace VideoCore {
@@ -179,6 +180,8 @@ public:
                                     manager->GetCpuAddr() + offset, size);
                                 manager->lock.unlock();
                             });
+        // 0.4.4 beta 16: numbered for object motion (the only place pages become GPU-modified).
+        GpuWriteStamps::Get().Note(query_cpu_range, query_size);
     }
 
     /// Call 'func' for each GPU modified range and unmark those pages as GPU modified

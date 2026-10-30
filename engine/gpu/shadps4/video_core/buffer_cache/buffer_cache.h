@@ -177,6 +177,10 @@ public:
 
     /// Return true when a region is modified from the GPU
     [[nodiscard]] bool IsRegionGpuModified(VAddr addr, size_t size);
+    /// 0.4.4 beta 16: for a range the memory tracker holds GPU-modified, the number of its newest
+    /// GPU write (0: none since GpuWriteStamps began numbering); ~0 otherwise (not GPU-modified, or
+    /// a write in place not done yet, which is not numbered).
+    [[nodiscard]] u64 GpuWriteVersion(VAddr addr, u64 size);
 
     /// Processes the fault buffer.
     void ProcessFaultBuffer();

@@ -18,23 +18,39 @@
 namespace Vulkan::Motion {
 
 /// BB_MOTION_GPU_SMALL: what is done with a small skeleton whose bone palette the GPU wrote.
-/// store (default): its positions are stored every frame, as since Lantern 0.9.38; source: its
-/// palette is compared with the last frame's through the copy shader's source where that wrote it
-/// (stored as before where not); camera: never stored, camera vectors only (to measure the cost:
-/// moving props then smear under an upscaler).
-enum class GpuSmall { Store, Source, Camera };
+/// version (default since 0.4.4 beta 16): its palette is compared with the last frame's by the
+/// number of its newest GPU write (VideoCore::GpuWriteStamps), stored as before where unknown;
+/// store: its positions are stored every frame, as since Lantern 0.9.38; source: compared through
+/// the copy shader's source where that wrote it (beta 14); camera: never stored, camera vectors
+/// only (to measure the cost: moving props then smear under an upscaler).
+enum class GpuSmall { Version, Store, Source, Camera };
 inline GpuSmall GpuSmallMode() {
     static const GpuSmall mode = [] {
         const char* env = std::getenv("BB_MOTION_GPU_SMALL");
+        if (env && std::strcmp(env, "store") == 0) {
+            return GpuSmall::Store;
+        }
         if (env && std::strcmp(env, "source") == 0) {
             return GpuSmall::Source;
         }
         if (env && std::strcmp(env, "camera") == 0) {
             return GpuSmall::Camera;
         }
-        return GpuSmall::Store;
+        return GpuSmall::Version;
     }();
     return mode;
+}
+inline const char* GpuSmallModeName() {
+    switch (GpuSmallMode()) {
+    case GpuSmall::Store:
+        return "store";
+    case GpuSmall::Source:
+        return "source";
+    case GpuSmall::Camera:
+        return "camera";
+    default:
+        return "version";
+    }
 }
 
 /// The copies of this frame and the last: guest destination, source, size, found by the 4 KiB
@@ -158,28 +174,40 @@ private:
     bool wanted = false;
 };
 
-/// Frame statistics on those draws (with frame statistics on, in any mode): how many, how many had
-/// every such palette from one copy of the copy shader with a source the CPU holds current, and of
-/// those how many found the source as in the last frame (what the source mode leaves to camera
-/// vectors). Draw recording thread only.
+/// Frame statistics on those draws (with frame statistics on, in any mode): how many; how many had
+/// every such palette's newest GPU write known, and of those how many found it as in the last
+/// frame (what the version mode leaves to camera vectors, its hold aside); how many had every
+/// palette from one copy of the copy shader with a source the CPU holds current, and of those how
+/// many found the source as in the last frame. Draw recording thread only.
 class GpuSmallStats {
 public:
     static GpuSmallStats& Get() {
         static GpuSmallStats instance;
         return instance;
     }
-    /// A draw's identity (as History::GateKey) and, when traced, its palettes' source hash.
-    void Note(uint64_t identity, bool traced, uint64_t source_hash) {
+    /// A draw's identity (as History::GateKey); its palettes' newest GPU write when known, and
+    /// their source hash when traced.
+    void Note(uint64_t identity, bool versioned, uint64_t version_hash, bool traced,
+              uint64_t source_hash) {
         ++draws;
-        if (!traced) {
-            return;
-        }
-        ++from_copy;
         // The same mesh drawn again this frame (another lamp): its own entry.
         const uint64_t key = identity ^ (uint64_t(occurrences[identity]++) * 0x9E3779B97F4A7C15ull);
         const auto prev = previous.find(key);
-        unchanged += prev != previous.end() && prev->second == source_hash;
-        current[key] = source_hash;
+        auto& entry = current[key];
+        if (versioned) {
+            ++known;
+            same_version += prev != previous.end() && prev->second.versioned &&
+                            prev->second.version == version_hash;
+            entry.versioned = true;
+            entry.version = version_hash;
+        }
+        if (traced) {
+            ++from_copy;
+            unchanged += prev != previous.end() && prev->second.traced &&
+                         prev->second.source == source_hash;
+            entry.traced = true;
+            entry.source = source_hash;
+        }
     }
     void NextFrame() {
         previous.swap(current);
@@ -190,21 +218,23 @@ public:
     /// The line for the 600-frame report, then the counts start again.
     void Report() {
         if (frames && draws) {
-            std::printf("Object motion: small skeletons the GPU wrote %.0f draws a frame; every palette "
-                        "from the copy shader %.0f (as in the last frame %.0f), the rest written "
-                        "otherwise or earlier %.0f (BB_MOTION_GPU_SMALL=%s)\n",
-                        double(draws) / frames, double(from_copy) / frames,
-                        double(unchanged) / frames, double(draws - from_copy) / frames,
-                        GpuSmallMode() == GpuSmall::Source   ? "source"
-                        : GpuSmallMode() == GpuSmall::Camera ? "camera"
-                                                             : "store");
+            std::printf("Object motion: small skeletons the GPU wrote %.0f draws a frame; newest GPU "
+                        "write known %.0f (none since the last frame %.0f); every palette from the "
+                        "copy shader %.0f (as in the last frame %.0f) (BB_MOTION_GPU_SMALL=%s)\n",
+                        double(draws) / frames, double(known) / frames,
+                        double(same_version) / frames, double(from_copy) / frames,
+                        double(unchanged) / frames, GpuSmallModeName());
         }
-        draws = from_copy = unchanged = frames = 0;
+        draws = known = same_version = from_copy = unchanged = frames = 0;
     }
 
 private:
-    uint64_t draws = 0, from_copy = 0, unchanged = 0, frames = 0;
-    std::unordered_map<uint64_t, uint64_t> current, previous;
+    struct Entry {
+        bool versioned = false, traced = false;
+        uint64_t version = 0, source = 0;
+    };
+    uint64_t draws = 0, known = 0, same_version = 0, from_copy = 0, unchanged = 0, frames = 0;
+    std::unordered_map<uint64_t, Entry> current, previous;
     std::unordered_map<uint64_t, uint32_t> occurrences;
 };
 

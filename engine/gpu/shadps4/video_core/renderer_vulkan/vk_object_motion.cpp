@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "video_core/renderer_vulkan/vk_object_motion.h"
 #include "video_core/renderer_vulkan/motion_copy_sources.h"
+#include "video_core/buffer_cache/gpu_write_stamps.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -171,7 +172,13 @@ ObjectMotion::ObjectMotion(const Instance& instance_, Scheduler& scheduler_)
                 positions_per_frame,
                 (unsigned long long)((u64(1 + 2 * u64(positions_per_frame)) * 16) >> 20), hold);
     // 0.4.4 beta 14: small skeletons the GPU wrote (Motion::GpuSmall).
-    if (Motion::GpuSmallMode() == Motion::GpuSmall::Source) {
+    if (Motion::GpuSmallMode() == Motion::GpuSmall::Version) {
+        std::printf("Object motion: small skeletons the GPU wrote compared with the last frame by "
+                    "their newest GPU write (BB_MOTION_GPU_SMALL=store: stored every frame)\n");
+    } else if (Motion::GpuSmallMode() == Motion::GpuSmall::Store) {
+        std::printf("Object motion: small skeletons the GPU wrote stored every frame "
+                    "(BB_MOTION_GPU_SMALL=store)\n");
+    } else if (Motion::GpuSmallMode() == Motion::GpuSmall::Source) {
         std::printf("Object motion: small skeletons the GPU wrote compared with the last frame "
                     "through the copy shader's source where it wrote them (BB_MOTION_GPU_SMALL=source)\n");
     } else if (Motion::GpuSmallMode() == Motion::GpuSmall::Camera) {
@@ -201,6 +208,9 @@ void ObjectMotion::OnFrameStart() {
     copy_sources.SetWanted(enabled && (BbStats::enabled ||
                                        Motion::GpuSmallMode() == Motion::GpuSmall::Source));
     copy_sources.NextFrame();
+    // 0.4.4 beta 16: GPU writes numbered for the version mode (and its statistics).
+    VideoCore::GpuWriteStamps::Get().SetWanted(
+        enabled && (BbStats::enabled || Motion::GpuSmallMode() == Motion::GpuSmall::Version));
     if (!enabled) {
         return;
     }
