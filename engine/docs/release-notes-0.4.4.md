@@ -7,8 +7,7 @@ What changed since 0.4.3, for the release page. The engine work behind each line
 
 - **The project's tested settings are the defaults:** depth of field on, the intro skipped,
   sharpness 0.20, the FPS counter off, picture tuning off, and the unified frame time on (More ›
-  Engine). The follow camera stays Original and model detail As in the game, also when the setup
-  guide's Best picture style is chosen (it picked Highest on strong graphics cards).
+  Engine). The follow camera stays Original and model detail As in the game.
   Settings files from earlier versions get the unified frame time turned on once; everything else in
   them stays as it was.
 
