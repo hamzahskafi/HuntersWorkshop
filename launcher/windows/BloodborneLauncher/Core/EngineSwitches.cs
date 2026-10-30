@@ -110,10 +110,6 @@ namespace BloodborneLauncher.Core
                 L.T("The frame-rate limit while the game window is in the background or minimized, to save power and heat. Online ") +
                 L.T("play is never limited, so co-op and invasions keep their pace"), "30",
                 new("10 FPS", "10"), new("15 FPS", "15"), new("30 FPS", "30"), new("60 FPS", "60"), new(L.T("No limit"), "0")),
-            OnUnless0("BB_GX_IN_PLACE", Performance, L.T("Per-frame GPU data in place"),
-                L.T("The memory the game rewrites for the GPU every frame (288 MiB) is read by the GPU where the game writes it, as a ") +
-                L.T("PC game's upload heap: no write faults or uploads for it, and less CPU and GPU time a frame. Off: watched and ") +
-                L.T("copied as before 0.4.4, should something look wrong")),
 
 
 

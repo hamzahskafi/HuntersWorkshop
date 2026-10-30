@@ -88,6 +88,9 @@ namespace BloodborneLauncher.Views
             SettingToggle(SymbolRegular.Storage24, L.T("PC memory model"),
                 L.T("The GPU reads the game's memory where it is instead of copies, so far less memory is watched and copied, which saves CPU. Off by default: moving memory between the game's RAM and VRAM stalls the GPU now and then, a late frame every minute or two on an NVIDIA card. Worth trying above 60 FPS or on a slower CPU, where the saving matters"),
                 "exp_guest_in_place", exp);
+            SettingToggle(SymbolRegular.Flow20, L.T("Per-frame GPU data in place"),
+                L.T("The memory the game rewrites for the GPU every frame (288 MiB) is read by the GPU where the game writes it, as a PC game's upload heap: no write faults or uploads for it, and less CPU and GPU time a frame. On by default; does nothing while the PC memory model is on, which reads all of the game's memory in place. Off: watched and copied as before 0.4.4, should something look wrong"),
+                "exp_gx_in_place", exp);
             SettingToggle(SymbolRegular.Code24, L.T("Native draw calls"),
                 L.T("The game's draw calls reach the engine directly instead of as console GPU commands it decodes again. On by default; turn it off if something stops drawing"),
                 "exp_native_calls", exp);

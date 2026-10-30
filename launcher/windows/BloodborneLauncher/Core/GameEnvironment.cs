@@ -193,6 +193,8 @@ namespace BloodborneLauncher.Core
             // GPU first and keeps copying where it cannot) and the game's draw calls handed over
             // directly: on since 0.9.37 beta 4.
             if (s.Bool("exp_guest_in_place")) env["BB_GUEST_IN_PLACE"] = "1";
+            // The game's per-frame GPU memory read in place (on unless 0; safe mode sets 0 below).
+            if (!s.Bool("exp_gx_in_place")) env["BB_GX_IN_PLACE"] = "0";
             if (s.Bool("exp_native_calls")) env["BB_NATIVE_CALLS"] = "1";
             if (s.Bool("exp_sfx_workaround")) env["BB_SFX_WORKAROUND"] = "1";
             if (s.Bool("borderless_fullscreen")) env["BB_EXCLUSIVE_FULLSCREEN"] = "0";

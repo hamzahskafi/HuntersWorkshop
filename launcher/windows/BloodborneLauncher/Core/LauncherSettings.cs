@@ -87,6 +87,8 @@ namespace BloodborneLauncher.Core
             // 0.4.0 beta 4: off. Its memory moves (sparse rebinds) stall the GPU now and then in play
             // on NVIDIA; the CPU it saves is spare at 60 FPS (engine/docs/gpu-memory.md).
             ["exp_guest_in_place"] = false,
+            // 0.4.4: the game's per-frame GPU memory (its GX region) read in place (BB_GX_IN_PLACE).
+            ["exp_gx_in_place"] = true,
             ["exp_native_calls"] = true,
             ["exp_sfx_workaround"] = false,
             ["borderless_fullscreen"] = false,
