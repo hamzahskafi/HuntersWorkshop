@@ -3200,15 +3200,24 @@ void BufferCache::PollGxRegion(VAddr addr, u64 size) {
 }
 
 void BufferCache::StartGxImport() {
-    // The region's whole blocks; the game maps its memory in runs of direct memory, and the
-    // region lies in one (its graphics heap).
+    // The region's whole blocks: one run of direct memory (its graphics heap), across the game's
+    // mappings of it if they were split (by a protection change) but still follow each other.
     const u64 start = BbGxRing::g_start.load(std::memory_order_acquire);
     const u64 end = BbGxRing::g_end.load(std::memory_order_relaxed);
     const u64 first = (start + block_size - 1) >> block_shift, stop = end >> block_shift;
     u64 phys = 0;
     uintptr_t mapping_end = 0;
-    if (first >= stop || !runtime_memory_direct_phys(first << block_shift, &phys, &mapping_end) ||
-        mapping_end < (stop << block_shift) || (phys & (block_size - 1)) != 0) {
+    bool contiguous = first < stop &&
+                      runtime_memory_direct_phys(first << block_shift, &phys, &mapping_end) &&
+                      (phys & (block_size - 1)) == 0;
+    for (uintptr_t at = mapping_end; contiguous && at < (stop << block_shift);) {
+        u64 next_phys = 0;
+        uintptr_t next_end = 0;
+        contiguous = runtime_memory_direct_phys(at, &next_phys, &next_end) &&
+                     next_phys == phys + (at - (first << block_shift));
+        at = next_end;
+    }
+    if (!contiguous) {
         std::printf("GPU memory: the GX region is not one block-aligned run of the game's direct "
                     "memory: tracked as before\n");
         gx_state.store(u8(GxState::Failed), std::memory_order_release);
