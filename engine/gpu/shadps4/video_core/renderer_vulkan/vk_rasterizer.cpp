@@ -273,7 +273,10 @@ bool Rasterizer::SignalsPublished(u64 position) const {
 
 bool Rasterizer::HasUnsubmittedSignals() {
     if (local_signal_count.load(std::memory_order_acquire) != 0) {
-        return true; // for the current tick, held by the recording thread
+        // Held by the recording thread, not handed over yet: for the current tick, or the last
+        // submission's (SignalTick). Counted as waiting either way: a flush hands them over, and
+        // submits only if anything was recorded.
+        return true;
     }
     std::scoped_lock lk{gpu_signals_mutex};
     return !gpu_signals.empty() && gpu_signals.back().tick >= scheduler.CurrentTick();
@@ -345,11 +348,11 @@ void Rasterizer::SubmitForSignalsNow() {
     // At the end of each of the game's submissions, as the PS4 hands each to its GPU: the work goes
     // when the GPU has got to the last of its submissions or finished them all, so it never waits
     // for work recorded already. While it still has two or more to finish, the work is held and
-    // the GPU announces when it gets to its last (ArmWatch, GpuSignalLoop): the recording thread
-    // then submits after a draw (SubmitForGpu). No timing: GPU-bound, a few large submissions;
-    // with the GPU waiting, one per game submission at most. (0.4.4 beta 9 also held it while
-    // draws were queued for this thread, as a submission cost it ~65 us before submissions went
-    // out from the recording threads; beta 9's logs give 1 to 2 us.)
+    // the GPU announces when it gets to its last (ArmWatch, GpuSignalLoop): the next end submits
+    // then, or with nothing more on its way, the announcement itself (SubmitForGpu). No timing:
+    // GPU-bound, a few large submissions; with the GPU waiting, one per game submission at most.
+    // (0.4.4 beta 9 also held it while draws were queued for this thread, as a submission cost it
+    // ~65 us before submissions went out from the recording threads; beta 9's logs give 1 to 2 us.)
     const u64 tick = scheduler.CurrentTick();
     if (tick >= 2 && !scheduler.IsFree(tick - 2)) {
         ArmWatch(tick - 2);

@@ -917,6 +917,7 @@ public:
     /// chunk: data and command must share a chunk, which is recycled once executed.
     void ReserveRecordData(size_t bytes) {
         ProducerScope producer{*this, "ReserveRecordData"};
+        recorded_since_submit.store(true, std::memory_order_relaxed); // for the command after it
         if (!IsRecordingDeferred()) {
             return;
         }

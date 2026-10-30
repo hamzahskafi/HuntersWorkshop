@@ -3455,7 +3455,6 @@ void BufferCache::StartGxImport() {
                                                   buffer, memory, address, &step);
             if (imported) {
                 gx_import_bytes = bytes + tail_bytes;
-                gx_tail_end.store(tail_end, std::memory_order_release);
             } else {
                 std::printf("GPU memory: importing the GX region with its last page failed at "
                             "%s: imported without it (bindings reaching into it are copied)\n",
@@ -3479,8 +3478,12 @@ void BufferCache::StartGxImport() {
         gx_address = address;
         gx_memory = memory;
         u8 expected = u8(GxState::Importing);
+        if (gx_import_bytes > bytes) {
+            gx_tail_end.store(tail_end, std::memory_order_release); // read once it is Ready
+        }
         if (!gx_state.compare_exchange_strong(expected, u8(GxState::Imported),
                                               std::memory_order_acq_rel)) {
+            gx_tail_end.store(0, std::memory_order_release);
             return; // given up on meanwhile: not used
         }
         std::printf("GPU memory: the GX region (%llu MiB) imported for the GPU in %.0f ms: what is "

@@ -209,9 +209,10 @@ void Liverpool::Process(std::stop_token stoken) {
         // BB_HONEST_LABELS: fences (and GPU idle) wait for work not submitted yet. The end of each
         // submission decides (Rasterizer::SubmitForSignalsNow): the work goes to the GPU, or it is
         // held while the GPU has two submissions or more to finish, and the GPU then announces when
-        // it gets to its last one (Rasterizer::Announce). The recording thread takes that after a
-        // draw once enough work waits (SubmitForGpu); with this thread out of work nothing more is
-        // on its way, so it hands it over here, or below when the announcement wakes it. Fence work
+        // it gets to its last one (Rasterizer::Announce). While the game is still submitting, the
+        // end of its next submission submits then; with this thread out of work nothing more is
+        // on its way, so the announcement's work goes from here (SubmitForGpu), or below when the
+        // announcement wakes it. Fence work
         // with nothing to announce it and the recording thread idle is submitted at once: a
         // trigger missing somewhere (counted, expected 0).
         if (rasterizer && Vulkan::Rasterizer::HonestLabels() &&
@@ -270,7 +271,8 @@ void Liverpool::Process(std::stop_token stoken) {
             BbTimeline::Note(BbTimeline::DecoderIdleEnd);
             if (gpu_wants_work_now && rasterizer) {
                 // The GPU has got to its last submission: the work waiting for it goes now, as
-                // nothing more is on its way (on the recording thread, after what it still has).
+                // nothing more is on its way (from here with the recording thread idle, else on it
+                // after what it still has).
                 rasterizer->RequestSubmitForGpu();
                 if (!(num_commands || num_submits || submit_done)) {
                     continue;
