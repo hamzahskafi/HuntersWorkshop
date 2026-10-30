@@ -31,6 +31,7 @@ constexpr std::size_t MaxChunks = 256;
 
 const Vulkan::Instance* vk_instance = nullptr;
 std::uint32_t import_types = 0; // memory types a host import may use (from the self-test)
+std::uint32_t arena_types = 0;  // memory types the arena lists (from the self-test)
 std::mutex mutex;
 std::array<Chunk*, MaxChunks> chunks{}; // by chunk number: phys / ChunkSize
 std::array<bool, MaxChunks> failed{};
@@ -48,8 +49,11 @@ std::uint32_t PickType(std::uint32_t bits) {
 }
 
 /// A buffer over `size` bytes of host memory at `pointer`, imported; false (nothing kept) if not.
+/// With eShaderDeviceAddress in `usage` the memory is allocated for device addresses and `address`
+/// is the buffer's.
 bool Import(void* pointer, u64 size, vk::Buffer& buffer, vk::DeviceMemory& memory,
-            const char** failed_step) {
+            const char** failed_step, vk::BufferUsageFlags usage = ChunkUsage,
+            vk::DeviceAddress* address = nullptr) {
     const vk::Device dev = vk_instance->GetDevice();
     const auto [props_result, props] = dev.getMemoryHostPointerPropertiesEXT(
         vk::ExternalMemoryHandleTypeFlagBits::eHostAllocationEXT, pointer);
@@ -66,14 +70,19 @@ bool Import(void* pointer, u64 size, vk::Buffer& buffer, vk::DeviceMemory& memor
     const auto [buffer_result, made] = dev.createBuffer({
         .pNext = &external,
         .size = size,
-        .usage = ChunkUsage,
+        .usage = usage,
         .sharingMode = vk::SharingMode::eExclusive,
     });
     if (buffer_result != vk::Result::eSuccess) {
         *failed_step = "buffer creation";
         return false;
     }
+    const bool device_address = bool(usage & vk::BufferUsageFlagBits::eShaderDeviceAddress);
+    const vk::MemoryAllocateFlagsInfo address_info{
+        .flags = vk::MemoryAllocateFlagBits::eDeviceAddress,
+    };
     const vk::ImportMemoryHostPointerInfoEXT import_info{
+        .pNext = device_address ? &address_info : nullptr,
         .handleType = vk::ExternalMemoryHandleTypeFlagBits::eHostAllocationEXT,
         .pHostPointer = pointer,
     };
@@ -84,7 +93,7 @@ bool Import(void* pointer, u64 size, vk::Buffer& buffer, vk::DeviceMemory& memor
     });
     if (memory_result != vk::Result::eSuccess) {
         dev.destroyBuffer(made);
-        *failed_step = "the import";
+        *failed_step = device_address ? "the import (with device addresses)" : "the import";
         return false;
     }
     if (dev.bindBufferMemory(made, imported, 0) != vk::Result::eSuccess) {
@@ -92,6 +101,15 @@ bool Import(void* pointer, u64 size, vk::Buffer& buffer, vk::DeviceMemory& memor
         dev.destroyBuffer(made);
         *failed_step = "binding";
         return false;
+    }
+    if (device_address && address) {
+        *address = dev.getBufferAddress({.buffer = made});
+        if (*address == 0) {
+            dev.freeMemory(imported);
+            dev.destroyBuffer(made);
+            *failed_step = "its device address";
+            return false;
+        }
     }
     buffer = made;
     memory = imported;
@@ -134,9 +152,10 @@ bool Usable(const Vulkan::Instance& instance) {
         const bool imported = view && Import(view, Size, buffer, memory, &step);
         if (imported) {
             const vk::Device dev = instance.GetDevice();
-            // The arena (a sparse buffer) binds this memory at its blocks. Outside the types the
-            // arena lists the binding is outside the spec; NVIDIA's driver binds it all the same
-            // (tools/host_import_probe_win.cpp checks the data), so it is reported, not refused.
+            // The arena (a sparse buffer) binds this memory at its blocks with the PC memory model.
+            // Outside the types the arena lists the binding is outside the spec; NVIDIA's driver
+            // binds it all the same (tools/host_import_probe_win.cpp checks the data), so Install
+            // reports it rather than refusing. The GX region uses a buffer of its own instead.
             const auto [arena_result, arena] = dev.createBuffer({
                 .flags = vk::BufferCreateFlagBits::eSparseBinding |
                          vk::BufferCreateFlagBits::eSparseResidency,
@@ -145,16 +164,10 @@ bool Usable(const Vulkan::Instance& instance) {
                 .sharingMode = vk::SharingMode::eExclusive,
             });
             if (arena_result == vk::Result::eSuccess) {
-                const auto arena_types = dev.getBufferMemoryRequirements(arena).memoryTypeBits;
+                arena_types = dev.getBufferMemoryRequirements(arena).memoryTypeBits;
                 const auto [props_result, props] = dev.getMemoryHostPointerPropertiesEXT(
                     vk::ExternalMemoryHandleTypeFlagBits::eHostAllocationEXT, view);
                 import_types = props_result == vk::Result::eSuccess ? props.memoryTypeBits : 0;
-                if ((arena_types & import_types) == 0) {
-                    std::printf("Guest memory: the arena lists no memory type a host import may "
-                                "use (0x%x, imports 0x%x): its blocks are bound to imports anyway, "
-                                "outside the Vulkan spec\n",
-                                arena_types, import_types);
-                }
                 dev.destroyBuffer(arena);
             }
             dev.destroyBuffer(buffer);
@@ -184,10 +197,21 @@ void Install(const Vulkan::Instance& instance) {
     std::printf("Guest memory: the GPU imports the game's memory in %llu MiB chunks as it uses "
                 "them (VK_EXT_external_memory_host)\n",
                 (unsigned long long)(ChunkSize >> 20));
+    if (!ArenaTakesImports()) {
+        std::printf("Guest memory: the arena lists no memory type a host import may use (0x%x, "
+                    "imports 0x%x): its blocks are bound to imports anyway, outside the Vulkan "
+                    "spec\n",
+                    arena_types, import_types);
+    }
+}
+
+bool ArenaTakesImports() {
+    return arena_types == 0 || import_types == 0 || (arena_types & import_types) != 0;
 }
 
 bool ImportRange(const Vulkan::Instance& instance, std::uint64_t phys, std::uint64_t size,
-                 vk::Buffer& buffer, vk::DeviceMemory& memory, const char** failed_step) {
+                 vk::BufferUsageFlags usage, vk::Buffer& buffer, vk::DeviceMemory& memory,
+                 vk::DeviceAddress& address, const char** failed_step) {
     if (!Usable(instance)) { // the self-test: sets vk_instance and the types an import may use
         *failed_step = "the driver's import of system memory (see above)";
         return false;
@@ -202,7 +226,8 @@ bool ImportRange(const Vulkan::Instance& instance, std::uint64_t phys, std::uint
         *failed_step = "committing its pages";
         return false;
     }
-    return Import(backing + phys, size, buffer, memory, failed_step);
+    address = 0;
+    return Import(backing + phys, size, buffer, memory, failed_step, usage, &address);
 }
 
 namespace {

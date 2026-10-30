@@ -117,6 +117,12 @@ struct Buffer {
     explicit Buffer(const Vulkan::Instance& instance, u64 size_bytes_, vk::DeviceMemory memory,
                     vk::ExternalMemoryHandleTypeFlagBits handle_type, vk::BufferUsageFlags usage,
                     std::string_view debug_name);
+    /// bbport BB_GX_IN_PLACE: takes `handle`, a buffer already bound to memory owned elsewhere
+    /// (the game's GX region, imported), for the game's addresses from `cpu_addr_`; destroys it
+    /// when destroyed (the memory is the owner's to free after that).
+    explicit Buffer(const Vulkan::Instance& instance, VAddr cpu_addr_, u64 size_bytes_,
+                    vk::Buffer handle, vk::DeviceAddress device_address,
+                    std::string_view debug_name);
 
     Buffer& operator=(const Buffer&) = delete;
     Buffer(const Buffer&) = delete;

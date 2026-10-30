@@ -222,6 +222,29 @@ to win here. With honest fences the GPU command thread sends about 10 submission
 frames come at loads in all three; in play, honest fences had four windows with one frame of 20 to
 30 ms (no shader compiles) in about ten minutes, tracked one: to watch, not acted on.
 
+Its own buffer (beta 9). Betas 5 to 8 bound the region's arena blocks to the import with one sparse
+bind. The arena is the engine's one sparse buffer over all of the game's memory, and NVIDIA's lists
+only VRAM among the memory types it may be bound to (`0x2`, imports `0x18`): the binding worked, but
+outside the Vulkan spec, and its import was made without device addresses though the arena has
+them. Now the import is its own buffer (`BbGuestMemory::ImportRange` with the arena's usage,
+`AllFlags`, and memory allocated for device addresses), and the buffer cache hands it out for every
+binding inside the region (`ObtainBuffer`, `CommandWriteTarget`, `ObtainBufferForImage`, through
+`gx_own`), at the binding's offset in it. The page table points the region's blocks at the
+buffer's device address (shaders that read memory through it). The arena's blocks there stay
+unbound: no sparse binding at all. `IsInPlace` and `IsAnyInPlace` answer for the region from its
+blocks, so writes into it from the command processor and DMA still go to the GPU in stream order.
+
+The import keeps to the region's whole blocks, as before. The two blocks at its ends, which it
+covers only in part, also hold the game's other memory: taken in, that memory's bindings would
+cross the buffer's edge instead, at a rate nothing has measured. As it is, only bindings inside the
+region's first and last 64 KiB cross it (about one a second, 256 KiB, in beta 6). Across the edge,
+part in the buffer and part outside: read-only bindings up to 8 MiB are copied when bound (the
+stream path, `GxEdgeCopied`); anything else that needs the arena there (a GPU write across the
+edge, a shader's page fault there) binds the arena's blocks to the import as before
+(`GxArenaBound`, logged once, with aliasing barriers as `BB_CHUNK_BUFFERS` has:
+`Runtime::NoteAliasedAccess`). `BB_GX_OWN_BUFFER=0` is beta 8's way, for comparison. The arena's
+out-of-spec note in the log is now printed only with the PC memory model.
+
 ### Step 4: verify, then decide the default
 
 - **What to compare:** the same route as step 1, with the step's switch on and off: frames over

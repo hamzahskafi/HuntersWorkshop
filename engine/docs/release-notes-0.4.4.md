@@ -1,7 +1,7 @@
 # Hunter's Workshop 0.4.4
 
 What changed since 0.4.3, for the release page. The engine work behind each line is in
-`docs/community-fixes-plan.md` and `docs/gpu-memory.md`. (In progress: beta 8. Lines marked
+`docs/community-fixes-plan.md` and `docs/gpu-memory.md`. (In progress: beta 9. Lines marked
 *to be measured* wait for a test log before the release says what they bring.)
 
 ## Defaults
@@ -17,15 +17,17 @@ What changed since 0.4.3, for the release page. The engine work behind each line
 - **The game's per-frame GPU data read where the game writes it.** The memory the game rewrites for
   the GPU every frame (per-draw parameters, CPU-animated vertices, its upload area; 288 MiB) is now
   used by the GPU in place, as a PC game's upload heap: no write protection, write faults, uploads
-  or VRAM copy for it. The game makes it once at start; the engine takes it from there and binds it
-  once, never moving it. Small read-only pieces of it are still copied when used. As with the PC
-  memory model, the game is told the GPU has finished a frame's work only once it has, so it cannot
-  reuse memory the GPU has yet to read. In play (RTX 3070 Ti, 60 FPS, the same route with it on
-  and off): write faults went from about 900 a second to about 1, the time spent re-protecting
-  memory from about 0.4 ms a frame to almost none, and the GPU's time from 7.9 to 7.0 ms a frame
-  (its uploads of the region are gone; reading it over PCIe costs less than they did). Frame rate,
-  pacing and VRAM are as before. Experimental engine features › Per-frame GPU data in place turns
-  it off (`BB_GX_IN_PLACE=0`), should something look wrong.
+  or VRAM copy for it. The game makes it once at start; the engine takes it from there, once, and
+  never moves it. Small read-only pieces of it are still copied when used. As with the PC memory
+  model, the game is told the GPU has finished a frame's work only once it has, so it cannot reuse
+  memory the GPU has yet to read. The GPU reaches that memory through a buffer of its own, within
+  the Vulkan spec on every graphics card (the betas before used a binding NVIDIA's driver only
+  tolerates). In play (RTX 3070 Ti, 60 FPS, the same route with it on and off): write faults went
+  from about 900 a second to about 1, the time spent re-protecting memory from about 0.4 ms a frame
+  to almost none, and the GPU's time from 7.9 to 7.0 ms a frame (its uploads of the region are
+  gone; reading it over PCIe costs less than they did). Frame rate, pacing and VRAM are as before.
+  Experimental engine features › Per-frame GPU data in place turns it off (`BB_GX_IN_PLACE=0`),
+  should something look wrong.
 - **Game-data memory** (*to be measured*). Memory for the game's data in VRAM is kept longer when it
   empties while VRAM has room. In beta 1 a tester saw about 1 GB less VRAM in dense areas, and
   smoother play there, than with 0.4.3; which change did it is not known yet.

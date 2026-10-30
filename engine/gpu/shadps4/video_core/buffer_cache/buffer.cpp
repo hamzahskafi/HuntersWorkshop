@@ -166,6 +166,16 @@ Buffer::Buffer(const Vulkan::Instance& instance, u64 size_bytes_, vk::DeviceMemo
 }
 
 Buffer::Buffer(const Vulkan::Instance& instance, VAddr cpu_addr_, u64 size_bytes_,
+               vk::Buffer handle, vk::DeviceAddress device_address, std::string_view debug_name)
+    : cpu_addr{cpu_addr_}, size_bytes{size_bytes_}, mem_type{MemoryType::HostCached},
+      buffer{instance.GetDevice(), instance.GetAllocator()} {
+    buffer.buffer = handle;
+    buffer.bda_addr = device_address;
+    Vulkan::SetObjectName(instance.GetDevice(), Handle(), debug_name);
+    is_coherent = true;
+}
+
+Buffer::Buffer(const Vulkan::Instance& instance, VAddr cpu_addr_, u64 size_bytes_,
                MemoryType mem_type_, std::string_view debug_name)
     : cpu_addr{cpu_addr_}, size_bytes{size_bytes_}, mem_type{mem_type_},
       buffer{instance.GetDevice(), instance.GetAllocator()} {

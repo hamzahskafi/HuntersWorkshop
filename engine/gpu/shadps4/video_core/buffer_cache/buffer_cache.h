@@ -132,9 +132,9 @@ public:
     static inline std::array<u64, 6> hle_path_calls{}, hle_path_bytes{};
     /// Bindings inside the game's GX region (bbport_gx_ring.h), by how they are served, with their
     /// bytes (the stats, in vk_shader_hle.cpp): small read-only ones copied (the stream path), read,
-    /// texel and written ones in place (BB_GX_IN_PLACE), and tracked ones (not in place: before
-    /// the import, without it, or across the region's edge).
-    enum GxUse : u32 { GxCopied, GxInPlace, GxTexel, GxWritten, GxTracked, GxUses };
+    /// texel and written ones in place (BB_GX_IN_PLACE), read-only ones across its edge copied, and
+    /// tracked ones (through the arena: before the import, without it, or across its edge).
+    enum GxUse : u32 { GxCopied, GxInPlace, GxTexel, GxWritten, GxEdgeCopied, GxTracked, GxUses };
     static inline std::array<std::atomic<u64>, GxUses> gx_ring_calls{}, gx_ring_bytes{};
     /// bbport: whether bindings may be in place: with the PC memory model, or once the game's GX
     /// region is bound in place (BB_GX_IN_PLACE).
@@ -222,7 +222,9 @@ public:
     /// Whether any part of the range is.
     [[nodiscard]] bool IsAnyInPlace(VAddr addr, u64 size) const {
         return InPlaceActive() && size != 0 &&
-               in_place_blocks.Overlaps(addr >> block_shift, ((addr + size - 1) >> block_shift) + 1);
+               (GxOverlaps(addr, size) ||
+                in_place_blocks.Overlaps(addr >> block_shift,
+                                         ((addr + size - 1) >> block_shift) + 1));
     }
 
 private:
@@ -623,18 +625,29 @@ private:
     /// bbport BB_GX_IN_PLACE (default on, not with the PC memory model): the game's GX region as a
     /// PC upload heap. Once the game has made it (BbGxRing), its whole blocks [gx_first, gx_end)
     /// are imported for the GPU as they are (BbGuestMemory::ImportRange, on a thread of its own)
-    /// and all bound to that memory in one run once imported, for good: what is bound inside it
-    /// is read and written in place, with no write tracking, uploads or VRAM copy; small read-only
-    /// bindings are still copied when bound (the stream path). A binding over the region waits
-    /// for the import; one that fails leaves the region tracked as before.
+    /// into a buffer of their own, for good: what is bound inside them is read and written in
+    /// place through that buffer (gx_own), with no write tracking, uploads or VRAM copy; small
+    /// read-only bindings are still copied when bound (the stream path), and so are read-only ones
+    /// across its edge. The page table points the blocks' device addresses at the buffer. The arena
+    /// keeps its own blocks there unbound; anything that still needs them (a GPU write across the
+    /// edge) binds them to the import as well (GxArenaBound), as 0.4.4 betas 5 to 8 did for all of
+    /// it, outside the Vulkan spec on NVIDIA. BB_GX_OWN_BUFFER=0: that from the start, as then.
+    /// A binding over the region waits for the import; one that fails leaves it tracked as before.
     enum class GxState : u8 { Off, Waiting, Importing, Imported, Ready, Failed };
     std::atomic<u8> gx_state{u8(GxState::Off)};
     std::atomic<bool> gx_ready{false}, gx_unmapped{false};
     u64 gx_first = 0, gx_end = 0; ///< blocks
-    vk::Buffer gx_buffer{};
+    vk::Buffer gx_buffer{};               ///< the import's, until gx_view takes it
+    vk::DeviceAddress gx_address = 0;     ///< its device address
     vk::DeviceMemory gx_memory{};
+    std::unique_ptr<Buffer> gx_view;      ///< the import's buffer, from the region's readiness
+    std::atomic<const Buffer*> gx_own{nullptr}; ///< gx_view, while bindings go through it
+    std::atomic<bool> gx_arena{false};    ///< the arena's blocks there bound to the import too
     void PollGxRegion(VAddr addr, u64 size);
     void StartGxImport();
+    /// The arena's blocks over the region about to be bound to its import (EnsureResident): noted
+    /// and logged once, from then on accesses through the arena there alias gx_own's.
+    void GxArenaBound();
     [[nodiscard]] bool InGxRegion(VAddr addr, u64 size) const noexcept {
         return gx_ready.load(std::memory_order_acquire) && size != 0 &&
                (addr >> block_shift) >= gx_first && ((addr + size - 1) >> block_shift) < gx_end;

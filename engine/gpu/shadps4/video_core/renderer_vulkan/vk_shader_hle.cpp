@@ -446,9 +446,9 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
                 gx_any += gx_calls[i] - gx_calls_before[i];
             }
             if (gx_any) {
-                const char* gx_names[BufferCache::GxUses] = {"read, small (copied)", "read in place",
-                                                             "texel in place", "written in place",
-                                                             "tracked (not in place)"};
+                const char* gx_names[BufferCache::GxUses] = {
+                    "read, small (copied)", "read in place", "texel in place", "written in place",
+                    "read across its edge (copied)", "tracked (through the arena)"};
                 // The size is the range bound. Only the copied ones move it all (MB/s); in place,
                 // the GPU reads just what its shaders touch.
                 std::printf("  GX region bindings:");
@@ -458,7 +458,7 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
                         const u64 bytes = gx_bytes[i] - gx_bytes_before[i];
                         std::printf(" %s %.0f/s, %.1f KiB bound", gx_names[i], calls / seconds,
                                     bytes / 1024.0 / calls);
-                        if (i == BufferCache::GxCopied) {
+                        if (i == BufferCache::GxCopied || i == BufferCache::GxEdgeCopied) {
                             std::printf(" (%.1f MB/s)", bytes / 1e6 / seconds);
                         }
                         std::printf(";");

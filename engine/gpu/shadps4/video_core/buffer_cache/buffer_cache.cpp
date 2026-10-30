@@ -410,6 +410,16 @@ bool ChunkVerify() {
     }();
     return on;
 }
+/// bbport BB_GX_IN_PLACE: the game's GX region read through a buffer of its own, within the
+/// Vulkan spec (default); BB_GX_OWN_BUFFER=0 binds its blocks in the arena to the import instead,
+/// as 0.4.4 betas 5 to 8 did (NVIDIA's arena lists no memory type an import may use).
+bool GxOwnBuffer() {
+    static const bool on = [] {
+        const char* env = std::getenv("BB_GX_OWN_BUFFER");
+        return !(env && env[0] == '0');
+    }();
+    return on;
+}
 bool ChunkBuffers() {
     static const bool on = [] {
         const char* env = std::getenv("BB_CHUNK_BUFFERS");
@@ -678,14 +688,18 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
 
 BufferCache::~BufferCache() {
     // bbport BB_GX_IN_PLACE: the import's thread done, then its buffer and memory freed. The GPU
-    // is idle by now (Presenter::~Presenter finishes its schedulers first); the arenas bound to
-    // the memory go after this, unused.
+    // is idle by now (Presenter::~Presenter finishes its schedulers first); arenas bound to the
+    // memory (GxArenaBound) go after this, unused.
     if (gx_import.valid()) {
         gx_import.wait();
     }
+    gx_own.store(nullptr, std::memory_order_release);
+    gx_view.reset();
     if (gx_memory) {
         const vk::Device device = instance.GetDevice();
-        device.destroyBuffer(gx_buffer);
+        if (gx_buffer) {
+            device.destroyBuffer(gx_buffer);
+        }
         device.freeMemory(gx_memory);
     }
 }
@@ -1076,6 +1090,25 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
         PollGxRegion(device_addr, size);
     }
     const bool gx_in_place = InGxRegion(device_addr, size);
+    const Buffer* const gx = gx_in_place ? gx_own.load(std::memory_order_acquire) : nullptr;
+    if (gx && (is_written || size > STREAM_THRESHOLD || IsRegionGpuModified(device_addr, size))) {
+        // Through the region's own buffer: no arena, residency or sparse binding. A write counts
+        // as GPU-modified until the GPU has done it (IsRegionGpuModified).
+        if (is_written) {
+            WriteTicks().Note(device_addr, size, scheduler.CurrentTick());
+            BbStats::bound_in_place_written_bytes.fetch_add(size, std::memory_order_relaxed);
+        }
+        CountGxUse(is_written ? GxWritten : is_texel_buffer ? GxTexel : GxInPlace, size);
+        BbStats::bound_in_place_bytes.fetch_add(size, std::memory_order_relaxed);
+        bound_in_place_bytes.fetch_add(size, std::memory_order_relaxed);
+        TraceBinding(device_addr, size, is_written, is_written ? 0 : 2);
+        note_hle(0);
+        const std::pair<const Buffer*, u64> target{gx, gx->Offset(device_addr)};
+        if (is_texel_buffer && !is_written) {
+            SynchronizeMemoryFromImage(target.first, target.second, device_addr, size);
+        }
+        return target;
+    }
     if ((GuestInPlace() || gx_in_place) &&
         (is_written || size > STREAM_THRESHOLD || IsRegionGpuModified(device_addr, size))) {
         const u64 first_block = device_addr >> block_shift;
@@ -1146,10 +1179,18 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
     const u64 stream_limit = copy_source ? copy_source_limit : STREAM_THRESHOLD;
     // The game's GX region (bbport_gx_ring.h), counted by how its bindings are served (the stats).
     const bool in_gx_region = BbGxRing::Contains(device_addr, size);
-    if (!is_written && size <= stream_limit && !IsRegionGpuModified(device_addr, size)) {
+    // Read-only bindings across the edge of the region's own buffer (part of them in it, part
+    // in the arena): copied when bound, up to 8 MiB, rather than binding the arena there too.
+    constexpr u64 GxEdgeCopyLimit = 8_MB;
+    const bool gx_edge = !gx_in_place && size <= GxEdgeCopyLimit && GxOverlaps(device_addr, size) &&
+                         gx_own.load(std::memory_order_acquire) != nullptr;
+    if (!is_written && (size <= stream_limit || gx_edge) &&
+        !IsRegionGpuModified(device_addr, size)) {
         BB_SECTION(ObtainStream);
         note_hle(1);
-        if (in_gx_region) {
+        if (gx_edge) {
+            CountGxUse(GxEdgeCopied, size);
+        } else if (in_gx_region) {
             CountGxUse(GxCopied, size);
         }
         if (stats) {
@@ -1180,7 +1221,7 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
         TraceBinding(device_addr, size, false, 3);
         return {&stream_buffer, offset};
     }
-    if (in_gx_region) {
+    if (in_gx_region || GxOverlaps(device_addr, size)) {
         CountGxUse(GxTracked, size);
     }
     const u64 first_block = device_addr >> block_shift;
@@ -1215,6 +1256,9 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
     if (ChunkBuffers() && IsAnyInPlace(device_addr, size)) {
         CountRoute(RoutePartly, size, is_written);
         runtime.NoteAliasedAccess(arena, arena->Offset(device_addr), size);
+    } else if (GxOverlaps(device_addr, size) && gx_own.load(std::memory_order_acquire)) {
+        // The region's memory reached through the arena too (GxArenaBound): barriers on both sides.
+        runtime.NoteAliasedAccess(arena, arena->Offset(device_addr), size);
     }
     TraceBinding(device_addr, size, is_written, is_written ? 1 : 4);
     return {arena, arena->Offset(device_addr)};
@@ -1224,6 +1268,12 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::CommandWriteTarget(VAd
                                                                            u32 size) {
     if ((!GuestInPlace() && !InGxRegion(device_addr, size)) || size == 0) {
         return std::nullopt;
+    }
+    // bbport BB_GX_IN_PLACE: inside the game's GX region, through its own buffer.
+    if (const Buffer* gx = gx_own.load(std::memory_order_acquire);
+        gx && InGxRegion(device_addr, size)) {
+        WriteTicks().Note(device_addr, size, scheduler.CurrentTick());
+        return std::pair<const Buffer*, u64>{gx, gx->Offset(device_addr)};
     }
     const u64 first_block = device_addr >> block_shift;
     const u64 last_block = (device_addr + size - 1) >> block_shift;
@@ -1277,8 +1327,14 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBufferForImage(VAddr device_add
             }
         }
     }
-    // bbport BB_GX_IN_PLACE: inside the game's GX region, through the arena where it is bound in
-    // place (no whole-chunk imports: those are the PC memory model's).
+    // bbport BB_GX_IN_PLACE: inside the game's GX region, through its own buffer (or the arena
+    // where it is bound in place, BB_GX_OWN_BUFFER=0; no whole-chunk imports: those are the PC
+    // memory model's).
+    if (const Buffer* gx = gx_own.load(std::memory_order_acquire);
+        gx && InGxRegion(device_addr, size)) {
+        TraceBinding(device_addr, size, false, 5);
+        return {gx, gx->Offset(device_addr)};
+    }
     if (!GuestInPlace() && InGxRegion(device_addr, size) && IsInPlace(device_addr, size)) {
         const u64 first_block = device_addr >> block_shift;
         const u64 last_block = (device_addr + size - 1) >> block_shift;
@@ -1507,7 +1563,8 @@ void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_
         }
         bind_ranges = std::move(rest);
     } else if (gx_ready.load(std::memory_order_acquire)) {
-        // bbport BB_GX_IN_PLACE: the region's blocks to its imported memory, for good.
+        // bbport BB_GX_IN_PLACE: the region's blocks to its imported memory, for good (with its
+        // own buffer only for what needs the arena there: GxArenaBound).
         IntervalList rest;
         for (const auto& range : bind_ranges) {
             const u64 a = std::max(range.start, gx_first), b = std::min(range.end, gx_end);
@@ -1515,6 +1572,7 @@ void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_
                 rest.Add(range);
                 continue;
             }
+            GxArenaBound();
             if (range.start < a) {
                 rest.Add({range.start, a});
             }
@@ -3198,20 +3256,61 @@ void BufferCache::PollGxRegion(VAddr addr, u64 size) {
         u8 expected = u8(GxState::Imported);
         if (gx_state.compare_exchange_strong(expected, u8(GxState::Ready),
                                              std::memory_order_acq_rel)) {
-            gx_ready.store(true, std::memory_order_release);
-            // All of it bound now, in one run (EnsureResident: one sparse bind, the page table
-            // with it), at the game's start: not block by block as the game first uses each,
-            // in its first frames (sparse binds stalled NVIDIA GPUs with the PC memory model).
-            EnsureResident(GetArena(gx_first, gx_end - 1), gx_first, gx_end - 1);
-            std::printf("GPU memory: the GX region bound in place (%llu MiB in one run)\n",
-                        (unsigned long long)(((gx_end - gx_first) << block_shift) >> 20));
+            const u64 blocks = gx_end - gx_first;
+            gx_view = std::make_unique<Buffer>(instance, gx_first << block_shift,
+                                               blocks << block_shift, gx_buffer, gx_address,
+                                               "GX region");
+            gx_buffer = vk::Buffer{};
+            if (GxOwnBuffer()) {
+                // The blocks' device addresses (shaders reading memory through the page table) are
+                // the buffer's; set before any binding goes through it.
+                const auto staging = staging_pool.Request(blocks * sizeof(vk::DeviceAddress),
+                                                          MemoryType::HostUncached);
+                auto* addresses = reinterpret_cast<vk::DeviceAddress*>(staging.mapped);
+                for (u64 i = 0; i < blocks; ++i) {
+                    addresses[i] = gx_view->BufferDeviceAddress() + (i << block_shift);
+                }
+                staging.Flush();
+                const vk::BufferCopy copy{staging.offset, gx_first * sizeof(vk::DeviceAddress),
+                                          blocks * sizeof(vk::DeviceAddress)};
+                runtime.CopyBuffer(staging.buffer, bda_pagetable_buffer.get(), std::span{&copy, 1});
+                gx_own.store(gx_view.get(), std::memory_order_release);
+                gx_ready.store(true, std::memory_order_release);
+                std::printf("GPU memory: the GX region read through a buffer of its own (%llu "
+                            "MiB): no sparse binding, within the Vulkan spec (BB_GX_OWN_BUFFER=0: "
+                            "bound in the arena, as 0.4.4 beta 8)\n",
+                            (unsigned long long)((blocks << block_shift) >> 20));
+            } else {
+                gx_ready.store(true, std::memory_order_release);
+                // All of it bound now, in one run (EnsureResident: one sparse bind, the page table
+                // with it), at the game's start: not block by block as the game first uses each,
+                // in its first frames (sparse binds stalled NVIDIA GPUs with the PC memory model).
+                EnsureResident(GetArena(gx_first, gx_end - 1), gx_first, gx_end - 1);
+                std::printf("GPU memory: the GX region bound in place in the arena (%llu MiB in "
+                            "one run, BB_GX_OWN_BUFFER=0)\n",
+                            (unsigned long long)((blocks << block_shift) >> 20));
+            }
         }
     }
+}
+
+void BufferCache::GxArenaBound() {
+    if (gx_arena.exchange(true) || !gx_own.load(std::memory_order_acquire)) {
+        return; // done before, or the arena is the region's way in (BB_GX_OWN_BUFFER=0)
+    }
+    std::printf("GPU memory: the arena was needed over the GX region (a binding across its edge, "
+                "or a shader's page fault there): its blocks bound to the region's memory as "
+                "well%s, as 0.4.4 beta 8 did for all of it\n",
+                BbGuestMemory::ArenaTakesImports() ? "" : " (outside the Vulkan spec on this GPU)");
 }
 
 void BufferCache::StartGxImport() {
     // The region's whole blocks: one run of direct memory (its graphics heap), across the game's
     // mappings of it if they were split (by a protection change) but still follow each other.
+    // Not the two partly covered blocks at its ends: those hold the game's other memory too,
+    // whose bindings would then cross the region's edge (copied or through the arena, below),
+    // where now only bindings inside the region's first and last 64 KiB do (about one a second,
+    // 256 KiB, in 0.4.4 beta 6).
     const u64 start = BbGxRing::g_start.load(std::memory_order_acquire);
     const u64 end = BbGxRing::g_end.load(std::memory_order_relaxed);
     const u64 first = (start + block_size - 1) >> block_shift, stop = end >> block_shift;
@@ -3240,8 +3339,10 @@ void BufferCache::StartGxImport() {
         const auto began = std::chrono::steady_clock::now();
         vk::Buffer buffer;
         vk::DeviceMemory memory;
+        vk::DeviceAddress address = 0;
         const char* step = "";
-        if (!BbGuestMemory::ImportRange(instance, phys, bytes, buffer, memory, &step)) {
+        if (!BbGuestMemory::ImportRange(instance, phys, bytes, AllFlags, buffer, memory, address,
+                                        &step)) {
             std::printf("GPU memory: importing the GX region for the GPU failed at %s: tracked as "
                         "before\n",
                         step);
@@ -3250,6 +3351,7 @@ void BufferCache::StartGxImport() {
             return;
         }
         gx_buffer = buffer;
+        gx_address = address;
         gx_memory = memory;
         u8 expected = u8(GxState::Importing);
         if (!gx_state.compare_exchange_strong(expected, u8(GxState::Imported),
@@ -3319,6 +3421,13 @@ void BufferCache::ProcessPendingUnmaps() {
     }
     if (gx_unmapped.load(std::memory_order_relaxed) && gx_ready.exchange(false)) {
         gx_state.store(u8(GxState::Failed), std::memory_order_release);
+        // Its own buffer stays alive (recorded work may still read it) until the cache goes; the
+        // blocks' page table entries are cleared (a shader reading one reports a fault and the
+        // block is bound again, as any evicted block).
+        if (gx_own.exchange(nullptr, std::memory_order_acq_rel)) {
+            runtime.FillBuffer(bda_pagetable_buffer.get(), gx_first * sizeof(vk::DeviceAddress),
+                               (gx_end - gx_first) * sizeof(vk::DeviceAddress), 0u);
+        }
         std::printf("GPU memory: the game unmapped its GX region: tracked as before from now on\n");
     }
 }
@@ -3326,6 +3435,9 @@ void BufferCache::ProcessPendingUnmaps() {
 bool BufferCache::IsInPlace(VAddr addr, u64 size) const {
     if (!InPlaceActive() || size == 0) {
         return false;
+    }
+    if (InGxRegion(addr, size) && gx_own.load(std::memory_order_acquire)) {
+        return true; // through the region's own buffer
     }
     const u64 first = addr >> block_shift, last = (addr + size - 1) >> block_shift;
     // bbport: asked for every binding; the answer holds while the residency is unchanged.

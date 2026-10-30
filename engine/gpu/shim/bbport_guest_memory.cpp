@@ -250,10 +250,14 @@ void Install(const Vulkan::Instance& instance) {
     std::printf("Guest memory: direct memory chunks come from Vulkan (BB_GUEST_GPU_MEMORY=1)\n");
 }
 
-bool ImportRange(const Vulkan::Instance&, std::uint64_t, std::uint64_t, vk::Buffer&, vk::DeviceMemory&,
-                 const char** failed_step) {
+bool ImportRange(const Vulkan::Instance&, std::uint64_t, std::uint64_t, vk::BufferUsageFlags,
+                 vk::Buffer&, vk::DeviceMemory&, vk::DeviceAddress&, const char** failed_step) {
     *failed_step = "Linux (its direct memory comes from Vulkan only with the PC memory model)";
     return false;
+}
+
+bool ArenaTakesImports() {
+    return true; // nothing imported into the arena here: its chunks are dma-bufs it lists
 }
 
 const Chunk* Find(std::uint64_t phys) {
