@@ -693,4 +693,8 @@ private:
 /// difference is free space VMA keeps).
 void VmaDeviceUsage(u64& block_bytes, u64& allocation_bytes);
 
+/// bbport memory statistics: the driver's count of this process's device-local memory and its budget
+/// (VK_EXT_memory_budget; both 0 without it).
+void VramUsage(u64& used_bytes, u64& budget_bytes);
+
 } // namespace Vulkan

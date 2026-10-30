@@ -408,6 +408,24 @@ static void LogRam() {
                 mib(BbStats::image_kept_bytes.load()),
                 static_cast<unsigned long long>(BbStats::image_allocs.load()),
                 static_cast<unsigned long long>(BbStats::image_reuses.load()));
+#ifdef _WIN32
+    // bbport: VRAM, once a minute: the driver's count of the game's use against its budget (what an
+    // overlay shows), then the engine's part of it: VMA's blocks, images, the game's data in VRAM.
+    // (Linux: PrintMemory's Memory line.)
+    u64 vram_used = 0, vram_budget = 0, vma_blocks = 0, vma_used = 0;
+    Vulkan::VramUsage(vram_used, vram_budget);
+    Vulkan::VmaDeviceUsage(vma_blocks, vma_used);
+    if (vram_budget != 0) {
+        std::printf("VRAM: %llu of %llu MiB in use (the driver's count); Vulkan memory %llu MiB: VMA "
+                    "blocks %llu MiB (%llu MiB of them used), images %llu MiB, the game's data %llu MiB "
+                    "(%llu MiB of it unused)\n",
+                    mib(vram_used), mib(vram_budget),
+                    mib(BbStats::device_alloc_bytes.load() - BbStats::device_free_bytes.load()),
+                    mib(vma_blocks), mib(vma_used), mib(BbStats::vk_image_bytes.load()),
+                    mib(BbStats::residency_alloc_bytes.load()),
+                    mib(BbStats::residency_unused_bytes.load()));
+    }
+#endif
     // Where that RAM is: on the first report, then every five minutes. Listing every resident page
     // takes a while, so not on this (the presenting) thread.
     static int reports = 0;

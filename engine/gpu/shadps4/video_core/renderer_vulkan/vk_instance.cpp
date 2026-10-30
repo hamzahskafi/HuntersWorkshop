@@ -970,6 +970,15 @@ void VmaDeviceUsage(u64& block_bytes, u64& allocation_bytes) {
     }
 }
 
+void VramUsage(u64& used_bytes, u64& budget_bytes) {
+    used_bytes = budget_bytes = 0;
+    if (!stats_instance || !stats_instance->CanReportMemoryUsage()) {
+        return;
+    }
+    used_bytes = stats_instance->GetDeviceMemoryUsage();
+    budget_bytes = stats_instance->GetDeviceMemoryBudgetNow();
+}
+
 void Instance::CreateAllocator() {
     const VmaVulkanFunctions functions = {
         .vkGetInstanceProcAddr = VULKAN_HPP_DEFAULT_DISPATCHER.vkGetInstanceProcAddr,
