@@ -19,10 +19,10 @@ What changed since 0.4.3, for the release page. The engine work behind each line
   or VRAM copy for it. The engine takes it over once, when the game makes it at start, and the GPU
   reads it through a buffer of its own, within the Vulkan spec on every graphics card. Small
   read-only pieces of it are still copied when used. The game is told the GPU has finished its
-  work only once it has, so it never reuses memory the GPU has yet to read. In play (RTX 3070 Ti,
-  60 FPS, the same route with it on and off): write faults went from about 900 a second to about 1,
-  the time spent re-protecting memory from about 0.4 ms a frame to almost none, and the GPU's time
-  from 7.9 to 7.0 ms a frame. Frame rate, pacing and VRAM are as before. Experimental engine
+  work only once it has, so it never reuses memory the GPU has yet to read. In play (RTX 3070 Ti):
+  write faults went from about 1,400 a second at 120 FPS to almost none, and the time spent re-protecting memory from
+  about 0.4 ms a frame to almost none. Frame rate and VRAM are as in 0.4.3, also where the GPU is
+  the limit (the busiest spot tested, 120 FPS: 109 FPS in both). Experimental engine
   features › Per-frame GPU data in place turns it off (`BB_GX_IN_PLACE=0`), should something look
   wrong.
 - **The GPU gets its work as it reaches the end of what it has, with no timers.** The game's

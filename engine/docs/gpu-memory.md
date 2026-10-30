@@ -279,7 +279,11 @@ profile's total less its idle label; play windows of over 500 draws a frame):
 | in place, honest fences (beta 7's default, `20261030_045019`) | 7.03 ms at 986 draws | 7.15 ms | 1 | 0.003 | 10.1 |
 
 Reading the region over PCIe costs the GPU less than the tracked path's uploads of it did: about
-0.9 ms a frame less. A per-frame GPU copy of it into VRAM (an alternative considered) has nothing
+0.9 ms a frame less at 60 FPS. Where the GPU is the limit it does not show: 0.4.3 itself
+(`20261030_211220`) and beta 12 (`20261030_204738`) at the same spot at 120 FPS (about 1,360 draws,
+DLAA) both run at about 109 FPS (108.5 to 108.8 and 108.8 to 109.2, beta 12 with the GPU profile
+on), so the GPU's time there is the same within 0.05 ms; the 60 FPS figures were taken with the GPU
+partly idle, its clocks free to vary. A per-frame GPU copy of it into VRAM (an alternative considered) has nothing
 to win here. With honest fences the GPU command thread sends about 10 submissions a frame
 (`BB_HONEST_FLUSH_US`, 2 ms) for 2; CPU use (3.0 to 3.2 cores), frame rate (60), pacing (stddev
 0.05 ms, p99 16.8 ms) and VRAM (3.0 to 3.5 GB, against 3.1 to 3.7 tracked) are unchanged. Long
