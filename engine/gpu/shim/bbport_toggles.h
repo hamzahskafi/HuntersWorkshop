@@ -136,10 +136,11 @@ inline std::atomic<std::uint64_t> gpu_data_updates{0}, copied_back_blocks{0}, re
 inline std::atomic<std::uint64_t> late_vram_writes{0}; ///< labels and the like put into VRAM copies
 /// BB_GUEST_IN_PLACE: copies of in-place data the CPU writes into VRAM for reading (ShadowCopy).
 inline std::atomic<std::uint64_t> shadow_copies{0}, shadow_bytes{0};
-/// BB_HONEST_LABELS: submissions at the end of a guest submission because the GPU had finished
-/// everything before them, or all but the last; and ends whose submission waited for the next
-/// because draws were queued for the recording thread.
-inline std::atomic<std::uint64_t> idle_flushes{0}, ahead_flushes{0}, held_flushes{0};
+/// BB_HONEST_LABELS: submissions for fences: at the end of a guest submission with the GPU out of
+/// work, or on its last submission; on the GPU's announcement that it got to its last one; and by
+/// the GPU command thread's safety net (fence work nothing would submit: expected 0).
+inline std::atomic<std::uint64_t> idle_flushes{0}, ahead_flushes{0}, announced_flushes{0},
+    net_flushes{0};
 /// EOP fences with data: decoded, and their labels written (a growing gap: lost fences, guest leaks).
 inline std::atomic<std::uint64_t> eop_decoded{0}, eop_written{0};
 /// sceGnmAreSubmitsAllowed calls, and those that answered no (submission lock held).

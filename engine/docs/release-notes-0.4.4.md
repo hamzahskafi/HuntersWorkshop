@@ -1,7 +1,7 @@
 # Hunter's Workshop 0.4.4
 
 What changed since 0.4.3, for the release page. The engine work behind each line is in
-`docs/community-fixes-plan.md` and `docs/gpu-memory.md`. (In progress: beta 9. Lines marked
+`docs/community-fixes-plan.md` and `docs/gpu-memory.md`. (In progress: beta 10. Lines marked
 *to be measured* wait for a test log before the release says what they bring.)
 
 ## Defaults
@@ -22,16 +22,18 @@ What changed since 0.4.3, for the release page. The engine work behind each line
   model, the game is told the GPU has finished a frame's work only once it has, so it cannot reuse
   memory the GPU has yet to read. The GPU reaches that memory through a buffer of its own, within
   the Vulkan spec on every graphics card (the betas before used a binding NVIDIA's driver only
-  tolerates). In play (RTX 3070 Ti, 60 FPS, the same route with it on and off): write faults went
-  from about 900 a second to about 1, the time spent re-protecting memory from about 0.4 ms a frame
-  to almost none, and the GPU's time from 7.9 to 7.0 ms a frame (its uploads of the region are
+  tolerates), and that buffer starts where the region does: the bindings at its start are no longer
+  copied every frame. In play (RTX 3070 Ti, 60 FPS, the same route with it on and off): write faults
+  went from about 900 a second to about 1, the time spent re-protecting memory from about 0.4 ms a
+  frame to almost none, and the GPU's time from 7.9 to 7.0 ms a frame (its uploads of the region are
   gone; reading it over PCIe costs less than they did). Frame rate, pacing and VRAM are as before.
   Experimental engine features › Per-frame GPU data in place turns it off (`BB_GX_IN_PLACE=0`),
   should something look wrong.
 - **The GPU gets its work as it needs it** (*to be measured*). With the per-frame data in place, the
   work the game's fences wait for goes to the GPU when the GPU gets to the last of what it was
-  given, instead of every 2 ms: it never waits for work the engine has ready, and when it is the
-  limit it gets that work in fewer, larger submissions.
+  given, without any timer: it never waits for work the engine has ready, and when it is the limit
+  it gets that work in fewer, larger submissions. The game's compute work is sent the same way
+  (it used to wait for the next graphics work or a short timer).
 - **Game-data memory** (*to be measured*). Memory for the game's data in VRAM is kept longer when it
   empties while VRAM has room. In beta 1 a tester saw about 1 GB less VRAM in dense areas, and
   smoother play there, than with 0.4.3; which change did it is not known yet.
@@ -46,8 +48,10 @@ What changed since 0.4.3, for the release page. The engine work behind each line
 - Long-frame reports (frame statistics on) now give the long frame's own figures, with how many
   images were made or had their data checked.
 - The frame capture lists every draw of each pass.
-- Frame statistics count how the work fences wait for went to the GPU (`Fence submissions:`): with
-  the GPU out of work, on its last submission, or held while the recording thread catches up.
+- Frame statistics count how the work fences wait for went to the GPU (`Fence submissions:`): at
+  the game's submission ends, when the GPU got to its last submission, and by a safety net that
+  should never be needed (expected 0). The GX region's bindings across its edges are counted per
+  edge.
 - Settings › Log › GPU time in the log (`BB_GPU_PROFILE`): the GPU's time a frame by render pass,
   dispatch and upscaler, every 5 seconds.
 - Settings › Log › Render stage timings stays on until it is turned off, like the other log

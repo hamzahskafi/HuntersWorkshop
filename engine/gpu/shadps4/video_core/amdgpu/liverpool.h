@@ -125,6 +125,21 @@ public:
         submit_cv.wait(lk, [this] { return num_submits == 0; });
     }
 
+    /// bbport BB_HONEST_LABELS: the GPU has got to the last of its submissions while work waits
+    /// for it (Rasterizer::Announce): wakes this thread from its idle wait to hand that over.
+    void WakeForGpu() noexcept {
+        {
+            std::scoped_lock lk{submit_mutex};
+            gpu_wants_work.store(true, std::memory_order_relaxed);
+        }
+        submit_cv.notify_all();
+    }
+
+    /// bbport: this thread is waiting for the game's next submission, everything before decoded.
+    bool DecoderIdle() const noexcept {
+        return decoder_idle.load(std::memory_order_acquire);
+    }
+
     /// bbport: also the draw recording thread and the fences it deferred are done (see
     /// work_retired). sceGnmSubmitDone does not block the guest when this is true.
     bool IsGpuIdle() const {
@@ -319,6 +334,9 @@ private:
     std::atomic<bool> submit_done{};
     std::mutex submit_mutex;
     std::condition_variable_any submit_cv;
+    /// bbport BB_HONEST_LABELS: set by WakeForGpu (under submit_mutex), taken by the idle wait.
+    std::atomic<bool> gpu_wants_work{false};
+    std::atomic<bool> decoder_idle{false};
     std::queue<Common::UniqueFunction<void>> command_queue{};
     std::thread::id gpu_id;
 #if defined(__linux__) || defined(_WIN32)

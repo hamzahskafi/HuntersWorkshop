@@ -134,7 +134,9 @@ public:
     /// bytes (the stats, in vk_shader_hle.cpp): small read-only ones copied (the stream path), read,
     /// texel and written ones in place (BB_GX_IN_PLACE), read-only ones across its edge copied, and
     /// tracked ones (through the arena: before the import, without it, or across its edge).
-    enum GxUse : u32 { GxCopied, GxInPlace, GxTexel, GxWritten, GxEdgeCopied, GxTracked, GxUses };
+    enum GxUse : u32 {
+        GxCopied, GxInPlace, GxTexel, GxWritten, GxEdgeCopied, GxTailCopied, GxTracked, GxUses
+    };
     static inline std::array<std::atomic<u64>, GxUses> gx_ring_calls{}, gx_ring_bytes{};
     /// bbport: whether bindings may be in place: with the PC memory model, or once the game's GX
     /// region is bound in place (BB_GX_IN_PLACE).
@@ -623,20 +625,27 @@ private:
     u32 blocks_per_arena_page_shift{};
 
     /// bbport BB_GX_IN_PLACE (default on, not with the PC memory model): the game's GX region as a
-    /// PC upload heap. Once the game has made it (BbGxRing), its whole blocks [gx_first, gx_end)
-    /// are imported for the GPU as they are (BbGuestMemory::ImportRange, on a thread of its own)
-    /// into a buffer of their own, for good: what is bound inside them is read and written in
-    /// place through that buffer (gx_own), with no write tracking, uploads or VRAM copy; small
-    /// read-only bindings are still copied when bound (the stream path), and so are read-only ones
-    /// across its edge. The page table points the blocks' device addresses at the buffer. The arena
-    /// keeps its own blocks there unbound; anything that still needs them (a GPU write across the
-    /// edge) binds them to the import as well (GxArenaBound), as 0.4.4 betas 5 to 8 did for all of
-    /// it, outside the Vulkan spec on NVIDIA. BB_GX_OWN_BUFFER=0: that from the start, as then.
-    /// A binding over the region waits for the import; one that fails leaves it tracked as before.
+    /// PC upload heap. Once the game has made it (BbGxRing), its blocks [gx_first, gx_end), from
+    /// the one holding its first byte (whose bytes before the region are the game's allocation's,
+    /// in place with it: NoteBeforeGx) to the last it covers whole, are imported for the GPU as
+    /// they are (BbGuestMemory::ImportRange, on a thread of its own) into a buffer of their own,
+    /// for good: what is bound inside them is read and written in place through that buffer
+    /// (gx_own), with no write tracking, uploads or VRAM copy; small read-only bindings are still
+    /// copied when bound (the stream path), and so are read-only ones across its edge. The page
+    /// table points the blocks' device addresses at the buffer. The arena keeps its own blocks
+    /// there unbound; anything that still needs them (a GPU write across the edge) binds them to
+    /// the import as well (GxArenaBound), as 0.4.4 betas 5 to 8 did for all of it, outside the
+    /// Vulkan spec on NVIDIA. BB_GX_OWN_BUFFER=0: that from the start, as then. A binding over the
+    /// region waits for the import; one that fails leaves it tracked as before.
     enum class GxState : u8 { Off, Waiting, Importing, Imported, Ready, Failed };
     std::atomic<u8> gx_state{u8(GxState::Off)};
     std::atomic<bool> gx_ready{false}, gx_unmapped{false};
     u64 gx_first = 0, gx_end = 0; ///< blocks
+    VAddr gx_head = 0;            ///< the region's first byte (BbGxRing::g_start)
+    std::atomic<bool> gx_before_noted{false};
+    /// A binding in the region's first block before the region itself (bytes the game's allocation
+    /// puts in front of it: 64 in 1.09): logged once, as nothing of the game's GPU work should.
+    void NoteBeforeGx(VAddr addr, u64 size);
     vk::Buffer gx_buffer{};               ///< the import's, until gx_view takes it
     vk::DeviceAddress gx_address = 0;     ///< its device address
     vk::DeviceMemory gx_memory{};

@@ -1090,6 +1090,9 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
         PollGxRegion(device_addr, size);
     }
     const bool gx_in_place = InGxRegion(device_addr, size);
+    if (gx_in_place && device_addr < gx_head) [[unlikely]] {
+        NoteBeforeGx(device_addr, size);
+    }
     const Buffer* const gx = gx_in_place ? gx_own.load(std::memory_order_acquire) : nullptr;
     if (gx && (is_written || size > STREAM_THRESHOLD || IsRegionGpuModified(device_addr, size))) {
         // Through the region's own buffer: no arena, residency or sparse binding. A write counts
@@ -1181,6 +1184,8 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
     const bool in_gx_region = BbGxRing::Contains(device_addr, size);
     // Read-only bindings across the edge of the region's own buffer (part of them in it, part
     // in the arena): copied when bound, up to 8 MiB, rather than binding the arena there too.
+    // Counted by edge: the first should see none (it is the game allocation's own start), the
+    // last only bindings that reach the region's final 64 bytes (its last block is shared).
     constexpr u64 GxEdgeCopyLimit = 8_MB;
     const bool gx_edge = !gx_in_place && size <= GxEdgeCopyLimit && GxOverlaps(device_addr, size) &&
                          gx_own.load(std::memory_order_acquire) != nullptr;
@@ -1189,7 +1194,7 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
         BB_SECTION(ObtainStream);
         note_hle(1);
         if (gx_edge) {
-            CountGxUse(GxEdgeCopied, size);
+            CountGxUse(device_addr < (gx_first << block_shift) ? GxEdgeCopied : GxTailCopied, size);
         } else if (in_gx_region) {
             CountGxUse(GxCopied, size);
         }
@@ -1272,6 +1277,9 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::CommandWriteTarget(VAd
     // bbport BB_GX_IN_PLACE: inside the game's GX region, through its own buffer.
     if (const Buffer* gx = gx_own.load(std::memory_order_acquire);
         gx && InGxRegion(device_addr, size)) {
+        if (device_addr < gx_head) [[unlikely]] {
+            NoteBeforeGx(device_addr, size);
+        }
         WriteTicks().Note(device_addr, size, scheduler.CurrentTick());
         return std::pair<const Buffer*, u64>{gx, gx->Offset(device_addr)};
     }
@@ -1332,6 +1340,9 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBufferForImage(VAddr device_add
     // memory model's).
     if (const Buffer* gx = gx_own.load(std::memory_order_acquire);
         gx && InGxRegion(device_addr, size)) {
+        if (device_addr < gx_head) [[unlikely]] {
+            NoteBeforeGx(device_addr, size);
+        }
         TraceBinding(device_addr, size, false, 5);
         return {gx, gx->Offset(device_addr)};
     }
@@ -3294,6 +3305,15 @@ void BufferCache::PollGxRegion(VAddr addr, u64 size) {
     }
 }
 
+void BufferCache::NoteBeforeGx(VAddr addr, u64 size) {
+    if (gx_before_noted.exchange(true, std::memory_order_relaxed)) {
+        return;
+    }
+    std::printf("GPU memory: a binding of the GX region's first block before the region itself "
+                "(%#llx, %llu bytes; the region begins at %#llx): read in place with the block\n",
+                (unsigned long long)addr, (unsigned long long)size, (unsigned long long)gx_head);
+}
+
 void BufferCache::GxArenaBound() {
     if (gx_arena.exchange(true) || !gx_own.load(std::memory_order_acquire)) {
         return; // done before, or the arena is the region's way in (BB_GX_OWN_BUFFER=0)
@@ -3305,26 +3325,45 @@ void BufferCache::GxArenaBound() {
 }
 
 void BufferCache::StartGxImport() {
-    // The region's whole blocks: one run of direct memory (its graphics heap), across the game's
+    // The region's blocks: one run of direct memory (its graphics heap), across the game's
     // mappings of it if they were split (by a protection change) but still follow each other.
-    // Not the two partly covered blocks at its ends: those hold the game's other memory too,
-    // whose bindings would then cross the region's edge (copied or through the arena, below),
-    // where now only bindings inside the region's first and last 64 KiB do (about one a second,
-    // 256 KiB, in 0.4.4 beta 6).
+    // From the block holding its first byte: the game's allocation puts 64 bytes in front of the
+    // region (its base is 0x40 into a block in 1.09), and nothing else lies in that block, so the
+    // whole of it is in place, for bindings and the page table alike. 0.4.4 beta 9 began at the
+    // next block: bindings starting in the region's first 64 KiB crossed into the buffer and were
+    // copied, every frame (about one a frame at the title, 160 KiB; 30 to 100 a second in play).
+    // Not the block holding its last bytes: the rest of that one is the game's next allocation.
     const u64 start = BbGxRing::g_start.load(std::memory_order_acquire);
     const u64 end = BbGxRing::g_end.load(std::memory_order_relaxed);
-    const u64 first = (start + block_size - 1) >> block_shift, stop = end >> block_shift;
+    const u64 stop = end >> block_shift;
     u64 phys = 0;
-    uintptr_t mapping_end = 0;
-    bool contiguous = first < stop &&
-                      runtime_memory_direct_phys(first << block_shift, &phys, &mapping_end) &&
-                      (phys & (block_size - 1)) == 0;
-    for (uintptr_t at = mapping_end; contiguous && at < (stop << block_shift);) {
-        u64 next_phys = 0;
-        uintptr_t next_end = 0;
-        contiguous = runtime_memory_direct_phys(at, &next_phys, &next_end) &&
-                     next_phys == phys + (at - (first << block_shift));
-        at = next_end;
+    const auto run = [&](u64 from) {
+        uintptr_t mapping_end = 0;
+        bool contiguous = from < stop &&
+                          runtime_memory_direct_phys(from << block_shift, &phys, &mapping_end) &&
+                          (phys & (block_size - 1)) == 0;
+        for (uintptr_t at = mapping_end; contiguous && at < (stop << block_shift);) {
+            u64 next_phys = 0;
+            uintptr_t next_end = 0;
+            contiguous = runtime_memory_direct_phys(at, &next_phys, &next_end) &&
+                         next_phys == phys + (at - (from << block_shift));
+            at = next_end;
+        }
+        return contiguous;
+    };
+    u64 first = start >> block_shift;
+    bool contiguous = run(first);
+    if (!contiguous && (start & (block_size - 1)) != 0) {
+        // The block before the region is not the same run of memory: from its first whole block,
+        // as beta 9 did.
+        first = (start + block_size - 1) >> block_shift;
+        contiguous = run(first);
+        if (contiguous) {
+            std::printf("GPU memory: the GX region's first block is not one run of memory with the "
+                        "rest: imported from its first whole block (bindings in its first %llu "
+                        "bytes cross into it)\n",
+                        (unsigned long long)((first << block_shift) - start));
+        }
     }
     if (!contiguous) {
         std::printf("GPU memory: the GX region is not one block-aligned run of the game's direct "
@@ -3334,6 +3373,7 @@ void BufferCache::StartGxImport() {
     }
     gx_first = first;
     gx_end = stop;
+    gx_head = start;
     const u64 bytes = (stop - first) << block_shift;
     gx_import = std::async(std::launch::async, [this, phys, bytes] {
         const auto began = std::chrono::steady_clock::now();

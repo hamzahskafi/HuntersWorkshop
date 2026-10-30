@@ -165,6 +165,16 @@ bool SubmitEndTasks() {
     }();
     return on;
 }
+
+/// BB_PIPE_SIGNALS: frames whose work is all recorded (the draw pipe passed it), retired once the
+/// GPU has executed it, whatever is decoded after (Liverpool::SignalDecodedFrames).
+void FramesRetiredTask(Vulkan::Rasterizer& self, const u8* data) {
+    u64 retired;
+    std::memcpy(&retired, data, sizeof(retired));
+    BbTimeline::Note(BbTimeline::PipeTask, 7, self.CurrentTick());
+    self.SignalAfterGpu([retired] { Libraries::GnmDriver::NoteFramesRetired(retired); });
+    self.Flush();
+}
 } // namespace
 
 void Liverpool::Process(std::stop_token stoken) {
@@ -181,24 +191,22 @@ void Liverpool::Process(std::stop_token stoken) {
 #endif
 
     while (!stoken.stop_requested()) {
-        // BB_HONEST_LABELS: fences (and GPU idle) wait for work not submitted yet. Submitted once
-        // this thread has had nothing to do for 0.2 ms: the guest may be waiting for them.
-        // BB_PIPE_SIGNALS: signals may still be on their way to the recording thread (tasks).
+        // BB_HONEST_LABELS: fences (and GPU idle) wait for work not submitted yet. The end of each
+        // submission decides (Rasterizer::SubmitForSignalsNow): the work goes to the GPU, or it is
+        // held while the GPU has two submissions or more to finish, and the GPU then announces when
+        // it gets to its last one (Rasterizer::Announce). The recording thread takes that after a
+        // draw once enough work waits (SubmitForGpu); with this thread out of work nothing more is
+        // on its way, so it hands it over here, or below when the announcement wakes it. Fence work
+        // with nothing to announce it and the recording thread idle is submitted at once: a
+        // trigger missing somewhere (counted, expected 0).
         if (rasterizer && Vulkan::Rasterizer::HonestLabels() &&
-            (rasterizer->HasUnsubmittedSignals() || !rasterizer->DrawPipeIdle())) {
-            std::unique_lock lk{submit_mutex};
-            static const auto idle_wait = std::chrono::microseconds([] {
-                const char* env = std::getenv("BB_HONEST_IDLE_US");
-                return env ? std::strtoll(env, nullptr, 10) : 200ll;
-            }());
-            const bool work = submit_cv.wait_for(lk, idle_wait, [this] {
-                return num_commands || num_submits || submit_done;
-            });
-            if (!work) {
-                lk.unlock();
+            !(num_commands || num_submits || submit_done)) {
+            if (rasterizer->GpuAnnounced()) {
+                rasterizer->RequestSubmitForGpu();
+            } else if (rasterizer->DrawPipeIdle() && !rasterizer->GpuWillAnnounce() &&
+                       rasterizer->HasUnsubmittedSignals()) {
+                BbStats::net_flushes.fetch_add(1, std::memory_order_relaxed);
                 if (rasterizer->PipeSignals()) {
-                    // The recording thread submits once it gets there: waiting here for it to
-                    // run dry (tens of ms in heavy scenes) held up the guest's next submission.
                     rasterizer->RequestSignalFlush();
                 } else {
                     rasterizer->Flush();
@@ -217,9 +225,11 @@ void Liverpool::Process(std::stop_token stoken) {
                 }
                 return int(BbThreads::CapSpinUs(BbThreads::Available() >= 12 ? 200 : 0));
             }());
+            decoder_idle.store(true, std::memory_order_release);
             if (spin_time.count() > 0) {
                 const auto spin_until = idle_start + spin_time;
-                for (u32 spins = 1; !(num_commands || num_submits || submit_done) &&
+                for (u32 spins = 1; !(num_commands || num_submits || submit_done ||
+                                      gpu_wants_work.load(std::memory_order_relaxed)) &&
                                     !stoken.stop_requested();
                      ++spins) {
                     __builtin_ia32_pause();
@@ -228,14 +238,29 @@ void Liverpool::Process(std::stop_token stoken) {
                     }
                 }
             }
-            std::unique_lock lk{submit_mutex};
-            Common::CondvarWait(submit_cv, lk, stoken,
-                                [this] { return num_commands || num_submits || submit_done; });
+            bool gpu_wants_work_now = false;
+            {
+                std::unique_lock lk{submit_mutex};
+                Common::CondvarWait(submit_cv, lk, stoken, [this] {
+                    return num_commands || num_submits || submit_done ||
+                           gpu_wants_work.load(std::memory_order_relaxed);
+                });
+                gpu_wants_work_now = gpu_wants_work.exchange(false, std::memory_order_relaxed);
+            }
+            decoder_idle.store(false, std::memory_order_release);
             BbStats::gpu_idle_ns.fetch_add(
                 std::chrono::duration_cast<std::chrono::nanoseconds>(
                     std::chrono::steady_clock::now() - idle_start).count(),
                 std::memory_order_relaxed);
             BbTimeline::Note(BbTimeline::DecoderIdleEnd);
+            if (gpu_wants_work_now && rasterizer) {
+                // The GPU has got to its last submission: the work waiting for it goes now, as
+                // nothing more is on its way (on the recording thread, after what it still has).
+                rasterizer->RequestSubmitForGpu();
+                if (!(num_commands || num_submits || submit_done)) {
+                    continue;
+                }
+            }
         }
         if (stoken.stop_requested()) {
             break;
@@ -328,11 +353,16 @@ void Liverpool::Process(std::stop_token stoken) {
             if (rasterizer && (rasterizer->PipeSignals() || end_tasks)) {
                 // BB_PIPE_SIGNALS: the frame's cache work runs on the recording thread after the
                 // frame (this thread decodes the next one meanwhile instead of waiting for it).
+                // The frame's retirement (SignalDecodedFrames, handed over right after this when
+                // its submissions are all decoded) submits this work with its own: two submissions
+                // back to back left the GPU idle between them (~25 us a frame, beta 9's profile).
                 static constexpr u8 none = 0;
                 rasterizer->RunInOrder(
                     [](Vulkan::Rasterizer& r, const u8*) {
                         r.OnSubmit();
-                        r.Flush();
+                        if (!r.NextPacketIsTask(&FramesRetiredTask)) {
+                            r.Flush();
+                        }
                     },
                     &none, 0, BbToggle::PipelinedTasks, true, "SubmitDone");
             } else if (rasterizer) {
@@ -397,7 +427,7 @@ void Liverpool::Process(std::stop_token stoken) {
                         std::memcpy(&idle, data, sizeof(idle));
                         r.WaitDeferredSignals();
                         r.SignalAfterGpu([idle] { idle.self->SignalGpuIdle(idle.generation); });
-                        r.SubmitForSignals(); // at once if the GPU is on its last submission
+                        r.SubmitForSignals(); // now, or when the GPU gets to its last
                     },
                     &signal, sizeof(signal), BbToggle::PipelinedTasks, false, "GpuIdleHonest");
                 continue;
@@ -2420,6 +2450,15 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
         }
     }
 
+    // bbport BB_HONEST_LABELS: the end of a compute submission decides as a graphics one's does:
+    // its fences' work goes to the GPU, or the GPU announces when it gets to its last submission.
+    // (Before 0.4.4 beta 10 it waited for the next graphics submission, a fence wait on the GPU,
+    // or this thread to be idle for 0.2 ms.)
+    if constexpr (!is_indirect) {
+        if (rasterizer) {
+            rasterizer->SubmitForSignals();
+        }
+    }
     FIBER_EXIT;
 }
 
@@ -2520,16 +2559,8 @@ void Liverpool::SignalDecodedFrames() {
     // Everything of the frame recorded (the draw pipe drained), then submitted: finished once the
     // GPU has executed it, whatever is decoded after it.
     if (rasterizer->PipeSignals()) {
-        rasterizer->RunInOrder(
-            [](Vulkan::Rasterizer& self, const u8* data) {
-                u64 retired;
-                std::memcpy(&retired, data, sizeof(retired));
-                BbTimeline::Note(BbTimeline::PipeTask, 7, self.CurrentTick());
-                self.SignalAfterGpu(
-                    [retired] { Libraries::GnmDriver::NoteFramesRetired(retired); });
-                self.Flush();
-            },
-            &frame, sizeof(frame), BbToggle::PipelinedTasks, false, "FramesRetired");
+        rasterizer->RunInOrder(&FramesRetiredTask, &frame, sizeof(frame), BbToggle::PipelinedTasks,
+                               false, "FramesRetired");
         return;
     }
     rasterizer->DrainDrawPipe(Vulkan::DrawPipe::ReasonSubmissionEnd);

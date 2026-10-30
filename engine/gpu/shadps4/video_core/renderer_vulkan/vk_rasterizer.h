@@ -256,11 +256,26 @@ public:
     /// recorded before it). Values of up to 8 bytes are registered for WAIT_REG_MEM until the GPU
     /// has written them. False: not in place (or BB_GPU_COMMAND_WRITES=0), the caller stores it.
     bool WriteDataOnGpu(VAddr address, const void* data, u32 size);
-    /// End of a guest submission: submits the work recorded so far when signals wait for it and
-    /// the GPU has got to the last of its submissions (SubmitForSignalsNow): the GPU starts on it
-    /// as the hardware would, instead of at the end of the frame, and never runs out of work
-    /// recorded already.
+    /// End of a guest submission (graphics or compute): submits the work recorded so far when
+    /// signals wait for it and the GPU has got to the last of its submissions, else has the GPU
+    /// announce when it does (SubmitForSignalsNow): the GPU starts on it as the hardware would,
+    /// instead of at the end of the frame, and never runs out of work recorded already.
     void SubmitForSignals();
+    /// bbport BB_HONEST_LABELS: the GPU has announced it got to its last submission (Announce),
+    /// and no submission has taken that yet; or will announce it (work held for it).
+    bool GpuAnnounced() const {
+        return gpu_wants_work.load(std::memory_order_acquire) != 0;
+    }
+    bool GpuWillAnnounce() const {
+        return GpuAnnounced() || watch_tick.load(std::memory_order_acquire) != 0;
+    }
+    /// GPU command thread, with nothing more on its way: the recording thread submits the work
+    /// waiting for the GPU after what it still has (SubmitForGpu), one request at a time.
+    void RequestSubmitForGpu();
+    /// Recording thread (or the GPU command thread with the draw pipe drained): takes the GPU's
+    /// announcement, submitting the work recorded since the last submission once it holds at
+    /// least as many draws and dispatches as the one the GPU runs, or at once if `nothing_coming`.
+    void SubmitForGpu(bool nothing_coming);
     /// bbport BB_PIPE_SIGNALS (default on with honest labels; 0: off): on the GPU command thread with
     /// the draw pipe, fences, the GPU idle and frame signals and the submissions for them are
     /// handed to the draw recording thread as ordered tasks instead of that thread being drained
@@ -892,9 +907,17 @@ private:
     std::atomic<bool> signal_flush_requested{false};
     std::jthread gpu_signal_thread;
     void SubmitForSignalsNow();
-    /// steady_clock nanoseconds of the last submission (written by both pipeline stages;
-    /// BB_HONEST_FLUSH_US).
-    std::atomic<s64> last_flush_ns{0};
+    /// The submission whose end puts the GPU on its last one while work is held for it (0: none):
+    /// set by a submission queued behind unfinished work (Flush) and by a decision to hold
+    /// (SubmitForSignalsNow); GpuSignalLoop announces it once the GPU has finished it.
+    std::atomic<u64> watch_tick{0};
+    /// The announced submission (0: none), until a submission answers it.
+    std::atomic<u64> gpu_wants_work{0};
+    std::atomic<bool> gpu_submit_requested{false};
+    /// Draws and dispatches recorded since the last submission, and in that submission.
+    std::atomic<u32> draws_since_submit{0}, last_batch_draws{0};
+    void ArmWatch(u64 tick);
+    void Announce(u64 tick);
 };
 
 } // namespace Vulkan

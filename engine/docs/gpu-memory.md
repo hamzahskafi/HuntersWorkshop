@@ -196,20 +196,46 @@ writes them once the GPU has finished, as the PC memory model always has (`BB_HO
 whenever `BbGxRing::InPlaceWanted`). Beta 6 ran without it: lighting and other flicker in
 Central Yharnam and a screen-wide purple flash, gone with `BB_HONEST_LABELS=1` on the same build.
 
-When the work goes to the GPU (beta 9). A fence the game waits for is written once the GPU has
-done the work before it, so that work must be submitted. Until beta 8 it went out at the end of a
-guest submission when the GPU had finished everything (an idle flush), else once 2 ms had passed
-since the last submission (`BB_HONEST_FLUSH_US`): about 10 submissions a frame at 60 FPS, 6 at
-120 with the GPU as the limit. Now it goes when the GPU has got to the last of its submissions,
-or finished them all (`Rasterizer::SubmitForSignalsNow`): the GPU always has the next submission
-queued behind the one it runs, and gets no other while it has one. No timing: GPU-bound, a few
-large submissions; with the GPU waiting, at once. The frame's end (`sceGnmSubmitDone`) and the game
-waiting on a fence (the GPU command thread idle for 0.2 ms, `BB_HONEST_IDLE_US`) submit whatever the
-GPU is doing, as before. Draws queued for the recording thread (`BB_HONEST_IDLE_BACKLOG`, 64 KiB)
-still hold it until the next guest submission's end: that thread is then the limit, and the GPU
-waits for it either way. Frame statistics print `Fence submissions: N/frame with the GPU out of
-work, N/frame with it on its last, N/frame held for the recording thread`. `BB_HONEST_FLUSH_US=2000`
-gives beta 8's timing, for one comparison, then goes.
+When the work goes to the GPU (betas 9 and 10). A fence the game waits for is written once the GPU
+has done the work before it, so that work must be submitted. Until beta 8 it went out at the end of
+a guest submission when the GPU had finished everything, else once 2 ms had passed since the last
+submission (`BB_HONEST_FLUSH_US`), and the GPU command thread submitted everything once it had been
+idle for 0.2 ms (`BB_HONEST_IDLE_US`): about 10 submissions a frame at 60 FPS, 6 at 120 with the
+GPU as the limit. Beta 9 replaced the 2 ms with the GPU's progress, at the guest submissions' ends
+only. Beta 10 has no timing at all:
+
+- At the end of each guest submission, graphics or compute (as the PS4 hands each to its GPU), the
+  work goes when the GPU has got to the last of its submissions or finished them all
+  (`Rasterizer::SubmitForSignalsNow`). Compute submissions did not decide before: their fences
+  waited for the next graphics submission or the 0.2 ms.
+- While the GPU still has two or more to finish, the work is held and the GPU announces when it gets
+  to its last: a submission queued behind unfinished work, or a decision to hold, sets a watch
+  (`ArmWatch`); the signal thread, which waits on the GPU's timeline semaphore, announces it once
+  the GPU has finished that submission (`GpuSignalLoop`, `Announce`). It waits on submitted work
+  only, and every submission wakes it (the scheduler's submit callback, `Finish` included).
+- On the announcement the recording thread submits after its next draw once the work recorded since
+  holds at least as many draws and dispatches as the submission the GPU runs (`SubmitForGpu`): the
+  CPU then keeps up with the GPU. Fewer would add a submission, and each switch between submissions
+  left the GPU idle about 25 us in beta 9's profile, for less work than it already has. With nothing
+  more on its way (the GPU command thread waiting for the game), at once: the GPU command thread
+  hands the announcement over when it runs out of work, or when the announcement wakes it.
+- The frame's end (`sceGnmSubmitDone`) submits, now in one submission with the frame's retirement
+  when that follows (beta 9 sent two back to back, the second all but empty).
+- Fence work with nothing to announce it and the recording thread idle is submitted by the GPU
+  command thread at once: a trigger missing somewhere, counted (expected 0).
+
+Beta 9 also held the work while 64 KiB of draws were queued for the recording thread
+(`BB_HONEST_IDLE_BACKLOG`), as a submission had cost that thread about 65 us. Beta 9's logs
+(`20261030_172924`, `20261030_173438`, 120 FPS, RTX 3070 Ti) give 1 to 2 us now that submissions go
+out from the Vulkan recording threads (the stage B tasks: about 0.8 us each without submissions,
+1 us with 12 a frame), and the hold fired 5 to 21 times a frame at the cap for nothing: it went.
+In those logs, where the GPU was the limit (the game waiting 7.4 to 7.9 ms a frame for the previous
+frame, 102 to 108 FPS), there were 4.1 submissions a frame and the GPU was idle between them 0.09 to
+0.12 ms a frame, in 4 gaps: the switches themselves, not waits for work. At the cap, 10 to 16 a
+frame, pacing stddev 0.02 to 0.05 ms. Frame statistics print `Fence submissions: N/frame at the
+game's submission ends (GPU out of work N, on its last N), N/frame when the GPU got to its last,
+N/frame by the safety net (expected 0)`. `BB_HONEST_FLUSH_US`, `BB_HONEST_IDLE_US`,
+`BB_HONEST_IDLE_BACKLOG` and `BB_HONEST_IDLE_FLUSH` are gone.
 
 Measured (beta 6, `20261030_042617`, about 20 minutes, RTX 3070 Ti, against beta 4's
 `20261030_033513`): the import took 70 ms and the region was bound in one run before the title
@@ -249,12 +275,23 @@ buffer's device address (shaders that read memory through it). The arena's block
 unbound: no sparse binding at all. `IsInPlace` and `IsAnyInPlace` answer for the region from its
 blocks, so writes into it from the command processor and DMA still go to the GPU in stream order.
 
-The import keeps to the region's whole blocks, as before. The two blocks at its ends, which it
-covers only in part, also hold the game's other memory: taken in, that memory's bindings would
-cross the buffer's edge instead, at a rate nothing has measured. As it is, only bindings inside the
-region's first and last 64 KiB cross it (in 2 of about 185 statistics windows of beta 6's log). Across the edge,
-part in the buffer and part outside: read-only bindings up to 8 MiB are copied when bound (the
-stream path, `GxEdgeCopied`); anything else that needs the arena there (a GPU write across the
+The region's edges (beta 10). The region begins 64 bytes into a block (0x1043400040 in 1.09) and
+ends 64 bytes into another. Beta 9 imported its whole blocks only, from the next block on: bindings
+starting in the region's first 64 KiB crossed into the buffer and were copied every frame (beta 9's
+logs: about one a frame at the title, 160 KiB, 19 MB/s; 30 to 100 a second in play, 30 to 50 KiB).
+Now the import begins at the block holding the region's first byte. The 64 bytes in front of the
+region are the game's: it gets the region from an allocation call (0x216b21a, 288 MiB, 16-byte
+aligned, through an allocator object, so not confirmed statically) that returned a pointer 0x40
+past a block boundary, the mark of a heap header. Nothing else lies in that block, so the whole of
+it is in place, for bindings and the page table alike: nothing reaches those bytes two ways. A
+binding of them is logged once (`NoteBeforeGx`); nothing of the game's GPU work should bind them.
+Should that block not be one run of memory with the rest, the import begins at the next block as
+before (logged). The block holding the region's last 64 bytes stays out: the rest of it is the
+game's next allocation, and the page table cannot point part of a block elsewhere. Bindings across
+an edge are counted by edge (`read across its first edge`, expected 0; `read across its last
+edge`, only bindings reaching the region's last 64 bytes). Across the edge, part in the buffer and
+part outside: read-only bindings up to 8 MiB are copied when bound (the stream path,
+`GxEdgeCopied`, `GxTailCopied`); anything else that needs the arena there (a GPU write across the
 edge, a shader's page fault there) binds the arena's blocks to the import as before
 (`GxArenaBound`, logged once, with aliasing barriers as `BB_CHUNK_BUFFERS` has:
 `Runtime::NoteAliasedAccess`). `BB_GX_OWN_BUFFER=0` is beta 8's way, for comparison. The arena's
