@@ -32,9 +32,8 @@ What changed since 0.4.3, for the release page. The engine work behind each line
   share one. Where the GPU is the limit (RTX
   3070 Ti, 120 FPS) it never waits for work the engine has ready: 3 submissions a frame, and about
   0.1 ms a frame idle between them, the switches themselves.
-- **VRAM reused rather than freed and allocated again.** Memory of a large image (4 MiB or more) is
-  kept for a few seconds after the image goes and given to the next image of the same size, and
-  emptied memory for the game's data is kept a while when VRAM has room.
+- **Game-data VRAM kept rather than freed and allocated again.** With room in VRAM, emptied memory
+  for the game's data is kept 30 seconds instead of 5, and the last 64 MiB emptied stays.
 
 ## Fixes
 
