@@ -85,6 +85,23 @@ public:
 
     void CopyColorAndDepth(VideoCore::Image* src, VideoCore::Image* dst);
 
+    /// 0.4.4 beta 17: a single-sample 32-bit float depth image's depth (one level, one layer)
+    /// into a 32-bit colour image of its size (R32F, or R32_UINT as the float's bits), by a
+    /// compute shader reading it where it lies, as the game's own passes sample it
+    /// (DepthStencilReadOnlyOptimal): no transfer layout, which can cost a decompression of the
+    /// whole depth image, and no round trip through a buffer. Bit-exact; stencil is not copied
+    /// (as by the copies before). False when it does not apply (nothing done): the caller copies
+    /// as before.
+    /// BB_DEPTH_COPY_SHADER=0 turns it off (CopyColorAndDepth as before 0.4.4 beta 17).
+    bool CopyDepthToColor(VideoCore::Image* src, VideoCore::Image* dst);
+    /// Its dispatch, for images the texture cache does not hold (SceneTargets' proxies): `depth`
+    /// a depth-aspect view in `depth_layout`, `color` an R32F (or, `uint_output`, R32_UINT)
+    /// storage view in General, `width` x `height`. The caller transitions both and keeps the
+    /// views alive until the GPU is done.
+    void RecordDepthToColor(vk::ImageView depth, vk::ImageLayout depth_layout, vk::ImageView color,
+                            bool uint_output, u32 width, u32 height);
+    [[nodiscard]] static bool DepthCopyShaderOn();
+
     void CopyDepthStencil(VideoCore::Image* src, VideoCore::Image* dst,
                           const VideoCore::SubresourceRange& sub_range);
 
@@ -163,6 +180,24 @@ private:
         u32 flushes = 0;       ///< barriers before it was seen (a binding never accessed ends it)
     };
     std::optional<AliasedAccess> aliased;
+    // 0.4.4 beta 17: CopyDepthToColor's pipelines (made on first use) and views (the last few
+    // images', as TemporalUpscaler::CachedView).
+    void CreateDepthCopyPipelines();
+    vk::ImageView DepthCopyView(const VideoCore::Image& image, vk::Format format,
+                                vk::ImageAspectFlags aspect);
+    vk::UniqueDescriptorSetLayout depth_copy_set_layout;
+    vk::UniquePipelineLayout depth_copy_layout;
+    std::array<vk::UniquePipeline, 2> depth_copy_pipelines; ///< R32F, R32_UINT
+    struct DepthCopyViewEntry {
+        vk::Image image{};
+        u64 uid = 0;
+        vk::Format format{};
+        vk::ImageAspectFlags aspect{};
+        vk::ImageView view{};
+        u64 last_use = 0;
+    };
+    std::array<DepthCopyViewEntry, 8> depth_copy_views{};
+    u64 depth_copy_uses = 0;
 };
 
 } // namespace Vulkan

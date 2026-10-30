@@ -1,0 +1,35 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// Hunter's Workshop 0.4.4 beta 17: a 32-bit float depth image's depth into a 32-bit colour image of
+// its size (Runtime::CopyDepthToColor), read where it lies instead of copied through a transfer
+// layout (directly with maintenance8, through a buffer without): a transfer read of a depth image
+// the driver keeps compressed can cost a decompression of all of it (the game's copy of its depth
+// for the next frame took 0.36 ms a frame that way). Each texel's 32 bits are copied unchanged.
+// UINT_OUTPUT: an R32_UINT image, the float's bits.
+#version 450
+#extension GL_EXT_samplerless_texture_functions : require
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0) uniform texture2D depth_tex; // depth aspect
+#ifdef UINT_OUTPUT
+layout(binding = 1, r32ui) uniform writeonly uimage2D out_img;
+#else
+layout(binding = 1, r32f) uniform writeonly image2D out_img;
+#endif
+
+layout(push_constant) uniform Params {
+    uvec2 size;
+};
+
+void main() {
+    const uvec2 pixel = gl_GlobalInvocationID.xy;
+    if (any(greaterThanEqual(pixel, size))) {
+        return;
+    }
+    const float depth = texelFetch(depth_tex, ivec2(pixel), 0).r;
+#ifdef UINT_OUTPUT
+    imageStore(out_img, ivec2(pixel), uvec4(floatBitsToUint(depth)));
+#else
+    imageStore(out_img, ivec2(pixel), vec4(depth));
+#endif
+}

@@ -16,6 +16,9 @@
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/texture_cache/blit_helper.h"
 #include "video_core/texture_cache/image.h"
+#include "video_core/host_shaders/depth_to_color_comp.h"
+#include "video_core/host_shaders/depth_to_color_uint_comp.h"
+#include "video_core/renderer_vulkan/vk_shader_util.h"
 
 #include <vulkan/vulkan_format_traits.hpp>
 
@@ -535,6 +538,10 @@ void Runtime::CopyMip(VideoCore::Image* src, VideoCore::Image* dst, u32 mip, u32
 
 void Runtime::CopyColorAndDepth(VideoCore::Image* src, VideoCore::Image* dst) {
     if (src->info.num_samples == 1 && dst->info.num_samples == 1) {
+        // 0.4.4 beta 17: depth into colour read by a shader where it applies (CopyDepthToColor).
+        if (src->info.props.is_depth && !dst->info.props.is_depth && CopyDepthToColor(src, dst)) {
+            return;
+        }
         if (instance.IsMaintenance8Supported() ||
             src->info.props.is_depth == dst->info.props.is_depth) {
             CopyImage(src, dst);
@@ -565,6 +572,160 @@ void Runtime::CopyColorAndDepth(VideoCore::Image* src, VideoCore::Image* dst) {
     } else {
         LOG_WARNING(Render_Vulkan, "Unimplemented depth overlap copy");
     }
+}
+
+bool Runtime::DepthCopyShaderOn() {
+    static const bool on = [] {
+        const char* env = std::getenv("BB_DEPTH_COPY_SHADER");
+        return !(env && env[0] == '0');
+    }();
+    return on;
+}
+
+bool Runtime::CopyDepthToColor(VideoCore::Image* src, VideoCore::Image* dst) {
+    if (!DepthCopyShaderOn()) {
+        return false;
+    }
+    const auto& from = src->info;
+    const auto& to = dst->info;
+    // One subresource of one size, both single-sample; the images' own (host) formats.
+    if (!from.props.is_depth || to.props.is_depth || from.num_samples != 1 ||
+        to.num_samples != 1 || from.resources.levels != 1 || from.resources.layers != 1 ||
+        to.resources.levels != 1 || to.resources.layers != 1 ||
+        from.size.width != to.size.width || from.size.height != to.size.height ||
+        !src->backing || !dst->backing ||
+        !(dst->usage_flags & vk::ImageUsageFlagBits::eStorage)) {
+        return false;
+    }
+    const vk::Format depth_format = src->backing->image.image_ci.format;
+    const vk::Format color_format = dst->backing->image.image_ci.format;
+    const bool float_depth = depth_format == vk::Format::eD32Sfloat ||
+                             depth_format == vk::Format::eD32SfloatS8Uint;
+    const bool uint_output = color_format == vk::Format::eR32Uint;
+    if (!float_depth || (color_format != vk::Format::eR32Sfloat && !uint_output)) {
+        return false;
+    }
+    SetBackingSamples(dst, 1, false);
+    SetBackingSamples(src, 1);
+    scheduler.EndRendering();
+    // The layout the game's passes sample depth in (Rasterizer::BindTextures): nothing more to
+    // change for its next read of it.
+    constexpr auto depth_layout = vk::ImageLayout::eDepthStencilReadOnlyOptimal;
+    bool needs_flush = Transit(src, depth_layout, vk::PipelineStageFlagBits2::eComputeShader,
+                               vk::AccessFlagBits2::eShaderRead);
+    needs_flush |= Transit(dst, vk::ImageLayout::eGeneral,
+                           vk::PipelineStageFlagBits2::eComputeShader,
+                           vk::AccessFlagBits2::eShaderStorageWrite);
+    if (needs_flush) {
+        FlushBarriers();
+    }
+    const vk::ImageView depth_view =
+        DepthCopyView(*src, depth_format, vk::ImageAspectFlagBits::eDepth);
+    const vk::ImageView color_view =
+        DepthCopyView(*dst, color_format, vk::ImageAspectFlagBits::eColor);
+    RecordDepthToColor(depth_view, depth_layout, color_view, uint_output, to.size.width,
+                       to.size.height);
+    // As CopyImage: the GPU's data, nothing to upload.
+    dst->flags |= (src->flags & VideoCore::ImageFlagBits::GpuModified);
+    dst->flags &= ~VideoCore::ImageFlagBits::Dirty;
+    return true;
+}
+
+void Runtime::RecordDepthToColor(vk::ImageView depth, vk::ImageLayout depth_layout,
+                                 vk::ImageView color, bool uint_output, u32 width, u32 height) {
+    CreateDepthCopyPipelines();
+    scheduler.Record([pipeline = *depth_copy_pipelines[uint_output ? 1 : 0],
+                      layout = *depth_copy_layout, depth, depth_layout, color, width,
+                      height](vk::CommandBuffer cmdbuf) {
+        const vk::DescriptorImageInfo in{.imageView = depth, .imageLayout = depth_layout};
+        const vk::DescriptorImageInfo out{.imageView = color,
+                                          .imageLayout = vk::ImageLayout::eGeneral};
+        const std::array<vk::WriteDescriptorSet, 2> writes{{
+            {.dstBinding = 0, .descriptorCount = 1,
+             .descriptorType = vk::DescriptorType::eSampledImage, .pImageInfo = &in},
+            {.dstBinding = 1, .descriptorCount = 1,
+             .descriptorType = vk::DescriptorType::eStorageImage, .pImageInfo = &out},
+        }};
+        const std::array<u32, 2> size{width, height};
+        cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline);
+        cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute, layout, 0, writes);
+        cmdbuf.pushConstants(layout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(size),
+                             size.data());
+        cmdbuf.dispatch((width + 7) / 8, (height + 7) / 8, 1);
+    });
+}
+
+void Runtime::CreateDepthCopyPipelines() {
+    if (depth_copy_layout) {
+        return;
+    }
+    const auto device = instance.GetDevice();
+    const std::array<vk::DescriptorSetLayoutBinding, 2> bindings{{
+        {.binding = 0, .descriptorType = vk::DescriptorType::eSampledImage,
+         .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eCompute},
+        {.binding = 1, .descriptorType = vk::DescriptorType::eStorageImage,
+         .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eCompute},
+    }};
+    depth_copy_set_layout = Check(device.createDescriptorSetLayoutUnique({
+        .flags = vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptorKHR,
+        .bindingCount = static_cast<u32>(bindings.size()),
+        .pBindings = bindings.data(),
+    }));
+    const vk::PushConstantRange push{vk::ShaderStageFlagBits::eCompute, 0, 2 * sizeof(u32)};
+    depth_copy_layout = Check(device.createPipelineLayoutUnique({
+        .setLayoutCount = 1,
+        .pSetLayouts = &*depth_copy_set_layout,
+        .pushConstantRangeCount = 1,
+        .pPushConstantRanges = &push,
+    }));
+    const auto make = [&](std::span<const u32> code) {
+        const auto module = CompileSPV(code, device);
+        auto pipeline = Check(device.createComputePipelineUnique(
+            {}, vk::ComputePipelineCreateInfo{
+                    .stage = {.stage = vk::ShaderStageFlagBits::eCompute,
+                              .module = module,
+                              .pName = "main"},
+                    .layout = *depth_copy_layout,
+                }));
+        device.destroyShaderModule(module);
+        return pipeline;
+    };
+    depth_copy_pipelines[0] = make(DEPTH_TO_COLOR_COMP);
+    depth_copy_pipelines[1] = make(DEPTH_TO_COLOR_UINT_COMP);
+}
+
+vk::ImageView Runtime::DepthCopyView(const VideoCore::Image& image, vk::Format format,
+                                     vk::ImageAspectFlags aspect) {
+    const vk::Image handle = image.GetImage();
+    DepthCopyViewEntry* oldest = &depth_copy_views[0];
+    for (auto& entry : depth_copy_views) {
+        if (entry.view && entry.image == handle && entry.uid == image.image_uid &&
+            entry.format == format && entry.aspect == aspect) {
+            entry.last_use = ++depth_copy_uses;
+            return entry.view;
+        }
+        if (entry.last_use < oldest->last_use) {
+            oldest = &entry;
+        }
+    }
+    const auto device = instance.GetDevice();
+    if (oldest->view) {
+        scheduler.DeferOperation([device, view = oldest->view] { device.destroyImageView(view); });
+    }
+    *oldest = {
+        .image = handle,
+        .uid = image.image_uid,
+        .format = format,
+        .aspect = aspect,
+        .view = Check(device.createImageView({
+            .image = handle,
+            .viewType = vk::ImageViewType::e2D,
+            .format = format,
+            .subresourceRange = {aspect, 0, 1, 0, 1},
+        })),
+        .last_use = ++depth_copy_uses,
+    };
+    return oldest->view;
 }
 
 void Runtime::CopyDepthStencil(VideoCore::Image* src, VideoCore::Image* dst,

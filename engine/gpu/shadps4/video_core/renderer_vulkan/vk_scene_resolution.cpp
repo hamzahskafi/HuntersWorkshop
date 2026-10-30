@@ -483,6 +483,12 @@ bool SceneTargets::CopyProxy(VideoCore::ImageId src_id, VideoCore::ImageId dst_i
         (!to || !to->state.valid)) {
         return refuse("stencil");
     }
+    // Sampled depth and a storage destination, as the native images (Image::usage_flags).
+    const vk::ImageUsageFlags to_usage =
+        to ? to->image.image_ci.usage : dst.backing->image.image_ci.usage;
+    const bool shader_copy = depth_to_color && Runtime::DepthCopyShaderOn() &&
+                             (from.image.image_ci.usage & vk::ImageUsageFlagBits::eSampled) &&
+                             (to_usage & vk::ImageUsageFlagBits::eStorage);
     scheduler.EndRendering();
     const Runtime::TransferMark mark{runtime, "scene proxy copy", dst};
     if (!to) {
@@ -502,11 +508,39 @@ bool SceneTargets::CopyProxy(VideoCore::ImageId src_id, VideoCore::ImageId dst_i
     }
     dst.scene_proxy = true;
     // Whole images: both aspects of a depth/stencil proxy change layout together.
-    Transition(from, src.aspect_mask, vk::ImageLayout::eTransferSrcOptimal,
-               vk::PipelineStageFlagBits2::eCopy, vk::AccessFlagBits2::eTransferRead);
-    Transition(*to, dst.aspect_mask, vk::ImageLayout::eTransferDstOptimal,
-               vk::PipelineStageFlagBits2::eCopy, vk::AccessFlagBits2::eTransferWrite);
-    if (depth_to_color) {
+    if (shader_copy) {
+        // 0.4.4 beta 17: read by a compute shader where it lies (Runtime::CopyDepthToColor), not
+        // through a transfer layout (a decompression of the whole proxy) and a buffer.
+        constexpr auto depth_layout = vk::ImageLayout::eDepthStencilReadOnlyOptimal;
+        Transition(from, src.aspect_mask, depth_layout, vk::PipelineStageFlagBits2::eComputeShader,
+                   vk::AccessFlagBits2::eShaderRead);
+        Transition(*to, dst.aspect_mask, vk::ImageLayout::eGeneral,
+                   vk::PipelineStageFlagBits2::eComputeShader,
+                   vk::AccessFlagBits2::eShaderStorageWrite);
+        const auto device = instance.GetDevice();
+        const auto view = [&](vk::Image image, vk::Format format, vk::ImageAspectFlags aspect) {
+            return Check(device.createImageView({
+                .image = image,
+                .viewType = vk::ImageViewType::e2D,
+                .format = format,
+                .subresourceRange = {aspect, 0, 1, 0, 1},
+            }));
+        };
+        const vk::ImageView depth_view =
+            view(from.image, from_format, vk::ImageAspectFlagBits::eDepth);
+        const vk::ImageView color_view =
+            view(to->image, to_format, vk::ImageAspectFlagBits::eColor);
+        runtime.RecordDepthToColor(depth_view, depth_layout, color_view, false, extent.width,
+                                   extent.height);
+        scheduler.DeferOperation([device, depth_view, color_view] {
+            device.destroyImageView(depth_view);
+            device.destroyImageView(color_view);
+        });
+    } else if (depth_to_color) {
+        Transition(from, src.aspect_mask, vk::ImageLayout::eTransferSrcOptimal,
+                   vk::PipelineStageFlagBits2::eCopy, vk::AccessFlagBits2::eTransferRead);
+        Transition(*to, dst.aspect_mask, vk::ImageLayout::eTransferDstOptimal,
+                   vk::PipelineStageFlagBits2::eCopy, vk::AccessFlagBits2::eTransferWrite);
         // Vulkan copies no image between depth and colour aspects (without maintenance8): through
         // a buffer, as Runtime::CopyImageWithBuffer. Copies only: no blit support needed (D32S8
         // has none on RADV).
@@ -534,6 +568,10 @@ bool SceneTargets::CopyProxy(VideoCore::ImageId src_id, VideoCore::ImageId dst_i
             cmd.copyBufferToImage(buffer, dst_image, vk::ImageLayout::eTransferDstOptimal, color);
         });
     } else {
+        Transition(from, src.aspect_mask, vk::ImageLayout::eTransferSrcOptimal,
+                   vk::PipelineStageFlagBits2::eCopy, vk::AccessFlagBits2::eTransferRead);
+        Transition(*to, dst.aspect_mask, vk::ImageLayout::eTransferDstOptimal,
+                   vk::PipelineStageFlagBits2::eCopy, vk::AccessFlagBits2::eTransferWrite);
         const vk::ImageAspectFlags aspect = dst_depth
                                                 ? vk::ImageAspectFlagBits::eDepth
                                                 : vk::ImageAspectFlagBits::eColor;
