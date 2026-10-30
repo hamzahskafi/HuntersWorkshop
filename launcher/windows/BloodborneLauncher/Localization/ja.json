@@ -1079,7 +1079,6 @@
   "For CPUs with many slower cores (older Xeons and similar): the game's sound runs before its other threads, against late or stuttering sound. Off by default": "低速なコアを多数持つ CPU (古い Xeon など) 向け: ゲームのサウンドをほかのスレッドより先に実行し、音の遅れや途切れを防ぎます。既定ではオフ",
   "If the sound jitters or crackles, try DirectSound. The larger buffer is steadier but the sound comes a little later": "音が揺らいだりパチパチしたりする場合は DirectSound を試してください。大きいバッファーの方が安定しますが、音がわずかに遅れます",
   "BB_SAMPLE_THREADS: where the game's main, render and file threads spend their time, every 5 seconds. For slow loading; costs a little speed": "BB_SAMPLE_THREADS: ゲームのメイン、レンダリング、ファイルの各スレッドが何に時間を使っているかを 5 秒ごとに記録します。読み込みが遅い場合用。速度がわずかに低下します",
-  "BB_SECTIONS: where each frame's CPU time goes (with frame statistics). It costs FPS, so it applies to the next game only": "BB_SECTIONS: 各フレームの CPU 時間の内訳 (フレーム統計と併用)。FPS が低下するため、次回のゲームにのみ適用されます",
   "The game's compiled shaders, kept between starts (a new engine version clears them itself). Clear them if ": "ゲームのコンパイル済みシェーダー。起動間で保持されます (新しいエンジンバージョンでは自動的に消去されます)。 ",
   "something draws wrong in every save, such as missing skin or hair; the next start compiles them again and stutters for a while": "どのセーブデータでも描画がおかしい場合 (肌や髪が表示されないなど) は消去してください。次回の起動時に再コンパイルされ、しばらくカクつきます",
   "Graphics, effects, camera, controls, cheats and engine options, as a code to paste in Discord or a file. ": "グラフィック、エフェクト、カメラ、操作、チート、エンジンオプションを、Discord に貼り付けるコードまたはファイルとして共有します。 ",

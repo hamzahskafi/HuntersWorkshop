@@ -334,12 +334,6 @@ namespace BloodborneLauncher.Core
                 return error;
             }
             Log(GameRunner.Custom(Settings) ? L.T("Started the game with the custom command.") : L.T("Started Bloodborne."), LogLevel.Step);
-            if (Settings.Bool("section_stats"))
-            {
-                // Timing every render stage costs frame rate: one game only.
-                Settings.Set("section_stats", false);
-                SaveSoon();
-            }
             if (safeMode)
             {
                 // One run only: the next start uses the settings as chosen again.

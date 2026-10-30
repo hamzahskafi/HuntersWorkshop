@@ -42,6 +42,8 @@ What changed since 0.4.3, for the release page. The engine work behind each line
 - The frame capture lists every draw of each pass.
 - Settings › Log › GPU time in the log (`BB_GPU_PROFILE`): the GPU's time a frame by render pass,
   dispatch and upscaler, every 5 seconds.
+- Settings › Log › Render stage timings stays on until it is turned off, like the other log
+  options (it used to turn itself off after one game).
 - Windows logs give VRAM once a minute: the game's use against the driver's budget, and the
   engine's part of it.
 - The log names the game's per-frame GPU memory (its GX range allocator) as the game makes it,

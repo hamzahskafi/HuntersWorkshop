@@ -1079,7 +1079,6 @@
   "For CPUs with many slower cores (older Xeons and similar): the game's sound runs before its other threads, against late or stuttering sound. Off by default": "適用於擁有許多較慢核心的 CPU（較舊的 Xeon 等）：遊戲的音效會優先於其他執行緒執行，以避免聲音延遲或斷續。預設關閉",
   "If the sound jitters or crackles, try DirectSound. The larger buffer is steadier but the sound comes a little later": "若聲音抖動或出現爆音，請試試 DirectSound。較大的緩衝區較穩定，但聲音會稍微延遲",
   "BB_SAMPLE_THREADS: where the game's main, render and file threads spend their time, every 5 seconds. For slow loading; costs a little speed": "BB_SAMPLE_THREADS：每 5 秒記錄遊戲的主執行緒、算繪執行緒與檔案執行緒的時間花在哪裡。用於排查載入緩慢；會稍微降低速度",
-  "BB_SECTIONS: where each frame's CPU time goes (with frame statistics). It costs FPS, so it applies to the next game only": "BB_SECTIONS：每個畫格的 CPU 時間花在哪裡（搭配畫格統計）。會降低 FPS，因此只套用於下一次遊戲",
   "The game's compiled shaders, kept between starts (a new engine version clears them itself). Clear them if ": "遊戲已編譯的著色器，會在每次啟動之間保留（新版引擎會自行清除）。若 ",
   "something draws wrong in every save, such as missing skin or hair; the next start compiles them again and stutters for a while": "所有存檔中都有東西繪製錯誤，例如皮膚或頭髮消失，請清除；下次啟動時會重新編譯，並會卡頓一段時間",
   "Graphics, effects, camera, controls, cheats and engine options, as a code to paste in Discord or a file. ": "圖形、效果、鏡頭、操作、作弊功能與引擎選項，以可貼到 Discord 的代碼或檔案形式提供。 ",

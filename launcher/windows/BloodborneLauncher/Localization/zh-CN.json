@@ -1079,7 +1079,7 @@
   "For CPUs with many slower cores (older Xeons and similar): the game's sound runs before its other threads, against late or stuttering sound. Off by default": "适用于核心较多但单核性能较弱的 CPU (较旧的 Xeon 等)：提高游戏音频线程的运行优先级，改善音频延迟或卡顿。默认关闭",
   "If the sound jitters or crackles, try DirectSound. The larger buffer is steadier but the sound comes a little later": "如果声音抖动或出现爆音，请尝试 DirectSound。较大的缓冲区更稳定，但音频延迟也会增加",
   "BB_SAMPLE_THREADS: where the game's main, render and file threads spend their time, every 5 seconds. For slow loading; costs a little speed": "BB_SAMPLE_THREADS：每 5 秒采样游戏主线程、渲染线程和文件线程的耗时分布，用于排查加载缓慢；会略微降低性能",
-  "BB_SECTIONS: where each frame's CPU time goes (with frame statistics). It costs FPS, so it applies to the next game only": "BB_SECTIONS：配合帧统计，记录每帧 CPU 时间的分布。会降低 FPS，因此仅对下一次启动的游戏生效",
+  "BB_SECTIONS: where each frame's CPU time goes (with frame statistics). Costs a little speed: a few tenths of a millisecond a frame on the draw recording thread": "BB_SECTIONS：记录每帧 CPU 时间的去向（需同时开启帧统计）。会稍微降低速度：绘制录制线程每帧零点几毫秒",
   "The game's compiled shaders, kept between starts (a new engine version clears them itself). Clear them if ": "游戏编译后的着色器会缓存并在下次启动时复用 (更新引擎版本时会自动清除)。如果所有存档中的",
   "something draws wrong in every save, such as missing skin or hair; the next start compiles them again and stutters for a while": "画面都出现异常，例如皮肤或头发缺失，可清除此缓存；下次启动时会重新编译，并在一段时间内出现卡顿",
   "Graphics, effects, camera, controls, cheats and engine options, as a code to paste in Discord or a file. ": "将图形、特效、镜头、控制、修改项和引擎选项导出为代码或文件，便于在 Discord 等平台分享。",
