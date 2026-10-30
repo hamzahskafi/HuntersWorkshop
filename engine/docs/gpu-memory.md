@@ -178,8 +178,9 @@ pages uploaded, re-protected, faulted again at the game's next write).
 `BB_GX_IN_PLACE` (default on, not with the PC memory model, which has its own rules) treats it as a
 PC game's upload heap: its whole blocks are imported for the GPU once, as they are
 (`BbGuestMemory::ImportRange`: VK_EXT_external_memory_host over the game's memory pool, on a
-thread of its own as soon as the region exists), and bound to that memory at first use, never
-moved. What is bound inside it then takes the PC memory model's in-place path (`ObtainBuffer`):
+thread of its own as soon as the region exists), and bound to that memory in one run as soon as
+the import is done (one sparse bind, at the game's start, rather than block by block in its first
+frames), never moved. What is bound inside it then takes the PC memory model's in-place path (`ObtainBuffer`):
 no tracking, uploads or VRAM copy; small read-only bindings are still copied when bound (commands
 decoded later may change them on the CPU); the command processor's writes into it (WriteData,
 DMA) are recorded on the GPU in stream order (`CommandWriteTarget`, `DmaMayWriteOnCpu`), and GPU

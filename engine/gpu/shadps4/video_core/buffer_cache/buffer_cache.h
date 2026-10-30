@@ -623,10 +623,10 @@ private:
     /// bbport BB_GX_IN_PLACE (default on, not with the PC memory model): the game's GX region as a
     /// PC upload heap. Once the game has made it (BbGxRing), its whole blocks [gx_first, gx_end)
     /// are imported for the GPU as they are (BbGuestMemory::ImportRange, on a thread of its own)
-    /// and bound to that memory at first use, for good: what is bound inside it is read and
-    /// written in place, with no write tracking, uploads or VRAM copy; small read-only bindings
-    /// are still copied when bound (the stream path). A binding over the region waits for the
-    /// import; one that fails leaves the region tracked as before.
+    /// and all bound to that memory in one run once imported, for good: what is bound inside it
+    /// is read and written in place, with no write tracking, uploads or VRAM copy; small read-only
+    /// bindings are still copied when bound (the stream path). A binding over the region waits
+    /// for the import; one that fails leaves the region tracked as before.
     enum class GxState : u8 { Off, Waiting, Importing, Imported, Ready, Failed };
     std::atomic<u8> gx_state{u8(GxState::Off)};
     std::atomic<bool> gx_ready{false}, gx_unmapped{false};

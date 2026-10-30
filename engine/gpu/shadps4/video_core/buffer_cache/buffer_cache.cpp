@@ -3189,6 +3189,12 @@ void BufferCache::PollGxRegion(VAddr addr, u64 size) {
         if (gx_state.compare_exchange_strong(expected, u8(GxState::Ready),
                                              std::memory_order_acq_rel)) {
             gx_ready.store(true, std::memory_order_release);
+            // All of it bound now, in one run (EnsureResident: one sparse bind, the page table
+            // with it), at the game's start: not block by block as the game first uses each,
+            // in its first frames (sparse binds stalled NVIDIA GPUs with the PC memory model).
+            EnsureResident(GetArena(gx_first, gx_end - 1), gx_first, gx_end - 1);
+            std::printf("GPU memory: the GX region bound in place (%llu MiB in one run)\n",
+                        (unsigned long long)(((gx_end - gx_first) << block_shift) >> 20));
         }
     }
 }
