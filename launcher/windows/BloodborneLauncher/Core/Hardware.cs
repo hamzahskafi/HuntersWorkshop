@@ -291,11 +291,11 @@ namespace BloodborneLauncher.Core
             else if (tier == Tier.High) Ini(L.T("Object motion vectors"), "object_motion", "1", OnOff, "1");
             else if (tier == Tier.Low || style == StyleSmooth) Ini(L.T("Object motion vectors"), "object_motion", "0", OnOff, "1");
 
-            // Model detail only with a style: Highest on strong GPUs for Best picture, Lower for
-            // Maximum FPS, the game's own otherwise.
+            // Model detail only with a style: Lower for Maximum FPS, the game's own otherwise (Best
+            // picture too: Highest needs the larger graphics memory, which takes RAM the GPU tier
+            // says nothing about; without it some models go undrawn).
             if (style != null)
-                Ini(L.T("Model detail"), "model_lod", style == StyleQuality && tier == Tier.High ? "-2" : style == StyleFps ? "1" : "0",
-                    Choices.ModelLod, "0");
+                Ini(L.T("Model detail"), "model_lod", style == StyleFps ? "1" : "0", Choices.ModelLod, "0");
             return changes;
         }
 
