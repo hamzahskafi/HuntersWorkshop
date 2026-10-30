@@ -1,7 +1,7 @@
 # Hunter's Workshop 0.4.4
 
 What changed since 0.4.3, for the release page. The engine work behind each line is in
-`docs/community-fixes-plan.md` and `docs/gpu-memory.md`. (In progress: beta 10. Lines marked
+`docs/community-fixes-plan.md` and `docs/gpu-memory.md`. (In progress: beta 11. Lines marked
 *to be measured* wait for a test log before the release says what they bring.)
 
 ## Defaults
@@ -29,11 +29,12 @@ What changed since 0.4.3, for the release page. The engine work behind each line
   gone; reading it over PCIe costs less than they did). Frame rate, pacing and VRAM are as before.
   Experimental engine features › Per-frame GPU data in place turns it off (`BB_GX_IN_PLACE=0`),
   should something look wrong.
-- **The GPU gets its work as it needs it** (*to be measured*). With the per-frame data in place, the
-  work the game's fences wait for goes to the GPU when the GPU gets to the last of what it was
-  given, without any timer: it never waits for work the engine has ready, and when it is the limit
-  it gets that work in fewer, larger submissions. The game's compute work is sent the same way
-  (it used to wait for the next graphics work or a short timer).
+- **The GPU gets its work by its progress, without timers.** With the per-frame data in place, the
+  work the game's fences wait for goes to the GPU at the end of each of the game's submissions
+  when the GPU is on the last of what it was given, or when the GPU gets there: no timer decides
+  it, and the game's compute work is sent the same way (it used to wait for the next graphics
+  work or a short timer). In play (RTX 3070 Ti, 120 FPS) speed is as before: the GPU was already
+  kept busy where it is the limit, idle between submissions about 0.1 ms a frame either way.
 - **Game-data memory** (*to be measured*). Memory for the game's data in VRAM is kept longer when it
   empties while VRAM has room. In beta 1 a tester saw about 1 GB less VRAM in dense areas, and
   smoother play there, than with 0.4.3; which change did it is not known yet.
@@ -52,6 +53,8 @@ What changed since 0.4.3, for the release page. The engine work behind each line
   the game's submission ends, when the GPU got to its last submission, and by a safety net that
   should never be needed (expected 0). The GX region's bindings across its edges are counted per
   edge.
+- The log and the GPU profile name the upscaler that runs (they said FSR for DLSS and TAA as
+  well).
 - Settings › Log › GPU time in the log (`BB_GPU_PROFILE`): the GPU's time a frame by render pass,
   dispatch and upscaler, every 5 seconds.
 - Settings › Log › Render stage timings stays on until it is turned off, like the other log

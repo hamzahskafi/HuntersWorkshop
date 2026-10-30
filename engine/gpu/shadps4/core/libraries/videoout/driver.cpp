@@ -932,13 +932,18 @@ void VideoOutDriver::Flip(const Request& req) {
                 const u64 ahead = BbStats::ahead_flushes.exchange(0);
                 const u64 announced = BbStats::announced_flushes.exchange(0);
                 const u64 net = BbStats::net_flushes.exchange(0);
+                const u64 with_end = BbStats::retired_with_end.exchange(0);
+                const u64 alone = BbStats::retired_alone.exchange(0);
                 if (dry || ahead || announced || net) {
                     std::printf("Fence submissions: %.1f/frame at the game's submission ends (GPU "
                                 "out of work %.1f, on its last %.1f), %.1f/frame when the GPU got "
-                                "to its last, %.1f/frame by the safety net (expected 0)\n",
+                                "to its last, %.1f/frame by the safety net (expected 0); frames "
+                                "retired with the frame end %.0f%%\n",
                                 (dry + ahead) / double(frames), dry / double(frames),
                                 ahead / double(frames), announced / double(frames),
-                                net / double(frames));
+                                net / double(frames),
+                                with_end + alone ? 100.0 * with_end / double(with_end + alone)
+                                                 : 0.0);
                 }
             }
             {

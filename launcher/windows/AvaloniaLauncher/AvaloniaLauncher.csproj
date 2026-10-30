@@ -8,7 +8,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>Hunters Workshop</AssemblyName>
-    <Version>0.4.4-beta.10</Version>
+    <Version>0.4.4-beta.11</Version>
     <RootNamespace>BloodborneLauncher</RootNamespace>
     <DefineConstants>$(DefineConstants);AVALONIA</DefineConstants>
     <ApplicationIcon>..\BloodborneLauncher\app.ico</ApplicationIcon>

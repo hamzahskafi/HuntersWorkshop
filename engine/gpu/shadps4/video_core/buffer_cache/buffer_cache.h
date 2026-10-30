@@ -643,6 +643,11 @@ private:
     u64 gx_first = 0, gx_end = 0; ///< blocks
     VAddr gx_head = 0;            ///< the region's first byte (BbGxRing::g_start)
     VAddr gx_tail = 0;            ///< the byte after its last (BbGxRing::g_end)
+    /// The end of the page holding the region's last bytes when it is imported with the region
+    /// (0: not): read-only bindings reaching into it are read in place (InGxTail). The page table
+    /// keeps that block on the tracked copy: the rest of it is the game's next allocation.
+    std::atomic<VAddr> gx_tail_end{0};
+    u64 gx_import_bytes = 0; ///< the import's size: the blocks, and the tail page if taken
     std::atomic<bool> gx_before_noted{false};
     std::array<std::atomic<bool>, 2> gx_edge_noted{};
     /// The first binding across each edge of the region's buffer (copied when bound): logged once,
@@ -666,6 +671,13 @@ private:
     [[nodiscard]] bool InGxRegion(VAddr addr, u64 size) const noexcept {
         return gx_ready.load(std::memory_order_acquire) && size != 0 &&
                (addr >> block_shift) >= gx_first && ((addr + size - 1) >> block_shift) < gx_end;
+    }
+    /// A binding from the region's blocks into the tail page (what the game binds at the
+    /// region's end: 256 KiB and 16 bytes past it at 1.09's title screen).
+    [[nodiscard]] bool InGxTail(VAddr addr, u64 size) const noexcept {
+        const VAddr tail_end = gx_tail_end.load(std::memory_order_acquire);
+        return tail_end != 0 && size != 0 && (addr >> block_shift) >= gx_first &&
+               addr + size <= tail_end && ((addr + size - 1) >> block_shift) >= gx_end;
     }
     [[nodiscard]] bool GxOverlaps(VAddr addr, u64 size) const noexcept {
         return gx_ready.load(std::memory_order_acquire) && size != 0 &&

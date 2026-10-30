@@ -1089,7 +1089,14 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
         state == u8(GxState::Imported)) {
         PollGxRegion(device_addr, size);
     }
-    const bool gx_in_place = InGxRegion(device_addr, size);
+    // Read-only bindings reaching into the tail page (InGxTail) too, unless the GPU has written
+    // there through the tracked path (its copy is then the newer): read in place, what the CPU
+    // wrote is what the tracked copy would hold.
+    const bool gx_tail =
+        !is_written && InGxTail(device_addr, size) &&
+        gx_own.load(std::memory_order_acquire) != nullptr &&
+        !IsRegionGpuModified(gx_end << block_shift, device_addr + size - (gx_end << block_shift));
+    const bool gx_in_place = InGxRegion(device_addr, size) || gx_tail;
     if (gx_in_place && device_addr < gx_head) [[unlikely]] {
         NoteBeforeGx(device_addr, size);
     }
@@ -1197,7 +1204,7 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
             const bool first_edge = device_addr < (gx_first << block_shift);
             CountGxUse(first_edge ? GxEdgeCopied : GxTailCopied, size);
             NoteGxEdge(device_addr, size, first_edge, is_texel_buffer);
-        } else if (in_gx_region) {
+        } else if (in_gx_region || gx_tail) {
             CountGxUse(GxCopied, size);
         }
         if (stats) {
@@ -3205,6 +3212,12 @@ void BufferCache::UnmapInPlace(VAddr addr, u64 size) {
     }
     // bbport BB_GX_IN_PLACE: memory of the region unmapped (only seen at the game's exit): every
     // block of it unbound (ProcessPendingUnmaps), then tracked as before.
+    // The tail page holds the game's next allocation too: unmapped there, it is no longer read
+    // in place (its memory may be mapped elsewhere).
+    if (const VAddr tail_end = gx_tail_end.load(std::memory_order_acquire);
+        tail_end != 0 && addr < tail_end && addr + size > (gx_end << block_shift)) {
+        gx_tail_end.store(0, std::memory_order_release);
+    }
     const bool gx = GxOverlaps(addr, size) && !gx_unmapped.exchange(true);
     if (!GuestInPlace() && !gx) {
         return;
@@ -3271,7 +3284,7 @@ void BufferCache::PollGxRegion(VAddr addr, u64 size) {
                                              std::memory_order_acq_rel)) {
             const u64 blocks = gx_end - gx_first;
             gx_view = std::make_unique<Buffer>(instance, gx_first << block_shift,
-                                               blocks << block_shift, gx_buffer, gx_address,
+                                               gx_import_bytes, gx_buffer, gx_address,
                                                "GX region");
             gx_buffer = vk::Buffer{};
             if (GxOwnBuffer()) {
@@ -3293,6 +3306,14 @@ void BufferCache::PollGxRegion(VAddr addr, u64 size) {
                             "MiB): no sparse binding, within the Vulkan spec (BB_GX_OWN_BUFFER=0: "
                             "bound in the arena, as 0.4.4 beta 8)\n",
                             (unsigned long long)((blocks << block_shift) >> 20));
+                if (const VAddr tail = gx_tail_end.load(std::memory_order_acquire)) {
+                    std::printf("GPU memory: with the page holding its last %llu bytes "
+                                "(%#llx-%#llx): read-only bindings reaching into it are read in "
+                                "place\n",
+                                (unsigned long long)(gx_tail - (gx_end << block_shift)),
+                                (unsigned long long)(gx_end << block_shift),
+                                (unsigned long long)tail);
+                }
             } else {
                 gx_ready.store(true, std::memory_order_release);
                 // All of it bound now, in one run (EnsureResident: one sparse bind, the page table
@@ -3356,12 +3377,13 @@ void BufferCache::StartGxImport() {
     const u64 end = BbGxRing::g_end.load(std::memory_order_relaxed);
     const u64 stop = end >> block_shift;
     u64 phys = 0;
-    const auto run = [&](u64 from) {
+    // One run of direct memory from block `from` up to address `until`.
+    const auto run = [&](u64 from, u64 until) {
         uintptr_t mapping_end = 0;
         bool contiguous = from < stop &&
                           runtime_memory_direct_phys(from << block_shift, &phys, &mapping_end) &&
                           (phys & (block_size - 1)) == 0;
-        for (uintptr_t at = mapping_end; contiguous && at < (stop << block_shift);) {
+        for (uintptr_t at = mapping_end; contiguous && at < until;) {
             u64 next_phys = 0;
             uintptr_t next_end = 0;
             contiguous = runtime_memory_direct_phys(at, &next_phys, &next_end) &&
@@ -3371,12 +3393,12 @@ void BufferCache::StartGxImport() {
         return contiguous;
     };
     u64 first = start >> block_shift;
-    bool contiguous = run(first);
+    bool contiguous = run(first, stop << block_shift);
     if (!contiguous && (start & (block_size - 1)) != 0) {
         // The block before the region is not the same run of memory: from its first whole block,
         // as beta 9 did.
         first = (start + block_size - 1) >> block_shift;
-        contiguous = run(first);
+        contiguous = run(first, stop << block_shift);
         if (contiguous) {
             std::printf("GPU memory: the GX region's first block is not one run of memory with the "
                         "rest: imported from its first whole block (bindings in its first %llu "
@@ -3395,14 +3417,57 @@ void BufferCache::StartGxImport() {
     gx_head = start;
     gx_tail = end;
     const u64 bytes = (stop - first) << block_shift;
-    gx_import = std::async(std::launch::async, [this, phys, bytes] {
+    // The page holding the region's last bytes as well, for read-only bindings (InGxTail): the
+    // game binds the region's last 256 KiB and 16 bytes past it at the title screen and after
+    // loads (0.4.4 beta 10's edge log), which crossed the buffer's end and were copied. Taken
+    // when that page is the same run of memory and the driver imports at that granularity (its
+    // minimum host pointer alignment); else the import ends at the blocks, as in beta 10.
+    u64 tail_bytes = 0;
+    VAddr tail_end = 0;
+    if ((end & (block_size - 1)) != 0) {
+        const u64 align = std::max<u64>(
+            4_KB, instance.GetPhysicalDevice()
+                      .getProperties2<vk::PhysicalDeviceProperties2,
+                                      vk::PhysicalDeviceExternalMemoryHostPropertiesEXT>()
+                      .get<vk::PhysicalDeviceExternalMemoryHostPropertiesEXT>()
+                      .minImportedHostPointerAlignment);
+        tail_end = (end + 4_KB - 1) & ~VAddr(4_KB - 1);
+        const VAddr import_end = (end + align - 1) & ~VAddr(align - 1);
+        if (import_end - (stop << block_shift) < block_size && run(first, import_end)) {
+            tail_bytes = import_end - (stop << block_shift);
+        } else {
+            tail_end = 0;
+            std::printf("GPU memory: the page holding the GX region's last bytes is not imported "
+                        "with it (%s): bindings reaching into it are copied\n",
+                        align >= block_size ? "the driver imports in larger steps"
+                                            : "not the same run of memory");
+        }
+    }
+    gx_import = std::async(std::launch::async, [this, phys, bytes, tail_bytes, tail_end] {
         const auto began = std::chrono::steady_clock::now();
         vk::Buffer buffer;
         vk::DeviceMemory memory;
         vk::DeviceAddress address = 0;
         const char* step = "";
-        if (!BbGuestMemory::ImportRange(instance, phys, bytes, AllFlags, buffer, memory, address,
-                                        &step)) {
+        bool imported = false;
+        if (tail_bytes != 0) {
+            imported = BbGuestMemory::ImportRange(instance, phys, bytes + tail_bytes, AllFlags,
+                                                  buffer, memory, address, &step);
+            if (imported) {
+                gx_import_bytes = bytes + tail_bytes;
+                gx_tail_end.store(tail_end, std::memory_order_release);
+            } else {
+                std::printf("GPU memory: importing the GX region with its last page failed at "
+                            "%s: imported without it (bindings reaching into it are copied)\n",
+                            step);
+            }
+        }
+        if (!imported) {
+            gx_import_bytes = bytes;
+            imported = BbGuestMemory::ImportRange(instance, phys, bytes, AllFlags, buffer, memory,
+                                                  address, &step);
+        }
+        if (!imported) {
             std::printf("GPU memory: importing the GX region for the GPU failed at %s: tracked as "
                         "before\n",
                         step);

@@ -141,6 +141,8 @@ inline std::atomic<std::uint64_t> shadow_copies{0}, shadow_bytes{0};
 /// the GPU command thread's safety net (fence work nothing would submit: expected 0).
 inline std::atomic<std::uint64_t> idle_flushes{0}, ahead_flushes{0}, announced_flushes{0},
     net_flushes{0};
+/// BB_PIPE_SIGNALS: frames retired in the frame end's own submission, and in one of their own.
+inline std::atomic<std::uint64_t> retired_with_end{0}, retired_alone{0};
 /// EOP fences with data: decoded, and their labels written (a growing gap: lost fences, guest leaks).
 inline std::atomic<std::uint64_t> eop_decoded{0}, eop_written{0};
 /// sceGnmAreSubmitsAllowed calls, and those that answered no (submission lock held).

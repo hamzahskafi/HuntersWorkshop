@@ -219,8 +219,13 @@ only. Beta 10 has no timing at all:
   left the GPU idle about 25 us in beta 9's profile, for less work than it already has. With nothing
   more on its way (the GPU command thread waiting for the game), at once: the GPU command thread
   hands the announcement over when it runs out of work, or when the announcement wakes it.
-- The frame's end (`sceGnmSubmitDone`) submits, now in one submission with the frame's retirement
-  when that follows (beta 9 sent two back to back, the second all but empty).
+- The frame's end (`sceGnmSubmitDone`) submits. Beta 11 puts the frame's retirement into that
+  submission when it is due then (the GPU command thread decides, `TakeDecodedFrame`): beta 9
+  sent two back to back, the second all but empty, and beta 10's merge, made on the recording
+  thread only when the second task was already queued, left the GPU profile at 4 switches a
+  frame. When the frame's last submission is decoded after the frame end, its retirement still
+  goes on its own, at once: held, later work would join its submission and the game wait
+  longer. Frame statistics give the share retired with the frame end.
 - Fence work with nothing to announce it and the recording thread idle is submitted by the GPU
   command thread at once: a trigger missing somewhere, counted (expected 0).
 
@@ -293,9 +298,15 @@ edge`, only bindings reaching the region's last 64 bytes). Beta 10's first log
 (`20261030_182328`): in play none at the first edge (30 to 100 a second in beta 9) and almost
 none at the last; at the title one a frame at the last (160 KiB, 19 MB/s), which beta 9's figure
 was too (taken then for the first). The first binding across each edge is logged once
-(`NoteGxEdge`), with where it ends against the region: inside it (its last 64 bytes, which a
-page more of import could serve in place) or beyond it (a binding running past the game's
-allocation, rightly copied). Across the edge, part in the buffer and
+(`NoteGxEdge`), with where it ends against the region. Beta 10's log (`20261030_190741`): at the
+title, 0x10553c0040 for 262,160 bytes, the region's last 256 KiB and 16 bytes past it (a buffer
+descriptor one 16-byte element past its data, into the game's next allocation, likely its heap
+header). Beta 11 imports the page holding the region's last bytes as well (to 0x1055401000,
+when it is the same run of memory and the driver imports at 4 KiB; logged either way), and reads
+read-only bindings reaching into it in place (`InGxTail`) unless the GPU has written there
+through the tracked path. Read in place, those bytes are what the CPU wrote, which the tracked
+copy would also hold. Writes there, and the page table for that block, stay on the tracked copy,
+as the rest of the block is the next allocation's; an unmap of that page's other bytes ends it. Across the edge, part in the buffer and
 part outside: read-only bindings up to 8 MiB are copied when bound (the stream path,
 `GxEdgeCopied`, `GxTailCopied`); anything else that needs the arena there (a GPU write across the
 edge, a shader's page fault there) binds the arena's blocks to the import as before

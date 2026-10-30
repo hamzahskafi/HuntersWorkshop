@@ -321,6 +321,9 @@ private:
     /// Frames whose graphics submissions are all decoded are reported finished once the GPU has
     /// executed the work recorded so far (GPU command thread).
     void SignalDecodedFrames();
+    /// The newest frame whose graphics submissions are all decoded, taken off frame_ends (0:
+    /// none): reported finished by the caller (the frame end's task, or SignalDecodedFrames).
+    u64 TakeDecodedFrame();
     /// BB_HONEST_LABELS: GPU idle once the GPU has finished the work up to `generation` and nothing
     /// was submitted since (the interrupt, work_retired).
     void SignalGpuIdle(u64 generation);

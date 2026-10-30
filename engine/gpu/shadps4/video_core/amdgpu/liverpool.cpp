@@ -171,6 +171,7 @@ bool SubmitEndTasks() {
 void FramesRetiredTask(Vulkan::Rasterizer& self, const u8* data) {
     u64 retired;
     std::memcpy(&retired, data, sizeof(retired));
+    BbStats::retired_alone.fetch_add(1, std::memory_order_relaxed);
     BbTimeline::Note(BbTimeline::PipeTask, 7, self.CurrentTick());
     self.SignalAfterGpu([retired] { Libraries::GnmDriver::NoteFramesRetired(retired); });
     self.Flush();
@@ -353,18 +354,30 @@ void Liverpool::Process(std::stop_token stoken) {
             if (rasterizer && (rasterizer->PipeSignals() || end_tasks)) {
                 // BB_PIPE_SIGNALS: the frame's cache work runs on the recording thread after the
                 // frame (this thread decodes the next one meanwhile instead of waiting for it).
-                // The frame's retirement (SignalDecodedFrames, handed over right after this when
-                // its submissions are all decoded) submits this work with its own: two submissions
-                // back to back left the GPU idle between them (~25 us a frame, beta 9's profile).
-                static constexpr u8 none = 0;
+                // The frame's retirement goes with it when due now (its submissions all decoded):
+                // one submission, the frame's work and its cache work before the signal, as
+                // before. Two back to back left the GPU idle between them (~25 us a frame, 0.4.4
+                // beta 9's profile); beta 10 merged them only when the second task was already
+                // queued, and the GPU profile kept both. When the frame's last submission is
+                // decoded after this call, its retirement goes on its own, as soon as it is
+                // (SignalDecodedFrames, in the loop above): holding it for the next submission
+                // would let later work into its submission and the game wait longer for it.
+                // Counted (frame statistics).
+                const u64 retired = rasterizer->PipeSignals() ? TakeDecodedFrame() : 0;
                 rasterizer->RunInOrder(
-                    [](Vulkan::Rasterizer& r, const u8*) {
+                    [](Vulkan::Rasterizer& r, const u8* data) {
+                        u64 frame;
+                        std::memcpy(&frame, data, sizeof(frame));
                         r.OnSubmit();
-                        if (!r.NextPacketIsTask(&FramesRetiredTask)) {
-                            r.Flush();
+                        if (frame != 0) {
+                            BbStats::retired_with_end.fetch_add(1, std::memory_order_relaxed);
+                            BbTimeline::Note(BbTimeline::PipeTask, 7, r.CurrentTick());
+                            r.SignalAfterGpu(
+                                [frame] { Libraries::GnmDriver::NoteFramesRetired(frame); });
                         }
+                        r.Flush();
                     },
-                    &none, 0, BbToggle::PipelinedTasks, true, "SubmitDone");
+                    &retired, sizeof(retired), BbToggle::PipelinedTasks, true, "SubmitDone");
             } else if (rasterizer) {
                 rasterizer->OnSubmit();
                 rasterizer->Flush();
@@ -2541,15 +2554,18 @@ void Liverpool::SubmitGfx(std::span<const u32> dcb, std::span<const u32> ccb) {
     submit_cv.notify_one();
 }
 
-void Liverpool::SignalDecodedFrames() {
+u64 Liverpool::TakeDecodedFrame() {
     u64 frame = 0;
-    {
-        std::scoped_lock lk{submit_mutex};
-        while (!frame_ends.empty() && frame_ends.front().first <= decoded_total) {
-            frame = frame_ends.front().second;
-            frame_ends.pop_front();
-        }
+    std::scoped_lock lk{submit_mutex};
+    while (!frame_ends.empty() && frame_ends.front().first <= decoded_total) {
+        frame = frame_ends.front().second;
+        frame_ends.pop_front();
     }
+    return frame;
+}
+
+void Liverpool::SignalDecodedFrames() {
+    const u64 frame = TakeDecodedFrame();
     if (frame == 0 || !rasterizer) {
         if (frame != 0) {
             Libraries::GnmDriver::NoteFramesRetired(frame);
