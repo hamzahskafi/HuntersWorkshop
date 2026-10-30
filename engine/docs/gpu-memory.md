@@ -203,9 +203,24 @@ screen. In play, write faults went from a median of 911 a second to 1, and prote
 remains are load-time writes outside the region (`0x261af9e` and its neighbours, up to about 2,000
 in a load window). About 10,000 bindings a second, of about 3 MiB each, are now read in place, and
 7,000 small ones are still copied (about 27 MB/s). Frame rate (60), pacing (stddev 0.04 ms, p99
-16.8 ms) and VRAM (2.8 to 3.5 GB by the driver's count) are as in beta 4. Not measured yet: the
-GPU's time reading the region over PCIe instead of from VRAM. That needs `BB_GPU_PROFILE=1`, with
-`BB_GX_IN_PLACE` on and then off, at the same spot.
+16.8 ms) and VRAM (2.8 to 3.5 GB by the driver's count) are as in beta 4.
+
+GPU time (`BB_GPU_PROFILE=1`, beta 6, the same route: Hunter's Dream, m32, m33, back; busy = the
+profile's total less its idle label; play windows of over 500 draws a frame):
+
+| | GPU busy (median) | per 1,000 draws | write faults/s | protect ms/frame | submissions/frame |
+|---|---|---|---|---|---|
+| region tracked (`BB_GX_IN_PLACE=0`, `20261030_045501`) | 7.94 ms at 965 draws | 7.87 ms | 912 | 0.405 | 2.0 |
+| in place, fences at recording (`20261030_044107`) | 7.26 ms at 1,132 draws | 6.63 ms | 0 | 0.005 | 2.0 |
+| in place, honest fences (beta 7's default, `20261030_045019`) | 7.03 ms at 986 draws | 7.15 ms | 1 | 0.003 | 10.1 |
+
+Reading the region over PCIe costs the GPU less than the tracked path's uploads of it did: about
+0.9 ms a frame less. A per-frame GPU copy of it into VRAM (an alternative considered) has nothing
+to win here. With honest fences the GPU command thread sends about 10 submissions a frame
+(`BB_HONEST_FLUSH_US`, 2 ms) for 2; CPU use (3.0 to 3.2 cores), frame rate (60), pacing (stddev
+0.05 ms, p99 16.8 ms) and VRAM (3.0 to 3.5 GB, against 3.1 to 3.7 tracked) are unchanged. Long
+frames come at loads in all three; in play, honest fences had four windows with one frame of 20 to
+30 ms (no shader compiles) in about ten minutes, tracked one: to watch, not acted on.
 
 ### Step 4: verify, then decide the default
 
