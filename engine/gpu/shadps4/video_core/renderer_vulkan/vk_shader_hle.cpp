@@ -435,22 +435,33 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
                 }
             }
             std::printf("\n");
-            // The game's GX range allocator past the usual limits (BufferCache::ObtainBuffer).
-            static u64 ring_calls_before, ring_bytes_before, ring_kept_before;
-            const u64 ring_calls = BufferCache::gx_ring_streams.load(std::memory_order_relaxed);
-            const u64 ring_bytes = BufferCache::gx_ring_stream_bytes.load(std::memory_order_relaxed);
-            const u64 ring_kept = BufferCache::gx_ring_gpu_kept.load(std::memory_order_relaxed);
-            if (ring_calls != ring_calls_before || ring_kept != ring_kept_before) {
-                const u64 calls = ring_calls - ring_calls_before;
-                std::printf("  GX region buffers copied when used: %.0f/s, %.1f KiB each, %.1f MB/s; %.0f/s "
-                            "kept tracked (the GPU wrote them)\n",
-                            calls / seconds, calls ? (ring_bytes - ring_bytes_before) / 1024.0 / calls : 0.0,
-                            (ring_bytes - ring_bytes_before) / 1e6 / seconds,
-                            (ring_kept - ring_kept_before) / seconds);
+            // Bindings in the game's GX range allocator by kind (BufferCache::ObtainBuffer): what its
+            // rule copies, and what stays tracked.
+            static std::array<u64, BufferCache::GxUses> gx_calls_before{}, gx_bytes_before{};
+            std::array<u64, BufferCache::GxUses> gx_calls{}, gx_bytes{};
+            u64 gx_any = 0;
+            for (u32 i = 0; i < BufferCache::GxUses; ++i) {
+                gx_calls[i] = BufferCache::gx_ring_calls[i].load(std::memory_order_relaxed);
+                gx_bytes[i] = BufferCache::gx_ring_bytes[i].load(std::memory_order_relaxed);
+                gx_any += gx_calls[i] - gx_calls_before[i];
             }
-            ring_calls_before = ring_calls;
-            ring_bytes_before = ring_bytes;
-            ring_kept_before = ring_kept;
+            if (gx_any) {
+                const char* gx_names[BufferCache::GxUses] = {
+                    "read, small (copied anyway)", "read, copied by its rule", "read, GPU-written (tracked)",
+                    "read, larger (tracked)", "texel (tracked)", "written"};
+                std::printf("  GX region bindings:");
+                for (u32 i = 0; i < BufferCache::GxUses; ++i) {
+                    const u64 calls = gx_calls[i] - gx_calls_before[i];
+                    if (calls) {
+                        std::printf(" %s %.0f/s %.1f KiB (%.1f MB/s);", gx_names[i], calls / seconds,
+                                    (gx_bytes[i] - gx_bytes_before[i]) / 1024.0 / calls,
+                                    (gx_bytes[i] - gx_bytes_before[i]) / 1e6 / seconds);
+                    }
+                }
+                std::printf("\n");
+            }
+            gx_calls_before = gx_calls;
+            gx_bytes_before = gx_bytes;
             path_calls_before = BufferCache::hle_path_calls;
             path_bytes_before = BufferCache::hle_path_bytes;
             window = now;

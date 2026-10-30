@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // See bbport_gx_ring.h.
 #include "bbport_gx_ring.h"
+#include "bbport_platform.h"
 
 #include <array>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-
-extern "C" std::uint64_t runtime_memory_clamp(std::uintptr_t address, std::uint64_t size);
 
 namespace BbGxRing {
 namespace {
@@ -34,25 +33,25 @@ constexpr std::array<Code, 4> kCode{{
 std::atomic<const std::uint8_t*> g_image{nullptr};
 std::atomic<u64> g_image_size{0};
 
-// Inside the image (its code, data and bss), or in memory the game mapped.
-bool Readable(u64 address, u64 size) {
-    const u64 image = reinterpret_cast<u64>(g_image.load(std::memory_order_acquire));
-    const u64 image_size = g_image_size.load(std::memory_order_relaxed);
-    if (image && address >= image && address - image <= image_size && image_size - (address - image) >= size) {
-        return true;
-    }
-    return address && runtime_memory_clamp(address, size) >= size;
+// Fault-safe: an address that is not mapped, or not readable, fails the read.
+bool Read(u64 address, void* out, u64 size) {
+    return address && BbPlatform::ReadProcessMemory(reinterpret_cast<const void*>(address), out, size);
 }
-
 bool Read(u64 address, u64& out) {
-    if (!Readable(address, sizeof out)) return false;
-    std::memcpy(&out, reinterpret_cast<const void*>(address), sizeof out);
-    return true;
+    return Read(address, &out, sizeof out);
 }
 
 // 0 unchecked, 1 the code is 1.09's, -1 not looked for (another version, or BB_GX_RING_STREAM_KB=0).
 std::atomic<int> g_state{0};
-std::atomic<bool> g_logged{false};
+std::atomic<bool> g_logged{false}, g_reported{false};
+
+// The last look that did not find it: the step it stopped at and what was read (ReportMissing).
+enum Step : int { NoImage, Holder, Device, Allocator, Region, Shape, Found };
+constexpr const char* kStepNames[] = {"the image", "the device's holder", "the device",
+                                      "the upload allocator", "the range allocator's region",
+                                      "a region of the shape its init leaves", "found"};
+std::atomic<int> g_step{NoImage};
+std::atomic<u64> g_seen[6]{}; // holder, device, allocator, start, end, size
 } // namespace
 
 void SetImage(const std::uint8_t* image, std::uint64_t size) {
@@ -62,20 +61,21 @@ void SetImage(const std::uint8_t* image, std::uint64_t size) {
 
 bool Find() {
     if (Known()) return true;
-    int state = g_state.load(std::memory_order_acquire);
+    const int state = g_state.load(std::memory_order_acquire);
     if (state < 0) return false;
+    const u64 base = reinterpret_cast<u64>(g_image.load(std::memory_order_acquire));
+    if (!base) {
+        return false; // the loader has not placed the image yet
+    }
     if (state == 0) {
-        if (!g_image.load(std::memory_order_acquire)) {
-            return false; // the loader has not placed the image yet
-        }
         const char* env = std::getenv("BB_GX_RING_STREAM_KB");
         const bool off = env && std::strtoull(env, nullptr, 10) == 0;
-        const u64 base = reinterpret_cast<u64>(g_image.load(std::memory_order_relaxed));
+        const u64 image_size = g_image_size.load(std::memory_order_relaxed);
         const Code* differs = nullptr;
         for (const Code& c : kCode) {
-            const u64 at = base + c.offset;
-            if (!Readable(at, c.bytes.size()) ||
-                std::memcmp(reinterpret_cast<const void*>(at), c.bytes.data(), c.bytes.size())) {
+            std::array<unsigned char, 7> bytes{};
+            if (c.offset + bytes.size() > image_size || !Read(base + c.offset, bytes.data(), bytes.size()) ||
+                bytes != c.bytes) {
                 differs = &c;
                 break;
             }
@@ -88,15 +88,22 @@ bool Find() {
         g_state.store(differs || off ? -1 : 1, std::memory_order_release);
         if (differs || off) return false;
     }
-    const u64 base = reinterpret_cast<u64>(g_image.load(std::memory_order_relaxed));
     u64 holder = 0, device = 0, ring = 0, start = 0, end = 0, size = 0;
-    if (!Read(base + DeviceHolder, holder) || !Read(holder, device) ||
-        !Read(device + UploadAllocator, ring) || !Read(ring + RegionStart, start) ||
-        !Read(ring + RegionEnd, end) || !Read(ring + RegionSize, size)) {
-        return false; // not made yet
+    const auto stop = [&](Step step) {
+        const u64 seen[6] = {holder, device, ring, start, end, size};
+        for (int i = 0; i < 6; ++i) g_seen[i].store(seen[i], std::memory_order_relaxed);
+        g_step.store(step, std::memory_order_relaxed);
+        return false;
+    };
+    if (!Read(base + DeviceHolder, holder) || !holder) return stop(Holder);
+    if (!Read(holder, device) || !device) return stop(Device);
+    if (!Read(device + UploadAllocator, ring) || !ring) return stop(Allocator);
+    if (!Read(ring + RegionStart, start) || !Read(ring + RegionEnd, end) || !Read(ring + RegionSize, size)) {
+        return stop(Region);
     }
     // The region as the allocator's init (0x26a9b50) left it: its end its start plus its size.
-    if (!start || end <= start || end - start != size || size > (u64(1) << 30)) return false;
+    if (!start || end <= start || end - start != size || size > (u64(1) << 30)) return stop(Shape);
+    g_step.store(Found, std::memory_order_relaxed);
     g_end.store(end, std::memory_order_relaxed);
     g_start.store(start, std::memory_order_release);
     if (!g_logged.exchange(true)) {
@@ -105,5 +112,15 @@ bool Find() {
                     (unsigned long long)start, (unsigned long long)end, (unsigned long long)((end - start) >> 20));
     }
     return true;
+}
+
+void ReportMissing() {
+    if (Known() || g_state.load(std::memory_order_acquire) < 0 || g_reported.exchange(true)) return;
+    const int step = g_step.load(std::memory_order_relaxed);
+    std::printf("GPU memory: the game's GX range allocator not found yet: stopped at %s (holder %#llx, device "
+                "%#llx, allocator %#llx, region %#llx..%#llx, size %#llx)\n",
+                kStepNames[step], (unsigned long long)g_seen[0].load(), (unsigned long long)g_seen[1].load(),
+                (unsigned long long)g_seen[2].load(), (unsigned long long)g_seen[3].load(),
+                (unsigned long long)g_seen[4].load(), (unsigned long long)g_seen[5].load());
 }
 } // namespace BbGxRing

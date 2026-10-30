@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // The GX range allocator's region (gpu/shim/bbport_gx_ring.h) read from a stand-in for the game: its
 // image at the loader's address with the 1.09 code the offsets come from, a device, its upload
-// allocator and the range allocator, as the game lays them out.
+// allocator and the range allocator, as the game lays them out. Reads are fault-safe: a pointer into
+// unmapped memory fails the look, not the process.
 #include "bbport_gx_ring.h"
 #include <cassert>
 #include <cstdint>
@@ -17,15 +18,6 @@
 
 namespace {
 constexpr std::uint64_t kBase = 0x800000000ull, kSize = 0x5541000; // up to the device's holder
-}
-
-// As the engine's memory table: the game's mappings only, never its image (the loader's own): the
-// image's code and data must be read through SetImage's range. Other test memory reads as mapped.
-extern "C" std::uint64_t runtime_memory_clamp(std::uintptr_t address, std::uint64_t size) {
-    return address && (address < kBase || address >= kBase + kSize) ? size : 0;
-}
-
-namespace {
 
 void Put(std::uint64_t offset, std::initializer_list<unsigned char> bytes) {
     std::memcpy(reinterpret_cast<void*>(kBase + offset), bytes.begin(), bytes.size());
@@ -62,11 +54,15 @@ int main() {
     assert(!BbGxRing::Find() && !BbGxRing::Known());
 
     // The objects: holder -> device in the image's spare room; device + 0xb3e0 -> the range allocator,
-    // in memory the game mapped (outside the image).
+    // in memory the game mapped (outside the image). First a device pointer no process can read (kernel
+    // space): the read fails, the game goes on, and it is looked for again.
     static std::uint64_t ring_object[0x100 / 8];
     const std::uint64_t holder = kBase + 0x1000, device = kBase + 0x10000;
     const auto ring = reinterpret_cast<std::uint64_t>(ring_object);
     Put64(kBase + 0x55406c8, holder);
+    Put64(holder, 0xffff800000000000ull);
+    assert(!BbGxRing::Find() && !BbGxRing::Known());
+    BbGxRing::ReportMissing(); // "stopped at the upload allocator", the device's field unreadable
     Put64(holder, device);
     Put64(device + 0xb3e0, ring);
     const std::uint64_t start = 0x1040000000ull, size = 288ull << 20;

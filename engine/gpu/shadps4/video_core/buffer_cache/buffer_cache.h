@@ -130,10 +130,12 @@ public:
     /// CopySourceStreamLimit they take the stream path, untracked (see ObtainBuffer).
     static inline thread_local bool copy_source = false;
     static inline std::array<u64, 6> hle_path_calls{}, hle_path_bytes{};
-    /// Read-only buffers in the game's GX range allocator past the usual stream limits
-    /// (BB_GX_RING_STREAM_KB): copied when used, with their bytes; and those kept on the tracked
-    /// path because the GPU wrote them.
-    static inline std::atomic<u64> gx_ring_streams{0}, gx_ring_stream_bytes{0}, gx_ring_gpu_kept{0};
+    /// Bindings inside the game's GX range allocator, by kind, with their bytes (the stats, in
+    /// vk_shader_hle.cpp): GxSmall read-only within the usual stream limits (copied anyway), GxCopied
+    /// read-only up to BB_GX_RING_STREAM_KB (copied by its rule), GxGpuWritten such ones the GPU wrote
+    /// (tracked), GxLarge read-only and larger (tracked), GxTexel, GxWritten.
+    enum GxUse : u32 { GxSmall, GxCopied, GxGpuWritten, GxLarge, GxTexel, GxWritten, GxUses };
+    static inline std::array<std::atomic<u64>, GxUses> gx_ring_calls{}, gx_ring_bytes{};
 
     /// Finds a buffer for the specified region.
     [[nodiscard]] std::pair<const Buffer*, u64> ObtainBuffer(VAddr device_addr, u32 size,
@@ -588,6 +590,7 @@ private:
     };
     std::unordered_map<VkDeviceMemory, ResidencyChunk> residency_chunks;
     u32 idle_scan_second = 0;
+    u32 gx_ring_looks = 0; ///< ProcessIdleBlocks: seconds spent looking for the GX range allocator
     u32 last_evacuation = 0; ///< ProcessIdleBlocks: when a chunk was last emptied
     /// bbport: how full VRAM is against the driver's budget, once a second (UpdateVramLevel):
     /// 0 room, 1 tight (idle VRAM copies go back sooner), 2 full (no new ones either).

@@ -16,12 +16,16 @@ namespace BbGxRing {
 inline std::atomic<std::uint64_t> g_start{0}, g_end{0};
 
 /// The game's image as the loader placed it (bbgpu_patch_image): the code checked and the device's
-/// holder are read there. The memory table (runtime_memory_clamp) has only the game's mappings.
+/// holder are read there.
 void SetImage(const std::uint8_t* image, std::uint64_t size);
 
-/// Looks for the region once the game has made its graphics device; false until then. Cheap to
-/// call again; logs the region once.
+/// Looks for the region once the game has made its graphics device; false until then. Called once a
+/// second by the buffer cache (ProcessIdleBlocks) until found; logs the region once. Reads go through
+/// BbPlatform::ReadProcessMemory: a pointer that leads nowhere fails the read, not the game.
 bool Find();
+
+/// After a minute of looking: logs once which step has not been found and what was read.
+void ReportMissing();
 
 inline bool Known() {
     return g_start.load(std::memory_order_acquire) != 0;

@@ -361,6 +361,17 @@ void EraseTwins(VAddr begin, VAddr end) {
 /// textures from the arena only where it is resident: no new VRAM. 2: all of the game's GPU
 /// memory, textures always from the arena (~3 GB more VRAM, the shared memory on a Steam Deck).
 /// 0: off.
+/// bbport: the largest read-only buffer in the game's GX range allocator that is copied when used
+/// (BB_GX_RING_STREAM_KB, 256; 0: the region is not looked for, everything in it tracked as before).
+u64 GxRingStreamLimit() {
+    static const u64 limit = [] {
+        const char* env = std::getenv("BB_GX_RING_STREAM_KB");
+        const u64 kib = env ? std::strtoull(env, nullptr, 10) : 256;
+        return kib ? std::max<u64>(std::min<u64>(kib, 4096) * 1024, BufferCache::STREAM_THRESHOLD) : 0;
+    }();
+    return limit;
+}
+
 int PreuploadMode() {
     static const int mode = [] {
         const char* env = std::getenv("BB_PREUPLOAD");
@@ -1117,32 +1128,31 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
     // (BB_GX_RING_STREAM_KB; 0: as before): the memory the game rewrites for the GPU every frame
     // (per-draw parameters, CPU-deformed vertices, the upload area), whose tracked uploads were
     // most of the write faults left after the copy shader's sources (0.4.3's profile). Not texel
-    // buffers, which the image path may serve. Looked for until the game has made its device.
-    static const u64 gx_ring_limit = [] {
-        const char* env = std::getenv("BB_GX_RING_STREAM_KB");
-        const u64 kib = env ? std::strtoull(env, nullptr, 10) : 256;
-        return kib ? std::max<u64>(std::min<u64>(kib, 4096) * 1024, STREAM_THRESHOLD) : 0;
-    }();
+    // buffers, which the image path may serve. Found once the game has made its device
+    // (ProcessIdleBlocks); every binding inside it is counted by kind for the stats.
     u64 stream_limit = copy_source ? copy_source_limit : STREAM_THRESHOLD;
-    bool gx_ring = false;
-    if (gx_ring_limit && !is_written && !is_texel_buffer && size > stream_limit && size <= gx_ring_limit) {
-        thread_local u32 ring_looks = 0;
-        if (BbGxRing::Known() || ((++ring_looks & 255) == 0 && BbGxRing::Find())) {
-            gx_ring = BbGxRing::Contains(device_addr, size);
-            if (gx_ring) stream_limit = gx_ring_limit;
+    int gx_use = -1;
+    if (BbGxRing::Contains(device_addr, size)) {
+        gx_use = is_written         ? GxWritten
+                 : is_texel_buffer ? GxTexel
+                 : size <= stream_limit ? GxSmall
+                 : size <= GxRingStreamLimit() ? GxCopied
+                                             : GxLarge;
+        if (gx_use == GxCopied) {
+            stream_limit = GxRingStreamLimit();
         }
     }
     const bool gpu_written = !is_written && size <= stream_limit && IsRegionGpuModified(device_addr, size);
-    if (gx_ring && gpu_written) {
-        gx_ring_gpu_kept.fetch_add(1, std::memory_order_relaxed);
+    if (gx_use == GxCopied && gpu_written) {
+        gx_use = GxGpuWritten;
+    }
+    if (gx_use >= 0) {
+        gx_ring_calls[gx_use].fetch_add(1, std::memory_order_relaxed);
+        gx_ring_bytes[gx_use].fetch_add(size, std::memory_order_relaxed);
     }
     if (!is_written && size <= stream_limit && !gpu_written) {
         BB_SECTION(ObtainStream);
         note_hle(1);
-        if (gx_ring) {
-            gx_ring_streams.fetch_add(1, std::memory_order_relaxed);
-            gx_ring_stream_bytes.fetch_add(size, std::memory_order_relaxed);
-        }
         if (stats) {
             auto& region = Stats().regions[RegionKey(device_addr)];
             ++region.stream_count;
@@ -1887,6 +1897,13 @@ void BufferCache::ProcessIdleBlocks() {
     }
     idle_scan_second = now;
     UpdateVramLevel(now);
+    // bbport: the game's GX range allocator, looked for once a second until found (it exists once
+    // the game made its graphics device); after a minute without it, the log says where it stopped.
+    if (GxRingStreamLimit() != 0 && !BbGxRing::Known()) {
+        if (!BbGxRing::Find() && ++gx_ring_looks == 60) {
+            BbGxRing::ReportMissing();
+        }
+    }
     if (GuestInPlace()) {
         ProcessDynamicRetries(now);
         ReportResidency(now);
