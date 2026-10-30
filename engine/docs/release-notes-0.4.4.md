@@ -1,7 +1,7 @@
 # Hunter's Workshop 0.4.4
 
 What changed since 0.4.3, for the release page. The engine work behind each line is in
-`docs/community-fixes-plan.md` and `docs/gpu-memory.md`. (In progress: beta 4. Lines marked
+`docs/community-fixes-plan.md` and `docs/gpu-memory.md`. (In progress: after beta 4. Lines marked
 *to be measured* wait for a test log before the release says what they bring.)
 
 ## Defaults
@@ -14,10 +14,6 @@ What changed since 0.4.3, for the release page. The engine work behind each line
 
 ## Performance
 
-- **Less CPU work every frame** (*to be measured*: betas 1 to 3 never found the region it needs;
-  beta 4 takes it from the game as the game makes it). The memory the game rewrites for the GPU every frame (per-draw parameters, CPU-animated
-  vertices, its upload area) is copied where it is used instead of being write-protected and
-  watched page by page.
 - **Texture and game-data memory** (*to be measured*). A freed large texture's memory is kept a few
   seconds for the next texture of the same size (beta 1: rarely used, 3 of 19,305 new images), and
   memory for the game's data in VRAM is kept longer when it empties while VRAM has room. In beta 1 a
@@ -36,3 +32,5 @@ What changed since 0.4.3, for the release page. The engine work behind each line
 - The frame capture lists every draw of each pass.
 - Windows logs give VRAM once a minute: the game's use against the driver's budget, and the
   engine's part of it.
+- The log names the game's per-frame GPU memory (its GX range allocator) as the game makes it,
+  marks the write faults inside it, and counts how the game binds it (with frame statistics).
