@@ -257,8 +257,9 @@ public:
     /// has written them. False: not in place (or BB_GPU_COMMAND_WRITES=0), the caller stores it.
     bool WriteDataOnGpu(VAddr address, const void* data, u32 size);
     /// End of a guest submission: submits the work recorded so far when signals wait for it and
-    /// the last submission is BB_HONEST_FLUSH_US (1000) old: the GPU starts on it as the hardware
-    /// would, instead of at the end of the frame, and the guest's mid-frame waits end sooner.
+    /// the GPU has got to the last of its submissions (SubmitForSignalsNow): the GPU starts on it
+    /// as the hardware would, instead of at the end of the frame, and never runs out of work
+    /// recorded already.
     void SubmitForSignals();
     /// bbport BB_PIPE_SIGNALS (default on with honest labels; 0: off): on the GPU command thread with
     /// the draw pipe, fences, the GPU idle and frame signals and the submissions for them are
@@ -891,7 +892,8 @@ private:
     std::atomic<bool> signal_flush_requested{false};
     std::jthread gpu_signal_thread;
     void SubmitForSignalsNow();
-    /// steady_clock nanoseconds of the last submission (written by both pipeline stages).
+    /// steady_clock nanoseconds of the last submission (written by both pipeline stages;
+    /// BB_HONEST_FLUSH_US).
     std::atomic<s64> last_flush_ns{0};
 };
 

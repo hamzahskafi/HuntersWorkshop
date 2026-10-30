@@ -397,7 +397,7 @@ void Liverpool::Process(std::stop_token stoken) {
                         std::memcpy(&idle, data, sizeof(idle));
                         r.WaitDeferredSignals();
                         r.SignalAfterGpu([idle] { idle.self->SignalGpuIdle(idle.generation); });
-                        r.SubmitForSignals(); // at once if the GPU has run dry
+                        r.SubmitForSignals(); // at once if the GPU is on its last submission
                     },
                     &signal, sizeof(signal), BbToggle::PipelinedTasks, false, "GpuIdleHonest");
                 continue;

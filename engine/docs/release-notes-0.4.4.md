@@ -28,6 +28,10 @@ What changed since 0.4.3, for the release page. The engine work behind each line
   gone; reading it over PCIe costs less than they did). Frame rate, pacing and VRAM are as before.
   Experimental engine features › Per-frame GPU data in place turns it off (`BB_GX_IN_PLACE=0`),
   should something look wrong.
+- **The GPU gets its work as it needs it** (*to be measured*). With the per-frame data in place, the
+  work the game's fences wait for goes to the GPU when the GPU gets to the last of what it was
+  given, instead of every 2 ms: it never waits for work the engine has ready, and when it is the
+  limit it gets that work in fewer, larger submissions.
 - **Game-data memory** (*to be measured*). Memory for the game's data in VRAM is kept longer when it
   empties while VRAM has room. In beta 1 a tester saw about 1 GB less VRAM in dense areas, and
   smoother play there, than with 0.4.3; which change did it is not known yet.
@@ -42,6 +46,8 @@ What changed since 0.4.3, for the release page. The engine work behind each line
 - Long-frame reports (frame statistics on) now give the long frame's own figures, with how many
   images were made or had their data checked.
 - The frame capture lists every draw of each pass.
+- Frame statistics count how the work fences wait for went to the GPU (`Fence submissions:`): with
+  the GPU out of work, on its last submission, or held while the recording thread catches up.
 - Settings › Log › GPU time in the log (`BB_GPU_PROFILE`): the GPU's time a frame by render pass,
   dispatch and upscaler, every 5 seconds.
 - Settings › Log › Render stage timings stays on until it is turned off, like the other log

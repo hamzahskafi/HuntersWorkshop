@@ -927,9 +927,16 @@ void VideoOutDriver::Flip(const Request& req) {
                         (unsigned long long)BbStats::eop_decoded.load(),
                         (unsigned long long)BbStats::eop_written.load(),
                         (long long)(BbStats::eop_decoded.load() - BbStats::eop_written.load()));
-            if (const u64 early = BbStats::idle_flushes.exchange(0)) {
-                std::printf("Honest labels: %.1f submissions/frame sent early (GPU idle)\n",
-                            early / double(frames));
+            {
+                const u64 dry = BbStats::idle_flushes.exchange(0);
+                const u64 ahead = BbStats::ahead_flushes.exchange(0);
+                const u64 held = BbStats::held_flushes.exchange(0);
+                if (dry || ahead || held) {
+                    std::printf("Fence submissions: %.1f/frame with the GPU out of work, %.1f/frame "
+                                "with it on its last, %.1f/frame held for the recording thread\n",
+                                dry / double(frames), ahead / double(frames),
+                                held / double(frames));
+                }
             }
             {
                 uint64_t sleeps = 0, sleep_ns = 0;

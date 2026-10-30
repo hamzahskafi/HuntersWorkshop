@@ -196,6 +196,21 @@ writes them once the GPU has finished, as the PC memory model always has (`BB_HO
 whenever `BbGxRing::InPlaceWanted`). Beta 6 ran without it: lighting and other flicker in
 Central Yharnam and a screen-wide purple flash, gone with `BB_HONEST_LABELS=1` on the same build.
 
+When the work goes to the GPU (beta 9). A fence the game waits for is written once the GPU has
+done the work before it, so that work must be submitted. Until beta 8 it went out at the end of a
+guest submission when the GPU had finished everything (an idle flush), else once 2 ms had passed
+since the last submission (`BB_HONEST_FLUSH_US`): about 10 submissions a frame at 60 FPS, 6 at
+120 with the GPU as the limit. Now it goes when the GPU has got to the last of its submissions,
+or finished them all (`Rasterizer::SubmitForSignalsNow`): the GPU always has the next submission
+queued behind the one it runs, and gets no other while it has one. No timing: GPU-bound, a few
+large submissions; with the GPU waiting, at once. The frame's end (`sceGnmSubmitDone`) and the game
+waiting on a fence (the GPU command thread idle for 0.2 ms, `BB_HONEST_IDLE_US`) submit whatever the
+GPU is doing, as before. Draws queued for the recording thread (`BB_HONEST_IDLE_BACKLOG`, 64 KiB)
+still hold it until the next guest submission's end: that thread is then the limit, and the GPU
+waits for it either way. Frame statistics print `Fence submissions: N/frame with the GPU out of
+work, N/frame with it on its last, N/frame held for the recording thread`. `BB_HONEST_FLUSH_US=2000`
+gives beta 8's timing, for one comparison, then goes.
+
 Measured (beta 6, `20261030_042617`, about 20 minutes, RTX 3070 Ti, against beta 4's
 `20261030_033513`): the import took 70 ms and the region was bound in one run before the title
 screen. In play, write faults went from a median of 911 a second to 1, and protection time from
@@ -237,7 +252,7 @@ blocks, so writes into it from the command processor and DMA still go to the GPU
 The import keeps to the region's whole blocks, as before. The two blocks at its ends, which it
 covers only in part, also hold the game's other memory: taken in, that memory's bindings would
 cross the buffer's edge instead, at a rate nothing has measured. As it is, only bindings inside the
-region's first and last 64 KiB cross it (about one a second, 256 KiB, in beta 6). Across the edge,
+region's first and last 64 KiB cross it (in 2 of about 185 statistics windows of beta 6's log). Across the edge,
 part in the buffer and part outside: read-only bindings up to 8 MiB are copied when bound (the
 stream path, `GxEdgeCopied`); anything else that needs the arena there (a GPU write across the
 edge, a shader's page fault there) binds the arena's blocks to the import as before

@@ -325,39 +325,55 @@ void Rasterizer::SubmitForSignals() {
 
 void Rasterizer::SubmitForSignalsNow() {
     PublishSignals(); // the end of a guest submission
-    static const auto interval = std::chrono::microseconds([] {
-        const char* env = std::getenv("BB_HONEST_FLUSH_US");
-        return env ? std::strtoll(env, nullptr, 10) : 2000ll;
-    }());
     if (!HasUnsubmittedSignals()) {
         return;
     }
-    // Batched (one submission per BB_HONEST_FLUSH_US) while the GPU still has work; at once when it
-    // has finished everything submitted: holding the work back then only leaves it idle. Not at
-    // once while draws are queued for this thread (BB_HONEST_IDLE_BACKLOG bytes, default 64 KiB):
-    // it is then what the GPU waits for, and a submission costs it ~65 us (heavy scenes: 13 a
-    // frame; 95 -> 100 FPS with half as many).
-    static const bool idle_flush = [] {
-        const char* env = std::getenv("BB_HONEST_IDLE_FLUSH");
-        return !env || env[0] != '0';
-    }();
     static const u64 idle_backlog = [] {
         const char* env = std::getenv("BB_HONEST_IDLE_BACKLOG");
         return env ? std::strtoull(env, nullptr, 10) : u64(64 * 1024);
     }();
-    const bool gpu_idle =
-        idle_flush &&
-        (!draw_pipe || !DrawPipe::OnStageB() || draw_pipe->Backlog() < idle_backlog) &&
-        scheduler.IsFree(scheduler.CurrentTick() - 1);
-    const auto since_flush = std::chrono::nanoseconds(
-        std::chrono::steady_clock::now().time_since_epoch().count() -
-        last_flush_ns.load(std::memory_order_relaxed));
-    if (!gpu_idle && since_flush < interval) {
+    // BB_HONEST_FLUSH_US: 0.4.4 beta 8's timing, for comparison (to go once compared): one
+    // submission per that many microseconds while the GPU has work, at once when it has none.
+    static const s64 interval_us = [] {
+        const char* env = std::getenv("BB_HONEST_FLUSH_US");
+        return env ? s64(std::strtoll(env, nullptr, 10)) : s64(-1);
+    }();
+    const bool behind =
+        draw_pipe && DrawPipe::OnStageB() && draw_pipe->Backlog() >= idle_backlog;
+    const u64 tick = scheduler.CurrentTick();
+    if (interval_us >= 0) {
+        const bool gpu_idle = !behind && scheduler.IsFree(tick - 1);
+        const auto since_flush = std::chrono::nanoseconds(
+            std::chrono::steady_clock::now().time_since_epoch().count() -
+            last_flush_ns.load(std::memory_order_relaxed));
+        if (!gpu_idle && since_flush < std::chrono::microseconds(interval_us)) {
+            return;
+        }
+        if (gpu_idle) {
+            BbStats::idle_flushes.fetch_add(1, std::memory_order_relaxed);
+        }
+        Flush();
         return;
     }
-    if (gpu_idle) {
-        BbStats::idle_flushes.fetch_add(1, std::memory_order_relaxed);
+    // Sent as the GPU gets to the last of its submissions (or has finished them all): it then
+    // always has the next one queued behind the one it runs and never waits for work recorded
+    // already, and while it has one queued it gets none it has no use for yet. GPU-bound, the
+    // work goes out in a few large submissions; with the GPU waiting, at once, and the game's
+    // fences come back as soon as the GPU can write them. No timing involved: the frame's end
+    // (sceGnmSubmitDone) and the game waiting on a fence (the GPU command thread idle,
+    // Liverpool::Process) submit whatever the GPU is doing. Held while draws are queued for this
+    // thread (BB_HONEST_IDLE_BACKLOG bytes, default 64 KiB): it is then what holds the frame up,
+    // the GPU waits for it either way, and a submission costs it time (heavy scenes: 13 a frame;
+    // 95 -> 100 FPS with half as many); it decides again at the next guest submission's end.
+    if (tick >= 2 && !scheduler.IsFree(tick - 2)) {
+        return; // the GPU has two submissions or more still to finish
     }
+    if (behind) {
+        BbStats::held_flushes.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
+    (scheduler.IsFree(tick - 1) ? BbStats::idle_flushes : BbStats::ahead_flushes)
+        .fetch_add(1, std::memory_order_relaxed);
     Flush();
 }
 
