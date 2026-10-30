@@ -16,7 +16,9 @@ layout(binding = 0, rgba16f) uniform image2D target;
 #endif
 layout(binding = 1) uniform texture2D reactive; // R8, render size
 layout(binding = 2) uniform texture2D motion;   // render size, pixels
-layout(binding = 3) uniform texture2D objects;  // render size, b = object vector written
+// Render size, R32G32_UINT: y's sign bit = object vector written (0.4.4 beta 15). Bound only
+// with mode bit 4; otherwise the motion image stands in and is not read.
+layout(binding = 3) uniform utexture2D objects;
 
 layout(push_constant) uniform Params {
     uint mode;
@@ -35,15 +37,17 @@ void main() {
     const ivec2 source = min(pixel * render / size, render - 1);
     const vec4 original = imageLoad(target, pixel);
     vec3 color = clamp(original.rgb, vec3(0.0), vec3(1.0));
-    if (mode == 1) {
+    const uint view = mode & 3u;
+    if (view == 1) {
         const ivec2 mask_size = textureSize(reactive, 0);
         const float mask = texelFetch(reactive, min(source, mask_size - 1), 0).r;
         color = mix(color * 0.25, vec3(1.0, 0.0, 0.0), mask);
-    } else if (mode == 2) {
+    } else if (view == 2) {
         const ivec2 motion_size = textureSize(motion, 0);
         const ivec2 at = min(source, motion_size - 1);
         const vec2 mv = texelFetch(motion, at, 0).rg;
-        const bool object = textureSize(objects, 0) == motion_size && texelFetch(objects, at, 0).b > 0.99;
+        const bool object = (mode & 4u) != 0u && textureSize(objects, 0) == motion_size &&
+                             (texelFetch(objects, at, 0).y & 0x80000000u) != 0u;
         const float luma = dot(color, vec3(0.3, 0.6, 0.1));
         color = vec3(luma * 0.3) + vec3(clamp(abs(mv) / 8.0, 0.0, 1.0), object ? 0.6 : 0.0);
     }

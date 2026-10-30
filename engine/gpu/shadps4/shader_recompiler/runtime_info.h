@@ -96,6 +96,9 @@ struct MotionVectors {
     static_assert(sizeof(Addresses) == 16);
     static constexpr u32 FlagStore = 1;
     static constexpr u32 FlagLoad = 2;
+    /// 0.4.4 beta 15: the positions stored with atomic exchanges (BB_MOTION_STORE=exchange, to
+    /// compare), not relaxed atomic stores.
+    static constexpr u32 FlagExchange = 4;
 };
 
 struct HwLocalRuntimeInfo {

@@ -13,8 +13,10 @@ layout(binding = 2, std430) readonly buffer PrevFrame { uint prev_frame[]; };
 layout(binding = 3, std430) writeonly buffer NextFrame { uint next_frame[]; };
 #else
 layout(binding = 1, rg16f) uniform writeonly image2D motion_img; // pixels, previous - current
-// Object motion from the G-buffer: rg pixels, b = valid, a = written depth.
-layout(binding = 2) uniform texture2D object_tex;
+// Object motion from the G-buffer (vk_object_motion.cpp, R32G32_UINT; bbport 0.7, 0.4.4 beta 15):
+// x = the vector in pixels as two halves, y = the written depth with its sign bit set where a
+// vector was written. Read only in mode 1.
+layout(binding = 2) uniform utexture2D object_tex;
 #endif
 
 layout(push_constant) uniform Constants {
@@ -91,7 +93,10 @@ void main() {
     // vector that smears the upscaler's history, and none reaches past four screens.
     vec2 result = any(isnan(motion)) || any(isinf(motion)) ? vec2(0.0) : clamp(motion, -4.0 * size, 4.0 * size);
     if (mode == 1) {
-        const vec4 object_motion = texelFetch(object_tex, pixel, 0);
+        const uvec2 packed = texelFetch(object_tex, pixel, 0).xy;
+        const vec4 object_motion = vec4(unpackHalf2x16(packed.x),
+                                        (packed.y & 0x80000000u) != 0u ? 1.0 : 0.0,
+                                        uintBitsToFloat(packed.y & 0x7fffffffu));
         // A later ordinary draw may have covered this pixel without touching the motion
         // target. Its final depth then differs from the depth stored with the vector.
         // Both depths are full precision. Do not accept an old foreground vector merely

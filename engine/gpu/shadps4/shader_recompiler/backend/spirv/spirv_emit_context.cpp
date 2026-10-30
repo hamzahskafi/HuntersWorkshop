@@ -751,7 +751,7 @@ void EmitContext::DefineOutputs() {
             ++num_render_targets;
         }
         if (FragmentMotion() && !Sirit::ValidId(frag_outputs[MotionVectors::Output].id)) {
-            motion_frag_out = DefineOutput(F32[4], MotionVectors::Output);
+            motion_frag_out = DefineOutput(U32[2], MotionVectors::Output); // R32G32_UINT
             motion_in_cur = DefineInput(F32[4], MotionVectors::CurrentLocation);
             motion_in_prev = DefineInput(F32[4], MotionVectors::PreviousLocation);
             Name(motion_frag_out, "motion_vector");

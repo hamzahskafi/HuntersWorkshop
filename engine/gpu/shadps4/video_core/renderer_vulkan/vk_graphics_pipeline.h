@@ -67,6 +67,20 @@ struct GraphicsPipelineKey {
 
     void Serialize(Serialization::Archive& ar) const;
     bool Deserialize(Serialization::Archive& ar);
+
+    /// bbport: the object motion vectors' attachment (Shader::MotionVectors::Output). 0.4.4 beta 15,
+    /// after bbport 0.7: R32G32_UINT, EmitFragmentMotion's packing (was RGBA32F), not blended. Also
+    /// applied to keys an earlier engine saved (PipelineCache::LoadGraphicsPipeline).
+    static void SetMotionTarget(GraphicsPipelineKey& key) {
+        constexpr u32 mv = Shader::MotionVectors::Output;
+        auto& color_buffer = key.color_buffers[mv];
+        color_buffer.data_format = AmdGpu::DataFormat::Format32_32;
+        color_buffer.num_format = AmdGpu::NumberFormat::Uint;
+        color_buffer.swizzle = AmdGpu::IdentityMapping;
+        key.blend_controls[mv] = {};
+        key.write_masks[mv] = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG;
+        key.color_samples[mv] = 1;
+    }
 };
 
 class GraphicsPipeline : public Pipeline {

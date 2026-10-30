@@ -1087,9 +1087,11 @@ void TemporalUpscaler::DebugView(vk::Image target, bool ldr, u32 w, u32 h, u32 o
     }
     const vk::ImageView target_view = ldr ? UiStorageView(target) : *output_view;
     const vk::ImageView objects = camera_motion.ObjectMotionView();
+    // 0.4.4 beta 15: bit 4, the object image is bound (R32G32_UINT); the float motion image that
+    // stands in for it otherwise is not read as one.
     scheduler.RecordCrumb({.name = "TAA debug view"}, [target, target_view, mask = *reactive_view,
                       motion = *motion_view, objects = objects ? objects : *motion_view,
-                      push = std::array<u32, 3>{mode, w, h}, ow, oh,
+                      push = std::array<u32, 3>{mode | (objects ? 4u : 0u), w, h}, ow, oh,
                       pipeline = ldr ? *debug_ldr_pipeline : *debug_pipeline,
                       layout = *debug_pipeline_layout](vk::CommandBuffer cmdbuf) {
         constexpr auto all = vk::PipelineStageFlagBits2::eAllCommands;
@@ -1512,7 +1514,7 @@ void TemporalUpscaler::Run() {
                        {{input_depth, w, h, 4, "depth", "f32", vk::ImageAspectFlagBits::eDepth}});
             if (const auto object = camera_motion.ObjectMotionImage(w, h); object) {
                 DumpImages(instance, scheduler, cmdbuf, dump,
-                           {{object, w, h, 16, "objects", "rgba32f"}});
+                           {{object, w, h, 8, "objects", "rg32ui"}});
             }
         }
         // The result replaces the scene color's RGB (its alpha carries data for the post).
@@ -1560,11 +1562,13 @@ void TemporalUpscaler::Run() {
         // Debug (menu or toggle 1 << 28): the reactive mask in red over a darkened frame;
         // or the motion vectors (menu).
         const int debug_view = BbSettings::Get().debug_view;
-        const u32 mode = has_reactive && (debug_view == BbSettings::DebugReactive ||
+        const u32 view = has_reactive && (debug_view == BbSettings::DebugReactive ||
                                           BbToggle::Disabled(1u << 28))
                              ? 1
                          : debug_view == BbSettings::DebugMotion ? 2
                                                                  : 0;
+        // 0.4.4 beta 15: bit 4, the object image is bound (R32G32_UINT, as above).
+        const u32 mode = view | (objects ? 4u : 0u);
         cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, *merge_pipeline);
         cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute, *merge_pipeline_layout, 0,
                                     writes);
@@ -2349,7 +2353,7 @@ void TemporalUpscaler::RunScaled() {
                 // inputs: only dump it when it matches, to avoid an out-of-bounds GPU copy.
                 if (const auto object = camera_motion.ObjectMotionImage(w, h); object) {
                     DumpImages(instance, scheduler, cmdbuf, dump,
-                               {{object, w, h, 16, "objects", "rgba32f"}});
+                               {{object, w, h, 8, "objects", "rg32ui"}});
                 }
             }
         }

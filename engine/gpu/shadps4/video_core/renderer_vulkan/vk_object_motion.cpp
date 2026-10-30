@@ -282,6 +282,15 @@ u32 ObjectMotion::PrepareDraw(const DrawInfo& draw, Motion::Anchor anchor, Motio
     if (!flags) {
         return 0;
     }
+    // 0.4.4 beta 15: BB_MOTION_STORE=exchange stores with atomic exchanges, as before, to compare
+    // (EmitVertexMotion: relaxed atomic stores otherwise). A flag, so no shader is compiled again.
+    static const bool exchange_stores = [] {
+        const char* value = std::getenv("BB_MOTION_STORE");
+        return value && std::strcmp(value, "exchange") == 0;
+    }();
+    if (exchange_stores && allocation.store) {
+        flags |= Shader::MotionVectors::FlagExchange;
+    }
     const u32 slot = u32(frame % FrameSlots);
     const u32 index = 1 + slot * ParamsPerFrame + params_used++;
     u32* param = params_mapped + index * 8;
@@ -333,7 +342,8 @@ ObjectMotion::Target& ObjectMotion::GetTarget(u32 width, u32 height) {
     slot->image = VideoCore::UniqueImage(device, instance.GetAllocator());
     slot->image.Create(vk::ImageCreateInfo{
         .imageType = vk::ImageType::e2D,
-        .format = vk::Format::eR32G32B32A32Sfloat,
+        // bbport 0.7, 0.4.4 beta 15: EmitFragmentMotion's packing, 8 bytes a pixel (was RGBA32F).
+        .format = vk::Format::eR32G32Uint,
         .extent = {width, height, 1},
         .mipLevels = 1,
         .arrayLayers = 1,
@@ -346,7 +356,7 @@ ObjectMotion::Target& ObjectMotion::GetTarget(u32 width, u32 height) {
     slot->view = Check(device.createImageViewUnique({
         .image = vk::Image(slot->image),
         .viewType = vk::ImageViewType::e2D,
-        .format = vk::Format::eR32G32B32A32Sfloat,
+        .format = vk::Format::eR32G32Uint,
         .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
     }));
     slot->width = width;

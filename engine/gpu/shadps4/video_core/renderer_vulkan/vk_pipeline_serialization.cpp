@@ -318,6 +318,10 @@ bool GraphicsPipeline::SerializationSupport::Deserialize(Serialization::Archive&
 
 bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar, u32 version) {
     sel.graphics_key.Deserialize(ar);
+    // 0.4.4 beta 15: keys saved before it carry the motion attachment as RGBA32F.
+    if (sel.graphics_key.motion_vectors) {
+        GraphicsPipelineKey::SetMotionTarget(sel.graphics_key);
+    }
     if (sel.graphics_key.motion_vectors &&
         !instance.GetPhysicalDevice().getFeatures().vertexPipelineStoresAndAtomics) {
         return false;

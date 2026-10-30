@@ -137,3 +137,17 @@ compared through its source, which the CPU holds (`BB_MOTION_GPU_SMALL=source`; 
 default, keeps the old rule; `camera` stores none, for measuring). With frame statistics the motion
 report counts those draws, how many came from the copy shader, and how many of those were as in
 the last frame.
+
+## Cheaper for the same vectors (Hunter's Workshop 0.4.4 beta 15)
+
+- The vertex shaders store the clip positions with relaxed atomic stores instead of atomic
+  exchanges (`EmitVertexMotion`): no value is read back. `BB_MOTION_STORE=exchange` brings the
+  exchanges back to compare (a flag in the draw's parameters, no shader compiles again).
+- The motion target is R32G32_UINT, 8 bytes a pixel instead of 16, after bbport 0.7: the vector in
+  pixels as two halves, the depth at full precision with its sign bit set where a vector was written.
+  The compose pass unpacks it; its depth test is unchanged.
+- Left out: deriving the current position in the pixel shader from the pixel's coordinates (one
+  varying instead of two) would need every draw's viewport and jitter there to stay exact.
+- Next, once measured: previous positions from last frame's bone and model constants (a second pass
+  of the vertex shader's position) instead of stored vertices, which stay for vertices that change.
+

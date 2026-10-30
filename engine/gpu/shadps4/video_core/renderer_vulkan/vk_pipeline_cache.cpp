@@ -836,13 +836,7 @@ bool PipelineCache::RefreshGraphicsKey(PipelineSelection& sel) {
         key.motion_vectors = 1;
         key.mrt_mask |= 1u << mv;
         key.num_color_attachments = mv + 1;
-        auto& color_buffer = key.color_buffers[mv];
-        color_buffer.data_format = AmdGpu::DataFormat::Format32_32_32_32;
-        color_buffer.num_format = AmdGpu::NumberFormat::Float;
-        color_buffer.swizzle = AmdGpu::IdentityMapping;
-        key.write_masks[mv] = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
-                              vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA;
-        key.color_samples[mv] = 1;
+        GraphicsPipelineKey::SetMotionTarget(key);
     }
 
     // Force all color samples to match depth samples to avoid unsupported MSAA configuration
