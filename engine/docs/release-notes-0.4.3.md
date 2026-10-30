@@ -45,3 +45,9 @@ What changed since 0.4.2, for the release page. The engine work behind each line
   frame's draws (measured at about 1,060 draws a frame).
 - **Motion vectors' bookkeeping halved.** A mesh's vertex range is checked again every 10 seconds
   instead of every half second: in every test log, no check had ever found one changed.
+
+## Good to know
+
+- **The first start after updating rebuilds the GPU cache.** The motion vectors' changes are part of
+  what the cache is identified by, so pipelines compile again the first time something draws them:
+  some pop-in on first visits, once each.
