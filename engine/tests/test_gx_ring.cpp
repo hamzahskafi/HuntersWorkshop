@@ -1,80 +1,97 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// The GX range allocator's region (gpu/shim/bbport_gx_ring.h) read from a stand-in for the game: its
-// image at the loader's address with the 1.09 code the offsets come from, a device, its upload
-// allocator and the range allocator, as the game lays them out. Reads are fault-safe: a pointer into
-// unmapped memory fails the look, not the process.
+// The game's GX range allocator's region (gpu/shim/bbport_gx_ring.h), taken from its init by the engine's hook
+// (gpu/shim/engine/gx_region.cpp): a stand-in for the init with 1.09's entry at its image offset, called as the
+// game's device creation calls it; the region as the init makes it of its base and size; the bounds.
 #include "bbport_gx_ring.h"
+#include "engine_hooks.h"
+#include "gx_region.h"
 #include <cassert>
+#include <cstdarg>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <initializer_list>
 #ifdef _WIN32
 #include <windows.h>
 #else
 #include <sys/mman.h>
 #endif
 
-namespace {
-constexpr std::uint64_t kBase = 0x800000000ull, kSize = 0x5541000; // up to the device's holder
-
-void Put(std::uint64_t offset, std::initializer_list<unsigned char> bytes) {
-    std::memcpy(reinterpret_cast<void*>(kBase + offset), bytes.begin(), bytes.size());
+namespace BbEngine {
+void host_log(const char* format, ...) {
+    std::va_list args;
+    va_start(args, format);
+    std::vprintf(format, args);
+    va_end(args);
+    std::putchar('\n');
 }
-void Put64(std::uint64_t address, std::uint64_t value) {
-    std::memcpy(reinterpret_cast<void*>(address), &value, 8);
+} // namespace BbEngine
+
+namespace {
+constexpr std::size_t kInit = 0x26a9b50, kSize = kInit + 0x100;
+// 1.09's entry (push rbp; mov rbp, rsp; push r15..r12; push rbx; push rax; mov r12, rcx), then the
+// pushes undone and a return: the stand-in keeps the game's entry and does nothing else.
+constexpr std::uint8_t kStandIn[] = {0x55, 0x48, 0x89, 0xe5, 0x41, 0x57, 0x41, 0x56, 0x41, 0x55, 0x41, 0x54,
+                                     0x53, 0x50, 0x49, 0x89, 0xcc, 0x58, 0x5b, 0x41, 0x5c, 0x41, 0x5d, 0x41,
+                                     0x5e, 0x41, 0x5f, 0x5d, 0xc3};
+
+std::uint8_t* MapImage() {
+#ifdef _WIN32
+    return static_cast<std::uint8_t*>(VirtualAlloc(nullptr, kSize, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE));
+#else
+    void* p = mmap(nullptr, kSize, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    return p == MAP_FAILED ? nullptr : static_cast<std::uint8_t*>(p);
+#endif
+}
+
+void SetEnv(const char* name, const char* value) {
+#ifdef _WIN32
+    _putenv_s(name, value ? value : "");
+#else
+    if (value) setenv(name, value, 1); else unsetenv(name);
+#endif
 }
 } // namespace
 
 int main() {
-#ifdef _WIN32
-    void* image = VirtualAlloc(reinterpret_cast<void*>(kBase), kSize, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-#else
-    void* image = mmap(reinterpret_cast<void*>(kBase), kSize, PROT_READ | PROT_WRITE,
-                       MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
-    if (image == MAP_FAILED) image = nullptr;
-#endif
-    if (image != reinterpret_cast<void*>(kBase)) {
-        std::puts("gx-ring-test: the game's address is taken here, skipped");
-        return 0;
-    }
-    // The 1.09 code: the query creation's lea of the device holder, the upload copy's lea of its allocator,
-    // the range allocator's region stores.
-    Put(0xe2f0e9, {0x48, 0x8d, 0x05, 0xd8, 0x15, 0x71, 0x04});
-    Put(0x26adbcb, {0x48, 0x8d, 0xbb, 0xe0, 0xb3, 0x00, 0x00});
-    Put(0x26a9b7d, {0x48, 0x89, 0x83, 0xb8, 0x00, 0x00, 0x00});
-    Put(0x26a9b88, {0x48, 0x89, 0x83, 0xc0, 0x00, 0x00, 0x00});
+    // The init's arithmetic (0x26a9b5e..0x26a9b88): the base up to 16, the size less that, down to 16.
+    std::uint64_t start = 0, end = 0;
+    BbGxRing::FromInit(0x1040000000ull, 288ull << 20, start, end);
+    assert(start == 0x1040000000ull && end == 0x1040000000ull + (288ull << 20));
+    BbGxRing::FromInit(0x1040000008ull, 0x100000ull, start, end);
+    assert(start == 0x1040000010ull && end == start + 0xffff0ull);
 
-    // Before the loader placed the image: not looked at, and looked for again later.
-    assert(!BbGxRing::Find() && !BbGxRing::Known());
-    BbGxRing::SetImage(reinterpret_cast<const std::uint8_t*>(kBase), kSize);
+    // Another version's entry: no hook, the region stays unknown.
+    std::uint8_t* image = MapImage();
+    assert(image);
+    std::uint8_t other[sizeof kStandIn];
+    std::memcpy(other, kStandIn, sizeof other);
+    other[1] = 0x90;
+    std::memcpy(image + kInit, other, sizeof other);
+    assert(!BbEngine::GxRegion::Install(image, kSize));
 
-    // Before the game made its device: not found, and looked for again later.
-    assert(!BbGxRing::Find() && !BbGxRing::Known());
+    // BB_GX_RING_STREAM_KB=0: no hook either.
+    std::memcpy(image + kInit, kStandIn, sizeof kStandIn);
+    SetEnv("BB_GX_RING_STREAM_KB", "0");
+    assert(!BbEngine::GxRegion::Install(image, kSize));
+    SetEnv("BB_GX_RING_STREAM_KB", nullptr);
 
-    // The objects: holder -> device in the image's spare room; device + 0xb3e0 -> the range allocator,
-    // in memory the game mapped (outside the image). First a device pointer no process can read (kernel
-    // space): the read fails, the game goes on, and it is looked for again.
-    static std::uint64_t ring_object[0x100 / 8];
-    const std::uint64_t holder = kBase + 0x1000, device = kBase + 0x10000;
-    const auto ring = reinterpret_cast<std::uint64_t>(ring_object);
-    Put64(kBase + 0x55406c8, holder);
-    Put64(holder, 0xffff800000000000ull);
-    assert(!BbGxRing::Find() && !BbGxRing::Known());
-    BbGxRing::ReportMissing(); // "stopped at the upload allocator", the device's field unreadable
-    Put64(holder, device);
-    Put64(device + 0xb3e0, ring);
-    const std::uint64_t start = 0x1040000000ull, size = 288ull << 20;
-    Put64(ring + 0xb8, start);
-    Put64(ring + 0xc0, start + size);
-    Put64(ring + 0xd0, size + 0x10); // its size field disagrees: not taken
-    assert(!BbGxRing::Find() && !BbGxRing::Known());
-    Put64(ring + 0xd0, size);
-    assert(BbGxRing::Find() && BbGxRing::Known());
-    assert(BbGxRing::Contains(start, 0x40000) && BbGxRing::Contains(start + size - 16, 16));
-    assert(!BbGxRing::Contains(start - 16, 32) && !BbGxRing::Contains(start + size - 8, 16));
-    assert(!BbGxRing::Contains(start + size, 1));
+    // 1.09: hooked; the game's call (the device's base and size in rdx and rcx) gives the region, and the
+    // init itself still runs and returns.
+    assert(BbEngine::GxRegion::Install(image, kSize));
+    assert(!BbGxRing::Known());
+    BbEngine::Call(reinterpret_cast<std::uint64_t>(image + kInit), 0x10282a2e40ull, 0, 0x1040000004ull,
+                   (288ull << 20) + 4);
+    assert(BbGxRing::Known());
+    assert(BbGxRing::Contains(0x1040000010ull, 0x40000) && BbGxRing::Contains(0x1052000000ull - 16, 16));
+    assert(!BbGxRing::Contains(0x1040000000ull, 32) && !BbGxRing::Contains(0x1052000000ull - 8, 16));
+    assert(!BbGxRing::Contains(0x1052000010ull, 1));
+
+    // What cannot be the game's region is not taken, and does not replace the one known.
+    assert(!BbGxRing::NoteRegion(0, 0x1000) && !BbGxRing::NoteRegion(0x2000, 0x1000));
+    assert(!BbGxRing::NoteRegion(0x1000, 0x1000 + (2ull << 30)));
+    assert(BbGxRing::Contains(0x1040000010ull, 16));
+    BbGxRing::ReportMissing(); // known: says nothing
     std::puts("gx-ring-test: all ok");
     return 0;
 }

@@ -1897,12 +1897,11 @@ void BufferCache::ProcessIdleBlocks() {
     }
     idle_scan_second = now;
     UpdateVramLevel(now);
-    // bbport: the game's GX range allocator, looked for once a second until found (it exists once
-    // the game made its graphics device); after a minute without it, the log says where it stopped.
-    if (GxRingStreamLimit() != 0 && !BbGxRing::Known()) {
-        if (!BbGxRing::Find() && ++gx_ring_looks == 60) {
-            BbGxRing::ReportMissing();
-        }
+    // bbport: the game's GX range allocator comes from the engine's hook on its init
+    // (engine/gx_region.cpp) when the game makes its graphics device; a minute on without it,
+    // the log says so once.
+    if (GxRingStreamLimit() != 0 && !BbGxRing::Known() && ++gx_ring_looks == 60) {
+        BbGxRing::ReportMissing();
     }
     if (GuestInPlace()) {
         ProcessDynamicRetries(now);

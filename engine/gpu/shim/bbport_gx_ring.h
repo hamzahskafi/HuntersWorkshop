@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // The game's GX range allocator: one region of GPU memory the CPU writes for the GPU every frame
 // (per-draw shader parameters, CPU-deformed vertices, the graphics device's per-frame upload area,
-// the copy shader's sources and range lists). Read once from the game's own objects after it made
-// its graphics device: the device (image offset 0x55406c8, two pointers in), its upload allocator
-// (+0xb3e0), whose first field is the range allocator, whose region is [+0xb8, +0xc0). Each offset is
-// checked against the 1.09 code that uses it. The buffer cache streams read-only buffers inside it
-// (BufferCache::ObtainBuffer): the game rewrites them before each use, and tracking them only cost
-// write faults and re-protection.
+// the copy shader's sources and range lists). The game makes it once, when it creates its graphics
+// device: the allocator's init (image 0x26a9b50, one caller) is given a base and a size, and a hook
+// on its entry (engine/gx_region.cpp) hands them here. The buffer cache copies read-only buffers
+// inside it when they are used (BufferCache::ObtainBuffer): the game rewrites them before each use,
+// and tracking them only cost write faults and re-protection.
 #pragma once
 
 #include <atomic>
@@ -15,16 +14,19 @@
 namespace BbGxRing {
 inline std::atomic<std::uint64_t> g_start{0}, g_end{0};
 
-/// The game's image as the loader placed it (bbgpu_patch_image): the code checked and the device's
-/// holder are read there.
-void SetImage(const std::uint8_t* image, std::uint64_t size);
+/// The region the init makes of the base and size it is given: the base rounded up to 16 bytes,
+/// the size less that and rounded down to 16 (0x26a9b5e..0x26a9b88).
+inline void FromInit(std::uint64_t base, std::uint64_t size, std::uint64_t& start, std::uint64_t& end) {
+    const std::uint64_t pad = (0u - static_cast<std::uint32_t>(base)) & 0xf;
+    start = base + pad;
+    end = start + ((size - pad) & ~std::uint64_t(0xf));
+}
 
-/// Looks for the region once the game has made its graphics device; false until then. Called once a
-/// second by the buffer cache (ProcessIdleBlocks) until found; logs the region once. Reads go through
-/// BbPlatform::ReadProcessMemory: a pointer that leads nowhere fails the read, not the game.
-bool Find();
+/// From the hook on the init: keeps the region and logs it once. False for one that cannot be the
+/// game's (empty, or over 1 GiB).
+bool NoteRegion(std::uint64_t start, std::uint64_t end);
 
-/// After a minute of looking: logs once which step has not been found and what was read.
+/// After a minute without a region: logs once that the game was not seen making it.
 void ReportMissing();
 
 inline bool Known() {

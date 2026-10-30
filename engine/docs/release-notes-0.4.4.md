@@ -1,7 +1,7 @@
 # Hunter's Workshop 0.4.4
 
 What changed since 0.4.3, for the release page. The engine work behind each line is in
-`docs/community-fixes-plan.md` and `docs/gpu-memory.md`. (In progress: beta 3. Lines marked
+`docs/community-fixes-plan.md` and `docs/gpu-memory.md`. (In progress: beta 4. Lines marked
 *to be measured* wait for a test log before the release says what they bring.)
 
 ## Defaults
@@ -14,8 +14,8 @@ What changed since 0.4.3, for the release page. The engine work behind each line
 
 ## Performance
 
-- **Less CPU work every frame** (*to be measured*: betas 1 and 2 never found the region it needs;
-  beta 3 looks for it differently and logs why if it still cannot). The memory the game rewrites for the GPU every frame (per-draw parameters, CPU-animated
+- **Less CPU work every frame** (*to be measured*: betas 1 to 3 never found the region it needs;
+  beta 4 takes it from the game as the game makes it). The memory the game rewrites for the GPU every frame (per-draw parameters, CPU-animated
   vertices, its upload area) is copied where it is used instead of being write-protected and
   watched page by page.
 - **Texture and game-data memory** (*to be measured*). A freed large texture's memory is kept a few

@@ -590,7 +590,7 @@ private:
     };
     std::unordered_map<VkDeviceMemory, ResidencyChunk> residency_chunks;
     u32 idle_scan_second = 0;
-    u32 gx_ring_looks = 0; ///< ProcessIdleBlocks: seconds spent looking for the GX range allocator
+    u32 gx_ring_looks = 0; ///< ProcessIdleBlocks: seconds without the GX range allocator's region
     u32 last_evacuation = 0; ///< ProcessIdleBlocks: when a chunk was last emptied
     /// bbport: how full VRAM is against the driver's budget, once a second (UpdateVramLevel):
     /// 0 room, 1 tight (idle VRAM copies go back sooner), 2 full (no new ones either).

@@ -1,109 +1,21 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // See bbport_gx_ring.h.
 #include "bbport_gx_ring.h"
-#include "bbport_platform.h"
 
-#include <array>
 #include <cstdio>
-#include <cstdlib>
-#include <cstring>
 
 namespace BbGxRing {
 namespace {
-using u64 = std::uint64_t;
-constexpr u64 DeviceHolder = 0x55406c8; // the graphics device, behind one more pointer
-constexpr u64 UploadAllocator = 0xb3e0; // in the device: its per-frame upload allocator
-constexpr u64 RegionStart = 0xb8, RegionEnd = 0xc0, RegionSize = 0xd0; // in the range allocator
-
-struct Code {
-    u64 offset;
-    std::array<unsigned char, 7> bytes;
-};
-// The 1.09 code these offsets come from (image offsets):
-constexpr std::array<Code, 4> kCode{{
-    // the GX query creation reads the device: lea rax, [0x55406c8]
-    {0xe2f0e9, {0x48, 0x8d, 0x05, 0xd8, 0x15, 0x71, 0x04}},
-    // the upload copy (0x26adb90) takes the device's allocator: lea rdi, [rbx + 0xb3e0]
-    {0x26adbcb, {0x48, 0x8d, 0xbb, 0xe0, 0xb3, 0x00, 0x00}},
-    // the range allocator's region (0x26a9b50): mov [rbx + 0xb8], rax ... mov [rbx + 0xc0], rax
-    {0x26a9b7d, {0x48, 0x89, 0x83, 0xb8, 0x00, 0x00, 0x00}},
-    {0x26a9b88, {0x48, 0x89, 0x83, 0xc0, 0x00, 0x00, 0x00}},
-}};
-
-std::atomic<const std::uint8_t*> g_image{nullptr};
-std::atomic<u64> g_image_size{0};
-
-// Fault-safe: an address that is not mapped, or not readable, fails the read.
-bool Read(u64 address, void* out, u64 size) {
-    return address && BbPlatform::ReadProcessMemory(reinterpret_cast<const void*>(address), out, size);
-}
-bool Read(u64 address, u64& out) {
-    return Read(address, &out, sizeof out);
-}
-
-// 0 unchecked, 1 the code is 1.09's, -1 not looked for (another version, or BB_GX_RING_STREAM_KB=0).
-std::atomic<int> g_state{0};
 std::atomic<bool> g_logged{false}, g_reported{false};
-
-// The last look that did not find it: the step it stopped at and what was read (ReportMissing).
-enum Step : int { NoImage, Holder, Device, Allocator, Region, Shape, Found };
-constexpr const char* kStepNames[] = {"the image", "the device's holder", "the device",
-                                      "the upload allocator", "the range allocator's region",
-                                      "a region of the shape its init leaves", "found"};
-std::atomic<int> g_step{NoImage};
-std::atomic<u64> g_seen[6]{}; // holder, device, allocator, start, end, size
 } // namespace
 
-void SetImage(const std::uint8_t* image, std::uint64_t size) {
-    g_image_size.store(size, std::memory_order_relaxed);
-    g_image.store(image, std::memory_order_release);
-}
-
-bool Find() {
-    if (Known()) return true;
-    const int state = g_state.load(std::memory_order_acquire);
-    if (state < 0) return false;
-    const u64 base = reinterpret_cast<u64>(g_image.load(std::memory_order_acquire));
-    if (!base) {
-        return false; // the loader has not placed the image yet
-    }
-    if (state == 0) {
-        const char* env = std::getenv("BB_GX_RING_STREAM_KB");
-        const bool off = env && std::strtoull(env, nullptr, 10) == 0;
-        const u64 image_size = g_image_size.load(std::memory_order_relaxed);
-        const Code* differs = nullptr;
-        for (const Code& c : kCode) {
-            std::array<unsigned char, 7> bytes{};
-            if (c.offset + bytes.size() > image_size || !Read(base + c.offset, bytes.data(), bytes.size()) ||
-                bytes != c.bytes) {
-                differs = &c;
-                break;
-            }
-        }
-        if (differs && !off) {
-            std::printf("GPU memory: the game's GX range allocator not looked for (its code at +%#llx differs "
-                        "from 1.09)\n",
-                        (unsigned long long)differs->offset);
-        }
-        g_state.store(differs || off ? -1 : 1, std::memory_order_release);
-        if (differs || off) return false;
-    }
-    u64 holder = 0, device = 0, ring = 0, start = 0, end = 0, size = 0;
-    const auto stop = [&](Step step) {
-        const u64 seen[6] = {holder, device, ring, start, end, size};
-        for (int i = 0; i < 6; ++i) g_seen[i].store(seen[i], std::memory_order_relaxed);
-        g_step.store(step, std::memory_order_relaxed);
+bool NoteRegion(std::uint64_t start, std::uint64_t end) {
+    if (!start || end <= start || end - start > (std::uint64_t(1) << 30)) {
+        std::printf("GPU memory: the game's GX range allocator made at %#llx..%#llx, which cannot be it: tracked "
+                    "as before\n",
+                    (unsigned long long)start, (unsigned long long)end);
         return false;
-    };
-    if (!Read(base + DeviceHolder, holder) || !holder) return stop(Holder);
-    if (!Read(holder, device) || !device) return stop(Device);
-    if (!Read(device + UploadAllocator, ring) || !ring) return stop(Allocator);
-    if (!Read(ring + RegionStart, start) || !Read(ring + RegionEnd, end) || !Read(ring + RegionSize, size)) {
-        return stop(Region);
     }
-    // The region as the allocator's init (0x26a9b50) left it: its end its start plus its size.
-    if (!start || end <= start || end - start != size || size > (u64(1) << 30)) return stop(Shape);
-    g_step.store(Found, std::memory_order_relaxed);
     g_end.store(end, std::memory_order_relaxed);
     g_start.store(start, std::memory_order_release);
     if (!g_logged.exchange(true)) {
@@ -115,12 +27,8 @@ bool Find() {
 }
 
 void ReportMissing() {
-    if (Known() || g_state.load(std::memory_order_acquire) < 0 || g_reported.exchange(true)) return;
-    const int step = g_step.load(std::memory_order_relaxed);
-    std::printf("GPU memory: the game's GX range allocator not found yet: stopped at %s (holder %#llx, device "
-                "%#llx, allocator %#llx, region %#llx..%#llx, size %#llx)\n",
-                kStepNames[step], (unsigned long long)g_seen[0].load(), (unsigned long long)g_seen[1].load(),
-                (unsigned long long)g_seen[2].load(), (unsigned long long)g_seen[3].load(),
-                (unsigned long long)g_seen[4].load(), (unsigned long long)g_seen[5].load());
+    if (Known() || g_reported.exchange(true)) return;
+    std::printf("GPU memory: the game's GX range allocator was not seen being made (the engine's hook on its "
+                "init left out, see above, or no graphics device yet): tracked as before\n");
 }
 } // namespace BbGxRing
