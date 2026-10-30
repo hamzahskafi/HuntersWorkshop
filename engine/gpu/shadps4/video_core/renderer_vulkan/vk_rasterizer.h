@@ -269,13 +269,17 @@ public:
     bool GpuWillAnnounce() const {
         return GpuAnnounced() || watch_tick.load(std::memory_order_acquire) != 0;
     }
-    /// GPU command thread, with nothing more on its way: the recording thread submits the work
-    /// waiting for the GPU after what it still has (SubmitForGpu), one request at a time.
+    /// GPU command thread, with nothing more on its way: the work waiting for the GPU goes, here
+    /// with the draw pipe idle, else on the recording thread after what it still has
+    /// (SubmitForGpu), one request at a time.
     void RequestSubmitForGpu();
     /// Recording thread (or the GPU command thread with the draw pipe drained): takes the GPU's
-    /// announcement, submitting the work recorded since the last submission once it holds at
-    /// least as many draws and dispatches as the one the GPU runs, or at once if `nothing_coming`.
+    /// announcement when nothing more is on its way (`nothing_coming`), submitting the work
+    /// recorded since the last submission; otherwise the end of the game's next submission does.
     void SubmitForGpu(bool nothing_coming);
+    /// The tick a signal registered now waits for: the current one, or with nothing recorded
+    /// since the last submission (BB_HONEST_LABELS), that submission's.
+    [[nodiscard]] u64 SignalTick() const;
     /// bbport BB_PIPE_SIGNALS (default on with honest labels; 0: off): on the GPU command thread with
     /// the draw pipe, fences, the GPU idle and frame signals and the submissions for them are
     /// handed to the draw recording thread as ordered tasks instead of that thread being drained
@@ -914,8 +918,6 @@ private:
     /// The announced submission (0: none), until a submission answers it.
     std::atomic<u64> gpu_wants_work{0};
     std::atomic<bool> gpu_submit_requested{false};
-    /// Draws and dispatches recorded since the last submission, and in that submission.
-    std::atomic<u32> draws_since_submit{0}, last_batch_draws{0};
     void ArmWatch(u64 tick);
     void Announce(u64 tick);
 };

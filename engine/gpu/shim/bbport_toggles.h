@@ -143,6 +143,8 @@ inline std::atomic<std::uint64_t> idle_flushes{0}, ahead_flushes{0}, announced_f
     net_flushes{0};
 /// BB_PIPE_SIGNALS: frames retired in the frame end's own submission, and in one of their own.
 inline std::atomic<std::uint64_t> retired_with_end{0}, retired_alone{0};
+/// BB_HONEST_LABELS: flushes with nothing recorded since the last submission (none made).
+inline std::atomic<std::uint64_t> empty_flushes{0};
 /// EOP fences with data: decoded, and their labels written (a growing gap: lost fences, guest leaks).
 inline std::atomic<std::uint64_t> eop_decoded{0}, eop_written{0};
 /// sceGnmAreSubmitsAllowed calls, and those that answered no (submission lock held).

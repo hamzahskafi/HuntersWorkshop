@@ -1095,12 +1095,30 @@ void Scheduler::SubmitExecution(SubmitInfo& info) {
     // bbport: no semaphore query here (an ioctl per submission, ~3% of the recording thread):
     // PopPendingOperations asks when an operation waits, the GPU signal thread on every fence.
     AllocateWorkerCommandBuffers();
+    recorded_since_submit.store(false, std::memory_order_relaxed);
 
     // Apply pending operations
     PopPendingOperations();
 }
 
+void Scheduler::CheckRecordedFlag() {
+    if (recorded_since_submit.load(std::memory_order_relaxed)) {
+        return;
+    }
+    const bool commands = direct_mode || current_segment != 0 || segment_bytes != 0 ||
+                          !full_chunks.empty() || (record_chunk && !record_chunk->Empty()) ||
+                          !ordered_full.empty() || (ordered_chunk && !ordered_chunk->Empty());
+    static std::atomic<bool> reported{false};
+    if (commands && !reported.exchange(true)) {
+        std::printf("GPU: a submission held commands recorded without the scheduler's recording "
+                    "calls noting it (RecordedSinceSubmit): a signal registered after them could "
+                    "have been given to the submission before\n");
+        std::fflush(stdout);
+    }
+}
+
 void Scheduler::SubmitAsync(SubmitInfo& info) {
+    CheckRecordedFlag();
     const u64 signal_value = work_semaphore.NextTick();
     if (on_submit) {
         on_submit(info);
@@ -1176,6 +1194,8 @@ void Scheduler::SubmitAsync(SubmitInfo& info) {
     });
     KickRecording(true);
     AllocateWorkerCommandBuffers();
+    // What this function recorded itself (the end of the batch, the submission) is in it.
+    recorded_since_submit.store(false, std::memory_order_relaxed);
     PopPendingOperations();
 }
 

@@ -800,6 +800,7 @@ public:
     /// KickRecording() or submission.
     [[gnu::noinline]] vk::CommandBuffer CommandBuffer() {
         ProducerScope producer{*this, "CommandBuffer"};
+        recorded_since_submit.store(true, std::memory_order_relaxed);
         if (!workers.empty() && !direct_mode) {
             EnterDirectMode();
             direct_recordings.fetch_add(1, std::memory_order_relaxed);
@@ -852,6 +853,7 @@ public:
     template <typename Func>
     void Record(Func&& func) {
         ProducerScope producer{*this, "Record"};
+        recorded_since_submit.store(true, std::memory_order_relaxed);
         if (workers.empty() || direct_mode) {
             func(current_cmdbuf);
             return;
@@ -1062,6 +1064,14 @@ public:
         return work_semaphore.CurrentTick();
     }
 
+    /// bbport: whether anything was recorded for the GPU since the last submission (Record,
+    /// RecordOrdered, CommandBuffer; RecordCrumb goes through Record). With nothing recorded, the
+    /// last submission holds all the work before this point: a signal registered now belongs to
+    /// it, and a flush would submit nothing (Rasterizer::SignalTick, Rasterizer::Flush).
+    [[nodiscard]] bool RecordedSinceSubmit() const noexcept {
+        return recorded_since_submit.load(std::memory_order_relaxed);
+    }
+
     /// Returns true when a tick has been triggered by the GPU.
     [[nodiscard]] bool IsFree(u64 tick) noexcept {
         if (work_semaphore.IsFree(tick)) {
@@ -1177,6 +1187,7 @@ private:
     template <typename Func>
     void RecordOrdered(Func&& func) {
         ProducerScope producer{*this, "RecordOrdered"};
+        recorded_since_submit.store(true, std::memory_order_relaxed);
         if (OrderedInline()) {
             func();
             return;
@@ -1253,6 +1264,11 @@ private:
     std::vector<SubmissionBatch*> free_batches; ///< guarded by recorder_mutex
     bool async_submit = false; ///< BB_ASYNC_SUBMIT (default on)
     std::atomic<u64> submitted_tick{0}; ///< the last tick handed to the queue (WaitSubmitted)
+    /// RecordedSinceSubmit: set by every recording call, cleared once a submission is made.
+    std::atomic<bool> recorded_since_submit{false};
+    /// The submission's own self-check: commands in the batch with the flag still clear (a
+    /// recording path that does not set it), reported once.
+    void CheckRecordedFlag();
     u32 current_segment = 0;
     std::atomic<u32> active_worker{0}; ///< the worker of current_segment (it spins for work)
     size_t segment_bytes = 0;          ///< closures of the current segment handed over or retired

@@ -213,12 +213,24 @@ only. Beta 10 has no timing at all:
   (`ArmWatch`); the signal thread, which waits on the GPU's timeline semaphore, announces it once
   the GPU has finished that submission (`GpuSignalLoop`, `Announce`). It waits on submitted work
   only, and every submission wakes it (the scheduler's submit callback, `Finish` included).
-- On the announcement the recording thread submits after its next draw once the work recorded since
-  holds at least as many draws and dispatches as the submission the GPU runs (`SubmitForGpu`): the
-  CPU then keeps up with the GPU. Fewer would add a submission, and each switch between submissions
-  left the GPU idle about 25 us in beta 9's profile, for less work than it already has. With nothing
-  more on its way (the GPU command thread waiting for the game), at once: the GPU command thread
-  hands the announcement over when it runs out of work, or when the announcement wakes it.
+- The announcement is acted on only with nothing more on its way (the GPU command thread waiting
+  for the game): then the work recorded since goes at once, from the GPU command thread itself
+  when the recording thread is idle (one wake-up fewer between the announcement and the work), else
+  after the recording thread's last packet (`SubmitForGpu`, `RequestSubmitForGpu`). While the game
+  is still submitting, the end of its next submission decides, a game submission away (60 to 70 a
+  frame): beta 10 and 11 acted on it then as well, once the work since held as many draws as the
+  submission the GPU ran, which added 5 to 10 submissions a frame at the 120 cap and up to 17 at
+  60 (beta 11's logs) for what the next end did a moment later.
+- No submission is made without work in it (beta 12). The scheduler notes whether anything was
+  recorded since the last submission (`Scheduler::RecordedSinceSubmit`: its recording calls set
+  it, a submission clears it). With nothing recorded, a signal registered then belongs to the last
+  submission, which holds all the work before it (`Rasterizer::SignalTick`), and a flush submits
+  nothing. Beta 11 sent the GPU idle signal after the frame end in a submission of its own: where
+  the GPU was the limit, that empty submission became its last, the GPU ran through it at once and
+  waited for the announcement's work, 0.34 to 0.42 ms a frame between submissions against 0.10 to
+  0.16 (`20261030_201553` against `20261030_193934`). Each real submission checks that the flag saw
+  its commands (logged once otherwise: a recording path that does not set it would let a signal
+  go to the submission before); frame statistics count the empty submissions not made.
 - The frame's end (`sceGnmSubmitDone`) submits, with the frame's retirement in the same
   submission. The game ends a frame right after its last submission, before the GPU command
   thread has decoded it (beta 11's first log: the retirement went alone in every frame). So the

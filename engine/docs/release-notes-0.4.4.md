@@ -1,7 +1,7 @@
 # Hunter's Workshop 0.4.4
 
 What changed since 0.4.3, for the release page. The engine work behind each line is in
-`docs/community-fixes-plan.md` and `docs/gpu-memory.md`. (In progress: beta 11. Lines marked
+`docs/community-fixes-plan.md` and `docs/gpu-memory.md`. (In progress: beta 12. Lines marked
 *to be measured* wait for a test log before the release says what they bring.)
 
 ## Defaults
@@ -33,8 +33,9 @@ What changed since 0.4.3, for the release page. The engine work behind each line
   work the game's fences wait for goes to the GPU at the end of each of the game's submissions
   when the GPU is on the last of what it was given, or when the GPU gets there: no timer decides
   it, and the game's compute work is sent the same way (it used to wait for the next graphics
-  work or a short timer). In play (RTX 3070 Ti, 120 FPS) speed is as before: the GPU was already
-  kept busy where it is the limit, idle between submissions about 0.1 ms a frame either way.
+  work or a short timer). No submission goes out without work in it, and a frame's end and its
+  completion signal share one. In play (RTX 3070 Ti, 120 FPS) speed is as before where the GPU is
+  the limit (it was already kept busy, idle between submissions about 0.1 ms a frame).
 - **Game-data memory** (*to be measured*). Memory for the game's data in VRAM is kept longer when it
   empties while VRAM has room. In beta 1 a tester saw about 1 GB less VRAM in dense areas, and
   smoother play there, than with 0.4.3; which change did it is not known yet.

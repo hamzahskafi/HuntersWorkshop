@@ -201,10 +201,18 @@ void Rasterizer::PublishSignals() {
     }
 }
 
+u64 Rasterizer::SignalTick() const {
+    // With nothing recorded since the last submission, it holds all the work before this point:
+    // the signal is that submission's, and needs none of its own (an empty one cost the GPU a
+    // switch, and as the GPU's last it ran out at once: 0.4.4 beta 11's GPU idle signal).
+    const u64 tick = scheduler.CurrentTick();
+    return HonestLabels() && tick > 1 && !scheduler.RecordedSinceSubmit() ? tick - 1 : tick;
+}
+
 void Rasterizer::SignalAfterGpu(std::function<void()> signal, VAddr label, u64 value) {
     if (DrawPipe::OnStageB()) {
         // Kept here until the end of the guest submission or the next flush (in tick order).
-        local_signals.push_back({scheduler.CurrentTick(), std::move(signal), label, value});
+        local_signals.push_back({SignalTick(), std::move(signal), label, value});
         local_signal_count.store(u32(local_signals.size()), std::memory_order_release);
         return;
     }
@@ -219,7 +227,7 @@ void Rasterizer::SignalAfterGpu(std::function<void()> signal, VAddr label, u64 v
                 std::jthread([this](std::stop_token token) { GpuSignalLoop(token); });
         }
         was_empty = gpu_signals.empty();
-        gpu_signals.push_back({scheduler.CurrentTick(), std::move(signal), label, value});
+        gpu_signals.push_back({SignalTick(), std::move(signal), label, value});
     }
     // The signal thread waits on the condition only with nothing queued (else it waits for the
     // GPU and takes the rest when it gets back): no notify per fence (~60 a frame).
@@ -370,7 +378,9 @@ void Rasterizer::Announce(u64 tick) {
 }
 
 void Rasterizer::RequestSubmitForGpu() {
-    if (!PipeSignals()) {
+    // With the recording thread idle, here and now: a task would wake it first, one more wait
+    // between the GPU's announcement and its work (0.4.4 beta 11's GPU idle).
+    if (!PipeSignals() || DrawPipeIdle()) {
         SubmitForGpu(true);
         return;
     }
@@ -395,16 +405,16 @@ void Rasterizer::SubmitForGpu(bool nothing_coming) {
         gpu_wants_work.compare_exchange_strong(announced, 0, std::memory_order_acq_rel);
         return; // a submission since gave the GPU its next one
     }
-    const u32 waiting = draws_since_submit.load(std::memory_order_relaxed);
-    if (waiting == 0 && !HasUnsubmittedSignals()) {
+    if (!scheduler.RecordedSinceSubmit()) {
         gpu_wants_work.compare_exchange_strong(announced, 0, std::memory_order_acq_rel);
         return; // nothing recorded for it
     }
-    // More on its way: the work goes once it is at least the submission the GPU runs (draws and
-    // dispatches), the CPU then keeping up with the GPU; less would add a submission (a switch
-    // the GPU idles for, ~25 us in beta 9's GPU profile) for less work than it already has.
-    if (!nothing_coming &&
-        waiting < std::max<u32>(last_batch_draws.load(std::memory_order_relaxed), 1)) {
+    // While the game is still submitting, the end of its next submission decides
+    // (SubmitForSignalsNow: the GPU is on its last submission, so it submits), a game submission
+    // away (60 to 70 a frame); acting here as well added 5 to 10 submissions a frame at the 120
+    // cap and up to 17 at 60 (0.4.4 beta 11), for what the next end did a moment later. With
+    // nothing more on its way (the game waiting), at once.
+    if (!nothing_coming) {
         return;
     }
     BbStats::announced_flushes.fetch_add(1, std::memory_order_relaxed);
@@ -1505,12 +1515,13 @@ void Rasterizer::RunDrawPacket(void* context, const u8* data, u32 size) {
     if (self.constant_ring) {
         self.constant_ring->Stamp(packet.ring_end);
     }
-    // bbport BB_HONEST_LABELS: the GPU has got to its last submission: the work recorded since
-    // goes once enough waits, at once with nothing more on its way (SubmitForGpu).
-    self.draws_since_submit.store(self.draws_since_submit.load(std::memory_order_relaxed) + 1,
-                                  std::memory_order_relaxed);
+    // bbport BB_HONEST_LABELS: the GPU has got to its last submission and nothing more is on its
+    // way (this thread's last packet, the GPU command thread waiting for the game): the work
+    // recorded since goes now (SubmitForGpu).
     if (self.gpu_wants_work.load(std::memory_order_relaxed) != 0) [[unlikely]] {
-        self.SubmitForGpu(!self.draw_pipe->PeekNext() && self.liverpool->DecoderIdle());
+        if (!self.draw_pipe->PeekNext() && self.liverpool->DecoderIdle()) {
+            self.SubmitForGpu(true);
+        }
     }
 }
 
@@ -2879,14 +2890,19 @@ u64 Rasterizer::Flush() {
     DrainDrawPipe();
     PublishSignals(); // the recording thread's (it is idle here, or this is it)
     const u64 current_tick = scheduler.CurrentTick();
+    // BB_HONEST_LABELS: nothing recorded since the last submission: nothing to submit, and every
+    // signal since is that submission's (SignalTick). Its tick is the one to wait for.
+    if (HonestLabels() && current_tick > 1 && !scheduler.RecordedSinceSubmit()) {
+        BbStats::empty_flushes.fetch_add(1, std::memory_order_relaxed);
+        gpu_wants_work.store(0, std::memory_order_release);
+        return current_tick - 1;
+    }
     // BB_HONEST_LABELS: queued behind unfinished work, the GPU gets to this, its last submission,
     // once it has finished the one before: watched, and announced then (GpuSignalLoop).
     const bool behind =
         HonestLabels() && current_tick >= 2 && !scheduler.IsFree(current_tick - 1);
     SubmitInfo info{};
     scheduler.Flush(info);
-    last_batch_draws.store(draws_since_submit.exchange(0, std::memory_order_relaxed),
-                           std::memory_order_relaxed);
     if (HonestLabels()) {
         gpu_wants_work.store(0, std::memory_order_release); // this submission answers it
         ArmWatch(behind ? current_tick - 1 : 0);
