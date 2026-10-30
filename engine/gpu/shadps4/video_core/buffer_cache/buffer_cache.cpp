@@ -1059,9 +1059,71 @@ void PrintBufferStats() {
 }
 } // namespace
 
+void BufferCache::NoteImageMadeForCopy(VAddr address, u64 size) {
+    if (address == 0 || size == 0) {
+        return;
+    }
+    std::scoped_lock lock{made_for_copy_mutex};
+    MadeForCopy* slot = nullptr;
+    for (auto& range : made_for_copy) {
+        const VAddr begin = range.begin.load(std::memory_order_relaxed);
+        if (begin == address && range.end.load(std::memory_order_relaxed) == address + size) {
+            return; // already noted (told or not)
+        }
+        if (!slot && begin == 0) {
+            slot = &range;
+        }
+    }
+    if (slot) {
+        made_for_copy_live.fetch_add(1, std::memory_order_relaxed);
+    } else {
+        slot = &made_for_copy[made_for_copy_next++ % made_for_copy.size()];
+    }
+    // Readers skip a slot whose begin changes while they look at it.
+    slot->begin.store(0, std::memory_order_release);
+    slot->end.store(address + size, std::memory_order_release);
+    slot->told.store(false, std::memory_order_release);
+    slot->begin.store(address, std::memory_order_release);
+}
+
+void BufferCache::CheckMadeForCopy(VAddr device_addr, u32 size, bool is_written) {
+    const VAddr end = device_addr + size;
+    for (auto& range : made_for_copy) {
+        const VAddr begin = range.begin.load(std::memory_order_acquire);
+        const VAddr range_end = range.end.load(std::memory_order_acquire);
+        if (begin == 0 || begin >= end || device_addr >= range_end ||
+            range.begin.load(std::memory_order_acquire) != begin) {
+            continue;
+        }
+        if (is_written) {
+            // The GPU writes that memory (or a download puts the image there): newer from now on.
+            std::scoped_lock lock{made_for_copy_mutex};
+            if (range.begin.load(std::memory_order_relaxed) == begin) {
+                range.begin.store(0, std::memory_order_release);
+                made_for_copy_live.fetch_sub(1, std::memory_order_relaxed);
+            }
+            continue;
+        }
+        // Once per range, and 32 lines a session at most.
+        static std::atomic<u32> lines{0};
+        if (!range.told.exchange(true, std::memory_order_relaxed) &&
+            lines.fetch_add(1, std::memory_order_relaxed) < 32) {
+            std::printf("Copy shader: memory of an image made for a copy is read as a buffer at "
+                        "%#llx, %u bytes (the image holds newer data)\n",
+                        static_cast<unsigned long long>(device_addr), size);
+        }
+    }
+}
+
 std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 size,
                                                         bool is_written, bool is_texel_buffer) {
     BB_SECTION(ObtainBuffer);
+    // 0.4.4 beta 14: raw reads of images made for a copy shader's copy (NoteImageMadeForCopy);
+    // texel buffers are filled from the image. One load while there is none.
+    if (made_for_copy_live.load(std::memory_order_relaxed) != 0 &&
+        (is_written || !is_texel_buffer)) [[unlikely]] {
+        CheckMadeForCopy(device_addr, size, is_written);
+    }
     const bool stats = BufferStatsEnabled();
     const auto note_hle = [&](u32 path) {
         if (hle_obtain) {

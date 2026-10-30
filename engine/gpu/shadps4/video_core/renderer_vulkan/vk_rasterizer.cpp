@@ -3499,27 +3499,32 @@ bool CopyShaderImagesWide() {
 
 // Frame statistics: the game's dword copy shaders (cs 3d5ebf4e: render targets copied through
 // memory), a second, by how they were done. One thread at a time runs them (BindResources).
+// 0.4.4 beta 14: the bytes past the image split into padding and a depth image's stencil plane,
+// and the copies done between scene proxies (reduced presets) counted among them.
 struct ImageCopyStats {
-    u64 exact = 0, padded = 0, made = 0, through_memory = 0;
+    u64 exact = 0, padding = 0, stencil = 0, made = 0, through_memory = 0, proxies = 0;
     std::chrono::steady_clock::time_point window = std::chrono::steady_clock::now();
 };
 ImageCopyStats image_copy_stats;
 
-void CountImageCopy(u64 ImageCopyStats::*outcome) {
+void CountImageCopy(u64 ImageCopyStats::*outcome, bool proxy = false) {
     if (!BbStats::enabled) {
         return;
     }
     auto& stats = image_copy_stats;
     ++(stats.*outcome);
+    stats.proxies += proxy;
     const auto now = std::chrono::steady_clock::now();
     if (now - stats.window < std::chrono::seconds(5)) {
         return;
     }
     const double seconds = std::chrono::duration<double>(now - stats.window).count();
-    std::printf("Copy shaders per second: %.1f done as image copies (%.1f of them with bytes past "
-                "the image, %.1f into an image made for it), %.1f run through memory\n",
-                (stats.exact + stats.padded + stats.made) / seconds,
-                stats.padded / seconds, stats.made / seconds, stats.through_memory / seconds);
+    std::printf("Copy shaders per second: %.1f done as image copies (%.1f of them with padding past "
+                "the image, %.1f with a stencil plane past it, %.1f into an image made for it, "
+                "%.1f between scene proxies), %.1f run through memory\n",
+                (stats.exact + stats.padding + stats.stencil + stats.made) / seconds,
+                stats.padding / seconds, stats.stencil / seconds, stats.made / seconds,
+                stats.proxies / seconds, stats.through_memory / seconds);
     stats = ImageCopyStats{};
     stats.window = now;
 }
@@ -3623,6 +3628,9 @@ bool Rasterizer::IsComputeImageCopy(const Pipeline* pipeline) {
         // Perform image copy
         VideoCore::Image& src_image = desc0.is_written ? image1 : image0;
         VideoCore::Image& dst_image = desc0.is_written ? image0 : image1;
+        scheduler.EndRendering();
+        // 0.4.4 beta 14: its GPU time labelled in BB_GPU_PROFILE.
+        const Runtime::TransferMark mark{runtime, "image copy", dst_image};
         runtime.CopyColorAndDepth(&src_image, &dst_image);
         CountImageCopy(&ImageCopyStats::exact);
         return true;
@@ -3685,9 +3693,24 @@ bool Rasterizer::IsComputeImageCopy(const Pipeline* pipeline) {
         (dst.info.props.has_stencil && size - image_size > 64_KB)) {
         return reject(4, &source, &dst);
     }
+    const u64 tail = size - image_size;
+    auto outcome = made ? &ImageCopyStats::made : &ImageCopyStats::exact;
+    if (tail && !made) {
+        outcome = source.info.props.has_stencil ? &ImageCopyStats::stencil
+                                                : &ImageCopyStats::padding;
+    }
     runtime.BeforeImageAccess();
-    runtime.CopyColorAndDepth(&source, &dst);
-    if (const u64 tail = size - image_size) {
+    scheduler.EndRendering();
+    // 0.4.4 beta 14: its GPU time labelled in BB_GPU_PROFILE, the bytes past the image included.
+    const Runtime::TransferMark mark{runtime, "image copy", dst};
+    // bbport 0.7 (deadinside28): with a reduced scene size, a source whose proxy holds its current
+    // content is copied proxy to proxy (SceneTargets::CopyProxy), not resolved into its native
+    // image first; the destination's native image resolves when it is accessed.
+    const bool proxy = scene_targets->CopyProxy(src_id, dst_id);
+    if (!proxy) {
+        runtime.CopyColorAndDepth(&source, &dst);
+    }
+    if (tail) {
         const VAddr src_tail = src_buf.base_address + image_size;
         const VAddr dst_tail = dst_buf.base_address + image_size;
         const auto [src_buffer, src_offset] =
@@ -3697,10 +3720,13 @@ bool Rasterizer::IsComputeImageCopy(const Pipeline* pipeline) {
         const vk::BufferCopy copy{src_offset, dst_offset, tail};
         runtime.CopyBuffer(src_buffer, dst_buffer, {&copy, 1});
         texture_cache.InvalidateMemoryFromGPU(dst_tail, tail);
-        CountImageCopy(made ? &ImageCopyStats::made : &ImageCopyStats::padded);
-        return true;
     }
-    CountImageCopy(made ? &ImageCopyStats::made : &ImageCopyStats::exact);
+    if (made) {
+        // 0.4.4 beta 14: the game's memory there is older than the image (logged when it is read
+        // as a buffer: BufferCache::ObtainBuffer).
+        buffer_cache.NoteImageMadeForCopy(dst_buf.base_address, image_size);
+    }
+    CountImageCopy(outcome, proxy);
     return true;
 }
 

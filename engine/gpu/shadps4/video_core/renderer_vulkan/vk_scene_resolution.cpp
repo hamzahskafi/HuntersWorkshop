@@ -231,7 +231,7 @@ void SceneTargets::Copy(Entry& e, VideoCore::Image& original, bool to_native) {
         return !(env && env[0] == '0');
     }();
     const bool linear =
-        linear_resolve && !BbToggle::Experiment(2) && to_native &&
+        linear_resolve && !BbToggle::Experiment(2) && to_native && !e.depth_values &&
         original.aspect_mask == vk::ImageAspectFlags{vk::ImageAspectFlagBits::eColor} &&
         bool(Features(original.backing->image.image_ci.format) &
              vk::FormatFeatureFlagBits::eSampledImageFilterLinear);
@@ -420,6 +420,146 @@ vk::Pipeline SceneTargets::ResamplePipeline(vk::Format format, bool stencil) {
     const auto result = *pipeline;
     resample_pipelines.emplace_back(key, std::move(pipeline));
     return result;
+}
+bool SceneTargets::CopyProxy(VideoCore::ImageId src_id, VideoCore::ImageId dst_id) {
+    // BB_SCENE_PROXY_COPIES=0: the source's proxy is resolved and the native images are copied
+    // (as before 0.4.4 beta 14).
+    static const bool proxy_copies = [] {
+        const char* env = std::getenv("BB_SCENE_PROXY_COPIES");
+        return !(env && env[0] == '0');
+    }();
+    if (!proxy_copies || !Reduced() || src_id == dst_id) {
+        return false;
+    }
+    VideoCore::Image* const src_image = lookup(src_id, 0);
+    VideoCore::Image* const dst_image = lookup(dst_id, 0);
+    if (!src_image || !dst_image || !src_image->scene_proxy) {
+        return false; // most copies: no proxy
+    }
+    auto& src = *src_image;
+    auto& dst = *dst_image;
+    const auto found = entries.find(Key(src.image_uid, 0));
+    if (found == entries.end() || !found->second->state.dirty) {
+        return false; // the native image is current: copied as it is
+    }
+    Entry& from = *found->second;
+    const bool src_depth = src.info.props.is_depth;
+    const bool dst_depth = dst.info.props.is_depth;
+    const auto refuse = [&](const char* why) {
+        if (debug) {
+            std::printf("Scene proxy copy refused (%s): %s %ux%u -> %s %ux%u\n", why,
+                        vk::to_string(src.info.pixel_format).c_str(), src.info.size.width,
+                        src.info.size.height, vk::to_string(dst.info.pixel_format).c_str(),
+                        dst.info.size.width, dst.info.size.height);
+        }
+        return false;
+    };
+    // Single-level, single-layer images of one size, each of which can have a proxy.
+    if (!Eligible(src) || !Eligible(dst) || src.info.size != dst.info.size ||
+        src.info.resources.levels != 1 || dst.info.resources.levels != 1 ||
+        (dst_depth && !src_depth)) {
+        return refuse("images");
+    }
+    // The proxies' own formats (the native images' host formats when they were made): colour
+    // into the same format, depth into the same depth format, or 32-bit depth into R32F (the
+    // game's copy of its depth for the next frame).
+    const auto existing = entries.find(Key(dst.image_uid, 0));
+    Entry* to = existing != entries.end() ? existing->second.get() : nullptr;
+    const auto proxy = ProxySize(dst, 0);
+    const vk::Format from_format = from.image.image_ci.format;
+    const vk::Format to_format = to ? to->image.image_ci.format : dst.backing->image.image_ci.format;
+    const vk::Extent3D extent = to ? to->image.image_ci.extent
+                                   : vk::Extent3D{proxy.width, proxy.height, 1};
+    const bool depth_to_color = src_depth && !dst_depth && to_format == vk::Format::eR32Sfloat &&
+                                (from_format == vk::Format::eD32Sfloat ||
+                                 from_format == vk::Format::eD32SfloatS8Uint);
+    const bool same_format = src_depth == dst_depth && from_format == to_format;
+    if ((!depth_to_color && !same_format) || from.image.image_ci.extent != extent) {
+        return refuse("formats");
+    }
+    // A depth copy leaves the destination's stencil as it is (Runtime::CopyImage): its proxy
+    // holds that stencil only while it is current.
+    if (dst_depth && (dst.aspect_mask & vk::ImageAspectFlagBits::eStencil) &&
+        (!to || !to->state.valid)) {
+        return refuse("stencil");
+    }
+    scheduler.EndRendering();
+    const Runtime::TransferMark mark{runtime, "scene proxy copy", dst};
+    if (!to) {
+        auto& slot = entries[Key(dst.image_uid, 0)];
+        slot = std::make_unique<Entry>();
+        slot->source = dst_id;
+        slot->uid = dst.image_uid;
+        slot->level = 0;
+        slot->image = VideoCore::UniqueImage(instance.GetDevice(), instance.GetAllocator());
+        auto ci = dst.backing->image.image_ci;
+        ci.pNext = nullptr;
+        ci.extent = extent;
+        ci.mipLevels = 1;
+        slot->image.Create(ci);
+        tracked.insert(dst.image_uid);
+        to = slot.get();
+    }
+    dst.scene_proxy = true;
+    // Whole images: both aspects of a depth/stencil proxy change layout together.
+    Transition(from, src.aspect_mask, vk::ImageLayout::eTransferSrcOptimal,
+               vk::PipelineStageFlagBits2::eCopy, vk::AccessFlagBits2::eTransferRead);
+    Transition(*to, dst.aspect_mask, vk::ImageLayout::eTransferDstOptimal,
+               vk::PipelineStageFlagBits2::eCopy, vk::AccessFlagBits2::eTransferWrite);
+    if (depth_to_color) {
+        // Vulkan copies no image between depth and colour aspects (without maintenance8): through
+        // a buffer, as Runtime::CopyImageWithBuffer. Copies only: no blit support needed (D32S8
+        // has none on RADV).
+        const vk::DeviceSize bytes = vk::DeviceSize(extent.width) * extent.height * 4;
+        const auto staging =
+            runtime.GetStagingPool().Request(bytes, VideoCore::MemoryType::DeviceLocal, 256);
+        scheduler.Record([src_image = vk::Image(from.image), dst_image = vk::Image(to->image),
+                          buffer = staging.buffer->Handle(), offset = staging.offset,
+                          extent](vk::CommandBuffer cmd) {
+            const vk::BufferImageCopy depth{
+                .bufferOffset = offset,
+                .imageSubresource = {vk::ImageAspectFlagBits::eDepth, 0, 0, 1},
+                .imageExtent = extent,
+            };
+            cmd.copyImageToBuffer(src_image, vk::ImageLayout::eTransferSrcOptimal, buffer, depth);
+            const vk::MemoryBarrier2 written{
+                .srcStageMask = vk::PipelineStageFlagBits2::eCopy,
+                .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
+                .dstStageMask = vk::PipelineStageFlagBits2::eCopy,
+                .dstAccessMask = vk::AccessFlagBits2::eTransferRead,
+            };
+            cmd.pipelineBarrier2({.memoryBarrierCount = 1, .pMemoryBarriers = &written});
+            auto color = depth;
+            color.imageSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
+            cmd.copyBufferToImage(buffer, dst_image, vk::ImageLayout::eTransferDstOptimal, color);
+        });
+    } else {
+        const vk::ImageAspectFlags aspect = dst_depth
+                                                ? vk::ImageAspectFlagBits::eDepth
+                                                : vk::ImageAspectFlagBits::eColor;
+        scheduler.Record([src_image = vk::Image(from.image), dst_image = vk::Image(to->image),
+                          extent, aspect](vk::CommandBuffer cmd) {
+            const vk::ImageCopy region{
+                .srcSubresource = {aspect, 0, 0, 1},
+                .dstSubresource = {aspect, 0, 0, 1},
+                .extent = extent,
+            };
+            cmd.copyImage(src_image, vk::ImageLayout::eTransferSrcOptimal, dst_image,
+                          vk::ImageLayout::eTransferDstOptimal, region);
+        });
+    }
+    to->state.ProxyWrite(); // the native destination resolves on its first native access
+    to->depth_values = depth_to_color || from.depth_values;
+    // As Runtime::CopyImage: the GPU's data, nothing to upload; other contents (tile memo).
+    dst.flags |= VideoCore::ImageFlagBits::GpuModified;
+    dst.flags &= ~VideoCore::ImageFlagBits::Dirty;
+    ++dst.write_seq;
+    if (debug) {
+        std::printf("Scene proxy copy: %s %ux%u -> %s\n",
+                    vk::to_string(src.info.pixel_format).c_str(), src.info.size.width,
+                    src.info.size.height, vk::to_string(dst.info.pixel_format).c_str());
+    }
+    return true;
 }
 SceneTargets::Entry& SceneTargets::Get(VideoCore::ImageId id, u32 level) {
     auto& original = *lookup(id, 0);

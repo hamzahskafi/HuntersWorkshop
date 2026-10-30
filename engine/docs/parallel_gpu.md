@@ -546,7 +546,8 @@ the buffer, the proxy resolved and the destination image uploaded again. Recogni
 whose source is an image and turning them into image copies (or a proxy-sized copy) would remove
 most of that. Skipping the dispatches blacks out the scene, so the copies are needed.
 Hunter's Workshop 0.4.4 beta 13 extends that detector (`IsComputeImageCopy`) to the copies it
-missed, after bbport 0.7 (`docs/community-fixes-plan.md`).
+missed, after bbport 0.7 (`docs/community-fixes-plan.md`); beta 14 copies the proxies themselves
+with a reduced scene size (`SceneTargets::CopyProxy`, also bbport 0.7).
 
 ### Fixed: guest heap corruption with the draw pipeline (2026-10-01)
 

@@ -149,6 +149,13 @@ public:
                                                              bool is_written,
                                                              bool is_texel_buffer = false);
 
+    /// 0.4.4 beta 14: the guest range of an image made for a copy shader's copy
+    /// (Rasterizer::IsComputeImageCopy): the image holds the copy, the game's memory there is
+    /// older. Texel buffer reads are filled from the image, textures read it; a raw read-only
+    /// binding over one of the 16 most recent is logged once (ObtainBuffer), a written binding
+    /// over one ends it (its memory is newer then).
+    void NoteImageMadeForCopy(VAddr address, u64 size);
+
     /// Attempts to obtain a buffer without modifying the cache contents.
     [[nodiscard]] std::pair<const Buffer*, u64> ObtainBufferForImage(VAddr device_addr, u32 size);
 
@@ -290,6 +297,17 @@ private:
     /// PC game copies an upload heap into a default heap: one sequential copy over PCIe instead of
     /// every shader reading it across the bus.
     std::optional<std::pair<const Buffer*, u64>> ShadowCopy(VAddr addr, u64 size);
+    /// NoteImageMadeForCopy's ranges, looked at by ObtainBuffer while any is live: written by one
+    /// thread at a time (the mutex), read without it (a range being replaced is skipped).
+    void CheckMadeForCopy(VAddr device_addr, u32 size, bool is_written);
+    struct MadeForCopy {
+        std::atomic<VAddr> begin{0}, end{0}; ///< begin 0: free
+        std::atomic<bool> told{false};
+    };
+    std::array<MadeForCopy, 16> made_for_copy{};
+    std::atomic<u32> made_for_copy_live{0};
+    u32 made_for_copy_next = 0; ///< the slot replaced next when none is free
+    std::mutex made_for_copy_mutex;
     struct Shadow {
         VAddr addr;
         u64 size, offset;
