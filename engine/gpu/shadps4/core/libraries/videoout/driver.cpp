@@ -881,8 +881,8 @@ void VideoOutDriver::Flip(const Request& req) {
             Vulkan::Breadcrumbs::PrintProgress();
             PrintMemory();
             if (const u64 in_place = BbStats::bound_in_place_bytes.exchange(0)) {
-                std::printf("Buffer bindings: %.1f MB/frame in place (%.1f GPU-written), %.1f MB/frame "
-                            "VRAM copies\n",
+                std::printf("Buffer bindings: %.1f MB/frame bound in place (%.1f GPU-written; the "
+                            "size bound, not what the GPU reads), %.1f MB/frame VRAM copies\n",
                             in_place / (frames * 1e6),
                             BbStats::bound_in_place_written_bytes.exchange(0) / (frames * 1e6),
                             BbStats::bound_vram_bytes.exchange(0) / (frames * 1e6));

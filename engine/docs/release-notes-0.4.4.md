@@ -14,12 +14,15 @@ What changed since 0.4.3, for the release page. The engine work behind each line
 
 ## Performance
 
-- **The game's per-frame GPU data read where the game writes it** (*to be measured*). The memory the
-  game rewrites for the GPU every frame (per-draw parameters, CPU-animated vertices, its upload area;
-  288 MiB) is now used by the GPU in place, as a PC game's upload heap: no write protection, write
-  faults, uploads or VRAM copy for it. The game makes it once at start; the engine takes it from
-  there and binds it once, never moving it. Small read-only pieces of it are still copied when used.
-  More › Engine has no switch for it yet; `BB_GX_IN_PLACE=0` turns it off.
+- **The game's per-frame GPU data read where the game writes it.** The memory the game rewrites for
+  the GPU every frame (per-draw parameters, CPU-animated vertices, its upload area; 288 MiB) is now
+  used by the GPU in place, as a PC game's upload heap: no write protection, write faults, uploads
+  or VRAM copy for it. The game makes it once at start; the engine takes it from there and binds it
+  once, never moving it. Small read-only pieces of it are still copied when used. In play, write
+  faults went from about 900 a second to about 1, and the time spent re-protecting memory from
+  about 0.45 ms a frame to almost none (RTX 3070 Ti, 60 FPS). Frame rate, pacing and VRAM are as
+  before. The GPU's own time with it is *to be measured*. More › Engine has no switch for it yet;
+  `BB_GX_IN_PLACE=0` turns it off.
 - **Game-data memory** (*to be measured*). Memory for the game's data in VRAM is kept longer when it
   empties while VRAM has room. In beta 1 a tester saw about 1 GB less VRAM in dense areas, and
   smoother play there, than with 0.4.3; which change did it is not known yet.

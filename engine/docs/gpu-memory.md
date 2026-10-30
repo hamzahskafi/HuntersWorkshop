@@ -188,6 +188,17 @@ writes not done yet count as GPU-modified (`WriteTicks`). A binding over the reg
 import (at most 10 s); a failed import, or the game unmapping the region, leaves it tracked as
 before. Unlike the model, nothing moves: no sparse rebinds in play, the cause of its late frames.
 
+Measured (beta 6, `20261030_042617`, about 20 minutes, RTX 3070 Ti, against beta 4's
+`20261030_033513`): the import took 70 ms and the region was bound in one run before the title
+screen. In play, write faults went from a median of 911 a second to 1, and protection time from
+0.21 ms a frame on the GPU command thread plus 0.25 ms on other threads to 0.004 and 0. What
+remains are load-time writes outside the region (`0x261af9e` and its neighbours, up to about 2,000
+in a load window). About 10,000 bindings a second, of about 3 MiB each, are now read in place, and
+7,000 small ones are still copied (about 27 MB/s). Frame rate (60), pacing (stddev 0.04 ms, p99
+16.8 ms) and VRAM (2.8 to 3.5 GB by the driver's count) are as in beta 4. Not measured yet: the
+GPU's time reading the region over PCIe instead of from VRAM. That needs `BB_GPU_PROFILE=1`, with
+`BB_GX_IN_PLACE` on and then off, at the same spot.
+
 ### Step 4: verify, then decide the default
 
 - **What to compare:** the same route as step 1, with the step's switch on and off: frames over
