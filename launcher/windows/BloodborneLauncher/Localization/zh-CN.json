@@ -1714,5 +1714,11 @@
   "Physics and cloth then behave as on the console: with Windows' way, some of Cainhurst's ghosts lose the lower half of their dresses. Off: Windows' way, as before 0.4.2": "物理和布料因此与主机一致：若按 Windows 的方式，该隐赫斯特的部分幽灵会缺失裙子的下半部分。关闭：Windows 的方式，与 0.4.2 之前相同",
   "Cloth as on the PS4 (test)": "布料与 PS4 一致（测试）",
   "Some of the cloth's constraints act once a 30 FPS frame, on the PS4's second cloth solve, and the cloth settles as fast as on the PS4; the 60 FPS patch left those constraints out and halved its damping. ": "布料的部分约束在每个 30 FPS 帧中作用一次，即 PS4 的第二次布料求解，布料的摆动衰减也与 PS4 一样快；60 FPS 补丁遗漏了这些约束，并将其阻尼减半。",
-  "For the side-by-side test, watch a coat or a dress move with it on and off. Off: the cloth as before 0.4.3": "对比测试时，分别开启和关闭此项，观察外套或裙子的摆动。关闭：布料与 0.4.3 之前相同"
+  "For the side-by-side test, watch a coat or a dress move with it on and off. Off: the cloth as before 0.4.3": "对比测试时，分别开启和关闭此项，观察外套或裙子的摆动。关闭：布料与 0.4.3 之前相同",
+  "Per-frame GPU data in place": "每帧 GPU 数据原地读取",
+  "The memory the game rewrites for the GPU every frame (288 MiB) is read by the GPU where the game writes it, as a ": "游戏每帧为 GPU 重写的内存（288 MiB）由 GPU 直接在游戏写入的位置读取，如同",
+  "PC game's upload heap: no write faults or uploads for it, and less CPU and GPU time a frame. Off: watched and ": " PC 游戏的上传堆：没有写入故障和上传，每帧占用更少的 CPU 和 GPU 时间。关闭：像 0.4.4 之前一样监视并",
+  "copied as before 0.4.4, should something look wrong": "复制，用于画面出现异常时",
+  "GPU time in the log": "在日志中记录 GPU 时间",
+  "BB_GPU_PROFILE: the GPU's time a frame by render pass, dispatch and upscaler, every 5 seconds. Costs a little GPU time": "BB_GPU_PROFILE：每 5 秒记录一次每帧的 GPU 时间，按渲染通道、计算调度和超分辨率分列。会占用少量 GPU 时间"
 }

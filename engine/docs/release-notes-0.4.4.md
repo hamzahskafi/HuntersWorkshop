@@ -24,8 +24,8 @@ What changed since 0.4.3, for the release page. The engine work behind each line
   and off): write faults went from about 900 a second to about 1, the time spent re-protecting
   memory from about 0.4 ms a frame to almost none, and the GPU's time from 7.9 to 7.0 ms a frame
   (its uploads of the region are gone; reading it over PCIe costs less than they did). Frame rate,
-  pacing and VRAM are as before. More › Engine has no switch for it yet; `BB_GX_IN_PLACE=0` turns
-  it off.
+  pacing and VRAM are as before. More › Engine › Performance › Per-frame GPU data in place turns it
+  off (`BB_GX_IN_PLACE=0`), should something look wrong.
 - **Game-data memory** (*to be measured*). Memory for the game's data in VRAM is kept longer when it
   empties while VRAM has room. In beta 1 a tester saw about 1 GB less VRAM in dense areas, and
   smoother play there, than with 0.4.3; which change did it is not known yet.
@@ -40,6 +40,8 @@ What changed since 0.4.3, for the release page. The engine work behind each line
 - Long-frame reports (frame statistics on) now give the long frame's own figures, with how many
   images were made or had their data checked.
 - The frame capture lists every draw of each pass.
+- Settings › Log › GPU time in the log (`BB_GPU_PROFILE`): the GPU's time a frame by render pass,
+  dispatch and upscaler, every 5 seconds.
 - Windows logs give VRAM once a minute: the game's use against the driver's budget, and the
   engine's part of it.
 - The log names the game's per-frame GPU memory (its GX range allocator) as the game makes it,

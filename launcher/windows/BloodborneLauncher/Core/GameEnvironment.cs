@@ -147,6 +147,7 @@ namespace BloodborneLauncher.Core
             if (int.TryParse(s.Str("hitch_report_ms"), out var hitch) && hitch > 0) env["BB_HITCH_REPORT_MS"] = hitch.ToString();
             if (s.Bool("pad_log")) env["BB_PAD_LOG"] = "1";
             if (s.Bool("fsr_profile")) env["BB_FSR4_PROFILE"] = "1";
+            if (s.Bool("gpu_profile")) env["BB_GPU_PROFILE"] = "1";
             if (s.Bool("audio_stats")) env["BB_AUDIO_STATS"] = "1";
             if (s.Bool("load_profile")) env["BB_SAMPLE_THREADS"] = "load";
             if (s.Bool("fsr4_balanced")) env["BB_FSR4_MODEL"] = "balanced";

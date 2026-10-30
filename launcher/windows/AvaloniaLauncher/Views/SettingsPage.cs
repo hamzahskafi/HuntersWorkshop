@@ -185,6 +185,9 @@ namespace BloodborneLauncher.Views
                 L.T("BB_PAD_LOG: each controller's USB ids, connection and rumble support, disconnects, the game's first vibration request and sticks past their round gate. For controller problems"),
                 "pad_log", logs);
             SettingToggle(SymbolRegular.DeveloperBoard24, L.T("FSR 4 profile in the log"), "BB_FSR4_PROFILE", "fsr_profile", logs);
+            SettingToggle(SymbolRegular.DeveloperBoard24, L.T("GPU time in the log"),
+                L.T("BB_GPU_PROFILE: the GPU's time a frame by render pass, dispatch and upscaler, every 5 seconds. Costs a little GPU time"),
+                "gpu_profile", logs);
             SettingToggle(SymbolRegular.Speaker224, L.T("Audio statistics in the log"), "BB_AUDIO_STATS", "audio_stats", logs);
             SettingToggle(SymbolRegular.HourglassHalf24, L.T("Loading profile in the log"),
                 L.T("BB_SAMPLE_THREADS: where the game's main, render and file threads spend their time, every 5 seconds. For slow loading; costs a little speed"), "load_profile", logs);
