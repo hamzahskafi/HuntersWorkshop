@@ -678,7 +678,19 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
     runtime.FillBuffer(bda_pagetable_buffer.get(), 0u, bda_pagetable_size, 0u);
 }
 
-BufferCache::~BufferCache() = default;
+BufferCache::~BufferCache() {
+    // bbport BB_GX_IN_PLACE: the import's thread done, then its buffer and memory freed. The GPU
+    // is idle by now (Presenter::~Presenter finishes its schedulers first); the arenas bound to
+    // the memory go after this, unused.
+    if (gx_import.valid()) {
+        gx_import.wait();
+    }
+    if (gx_memory) {
+        const vk::Device device = instance.GetDevice();
+        device.destroyBuffer(gx_buffer);
+        device.freeMemory(gx_memory);
+    }
+}
 
 void BufferCache::InvalidateMemory(VAddr device_addr, u64 size, bool assume_locks) {
     memory_tracker->InvalidateRegion(device_addr, size, [this, device_addr, size, assume_locks] {
