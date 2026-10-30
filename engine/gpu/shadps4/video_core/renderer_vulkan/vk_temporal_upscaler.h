@@ -199,6 +199,9 @@ private:
     bool RecordReactive(vk::ImageView color_view);
     /// FSR 4 is selected, possible in this session (not BB_RENDER_RES) and has not failed.
     [[nodiscard]] bool UseFsr4() const;
+    /// The upscaler that runs now, for the log and the GPU profile: TAA, DLSS (DLAA at 1:1),
+    /// FSR 4.1, FSR 4, or FSR 3.1 (also what runs when the one selected is unavailable).
+    [[nodiscard]] const char* BackendName() const;
     /// Records FSR 4 into output_image; on a permanent failure FSR 3 takes over. `reactive`: this
     /// frame's reactive mask is ready, given to DLSS as its bias-current-colour mask.
     bool RecordFsr4(vk::CommandBuffer cmdbuf, Fsr4Upscaler::Image color, Fsr4Upscaler::Image depth,

@@ -294,9 +294,10 @@ TemporalUpscaler::TemporalUpscaler(const Instance& instance_, Scheduler& schedul
         enabled = false;
     }
     if (enabled) {
-        std::printf("Upscaler: FSR 3.1 available (%s) on scene color before compute shader "
-                    "%016llx\n",
-                    BbSettings::Get().upscaler != BbSettings::UpscalerOff ? "on" : "off",
+        // bbport: names what runs (it said FSR 3.1 for DLSS, FSR 4 and TAA as well).
+        const bool on = BbSettings::Get().upscaler != BbSettings::UpscalerOff;
+        std::printf("Upscaler: available (%s%s) on scene color before compute shader %016llx\n",
+                    on ? "on: " : "off", on ? BackendName() : "",
                     static_cast<unsigned long long>(trigger_hash));
     }
 }
@@ -705,7 +706,7 @@ bool TemporalUpscaler::EnsureResources(u32 w, u32 h, u32 ow, u32 oh, bool hdr) {
         return true;
     }
     if (use_fsr4) {
-        std::printf("Upscaler: FSR 4 inputs %ux%u -> %ux%u\n", w, h, ow, oh);
+        std::printf("Upscaler: %s inputs %ux%u -> %ux%u\n", BackendName(), w, h, ow, oh);
         return true;
     }
     FfxVkPortableMemoryUsage usage{};
@@ -1307,8 +1308,13 @@ bool TemporalUpscaler::RecordReactive(vk::ImageView color_view) {
 void TemporalUpscaler::Run() {
     BB_SECTION(Upscaler);
     if (auto* profiler = GpuProfiler::Get()) {
-        const char* label = BbSettings::Get().upscaler == BbSettings::UpscalerTaa
-            ? "upscaler Run (TAA)" : "upscaler Run (FSR)";
+        // Fixed strings per backend (the profile keys its labels by them).
+        const std::string_view name = BackendName();
+        const char* label = name == "TAA"     ? "upscaler Run (TAA)"
+                            : name == "DLSS"    ? "upscaler Run (DLSS)"
+                            : name == "FSR 4.1" ? "upscaler Run (FSR 4.1)"
+                            : name == "FSR 4"   ? "upscaler Run (FSR 4)"
+                                                : "upscaler Run (FSR 3.1)";
         profiler->Mark(0xF5A0'0000ull ^ std::hash<std::string_view>{}(label),
                        [label] { return std::string{label}; });
     }
@@ -2080,8 +2086,12 @@ void TemporalUpscaler::RunUiOnly(VideoCore::ImageId color_id, VideoCore::ImageId
 
 void TemporalUpscaler::RunScaled() {
     if (auto* profiler = GpuProfiler::Get()) {
-        const char* label = BbSettings::Get().upscaler == BbSettings::UpscalerTaa
-            ? "upscaler RunScaled (TAA)" : "upscaler RunScaled (FSR)";
+        const std::string_view name = BackendName();
+        const char* label = name == "TAA"     ? "upscaler RunScaled (TAA)"
+                            : name == "DLSS"    ? "upscaler RunScaled (DLSS)"
+                            : name == "FSR 4.1" ? "upscaler RunScaled (FSR 4.1)"
+                            : name == "FSR 4"   ? "upscaler RunScaled (FSR 4)"
+                                                : "upscaler RunScaled (FSR 3.1)";
         profiler->Mark(0xF5A0'0000ull ^ std::hash<std::string_view>{}(label),
                        [label] { return std::string{label}; });
     }
@@ -2618,6 +2628,19 @@ void TemporalUpscaler::DumpPresented(vk::Image image, u32 width, u32 height, vk:
 } // namespace Vulkan
 
 namespace Vulkan {
+
+const char* TemporalUpscaler::BackendName() const {
+    const int selected = BbSettings::Get().upscaler;
+    if (selected == BbSettings::UpscalerTaa) {
+        return "TAA";
+    }
+    if (!UseFsr4()) {
+        return "FSR 3.1";
+    }
+    return selected == BbSettings::UpscalerDlss    ? "DLSS"
+           : selected == BbSettings::UpscalerFsr411 ? "FSR 4.1"
+                                                   : "FSR 4";
+}
 
 bool TemporalUpscaler::UseFsr4() const {
     const int selected = BbSettings::Get().upscaler;
