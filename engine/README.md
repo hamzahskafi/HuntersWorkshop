@@ -18,7 +18,7 @@ and [shadPS4](https://github.com/shadps4-emu/shadPS4), and added:
 - **its own start and runtime**: `start/` (bb-start: the game's executable prepared once and reused,
   mods, patches checked against the game's code, the GPU cache kept across updates) and `src/` (the
   runtime, saves, files read in place, pads with menu and keyboard bindings);
-- **a direct path away from emulation** ([docs/EMULATION_REMOVAL_PLAN.md](docs/EMULATION_REMOVAL_PLAN.md)):
+- **a direct path away from emulation** ([docs/history/EMULATION_REMOVAL_PLAN.md](docs/history/EMULATION_REMOVAL_PLAN.md)):
   draw calls taken from the game's graphics library as records, the PC memory model (the game's
   memory used by the GPU in place; off by default since 0.4.0 beta 4, [docs/gpu-memory.md](docs/gpu-memory.md)),
   and a native compiler for the game's shaders

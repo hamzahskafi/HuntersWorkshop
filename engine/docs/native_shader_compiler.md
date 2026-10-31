@@ -4,8 +4,19 @@ The engine translates the game's GCN shaders to SPIR-V with the compiler it inhe
 shadPS4 (`gpu/shadps4/shader_recompiler/`). That compiler is written for every PS4 game; this one
 is for Bloodborne's shaders only, which are a closed set: about 860 programs in the shader catalog,
 all compiled by the same PSSL compiler. The plan here replaces the inherited path piece by piece,
-each piece checked against it per captured shader in the shader lab before the game uses it. It is
-step 7 of `EMULATION_REMOVAL_PLAN.md` ("shaders fully precompiled per GPU").
+each piece checked against it per captured shader in the shader lab before the game uses it. It
+grew out of item 5, "Shaders ahead of time", of the emulation removal plan
+([history/EMULATION_REMOVAL_PLAN.md](history/EMULATION_REMOVAL_PLAN.md), now historical).
+
+**Status at 0.4.4 beta 21.** Built: the table plan (steps 1 and 1b; the walker is still the default,
+`BB_NATIVE_TABLES=0`) and the compile speed and output changes of 2026-10-22 (all on by default).
+Not built: steps 2 to 4 (the structurizer without goto variables, exact descriptor layouts,
+precompiling the whole catalog per GPU); the census measures them in the lab only, and the cache
+recompile and the shader catalog (`pipeline_compiles.md`) are what runs before play today. The
+native constant buffers (uniform buffers, `BB_NATIVE_SHADERS`) are on by default where the device's
+storage-buffer offset alignment is above 4 bytes (`vk_pipeline_cache.cpp`; elsewhere the legacy
+storage-buffer layout is used, `engine-map.md` 2.12); the launcher's "Legacy shader compiler" turns
+them off.
 
 ## Why
 
@@ -121,7 +132,9 @@ the CPU anyway. What changes is how the tables are read:
 Later (with "descriptors on the GPU", step 3 of the emulation plan) the shader could read
 constants straight from the game's memory, which the PC memory model already maps for the GPU;
 the plan then shrinks to the descriptors the CPU must bind. That needs the GPU to survive null
-and stale pointers itself, so it comes after this.
+and stale pointers itself, so it comes after this. (Not built. The PC memory model has been off by
+default since 0.4.0 beta 4 and is to be removed before 0.4.4 ships; what the GPU reads in place by
+default is the game's GX region, on Windows, `BB_GX_IN_PLACE`.)
 
 ### 2. Structured control flow without goto variables
 
@@ -212,8 +225,9 @@ captures do not compile):
 | captured nonzero dwords read again from the rebuilt tables | 24 517 | 8 851 |
 | a plan with one offset moved by a dword caught | 718 of 718 | 317 of 317 |
 
-The unmapped case is the one the null check in the walker does not cover: each of those 45 084
-faults is an exception and a skipped draw in the game today; the plan reads zeros without one.
+The unmapped case is the one the null check in the walker does not cover: in the game each such
+fault is an exception and a skipped draw; the plan reads zeros without one. The 45 084 faults
+are the lab's synthetic case 3, not a count from play; none exists (`engine-map.md`, `shader-1`).
 A last check proves the comparison can fail: a copy of each plan with one offset moved by a dword
 must give different values on the synthetic tables, and does for every shader.
 
@@ -234,8 +248,11 @@ must give different values on the synthetic tables, and does for every shader.
   pipe's check that the tables did not change before stage B (`vk_rasterizer.cpp`, which no
   longer needs fault recovery when the plan reads).
 - **`readable`** is the engine's mapping table, `MemoryManager::ClampRangeSize` (its cached
-  region per thread makes the common case a compare), set in `shim/bbgpu.cpp`. A table is checked
-  once over the span of its constant offsets, then copied without a check per dword.
+  region per thread makes the common case a compare), set in `shim/bbgpu.cpp`; since 0.4.4 beta 20
+  the range must also be readable under the game's own page protection (`runtime_memory_readable`):
+  a page the game made unreadable would otherwise fault in the plan's copy, outside any handler.
+  A table is checked once over the span of its constant offsets, then copied without a check per
+  dword.
 - **The pipeline cache** keeps the plan at the end of the shader record (`TPL1`), after the walker.
   A record of an older engine has none: that shader runs the walker in every mode until the cache
   is recompiled (`--recompile-cache`, which `bb-start` runs when the compiler changes), so no cache
@@ -244,7 +261,7 @@ must give different values on the synthetic tables, and does for every shader.
 - **Lab**: `--tables` runs every check on the plan as written to and read back from a cache
   record.
 
-Still to do once verify is clean in the game:
+Still to do once verify is clean in the game (open at 0.4.4 beta 21; `engine-map.md`, `shader-1`):
 
 - `BB_NATIVE_TABLES=1` by default; then the walker generator (Xbyak, the 32 MiB code buffer), its
   fault handler and `srt_walk_faults` go, and the cache stops storing walker code.
@@ -340,8 +357,8 @@ So on this driver:
 3. **Both together: pixel shaders -16.3% NVIDIA code, -3.7% registers** (284 of 296 changed),
    vertex and compute unchanged; SPIR-V -12.2%, IR -5.2%. `spirv-val` passes on every module.
 4. **The warm-up builds pipelines on several threads** (`BB_WARMUP_THREADS`, default the
-   hardware threads less one, at most 8; `vk_pipeline_serialization.cpp`). The cached
-   pipelines' state is still rebuilt on the main thread (it shares selection, programs and the
+   threads available to the process less one, at most 8; `vk_pipeline_serialization.cpp`). The
+   cached pipelines' state is still rebuilt on the main thread (it shares selection, programs and the
    archive); their creation by the driver is collected (`WarmupJobs`, the same owned create infos
    as the compile threads' jobs) and run in parallel, and the game starts once all are built, as
    before. `warmup.running` lists every pipeline being built; after a driver crash the next start
@@ -401,7 +418,8 @@ Driver compile time per pipeline did not change measurably with the smaller pixe
   needs one per-vertex input and both interpolations computed from it (a compiler fix of its
   own; drivers accept it today).
 - Vertex shader contraction (14%) with a proof that the depth pre-pass and colour pass compute
-  their positions with the same instructions.
+  their positions with the same instructions. With the position kept exact the measured gain is
+  4.3% (the table above); `engine-map.md` (`shader-5`) puts the realistic ceiling there.
 - Shader translation still runs on the GPU command thread for a shader first seen in play.
 
 Sources read for this pass: shadPS4 PRs 1644 (manual interpolation for Bloodborne's flicker),

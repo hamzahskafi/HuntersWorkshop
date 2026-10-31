@@ -169,7 +169,7 @@ call stack (`shim/common/assert.cpp`), which found this.
   Treat it as unproven on every driver: the arena is not made for external memory either
   (`VUID-VkSparseMemoryBind-memory-02731`), and on lavapipe the GPU reads other bytes through such a
   binding than the CPU wrote (`tools/chunk_buffer_probe.cpp`). `BB_CHUNK_BUFFERS=1` moves bindings in
-  one chunk off it (EMULATION_REMOVAL_PLAN.md, step 6 item 2).
+  one chunk off it (history/EMULATION_REMOVAL_PLAN.md, step 6 item 2).
 - **NVIDIA Pascal (GTX 10)**: the 580 branch is the last driver; features in later drivers never
   reach these cards.
 
