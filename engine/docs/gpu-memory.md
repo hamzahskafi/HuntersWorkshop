@@ -1,10 +1,36 @@
 # GPU memory: frames late while memory is moved, created or pinned
 
-Written 2026-10-26 for Hunter's Workshop 0.4.0. **Status: set aside.** The PC memory model is off by
-default since 0.4.0 beta 4, and the rest of this work is skipped for now. This file records what
-was found and how to fix it, in case it's picked up again. Paths are relative to `engine/`.
+Written 2026-10-26 for Hunter's Workshop 0.4.0, when this work was set aside; its status brought up
+to date 2026-10-31 (0.4.4 beta 21). This file records what was found, how to fix it, and what of
+that has been done. Paths are relative to `engine/`; shadPS4's (`video_core/...`, `core/...`) to
+`engine/gpu/shadps4/`.
 
-## Decision
+## Status (2026-10-31, 0.4.4 beta 21)
+
+- **The PC memory model (`BB_GUEST_IN_PLACE`) is still off by default** (since 0.4.0 beta 4): an
+  Experimental launcher option (PC memory model, `exp_guest_in_place`). It is to be removed before
+  0.4.4 ships. That is not done yet: its code and switches are still in the build, and what this
+  file says of them still holds. Causes 1 and 2, step 2 and step 3.3 go with it.
+- **0.4.4 took the work up again for the memory every player's game uses, without moving any:**
+  - beta 1: residency chunks kept longer (step 3.2); each long frame's own figures (step 1);
+  - betas 1 to 4: freed image memory reused (step 3.1): removed again in beta 5;
+  - betas 1 to 4 looked for the game's GX region (its per-frame GPU data, 288 MiB; found from beta
+    4, by a hook on its init); since beta 5 it is read in place, as a PC game's upload heap
+    (`BB_GX_IN_PLACE`, on by default, Windows only), through a buffer of its own since beta 9 (step
+    2.4's idea, for that region): see "The GX region as an upload heap" below;
+  - beta 7: fences written once the GPU has done the work before them (needed with the region in
+    place); betas 9 to 12: that work sent to the GPU by its progress, without timers.
+- **Result (RTX 3070 Ti).** In play, write faults went from a median of 911 a second to 1 (beta 6
+  against beta 4, 60 FPS). At the busiest test spot (the lamps, about 1,765 draws a frame), 0.4.3
+  ran 90.9 to 92.5 FPS with 1,340 write faults a second (`20261031_174716`); beta 20 holds 120 FPS
+  (the cap) with none. The frame rate there comes mostly from the GPU work of betas 13 to 20
+  (render target copies, object motion, depth copies and more; `docs/community-fixes-plan.md`):
+  beta 12 ran 95.5 FPS at about 1,750 draws, and at the 1,360-draw spot, where the GPU was the
+  limit, beta 12 and 0.4.3 ran the same (below).
+- **Not done:** step 1's per-frame figures and light hitch report, step 3.3 (pinning at load, model
+  only) and step 3.4 (the full-screen image). Cause 3 (image memory per image) is as it was.
+
+## Decision (2026-10-26)
 
 - **The PC memory model (`BB_GUEST_IN_PLACE`) is off by default.** It's the main source of late
   frames in play on the measured PC (RTX 3070 Ti, i5-14600KF, 60 FPS). The CPU it saves, a few
@@ -14,6 +40,9 @@ was found and how to fix it, in case it's picked up again. Paths are relative to
 - **Pick it up again if:**
   - logs with the model off show frames over 30 ms in play, away from loading screens; or
   - the model is wanted for its CPU saving: above 60 FPS, or on slower CPUs and handhelds.
+
+Since then (above): 0.4.4 picked up the part every player's game runs, and the second condition no
+longer applies, as the model is to be removed.
 
 ## Evidence
 
@@ -44,7 +73,8 @@ here one missed refresh at 60 Hz.
   keeping VRAM copies of everything and catching every CPU write (page protection, faults,
   re-uploads). Off by default in bbport and in DarkIzuku's fork.
 - **Lantern (Awaken):** Windows version from 0.9.16, on for everyone from 0.9.37 beta 4; beta 5
-  fixed an FPS sink with it. Hunter's Workshop inherited that default.
+  fixed an FPS sink with it (`docs/memory_model_fps_sink.md`). Hunter's Workshop inherited that
+  default.
 - **bbport 0.52 and later:** dropped sparse binding for it; its notes say "NVIDIA's sparse binding
   stalls the GPU for seconds". That replacement (the Vulkan layer's memory module, dma-buf memory)
   is Linux-only and comes with bbport's own renderer, so it doesn't port as it stands. HW's
@@ -56,9 +86,10 @@ here one missed refresh at 60 Hz.
 
 ### 1. The model's moves (model on only)
 
-The game's memory lives in one large sparse buffer, the arena (`buffer_cache/buffer_cache.cpp`).
-Each block of it is bound either to the game's own memory, imported ("in place"), or to a VRAM
-copy. The model moves blocks between the two as use changes:
+The game's memory lives in one large sparse buffer, the arena
+(`video_core/buffer_cache/buffer_cache.cpp`). Each block of it is bound either to the game's own
+memory, imported ("in place"), or to a VRAM copy. The model moves blocks between the two as use
+changes:
 
 - **`QueuePromotions`:** blocks the GPU reads often go from in place to a VRAM copy (loaded
   assets, GPU-written data, blocks back after idling or an evacuation). There's **no budget**:
@@ -86,20 +117,22 @@ the draw thread it still competes for the process's address space.
 
 ### 3. Image memory created and freed with each image (both models)
 
-`texture_cache/image.cpp`, `UniqueImage::Create`: images of `BB_VMA_DEDICATED_MB` (default 4) MiB or
-more get memory of their own, created when the image is and returned to the driver when it's
-freed. bbport chose this to avoid holes in shared VMA blocks (~0.9 GB on an RX 7800 XT). Every
-render target and large texture an area streams in is then a `vkAllocateMemory` and a kernel call.
-This is the `allocation` figure in the stall lines' `of which:` breakdown, for example 22.9 ms of a
-59 ms stall in `20261026_033515` and 35–60 ms in many 0.3.0 stalls. (Until 0.4.4 beta 1 those
-figures added up everything since the previous long frame, not the long frame alone: an upper bound.)
+`video_core/texture_cache/image.cpp`, `UniqueImage::Create`: images of `BB_VMA_DEDICATED_MB`
+(default 4) MiB or more get memory of their own, created when the image is and returned to the
+driver when it's freed. bbport chose this to avoid holes in shared VMA blocks (~0.9 GB on an
+RX 7800 XT). Every render target and large texture an area streams in is then a `vkAllocateMemory`
+and a kernel call. This is the `allocation` figure in the stall lines' `of which:` breakdown, for
+example 22.9 ms of a 59 ms stall in `20261026_033515` and 35–60 ms in many 0.3.0 stalls. (Until
+0.4.4 beta 1 those figures added up everything since the previous long frame, not the long frame
+alone: an upper bound.)
 
 ### 4. Arena residency chunks (both models)
 
-`BufferCache::AllocateResidency`: VRAM copies come out of 64 MiB chunks. Empty chunks go back to the
-driver after 5 s idle (`ProcessIdleBlocks`), so the next area allocates them again. A spare chunk
-is already created ahead when half the residency is in use (`spare_residency`,
-`TakeSpareResidency`), which covers part of this.
+`BufferCache::AllocateResidency`: VRAM copies come out of 64 MiB chunks. Empty chunks went back to the
+driver after 5 s idle (`ProcessIdleBlocks`, `FreeEmptyChunks`), so the next area allocated them
+again. A spare chunk is already created ahead when half the residency is in use (`spare_residency`,
+`TakeSpareResidency`), which covers part of this. Since 0.4.4 beta 1, with the model off and room
+in VRAM, an empty chunk waits 30 s and the one emptied last stays (step 3.2).
 
 ### 5. The full-screen image re-upload (both models)
 
@@ -114,7 +147,10 @@ Each step goes in on its own, behind a switch, and is measured before the next.
 ### Step 1: measure each late frame (no behaviour change)
 
 - *0.4.4 beta 1:* the `of which:` figures are the long frame's own (before, everything since the
-  previous long frame), with the images given new memory, given a freed image's, and checked.
+  previous long frame), with the images given new memory and checked (betas 1 to 4 also those given
+  a freed image's memory).
+- *Not done (2026-10-31):* the per-frame figures and the light report below. Half of the figures
+  count the model's moves, which go with it.
 - **Per-frame figures:** add to the stall line (`core/libraries/videoout/driver.cpp`, `Stall:` and
   its `of which:` line) this frame's:
   - `vkQueueBindSparse` calls, ranges, ms, and how many waited;
@@ -129,6 +165,10 @@ Each step goes in on its own, behind a switch, and is measured before the next.
   off.
 
 ### Step 2: the model's moves (only if the model is wanted)
+
+*No longer planned (2026-10-31):* the model is to be removed before 0.4.4 ships. Item 4's idea, a
+buffer bound directly to imported memory in place of the sparse arena, is how the GX region is read
+since 0.4.4 beta 9 ("Its own buffer", below).
 
 1. **Budget promotions.** Promotions are optional: a block left in place is correct, only slower
    for the GPU to read. Cap them per submission (`BB_PROMOTE_MB`, start at 8–16 MiB a frame), keep
@@ -163,25 +203,31 @@ Each step goes in on its own, behind a switch, and is measured before the next.
    slots.
 3. **Pin at load (model on).** Import every chunk of the game's direct memory while a loading
    screen is up, or at start, rather than at first use in play.
+   *No longer planned:* goes with the model. The GX region is imported whole at the game's start
+   (below).
 4. **The full-screen image.** Upload only the pages its write faults marked, or skip the upload
    when a cheap checksum of the written pages is unchanged. Failing that, spread its hash and
    upload over two frames.
+   *Not done (2026-10-31).*
 
-### The GX region as an upload heap (0.4.4 beta 5)
+### The GX region as an upload heap (0.4.4 betas 5 to 12)
 
 The game's per-frame GPU data lives in one region it makes at start: its GX range allocator
-(288 MiB with HW's patch). 0.4.4 beta 4 found it (a hook on its init, `engine/gx_region.cpp`) and
-showed that nearly every remaining write fault is inside it, and that the game binds it either in
-pieces of 16 KiB or less (already copied) or in spans of about 4 MiB (tracked: walked, the written
-pages uploaded, re-protected, faulted again at the game's next write).
+(288 MiB with HW's patch). 0.4.4 beta 4 found it (a hook on its init,
+`gpu/shim/engine/gx_region.cpp`) and showed that nearly every remaining write fault is inside it,
+and that the game binds it either in pieces of 16 KiB or less (already copied) or in spans of about
+4 MiB (tracked: walked, the written pages uploaded, re-protected, faulted again at the game's next
+write).
 
-`BB_GX_IN_PLACE` (default on, not with the PC memory model, which has its own rules) treats it as a
-PC game's upload heap: its whole blocks are imported for the GPU once, as they are
+`BB_GX_IN_PLACE` (default on, Windows only: `BbGxRing::InPlaceWanted`; not with the PC memory
+model, which has its own rules; the launcher's Per-frame GPU data in place, `exp_gx_in_place`)
+treats it as a PC game's upload heap: its whole blocks are imported for the GPU once, as they are
 (`BbGuestMemory::ImportRange`: VK_EXT_external_memory_host over the game's memory pool, on a
 thread of its own as soon as the region exists), and bound to that memory in one run as soon as
-the import is done (one sparse bind, at the game's start, rather than block by block in its first
-frames), never moved. What is bound inside it then takes the PC memory model's in-place path (`ObtainBuffer`):
-no tracking, uploads or VRAM copy; small read-only bindings are still copied when bound (commands
+the import is done (betas 5 to 8: one sparse bind, at the game's start, rather than block by block
+in its first frames; since beta 9 a buffer of its own, below), never moved. What is bound inside
+it then takes the PC memory model's in-place path (`ObtainBuffer`): no tracking, uploads or VRAM
+copy; small read-only bindings are still copied when bound (commands
 decoded later may change them on the CPU); the command processor's writes into it (WriteData,
 DMA) are recorded on the GPU in stream order (`CommandWriteTarget`, `DmaMayWriteOnCpu`), and GPU
 writes not done yet count as GPU-modified (`WriteTicks`). A binding over the region waits for the
@@ -191,9 +237,10 @@ before. Unlike the model, nothing moves: no sparse rebinds in play, the cause of
 Fences (beta 7): read in place, the region is read when the GPU runs the work, not when it is
 recorded, so the game must not see a fence for that work before the GPU has done it: it reuses
 the range allocator's memory by them (the collector at 0x26aa860 returns a range once its state
-reads done). The engine's default writes labels at recording; with the region in place it now
-writes them once the GPU has finished, as the PC memory model always has (`BB_HONEST_LABELS`, on
-whenever `BbGxRing::InPlaceWanted`). Beta 6 ran without it: lighting and other flicker in
+reads done). The engine wrote labels at recording, as it still does with the region tracked
+(`BB_GX_IN_PLACE=0`, or on Linux); with the region in place it writes them once the GPU has
+finished, as the PC memory model always has (`BB_HONEST_LABELS`, on whenever
+`BbGxRing::InPlaceWanted`). Beta 6 ran without it: lighting and other flicker in
 Central Yharnam and a screen-wide purple flash, gone with `BB_HONEST_LABELS=1` on the same build.
 
 When the work goes to the GPU (betas 9 to 12). A fence the game waits for is written once the GPU
@@ -257,7 +304,9 @@ frame, 102 to 108 FPS), there were 4.1 submissions a frame and the GPU was idle 
 0.12 ms a frame, in 4 gaps: the switches themselves, not waits for work. At the cap, 10 to 16 a
 frame, pacing stddev 0.02 to 0.05 ms. Frame statistics print `Fence submissions: N/frame at the
 game's submission ends (GPU out of work N, on its last N), N/frame when the GPU got to its last,
-N/frame by the safety net (expected 0)`. `BB_HONEST_FLUSH_US`, `BB_HONEST_IDLE_US`,
+N/frame by the safety net (expected 0)`, then the share of frames retired with the frame end and
+the empty submissions not made (beta 12), and the waits on a 4-byte fence's next word and the
+compute-queue WRITE_DATA packets (beta 20). `BB_HONEST_FLUSH_US`, `BB_HONEST_IDLE_US`,
 `BB_HONEST_IDLE_BACKLOG` and `BB_HONEST_IDLE_FLUSH` are gone.
 
 Measured (beta 6, `20261030_042617`, about 20 minutes, RTX 3070 Ti, against beta 4's
@@ -278,17 +327,18 @@ profile's total less its idle label; play windows of over 500 draws a frame):
 | in place, fences at recording (`20261030_044107`) | 7.26 ms at 1,132 draws | 6.63 ms | 0 | 0.005 | 2.0 |
 | in place, honest fences (beta 7's default, `20261030_045019`) | 7.03 ms at 986 draws | 7.15 ms | 1 | 0.003 | 10.1 |
 
-Reading the region over PCIe costs the GPU less than the tracked path's uploads of it did: about
-0.9 ms a frame less at 60 FPS. Where the GPU is the limit it does not show: 0.4.3 itself
+At 60 FPS, reading the region over PCIe looked cheaper for the GPU than the tracked path's uploads
+of it: about 0.9 ms a frame less. Where the GPU is the limit it does not show: 0.4.3 itself
 (`20261030_211220`) and beta 12 (`20261030_204738`) at the same spot at 120 FPS (about 1,360 draws,
 DLAA) both run at about 109 FPS (108.5 to 108.8 and 108.8 to 109.2, beta 12 with the GPU profile
 on), so the GPU's time there is the same within 0.05 ms; the 60 FPS figures were taken with the GPU
-partly idle, its clocks free to vary. A per-frame GPU copy of it into VRAM (an alternative considered) has nothing
-to win here. With honest fences the GPU command thread sends about 10 submissions a frame
-(`BB_HONEST_FLUSH_US`, 2 ms) for 2; CPU use (3.0 to 3.2 cores), frame rate (60), pacing (stddev
-0.05 ms, p99 16.8 ms) and VRAM (3.0 to 3.5 GB, against 3.1 to 3.7 tracked) are unchanged. Long
-frames come at loads in all three; in play, honest fences had four windows with one frame of 20 to
-30 ms (no shader compiles) in about ten minutes, tracked one: to watch, not acted on.
+partly idle, its clocks free to vary. A per-frame GPU copy of it into VRAM (an alternative
+considered) has nothing to win here. With honest fences as beta 7 timed them (`BB_HONEST_FLUSH_US`,
+2 ms; replaced in betas 9 to 12, above) the GPU command thread sent about 10 submissions a frame
+for 2; CPU use (3.0 to 3.2 cores), frame rate (60), pacing (stddev 0.05 ms, p99 16.8 ms) and VRAM
+(3.0 to 3.5 GB, against 3.1 to 3.7 tracked) were unchanged. Long frames came at loads in all
+three; in play, honest fences had four windows with one frame of 20 to 30 ms (no shader compiles)
+in about ten minutes, tracked one: to watch, not acted on.
 
 Its own buffer (beta 9). Betas 5 to 8 bound the region's arena blocks to the import with one sparse
 bind. The arena is the engine's one sparse buffer over all of the game's memory, and NVIDIA's lists
@@ -328,13 +378,15 @@ when it is the same run of memory and the driver imports at 4 KiB; logged either
 read-only bindings reaching into it in place (`InGxTail`) unless the GPU has written there
 through the tracked path. Read in place, those bytes are what the CPU wrote, which the tracked
 copy would also hold. Writes there, and the page table for that block, stay on the tracked copy,
-as the rest of the block is the next allocation's; an unmap of that page's other bytes ends it. Across the edge, part in the buffer and
-part outside: read-only bindings up to 8 MiB are copied when bound (the stream path,
+as the rest of the block is the next allocation's; an unmap of that page's other bytes ends it.
+Across the edge, part in the buffer and part outside: read-only bindings up to 8 MiB are copied
+when bound (the stream path,
 `GxEdgeCopied`, `GxTailCopied`); anything else that needs the arena there (a GPU write across the
 edge, a shader's page fault there) binds the arena's blocks to the import as before
 (`GxArenaBound`, logged once, with aliasing barriers as `BB_CHUNK_BUFFERS` has:
 `Runtime::NoteAliasedAccess`). `BB_GX_OWN_BUFFER=0` is beta 8's way, for comparison. The arena's
-out-of-spec note in the log is now printed only with the PC memory model.
+out-of-spec note at start is now printed only with the PC memory model (`GxArenaBound`'s line says
+so where it applies).
 
 ### Step 4: verify, then decide the default
 
@@ -342,3 +394,5 @@ out-of-spec note in the log is now printed only with the PC memory model.
   30 ms in play per minute, the minute summaries' CPU cores, and VRAM.
 - **The model's default:** it goes back on only if, with steps 2 and 3, it has no more late
   frames in play than with it off.
+  *Superseded (2026-10-31):* the model is not coming back on; it is to be removed before 0.4.4
+  ships.

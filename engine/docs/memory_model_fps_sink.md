@@ -1,8 +1,15 @@
 # PC memory model: FPS sinking over a session (2026-10-22)
 
-With the Windows PC memory model on (`BB_GUEST_IN_PLACE=1`, the launcher's default since 0.9.37
-beta 4) the frame rate fell over a play session: 90 at first, 75 after four minutes, ~60 after
-five, 30 near the end of the player's video. Turning the memory model off fixed it.
+Status (2026-10-31): the fix below shipped in Lantern 0.9.37 beta 5 and is still in the code
+(`video_core/buffer_cache/buffer_cache.cpp` under `engine/gpu/shadps4/`), but none of it runs with
+the PC memory model off. The model has been off by default since Hunter's Workshop 0.4.0 beta 4
+(the launcher's Experimental option PC memory model, `exp_guest_in_place`) and is to be removed
+before 0.4.4 ships; not done yet. Why it went off, and what 0.4.4 did instead: `docs/gpu-memory.md`.
+
+With the Windows PC memory model on (`BB_GUEST_IN_PLACE=1`, then the launcher's default, since
+Lantern 0.9.37 beta 4) the frame rate fell over a play session: 90 at first, 75 after four
+minutes, ~60 after five, 30 near the end of the player's video. Turning the memory model off fixed
+it.
 
 ## Evidence
 
@@ -21,9 +28,9 @@ Player log `lantern-20261021_204509.log` (RX 9070 XT, Ryzen 7 9700X, 2560x1440 o
 CPU use went down as FPS did (3.8 -> 2.8 cores): the threads waited more, they did not work more.
 Write faults (161-434/s) and protects (7.6k-15k pages/s) did not grow with the drop.
 
-The same accumulation shows on this PC (RTX 5060, `logs/last_session.log`, beta 3, five minutes
-with `BB_FRAME_STATS=1`): `Buffer bindings: ... in place` went 24 -> 49 -> 175 -> 200 -> 240 ->
-263 MB a frame while 725 MiB of blocks moved in place as CPU-written. Stage B is the limit there
+The same accumulation shows on this PC (RTX 5060, `logs/last_session.log`, 0.9.37 beta 3, five
+minutes with `BB_FRAME_STATS=1`): `Buffer bindings: ... in place` went 24 -> 49 -> 175 -> 200 ->
+240 -> 263 MB a frame while 725 MiB of blocks moved in place as CPU-written. Stage B is the limit there
 (97% busy), which hides most of the GPU side.
 
 ## Mechanism
@@ -60,14 +67,15 @@ the 1106 MiB "moved to VRAM" in the table.
   (`ProcessDynamicRetries`, once a second). It is write-protected again; if the game's code still
   writes it in 3 frames of 60 it moves back and waits twice as long (up to 32x). A block that
   stayed in VRAM four times its wait starts over. At most `BB_DYNAMIC_RETRY_MB` (default 8) MiB a
-  second is retried, none while VRAM is tight. The new copy is uploaded whole from the game's
-  memory before it is read (`ProcessRetryFills`): its slot may hold another block's bytes.
+  second is retried, none while VRAM is tight. A retry is a promotion (`QueuePromotions`): the new
+  copy is uploaded whole from the game's memory before it is read (`ProcessPromoteFills`), as its
+  slot may hold another block's bytes.
 - `BB_EVACUATE_IN_USE=1` restores evacuations of blocks the GPU read in the last 10 s while VRAM
   has room (default 0: those stay, the idle ones of the chunk go).
 
 ## Promoted blocks with another block's bytes (device lost, RTX 2070 report)
 
-A beta 4 report (RTX 2070 8 GB, 16 GB RAM) lost the device after "loaded blocks moved from in
+A 0.9.37 beta 4 report (RTX 2070 8 GB, 16 GB RAM) lost the device after "loaded blocks moved from in
 place to VRAM" climbed to 271 MiB. The GPU finished `cs 4ca76892` (1x1x1) and never started the
 indirect `cs 2da7fe60` after it. This is the particle pair of the 2026-10-06 hang, whose loop counts
 come from memory. `QueuePromotions` takes a freed VRAM slot (`AllocateResidency`) without clearing
@@ -96,3 +104,10 @@ the same settings, `BB_DYNAMIC_RETRY=0 BB_EVACUATE_IN_USE=1` (as before) against
 comparing the per-minute `Load:` FPS and the `Guest memory, last 60 s` lines. The fix holds if
 "now ... MiB in place (... CPU-written)" and "bound in place ... MB a frame" stay flat instead of
 climbing, and the FPS with them.
+
+Later (2026-10-25 and 26): this A/B was not run as planned, but five Hunter's Workshop 0.3.0
+sessions with the model on (RTX 3070 Ti, i5-14600KF, 60 FPS) showed no sinking: the in-place share
+followed the area (0.1 to 551 MB a frame) and did not climb (`docs/community-fixes-plan.md`, "PC
+memory model (`BB_GUEST_IN_PLACE`), on and off"). They had more late frames than the sessions with
+it off (0.29 against 0.10 a minute), and a 0.4.0 beta 3 session with it on had each of its late
+frames inside a burst of the model's moves: why it went off by default (`docs/gpu-memory.md`).
