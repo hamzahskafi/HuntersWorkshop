@@ -1363,9 +1363,10 @@ int CheckCache(const fs::path& dir) {
                                HashCombine(info2.pgm_hash, perm_idx) != hash) {
                         why = "hash mismatch";
                     } else {
-                        bool gds = false;
+                        bool gds = false; // per subgroup: compute shaders only
                         for (const auto& buffer : info2.buffers) {
-                            gds = gds || buffer.buffer_type == BufferType::GdsBuffer;
+                            gds = gds || (buffer.buffer_type == BufferType::GdsBuffer &&
+                                          info2.hw_stage == HwStage::Compute);
                         }
                         why = "binary version " + std::to_string(binary_version) + " for motion " +
                               std::to_string(info2.hw_stage == HwStage::Vertex &&

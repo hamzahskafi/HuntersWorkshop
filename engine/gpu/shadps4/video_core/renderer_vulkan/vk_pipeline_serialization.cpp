@@ -29,6 +29,8 @@ namespace Serialization {
 static constexpr u32 ShaderBinaryVersion = 7u; // bbport: interpolated integer fix (Pascal)
 static constexpr u32 MotionShaderBinaryVersion = 8u; // runtime address descriptor, set 1
 static constexpr u32 GdsShaderBinaryVersion = 9u; // 0.4.4 beta 19: GDS append per subgroup
+// The three binary versions are separate: a change to all shaders' code moves all three (to
+// numbers none of them had).
 static constexpr u32 ShaderMetaVersion = 8u; // bbport: HwFragmentRuntimeInfo::depth_first
 static constexpr u32 PipelineKeyVersion = 7u; // pointer-free pipeline state + generated fragment,
                                                // decided by the draw's own registers without a pixel shader
@@ -36,9 +38,10 @@ static constexpr u32 PipelineKeyVersion = 7u; // pointer-free pipeline state + g
 /// The binary version a shader's record carries. 0.4.4 beta 19: shaders that use the GDS buffer
 /// carry their own while GDS appends are translated per subgroup (gds_append.h), so only they
 /// are compiled again, and BB_GDS_APPEND=lane takes their earlier binaries back; others as
-/// before (vertex shaders with motion vectors: their own since 0.4.4 beta 15).
+/// before (vertex shaders with motion vectors: their own since 0.4.4 beta 15). 0.4.4 beta 20:
+/// compute shaders only (the others' appends are per lane again, as their earlier binaries).
 static u32 BinaryVersionFor(const Shader::Info& info, const Shader::StageSpecialization& spec) {
-    if (Shader::GdsAppendPerSubgroup()) {
+    if (Shader::GdsAppendPerSubgroup(info.hw_stage)) {
         for (const auto& buffer : info.buffers) {
             if (buffer.buffer_type == Shader::BufferType::GdsBuffer) {
                 return GdsShaderBinaryVersion;

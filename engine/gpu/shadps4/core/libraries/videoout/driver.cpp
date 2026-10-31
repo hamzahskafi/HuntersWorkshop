@@ -773,11 +773,13 @@ void VideoOutDriver::Flip(const Request& req) {
                                            : 0.0;
             const double draws_per_frame = frames ? double(all_draws - window_draws) / frames : 0.0;
             // 0.4.4 beta 20: its work alone, without the idle spin counted in its CPU time (the
-            // engine map's clean-4): CPU time less idle time, per draw.
+            // engine map's clean-4): CPU time less the spin (not the sleep, which is no CPU
+            // time), per draw.
             const u64 idle_ns = BbStats::gpu_idle_ns.exchange(0);
+            const u64 spin_ns = BbStats::gpu_spin_ns.exchange(0);
             const double work_us_per_draw =
                 all_draws > window_draws
-                    ? std::max(0.0, double(gpu_us - window_gpu_us) - idle_ns / 1e3) /
+                    ? std::max(0.0, double(gpu_us - window_gpu_us) - spin_ns / 1e3) /
                           (all_draws - window_draws)
                     : 0.0;
             window_draws = all_draws;

@@ -418,6 +418,14 @@ public:
         }
     }
 
+    /// 0.4.4 beta 20 (the audit): ForEachImageInRegion under the cache's lock, from a thread the
+    /// guest's write faults run beside (they change image flags under it, Picked among them).
+    template <typename Func>
+    void ForEachImageInRegionLocked(VAddr cpu_addr, size_t size, Func&& func) {
+        std::scoped_lock lock{mutex};
+        ForEachImageInRegion(cpu_addr, size, std::forward<Func>(func));
+    }
+
 private:
     /// Iterate over all page indices in a range
     template <typename Func>

@@ -253,6 +253,10 @@ void Liverpool::Process(std::stop_token stoken) {
                         break;
                     }
                 }
+                BbStats::gpu_spin_ns.fetch_add(
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        std::chrono::steady_clock::now() - idle_start).count(),
+                    std::memory_order_relaxed);
             }
             bool gpu_wants_work_now = false;
             {
@@ -512,6 +516,16 @@ bool PipelinedOpcode(PM4ItOpcode opcode) {
 }
 } // namespace
 
+// 0.4.4 beta 20: BB_HONEST_LABELS fences queued with the bytes they write and whether their value
+// is known (PendingFenceValue; the engine map's fence-1). BB_FENCE_HALF_CHECK=0: as before.
+static bool FenceSizes() {
+    static const bool on = [] {
+        const char* env = std::getenv("BB_FENCE_HALF_CHECK");
+        return !(env && env[0] == '0');
+    }();
+    return on;
+}
+
 namespace {
 // bbport: a label written straight into guest memory (no backing view): one store. A memcpy of a
 // variable 4 or 8 bytes is two overlapping stores in glibc; a thread preempted between them
@@ -578,13 +592,16 @@ void RunEventWriteEop(Vulkan::Rasterizer& rasterizer, const u8* data) {
     // does (an end-of-pipe event), instead of when that work is recorded.
     if (Vulkan::Rasterizer::HonestLabels()) {
         // 0.4.4 beta 20: the value and size it writes; the clock and counter modes write a time,
-        // not the packet's data: no value to answer waits with (polled in memory).
+        // not the packet's data: no value to answer waits with (they read memory), though they
+        // still hide older fences at the same address.
         const auto sel = eop.data_sel.Value();
+        const bool writes = sel != DataSelect::None;
         const bool known = sel == DataSelect::Data32Low || sel == DataSelect::Data64;
         const u64 value = sel == DataSelect::Data32Low ? eop.DataDWord() : eop.DataQWord();
         rasterizer.SignalAfterGpu([eop, seq] { SignalEop(eop, seq); },
-                                  known ? reinterpret_cast<VAddr>(eop.Address<u8>()) : 0, value,
-                                  sel == DataSelect::Data32Low ? 4u : 8u);
+                                  writes ? reinterpret_cast<VAddr>(eop.Address<u8>()) : 0, value,
+                                  sel == DataSelect::Data32Low ? 4u : 8u,
+                                  known || !FenceSizes());
         return;
     }
     // Guest memory copies on the copy threads precede the fence the guest sees.
@@ -882,25 +899,29 @@ bool Liverpool::PendingFenceValue(VAddr address, u32& value) {
     // BB_HONEST_LABELS: past the recording thread, a fence waits for the GPU to finish the work
     // before it; in stream order it is met already.
     if (Vulkan::Rasterizer::HonestLabels() && rasterizer) {
+        if (FenceSizes()) {
+            // 0.4.4 beta 20: the newest fence that writes these 4 bytes answers (the engine map's
+            // fence-1). Only an 8-byte fence writes label+4: a 4-byte one leaves it as it is in
+            // memory, polled as such (before, its "high half" read 0); a clock or counter there
+            // is read in memory too; and a newer 8-byte fence at label-4 wins over an older
+            // 4-byte one at label (before, the fence at the address itself was asked first).
+            bool next_to_short = false;
+            if (rasterizer->PendingSignalWord(address, value, next_to_short)) {
+                return true;
+            }
+            if (next_to_short) {
+                fence_high_half_refused.fetch_add(1, std::memory_order_relaxed);
+            }
+            return false;
+        }
         u64 data = 0;
         if (rasterizer->PendingSignalValue(address, data)) {
             value = static_cast<u32>(data);
             return true;
         }
-        u32 size = 8;
-        if ((address & 7) == 4 && rasterizer->PendingSignalValue(address - 4, data, &size)) {
-            // 0.4.4 beta 20: only an 8-byte fence writes label+4 (the engine map's fence-1): a
-            // 4-byte one leaves it as it is in memory, polled as such. Before, its "high half"
-            // read 0. BB_FENCE_HALF_CHECK=0: as before.
-            static const bool half_check = [] {
-                const char* env = std::getenv("BB_FENCE_HALF_CHECK");
-                return !(env && env[0] == '0');
-            }();
-            if (size == 8 || !half_check) {
-                value = static_cast<u32>(data >> 32); // the high half of a 64-bit fence
-                return true;
-            }
-            fence_high_half_refused.fetch_add(1, std::memory_order_relaxed);
+        if ((address & 7) == 4 && rasterizer->PendingSignalValue(address - 4, data)) {
+            value = static_cast<u32>(data >> 32); // the high half of a 64-bit fence
+            return true;
         }
     }
     return false;
@@ -2426,7 +2447,8 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
                 const u32 pipe_id = queue.pipe_id;
                 // 0.4.4 beta 20: value and size by its data select, as EOP's.
                 const auto sel = release.data_sel.Value();
-                const bool writes = sel == DataSelect::Data32Low || sel == DataSelect::Data64;
+                const bool sizes = FenceSizes();
+                const bool known = sel == DataSelect::Data32Low || sel == DataSelect::Data64;
                 rasterizer->SignalAfterGpu(
                     [release, pipe_id] {
                         release.SignalFence(
@@ -2436,9 +2458,10 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
                             },
                             [](VAddr, u16, u16) {});
                     },
-                    writes ? release.Address<VAddr>() : 0,
-                    sel == DataSelect::Data32Low ? release.DataDWord() : release.DataQWord(),
-                    sel == DataSelect::Data32Low ? 4u : 8u);
+                    sel != DataSelect::None ? release.Address<VAddr>() : 0,
+                    sel == DataSelect::Data32Low && sizes ? release.DataDWord()
+                                                          : release.DataQWord(),
+                    sel == DataSelect::Data32Low ? 4u : 8u, known || !sizes);
                 break;
             }
             // bbport: copies deferred to the recording thread precede writes the guest sees, and

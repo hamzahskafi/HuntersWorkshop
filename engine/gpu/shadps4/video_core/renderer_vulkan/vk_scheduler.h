@@ -1060,6 +1060,12 @@ public:
         return is_rendering;
     }
 
+    /// 0.4.4 beta 20 (the audit): a render pass open, or closed by a recording cut with nothing
+    /// ending it since (frame statistics: what a dispatch interrupts).
+    [[nodiscard]] bool PassOpen() const {
+        return is_rendering || (resume_rendering && !ended_after_cut);
+    }
+
 
 
     /// Whether BeginRendering(state) would start a new render pass.
@@ -1266,6 +1272,9 @@ private:
     bool is_rendering = false;
     GpuSavings::PassBreak pass_break = GpuSavings::PassBreak::Other; ///< what ended the last pass
     u32 pass_break_detail = 0;                                         ///< and its detail bits
+    /// 0.4.4 beta 20 (the audit): an ender came after a cut closed the pass (pass_break names
+    /// the first): the pass begun again is counted as split by it, not as resumed.
+    bool ended_after_cut = false;
     // bbport: threaded recording. Commands go into chunks of the current segment; segments are
     // recorded in parallel, each into its own command buffer, and a submission runs their
     // command buffers in order. Guest memory copies and fence signals go into ordered chunks,

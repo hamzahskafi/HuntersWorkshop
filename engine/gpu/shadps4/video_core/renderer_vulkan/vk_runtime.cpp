@@ -96,6 +96,24 @@ static vk::Extent3D CopyExtent(const VideoCore::ImageInfo& src, u32 src_mip,
             depth};
 }
 
+/// 0.4.4 beta 20: the format of an aspect's data in a buffer copy: a depth/stencil image's depth
+/// aspect alone (2 or 4 bytes a texel, not the format's packed size).
+static vk::Format CopyAspectFormat(vk::Format format, vk::ImageAspectFlags aspect) {
+    if (!(aspect & vk::ImageAspectFlagBits::eDepth)) {
+        return format;
+    }
+    switch (format) {
+    case vk::Format::eD16Unorm:
+    case vk::Format::eD16UnormS8Uint:
+        return vk::Format::eD16Unorm;
+    case vk::Format::eX8D24UnormPack32:
+    case vk::Format::eD24UnormS8Uint:
+        return vk::Format::eX8D24UnormPack32;
+    default:
+        return vk::Format::eD32Sfloat;
+    }
+}
+
 static u64 BufferImageCopySize(const vk::BufferImageCopy& copy, const vk::Format pixel_format) {
     const u32 row_length = copy.bufferRowLength ? copy.bufferRowLength : copy.imageExtent.width;
     const u32 height = copy.bufferImageHeight ? copy.bufferImageHeight : copy.imageExtent.height;
@@ -120,6 +138,17 @@ Runtime::Runtime(const Instance& instance_, Scheduler& scheduler_)
     memory_barrier.dstStageMask = vk::PipelineStageFlagBits2::eAllCommands;
     memory_barrier.dstAccessMask =
         vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite;
+}
+
+Runtime::~Runtime() {
+    // 0.4.4 beta 20 (the audit): the depth copies' cached views (the GPU has finished: the
+    // presenter's schedulers are done before this, as for the pipelines destroyed with it).
+    const auto device = instance.GetDevice();
+    for (const auto& entry : depth_copy_views) {
+        if (entry.view) {
+            device.destroyImageView(entry.view);
+        }
+    }
 }
 
 void Runtime::TickFrame() {
@@ -432,6 +461,15 @@ void Runtime::CopyImageWithBuffer(VideoCore::Image* src, VideoCore::Image* dst,
 
     boost::container::small_vector<std::pair<vk::BufferImageCopy, vk::BufferImageCopy>, 8> regions;
     u64 copy_size = 0;
+    // 0.4.4 beta 20: the buffer holds the images' own formats (a D16S8 image is D24S8 or D32S8
+    // where the device has no D16S8: 4 bytes a texel, not 3), each aspect copied alone.
+    const auto host_format = [&](const VideoCore::Image* image) {
+        return CopyAspectFormat(
+            instance.GetSupportedFormat(image->info.pixel_format, image->format_features),
+            image->aspect_mask & ~vk::ImageAspectFlagBits::eStencil);
+    };
+    const vk::Format src_format = host_format(src);
+    const vk::Format dst_format = host_format(dst);
     for (u32 mip = 0; mip < num_mips; ++mip) {
         const auto layers = SanitizeCopyLayers(src->info, dst->info, mip, mip);
         if (!layers) {
@@ -452,7 +490,8 @@ void Runtime::CopyImageWithBuffer(VideoCore::Image* src, VideoCore::Image* dst,
         upload.imageSubresource.aspectMask = dst->aspect_mask & ~vk::ImageAspectFlagBits::eStencil;
         upload.imageSubresource.layerCount = layers.destination;
         upload.imageExtent.depth = dst->info.props.is_volume ? layers.depth : 1u;
-        copy_size = std::max<u64>(copy_size, BufferImageCopySize(download, src->info.pixel_format));
+        copy_size = std::max({copy_size, BufferImageCopySize(download, src_format),
+                              BufferImageCopySize(upload, dst_format)});
         regions.emplace_back(download, upload);
     }
     if (regions.empty()) {
@@ -466,6 +505,14 @@ void Runtime::CopyImageWithBuffer(VideoCore::Image* src, VideoCore::Image* dst,
             staging_pool.Request(copy_size, VideoCore::MemoryType::DeviceLocal, 256);
         buffer = staging.buffer;
         offset = staging.offset;
+        // 0.4.4 beta 20 (the audit): the regions were built at offset 0. A request of up to
+        // 16 MB comes from the ring at any offset: the copy used the start of the ring's buffer,
+        // outside its range, over other staging data (beta 19 and 20, on devices without
+        // maintenance8).
+        for (auto& [download, upload] : regions) {
+            download.bufferOffset = offset;
+            upload.bufferOffset = offset;
+        }
     }
     ASSERT(copy_size <= 128_MB && offset <= buffer->SizeBytes() &&
            copy_size <= buffer->SizeBytes() - offset);
@@ -677,7 +724,12 @@ static std::optional<GpuSavings::DepthCopyRefusal> CheckDepthColorPair(
     if (from.num_samples != 1 || to.num_samples != 1) {
         return DepthCopyRefusal::Samples;
     }
-    if (from.props.is_volume || to.props.is_volume) {
+    // The shaders' views are 2D (DepthCopyView): no volume, nor a 1D image (the audit).
+    const auto one_d = [](const VideoCore::ImageInfo& info) {
+        return info.type == AmdGpu::ImageType::Color1D ||
+               info.type == AmdGpu::ImageType::Color1DArray;
+    };
+    if (from.props.is_volume || to.props.is_volume || one_d(from) || one_d(to)) {
         return DepthCopyRefusal::LevelsOrLayers;
     }
     if (from.size.width != to.size.width || from.size.height != to.size.height) {
@@ -736,9 +788,11 @@ bool Runtime::CopyDepthToColor(VideoCore::Image* src, VideoCore::Image* dst) {
     constexpr auto depth_layout = vk::ImageLayout::eDepthStencilReadOnlyOptimal;
     bool needs_flush = Transit(src, depth_layout, vk::PipelineStageFlagBits2::eComputeShader,
                                vk::AccessFlagBits2::eShaderRead);
+    // eShaderWrite: a write to the image's state (Image::GetBarriers), so a second copy into it
+    // waits for this one (eShaderStorageWrite is not counted as one there).
     needs_flush |= Transit(dst, vk::ImageLayout::eGeneral,
                            vk::PipelineStageFlagBits2::eComputeShader,
-                           vk::AccessFlagBits2::eShaderStorageWrite);
+                           vk::AccessFlagBits2::eShaderWrite);
     if (needs_flush) {
         FlushBarriers();
     }
@@ -806,10 +860,13 @@ bool Runtime::CopyColorToDepth(VideoCore::Image* src, VideoCore::Image* dst) {
     bool needs_flush =
         Transit(src, vk::ImageLayout::eShaderReadOnlyOptimal,
                 vk::PipelineStageFlagBits2::eFragmentShader, vk::AccessFlagBits2::eShaderRead);
+    // eMemoryWrite beside it: a write to the image's state (Image::GetBarriers counts no
+    // attachment write as one), so a second copy into it waits for this one (the audit).
     needs_flush |= Transit(dst, vk::ImageLayout::eDepthStencilAttachmentOptimal,
                            vk::PipelineStageFlagBits2::eEarlyFragmentTests |
                                vk::PipelineStageFlagBits2::eLateFragmentTests,
-                           vk::AccessFlagBits2::eDepthStencilAttachmentWrite);
+                           vk::AccessFlagBits2::eDepthStencilAttachmentWrite |
+                               vk::AccessFlagBits2::eMemoryWrite);
     if (needs_flush) {
         FlushBarriers();
     }

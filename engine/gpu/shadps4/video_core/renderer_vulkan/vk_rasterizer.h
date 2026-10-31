@@ -244,9 +244,10 @@ public:
     /// waits on the work semaphore: fences the guest sees when the work is done, not when it is
     /// recorded. `label` and `value`: the fence it writes (PendingSignalValue).
     /// 0.4.4 beta 20: `size`, the bytes it writes (4 or 8): a wait on label+4 is answered from
-    /// an 8-byte fence only (the engine map's fence-1).
+    /// an 8-byte fence only (the engine map's fence-1). `known` false: it writes a value not
+    /// known here (a clock or counter), so waits on its bytes read memory (PendingSignalWord).
     void SignalAfterGpu(std::function<void()> signal, VAddr label = 0, u64 value = 0,
-                        u32 size = 8);
+                        u32 size = 8, bool known = true);
     /// Whether signals wait for work not submitted yet (the GPU command thread submits it when
     /// it runs out of work, or the guest could wait for them forever).
     bool HasUnsubmittedSignals();
@@ -299,7 +300,12 @@ public:
     }
     /// The newest queued value of the fence at `address` (a WaitRegMem in the same stream is met
     /// by it in stream order).
-    bool PendingSignalValue(VAddr address, u64& value, u32* size = nullptr);
+    bool PendingSignalValue(VAddr address, u64& value);
+    /// 0.4.4 beta 20: the 4 bytes at `address` as the newest queued fence over them writes them
+    /// (a 4-byte fence at `address`, or either half of an 8-byte one); false when none does or
+    /// that one's value is not known here. `next_to_short`: a 4-byte fence just below was passed
+    /// over (it does not write there).
+    bool PendingSignalWord(VAddr address, u32& value, bool& next_to_short);
     static bool HonestLabels();
     /// The GPU command thread or the draw recording thread (fault handling runs inline there).
     bool IsGpuSideThread() const;
@@ -896,6 +902,7 @@ private:
         VAddr label;
         u64 value;
         u32 size = 8; ///< 0.4.4 beta 20: the bytes the fence writes at `label`
+        bool known = true; ///< 0.4.4 beta 20: `value` is what it writes
     };
     void GpuSignalLoop(std::stop_token token);
     /// bbport: GpuSignalLoop has waited 10 s for `tick`: prints whether the GPU or the port is stuck.

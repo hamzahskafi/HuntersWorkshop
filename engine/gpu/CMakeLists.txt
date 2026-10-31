@@ -142,6 +142,8 @@ set(SHADER_SRC ${CMAKE_CURRENT_SOURCE_DIR}/shadps4/video_core/host_shaders)
 set(SHADER_INCLUDE ${CMAKE_CURRENT_BINARY_DIR}/include)
 set(SHADER_DIR ${SHADER_INCLUDE}/video_core/host_shaders)
 set(SHADER_HEADERS "")
+# The files the shaders include (0.4.4 beta 20: rcas_extra.glsl): a change rebuilds them all.
+file(GLOB SHADER_INCLUDES ${SHADER_SRC}/*.glsl ${SHADER_SRC}/fsr/*.h)
 function(add_host_shader FILENAME SHADER_NAME)
     set(OUT ${SHADER_DIR}/${SHADER_NAME}.h)
     string(TOUPPER ${SHADER_NAME} SYMBOL)
@@ -151,7 +153,7 @@ function(add_host_shader FILENAME SHADER_NAME)
         COMMAND ${CMAKE_COMMAND} -E make_directory ${SHADER_DIR}
         COMMAND ${GLSLANG_COMPILER} --target-env vulkan1.3 -o ${OUT} --vn ${SYMBOL} ${DEFINES} ${SHADER_SRC}/${FILENAME}
         COMMAND ${CMAKE_COMMAND} "-DHEADER_FILE=${OUT}" -P ${SHADER_SRC}/AddShaderHeaderInclude.cmake
-        DEPENDS ${SHADER_SRC}/${FILENAME} VERBATIM)
+        DEPENDS ${SHADER_SRC}/${FILENAME} ${SHADER_INCLUDES} VERBATIM)
     set(SHADER_HEADERS ${SHADER_HEADERS} ${OUT} PARENT_SCOPE)
 endfunction()
 add_host_shader(color_to_ms_depth.frag color_to_ms_depth_frag)

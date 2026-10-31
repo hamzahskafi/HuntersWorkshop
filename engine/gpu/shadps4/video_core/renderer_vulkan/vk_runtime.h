@@ -27,7 +27,7 @@ class Scheduler;
 class Runtime {
 public:
     explicit Runtime(const Instance& instance, Scheduler& scheduler);
-    ~Runtime() = default;
+    ~Runtime();
 
     Scheduler& GetScheduler() {
         return scheduler;
@@ -96,7 +96,8 @@ public:
     /// depth into R16 unorm or R16_UINT, and every level and layer both images have. False when
     /// it does not apply (nothing done): the caller copies as before.
     /// BB_DEPTH_COPY_SHADER=0 turns it off (CopyColorAndDepth as before 0.4.4 beta 17), with
-    /// CopyColorToDepth.
+    /// CopyColorToDepth; the colour to multisampled depth draw keeps its limit of 4 samples, and
+    /// the buffer copy its own-sized staging range (beta 19).
     bool CopyDepthToColor(VideoCore::Image* src, VideoCore::Image* dst);
     /// 0.4.4 beta 19: the other way, a single-sample colour image (R32F, R32_UINT holding a
     /// float's bits, R16 unorm, R16_UINT holding 16-bit depth's bits) into a depth image of its

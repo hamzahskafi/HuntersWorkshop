@@ -511,8 +511,8 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
         for (const auto& batch : batches) {
             const VAddr start = dst_buf_sharp.base_address + batch.dst_min;
             const u64 size = batch.dst_max - batch.dst_min;
-            texture_cache.ForEachImageInRegion(start, size, [&](VideoCore::ImageId,
-                                                                VideoCore::Image& image) {
+            texture_cache.ForEachImageInRegionLocked(start, size, [&](VideoCore::ImageId,
+                                                                      VideoCore::Image& image) {
                 const VAddr base = image.info.guest_address;
                 if (told.size() >= 16 || std::ranges::find(told, base) != told.end()) {
                     return;
@@ -536,7 +536,7 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
     // its own name. Counted once per game dispatch.
     if (!batches.empty()) {
         auto& scheduler = runtime.GetScheduler();
-        copy_dispatch_in_pass = scheduler.IsRendering();
+        copy_dispatch_in_pass = scheduler.PassOpen(); // (or cut, nothing ended since)
         if (copy_dispatch_in_pass) {
             GpuSavings::Count(GpuSavings::Get().hle_dispatches_in_pass);
         }
@@ -615,9 +615,11 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
                         if (!MultiCopy(rasterizer, obtained[b].src, obtained[b].dst, part)) {
                             runtime.CopyBuffer(obtained[b].src, obtained[b].dst, part);
                         }
+                        copy_dispatch_in_pass = false; // the first batch's only (the audit)
                         at = batches[b].end;
                     }
                 }
+                copy_dispatch_in_pass = false;
                 first = last;
                 copy_start = copy_end;
             }
@@ -659,9 +661,11 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
         if (!MultiCopy(rasterizer, src_buf, dst_buf, vk_copies)) {
             runtime.CopyBuffer(src_buf, dst_buf, vk_copies);
         }
+        // The first batch's only (the audit): one copied without MultiCopy leaves it unread, and
+        // a later batch's would read it after the first batch's copy.
+        copy_dispatch_in_pass = false;
         batch_start = batch_end;
     }
-    copy_dispatch_in_pass = false; // a first batch copied without MultiCopy did not take it
     return true;
 }
 

@@ -1005,7 +1005,7 @@ void runtime_memory_read_backing(uintptr_t address, void *data, uint64_t size) {
 }
 /* Per-thread cache of recently found regions for the GPU's per-draw queries:
  * entries hold for as long as the table generation they were read at. */
-typedef struct { uint64_t generation; uintptr_t start, end; int kind; } CachedRegion;
+typedef struct { uint64_t generation; uintptr_t start, end; int kind, prot; } CachedRegion;
 static __thread CachedRegion region_cache[8];
 static __thread unsigned region_cache_next;
 static const CachedRegion *cached_region(uintptr_t address) {
@@ -1021,7 +1021,7 @@ static const CachedRegion *cached_region(uintptr_t address) {
 static void cache_region(size_t i) {
     uint64_t generation=__atomic_load_n(&table_generation,__ATOMIC_ACQUIRE);
     if (i==vma_count || (generation & 1)) return;
-    region_cache[region_cache_next++ % 8]=(CachedRegion){generation,vmas[i].start,vmas[i].end,vmas[i].kind};
+    region_cache[region_cache_next++ % 8]=(CachedRegion){generation,vmas[i].start,vmas[i].end,vmas[i].kind,vmas[i].prot};
 }
 /* The mapping table's generation (odd while it changes): callers cache regions against it. */
 const uint64_t *runtime_memory_generation(void) { return &table_generation; }
@@ -1135,7 +1135,7 @@ int runtime_memory_restore_access(void *context, uintptr_t address, int repeated
 }
 /* bbport: whether the guest may write all of [address, address+size) (its own protection). */
 int runtime_memory_guest_writable(uintptr_t address, uint64_t size) {
-    if (!size) return 0;
+    if (!size || address+size<address) return 0;
     int ok=1;
     read_lock();
     uintptr_t at=address;
@@ -1160,9 +1160,15 @@ int runtime_memory_is_mapped(uintptr_t address, uint64_t size) {
    a page the game made unreadable would fault outside any handler (the engine map's shader-1). */
 int runtime_memory_readable(uintptr_t address, uint64_t size) {
     const uintptr_t end=address+size;
-    int readable=size!=0;
+    if (!size || end<address) return 0;
+    /* The table plan asks for each table it reads, nearly all in a region asked about before:
+     * answered from the cache without the lock (a protection change moves the generation). */
+    const CachedRegion *c=(runtime_disabled_optimizations & 1) ? NULL : cached_region(address);
+    if (c && end<=c->end) return c->kind!=KIND_RESERVED && (c->prot & 0x37);
+    int readable=1;
     read_lock();
     size_t i=vma_index(address);
+    if (i<vma_count && vmas[i].start<=address) cache_region(i);
     uintptr_t at=address;
     for (; readable && at<end; ++i) {
         if (i==vma_count || vmas[i].start>at || vmas[i].kind==KIND_RESERVED || !(vmas[i].prot & 0x37)) {

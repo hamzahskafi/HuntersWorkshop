@@ -232,10 +232,10 @@ u64 Rasterizer::SignalTick() const {
 }
 
 void Rasterizer::SignalAfterGpu(std::function<void()> signal, VAddr label, u64 value,
-                                u32 size) {
+                                u32 size, bool known) {
     if (DrawPipe::OnStageB()) {
         // Kept here until the end of the guest submission or the next flush (in tick order).
-        local_signals.push_back({SignalTick(), std::move(signal), label, value, size});
+        local_signals.push_back({SignalTick(), std::move(signal), label, value, size, known});
         local_signal_count.store(u32(local_signals.size()), std::memory_order_release);
         return;
     }
@@ -250,7 +250,7 @@ void Rasterizer::SignalAfterGpu(std::function<void()> signal, VAddr label, u64 v
                 std::jthread([this](std::stop_token token) { GpuSignalLoop(token); });
         }
         was_empty = gpu_signals.empty();
-        gpu_signals.push_back({SignalTick(), std::move(signal), label, value, size});
+        gpu_signals.push_back({SignalTick(), std::move(signal), label, value, size, known});
     }
     // The signal thread waits on the condition only with nothing queued (else it waits for the
     // GPU and takes the rest when it gets back): no notify per fence (~60 a frame).
@@ -447,16 +447,33 @@ void Rasterizer::SubmitForGpu(bool nothing_coming) {
     Flush();
 }
 
-bool Rasterizer::PendingSignalValue(VAddr address, u64& value, u32* size) {
+bool Rasterizer::PendingSignalValue(VAddr address, u64& value) {
     std::scoped_lock lk{gpu_signals_mutex};
     for (auto it = gpu_signals.rbegin(); it != gpu_signals.rend(); ++it) {
         if (it->label == address) {
             value = it->value;
-            if (size) {
-                *size = it->size;
-            }
             return true;
         }
+    }
+    return false;
+}
+
+bool Rasterizer::PendingSignalWord(VAddr address, u32& value, bool& next_to_short) {
+    next_to_short = false;
+    std::scoped_lock lk{gpu_signals_mutex};
+    for (auto it = gpu_signals.rbegin(); it != gpu_signals.rend(); ++it) {
+        if (it->label == 0) {
+            continue;
+        }
+        if (address < it->label || address + sizeof(u32) > it->label + it->size) {
+            next_to_short |= it->label + it->size == address && it->size == sizeof(u32);
+            continue; // writes other bytes: an older fence may write these
+        }
+        if (!it->known) {
+            return false; // the newest write there is a clock or counter: read in memory
+        }
+        value = static_cast<u32>(it->value >> ((address - it->label) * 8));
+        return true;
     }
     return false;
 }
@@ -3944,20 +3961,30 @@ void NoteWrittenBufferMtype(u64 hash, u32 buffer_index, bool shared) {
                 shared ? "3 (shared)" : "other than 3", shared ? "other" : "3");
 }
 
+// bbport: BB_TRACE_SHADER=hash[,hash...] (diagnostics): the shaders traced.
+static const std::vector<u64>& TracedShaders() {
+    static const std::vector<u64> hashes = [] {
+        std::vector<u64> out;
+        const char* env = std::getenv("BB_TRACE_SHADER");
+        for (const char* at = env; at && *at;) {
+            char* end = nullptr;
+            out.push_back(std::strtoull(at, &end, 16));
+            at = end && *end == ',' ? end + 1 : nullptr;
+        }
+        return out;
+    }();
+    return hashes;
+}
+
 // 0.4.4 beta 20: with BB_TRACE_SHADER, the memory of the GDS stand-in a traced shader binds
 // (BufferCache::gds_buffer, MemoryType::Stream: whatever VMA chose for it), said once.
 void TraceGdsBinding(const Shader::Info& stage, u32 memory_properties) {
-    static const char* env = std::getenv("BB_TRACE_SHADER");
-    static bool told = false;
-    if (!env || told) {
+    static std::atomic<bool> told{false};
+    const auto& hashes = TracedShaders();
+    if (hashes.empty() || told.load(std::memory_order_relaxed) ||
+        std::ranges::find(hashes, stage.pgm_hash) == hashes.end() || told.exchange(true)) {
         return;
     }
-    char hash[24];
-    std::snprintf(hash, sizeof(hash), "%llx", static_cast<unsigned long long>(stage.pgm_hash));
-    if (!std::strstr(env, hash)) {
-        return;
-    }
-    told = true;
     const vk::MemoryPropertyFlags flags{memory_properties};
     std::printf("Shader %016llx binds the GDS stand-in: %s%s%s (memory properties %s)\n",
                 static_cast<unsigned long long>(stage.pgm_hash),
@@ -3972,16 +3999,7 @@ void TraceGdsBinding(const Shader::Info& stage, u32 memory_properties) {
 // GPU; VRAM; partly), how often; printed every 5 s.
 void TraceShaderBinding(const Shader::Info& stage, VAddr addr, u64 size, bool written,
                         bool in_place, bool any_in_place) {
-    static const std::vector<u64> hashes = [] {
-        std::vector<u64> out;
-        const char* env = std::getenv("BB_TRACE_SHADER");
-        for (const char* at = env; at && *at;) {
-            char* end = nullptr;
-            out.push_back(std::strtoull(at, &end, 16));
-            at = end && *end == ',' ? end + 1 : nullptr;
-        }
-        return out;
-    }();
+    const auto& hashes = TracedShaders();
     if (hashes.empty() || std::ranges::find(hashes, stage.pgm_hash) == hashes.end()) {
         return;
     }

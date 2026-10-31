@@ -10,6 +10,7 @@
 
 #include <cstdlib>
 #include <cstring>
+#include "shader_recompiler/runtime_info.h"
 
 namespace Shader {
 
@@ -20,6 +21,14 @@ inline bool GdsAppendPerSubgroup() {
         return !(env && std::strcmp(env, "lane") == 0);
     }();
     return on;
+}
+
+/// Whether a shader of `stage` gets it: compute shaders only (0.4.4 beta 20's audit). A pixel
+/// shader's helper lanes (demoted by a kill, or a quad's) can take part in the ballot and the
+/// election while their atomic does nothing: the subgroup's add lost, or helpers counted. A
+/// vertex shader would declare the lane index as a Flat input, which Vulkan refuses there.
+inline bool GdsAppendPerSubgroup(HwStage stage) {
+    return stage == HwStage::Compute && GdsAppendPerSubgroup();
 }
 
 } // namespace Shader

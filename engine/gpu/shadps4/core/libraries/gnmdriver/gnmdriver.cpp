@@ -170,8 +170,8 @@ static void WatchOverlapLeak() {
                    runtime_heap_growths() > growths_at_start) {
             said = true;
             std::printf("Gnm: the game's heap asked for more memory (%llu times since warm-up): "
-                        "on Linux frame overlap would stop now (BB_SUBMIT_AHEAD 0); here it is "
-                        "only said (0.4.4 beta 20)\n",
+                        "with the allocation counters frame overlap would stop now "
+                        "(BB_SUBMIT_AHEAD 0); without them it is only said (0.4.4 beta 20)\n",
                         static_cast<unsigned long long>(runtime_heap_growths() - growths_at_start));
         }
         return;

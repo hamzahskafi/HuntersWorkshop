@@ -202,7 +202,7 @@ void Scheduler::BeginRendering(const RenderState& new_state) {
     resume_rendering = false;
     // 0.4.4 beta 18: the pass that ended last begun again as it was: split by what ended it.
     auto& savings = GpuSavings::Get();
-    if (!is_rendering && !resume && render_state == new_state) {
+    if (!is_rendering && render_state == new_state && (!resume || ended_after_cut)) {
         GpuSavings::Count(savings.pass_splits[static_cast<u32>(pass_break)]);
         // 0.4.4 beta 20: a barrier's detail, only for a pass begun again.
         for (u32 bit = 0; bit < savings.pass_barrier_waits.size(); ++bit) {
@@ -217,7 +217,8 @@ void Scheduler::BeginRendering(const RenderState& new_state) {
         }
     } else if (resume) {
         GpuSavings::Count(savings.pass_resumes_after_cut);
-    } else if (render_state.width == new_state.width && render_state.height == new_state.height &&
+    } else if (new_state.num_color_attachments > 0 && // (a depth-only pass has no colour targets)
+               render_state.width == new_state.width && render_state.height == new_state.height &&
                render_state.num_layers == new_state.num_layers &&
                render_state.num_color_attachments == new_state.num_color_attachments) {
         // 0.4.4 beta 20: the same colour targets again, the state changed: another depth view (a
@@ -239,6 +240,7 @@ void Scheduler::BeginRendering(const RenderState& new_state) {
     }
     pass_break = GpuSavings::PassBreak::Other;
     pass_break_detail = 0;
+    ended_after_cut = false;
     EndRendering();
     is_rendering = true;
     render_state = new_state;
@@ -314,6 +316,13 @@ void Scheduler::EndRendering() {
 
 void Scheduler::EndRendering(GpuSavings::PassBreak why, u32 detail) {
     if (!is_rendering) {
+        // 0.4.4 beta 20 (the audit): a cut closed the pass: the first ender since names it (it
+        // would have ended it), and a submission (which drops the resume) too.
+        if (resume_rendering && !ended_after_cut) {
+            pass_break = why;
+            pass_break_detail = detail;
+            ended_after_cut = true;
+        }
         return;
     }
     pass_break = why;

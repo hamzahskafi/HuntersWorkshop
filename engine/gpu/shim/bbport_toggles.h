@@ -196,6 +196,9 @@ struct Timer {
 };
 /// Wall time the GPU command thread waited for guest submissions (ns).
 inline std::atomic<std::uint64_t> gpu_idle_ns{0};
+/// 0.4.4 beta 20: the part of it spent spinning before sleeping (BB_GPU_SPIN_US): counted in
+/// its CPU time, unlike the sleep (ns).
+inline std::atomic<std::uint64_t> gpu_spin_ns{0};
 /// Draws recorded into the reduced scene targets, and draws after the scene started.
 inline std::atomic<std::uint64_t> reduced_draws{0}, scene_draws{0};
 /// Wall time spent blocked in the scheduler (ns): waiting for the recording thread to drain,

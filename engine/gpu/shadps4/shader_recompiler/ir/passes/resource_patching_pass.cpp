@@ -456,7 +456,7 @@ void PatchGlobalDataShareAccess(IR::Inst& inst, Info& info, Descriptors& descrip
         // 0.4.4 beta 19: one atomic for the subgroup where the backend can (gds_append.h); each
         // lane still gets its own value, as the per-lane atomics give it.
         IR::BufferInstInfo append_info{};
-        append_info.subgroup_append.Assign(GdsAppendPerSubgroup() ? 1 : 0);
+        append_info.subgroup_append.Assign(GdsAppendPerSubgroup(info.hw_stage) ? 1 : 0);
         const IR::Value replacement =
             inst.GetOpcode() == IR::Opcode::DataAppend
                 ? ir.BufferAtomicIAdd(ir.Imm32(binding), inst.Arg(0), ir.Imm32(1u), append_info)

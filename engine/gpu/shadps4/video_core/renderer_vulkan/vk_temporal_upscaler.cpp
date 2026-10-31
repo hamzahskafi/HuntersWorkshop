@@ -1329,6 +1329,9 @@ void TemporalUpscaler::Run() {
                             : name == "FSR 4.1" ? "upscaler Run (FSR 4.1)"
                             : name == "FSR 4"   ? "upscaler Run (FSR 4)"
                                                 : "upscaler Run (FSR 3.1)";
+        // The mark ends an open pass: named as the upscaler's, as without the profile (the
+        // audit; the copy shader's renderer-1 the same way).
+        scheduler.EndRendering(Vulkan::GpuSavings::PassBreak::Upscaler);
         profiler->Mark(0xF5A0'0000ull ^ std::hash<std::string_view>{}(label),
                        [label] { return std::string{label}; });
     }
