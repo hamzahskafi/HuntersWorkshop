@@ -2,6 +2,44 @@
 
 As of 0.4.4 beta 19 (commit `9b8b057`, 2026-10-31). Written for the project owner. What has been done about each item since is kept in `community-fixes-plan.md` (from 0.4.4 beta 20 on); this document is not updated after the fact.
 
+## Status after 0.4.4 beta 21
+
+What became of each idea and bug below; the measurements and reasons are in `community-fixes-plan.md` (the beta 20 and 21 rows and the rows between them). The sections that follow are kept as written at beta 19, with their file:line references of that commit.
+
+| Id | Status | Note |
+|---|---|---|
+| `upscale-1` | done, beta 20 | the extra sharpening in the merge: 0.17 ms a frame less; the lamps at 120 FPS |
+| `seg-1` | dropped | beta 14: a pass ended and begun again without a barrier costs a few microseconds on the tester's GPU (GPU busy unchanged with half the cuts); Vulkan also wants the suspending flag when the pass begins, before a cut is known |
+| `renderer-7` | done, beta 21 | one breadcrumb per command; both cost 0.10 ms a frame (beta 20); `BB_BREADCRUMBS=both` |
+| `renderer-3` | dropped | beta 20: 55 depth-view changes a frame on colour passes, none with a barrier (no image moved to a depth layout); restarts are cheap (`seg-1`) |
+| `renderer-6` | open | the toggle test (no code) not run yet |
+| `mem-4` | open | at most about 0.1 ms; the GX region's reads in place over PCIe unmeasured |
+| `renderer-4` | dropped | 3 a frame (beta 20), a few microseconds each |
+| `idle-1` | open | CPU only |
+| `upscale-2`, `upscale-3` | open | reduced presets only |
+| `pipe-1`, `asc-2`, `rt-1` | open | CPU-bound systems only |
+| `shader-2` | open | AMD and Linux Intel only |
+| `renderer-5`, `shader-5`, `shader-6`, `mem-3`, `upscale-4` | open | small or near zero |
+| copies before the pass (6.4) | dropped | the copy shader's restarts are cheap (`seg-1`); 44.8 of its 54 dispatches a frame interrupt a pass (beta 20) |
+| still motion variant (6.4) | open | the history about 0.1 ms (beta 16) |
+| `shader-4` (GDS append per subgroup) | done, beta 19; compute shaders only since beta 20's audit | no gain on `cs a954e79d` (about 44 us a dispatch either way); the GDS stand-in is in VRAM |
+| `renderer-2` | done, beta 20 | restarts by cause; corrected in the audit (depth-only passes, enders after a cut) |
+| `upscale-6` | done, beta 21 | copy-shader sources traced only with `BB_MOTION_GPU_SMALL=source` |
+| `shader-9` | done, beta 20 | push descriptors up to the limit; 4 draws a frame still bound by a set |
+| `clean-3` | code done, beta 21 | the lookahead counts the threads the process may use; the A/B (CPU-bound spot) not run |
+| `upscale-7` | done, beta 21 | about 35 MB less VRAM at DLAA 1080p; `BB_UPSCALER_EAGER_IMAGES=1` |
+| `renderer-8` | removed, beta 21 | measured on beta 20 with it on: 56 dispatches a frame instead of about 196 commands, GPU busy unchanged, more barrier flushes |
+| `mem-8`, `clean-4`, `renderer-9` | done, beta 20 | the idle spin is about 0.14 us a draw |
+| `upscale-8` | done, beta 21 | FSR 3's setup written once; Run's FSR 3 on a recording thread only with `BB_FSR3_RECORDER=1` (open: record FSR 3 steps in frame order; RunScaled has the same exposure) |
+| `mem-9`, `clean-1`, `clean-2`, `mem-7` | done, beta 21 | |
+| `renderer-1` | fixed, beta 20 | checked in the tester's runs (profile on and off agree) |
+| `gnm-1` | logged, beta 20 | open: a session of 20 minutes or more |
+| `shader-1` | fixed, beta 20 | no draw left out in any run |
+| `fence-1` | fixed, beta 20 (and its audit) | never seen in Bloodborne |
+| `asc-1`, `mem-5`, `shader-7`, `shader-8` | closed | counted in beta 20, never seen in Bloodborne; the counters stay |
+| `upscale-5` | fixed, beta 21 | the edge clamp in RGB only; `BB_EDGE_CLAMP_COPY=1` |
+| `shader-3` | open | AMD and Intel only; needs the recompiler to decide per stage |
+
 ## How to read this document
 
 Five agents each mapped one area of the engine and proposed ideas:
