@@ -1632,10 +1632,14 @@ void TemporalUpscaler::Run() {
     // keeps the game's frame; `failed` follows at the next frame, as for RunScaled). TAA, FSR 4
     // and DLSS keep their frame bookkeeping on this thread and record directly, as do frames
     // with the separate sharpening (BB_SHARPEN_FUSED=0: its pass comes between the two) or a dump
-    // (its buffers and files are set up here). BB_FSR3_DIRECT=1: FSR 3 directly, as before.
+    // (its buffers and files are set up here). Only with BB_FSR3_RECORDER=1 for now: FSR 3 wants
+    // its dispatches recorded in frame order, and the recording threads may record a later
+    // frame's segment before an earlier one's (BB_ASYNC_SUBMIT does not wait for them between
+    // submissions; RunScaled's recorded dispatch has had the same exposure). Without it, directly
+    // on this thread, as before.
     static const bool fsr3_direct = [] {
-        const char* env = std::getenv("BB_FSR3_DIRECT");
-        return env && env[0] == '1';
+        const char* env = std::getenv("BB_FSR3_RECORDER");
+        return !(env && env[0] == '1');
     }();
     // The backend the resources were made for (EnsureResources above): where the commands go
     // depends on it, so it is read once (a menu change takes effect next frame).
