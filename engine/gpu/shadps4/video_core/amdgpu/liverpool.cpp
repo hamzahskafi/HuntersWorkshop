@@ -14,7 +14,6 @@
 #include "bbport_threads.h"
 #include "bbport_ce_stats.h"
 #include "bbport_timeline.h"
-#include "bbport_copy.h"
 #include "bbport_platform.h"
 #include "bbport_toggles.h"
 #include <atomic>
@@ -547,15 +546,6 @@ void SignalEop(const PM4CmdEventWriteEop& eop, u64 seq) {
     eop.SignalFence(
         [seq](void* address, u64 data, u32 num_bytes) {
             auto* memory = Core::Memory::Instance();
-            // bbport: BB_FENCE_DELAY_TEST=1 (experiment) holds every 200th fence back 80 ms: if
-            // the guest frees label objects after a timeout, late labels corrupt its heap.
-            static const bool delay_test = [] {
-                const char* env = std::getenv("BB_FENCE_DELAY_TEST");
-                return env && env[0] == '1';
-            }();
-            if (delay_test && seq != 0 && seq % 200 == 0) { // seq: BB_FREE_CHECK=1
-                std::this_thread::sleep_for(std::chrono::milliseconds(80));
-            }
             BbFreeCheck::Check(reinterpret_cast<u64>(address), num_bytes, &data, BbFreeCheck::Eop,
                                seq);
             BbFreeCheck::NoteFenceWriting(reinterpret_cast<u64>(address));
@@ -605,16 +595,7 @@ void RunEventWriteEop(Vulkan::Rasterizer& rasterizer, const u8* data) {
         return;
     }
     // Guest memory copies on the copy threads precede the fence the guest sees.
-    // BB_ASYNC_FENCES=1 writes it once they are done instead of waiting for them; measured
-    // slower (79 vs 83 FPS): the guest waits on these fences, and later fences stall it more
-    // than the wait costs.
-    static const bool async_fences = [] {
-        const char* env = std::getenv("BB_ASYNC_FENCES");
-        return env && env[0] == '1';
-    }();
-    if (async_fences && !BbToggle::Disabled(BbToggle::AsyncFences)) {
-        BbCopy::AfterCopies([eop, seq] { SignalEop(eop, seq); });
-    } else if (Vulkan::DrawPipe::OnStageB() && !BbToggle::Disabled(BbToggle::RecorderFences)) {
+    if (Vulkan::DrawPipe::OnStageB() && !BbToggle::Disabled(BbToggle::RecorderFences)) {
         // The draw recording thread does not wait: the Vulkan recording thread signals the
         // fence after the copies queued before it. A fence right behind this one (already in
         // the draw pipe, run next) hands both to the recording threads at once.

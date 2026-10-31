@@ -119,25 +119,16 @@ void NoteFramesRetired(u64 frames) {
 // sceGnmSubmitDone returns once the GPU has finished the frame before (the game frees that frame's
 // memory then: without it, its heap ran out after ~7 minutes) - but the work is handed over first,
 // so the GPU starts the next frame instead of draining between frames.
-// BB_SUBMIT_LOCK=ahead (an experiment): submissions do not wait, sceGnmSubmitDone(F) waits for
-// frame F-1 (the guest runs up to a frame ahead of the GPU).
-static bool RunAhead() {
-    static const bool on = [] {
-        const char* env = std::getenv("BB_SUBMIT_LOCK");
-        return env && std::string_view{env} == "ahead";
-    }();
-    return on;
-}
-
 static void WaitPreviousFrame();
 
 // BB_SUBMIT_AHEAD=K (default 2): the first K submissions of a frame do not wait for the previous
 // frame, the next ones do. The game keeps two frame contexts and builds the next frame in the one
 // of the frame before the previous: the first submissions are translated while the GPU finishes
 // the previous frame instead of after it (1080p, Yahar'gul: 101 -> 154 FPS). Further on it
-// assumes the previous frame finished: K 8 or more, or no wait at all, and its heap leaked (~2
-// resource objects a frame, out of memory after minutes). Should the heap grow anyway (the game
-// asks for more memory with mmap, which it never does otherwise), K becomes 0 for the session.
+// assumes the previous frame finished: K 8 or more, or no wait at all (the BB_SUBMIT_LOCK=ahead
+// experiment, removed in 0.4.4 beta 21), and its heap leaked (~2 resource objects a frame, out of
+// memory after minutes). Should the heap grow anyway (the game asks for more memory with mmap,
+// which it never does otherwise), K becomes 0 for the session.
 extern "C" std::uint64_t runtime_heap_growths(void);
 static u32 submits_this_frame = 0;
 static bool overlap_off = false;
@@ -191,7 +182,7 @@ static void WatchOverlapLeak() {
     }
 }
 static void WaitPreviousFrameAtSubmit() {
-    if (RunAhead() || ++submits_this_frame <= SubmitsAhead()) {
+    if (++submits_this_frame <= SubmitsAhead()) {
         return;
     }
     WaitPreviousFrame();
