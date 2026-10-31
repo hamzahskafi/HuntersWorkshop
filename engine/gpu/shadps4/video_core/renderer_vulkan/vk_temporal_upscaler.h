@@ -26,6 +26,8 @@
 #include "video_core/texture_cache/image.h"
 
 struct FfxVkPortableUpscaleContext;
+struct FfxVkPortableUpscaleDispatchInfo;
+struct FfxVkPortableUpscaleCreateInfo;
 
 namespace VideoCore {
 class TextureCache;
@@ -221,6 +223,30 @@ private:
     bool RecordFsr4(vk::CommandBuffer cmdbuf, Fsr4Upscaler::Image color, Fsr4Upscaler::Image depth,
                     u32 w, u32 h, u32 ow, u32 oh, float frame_ms, bool reactive = false);
     void RecordTaa(vk::CommandBuffer cmdbuf, vk::ImageView color, vk::ImageView depth);
+    /// 0.4.4 beta 21: an image as FSR 3.1 is given it (the colour, the depth, the output).
+    struct Fsr3Image {
+        vk::Image image;
+        vk::Format format;
+        u32 width, height;
+        vk::ImageUsageFlags usage;
+    };
+    /// 0.4.4 beta 21: FSR 3.1's dispatch of this frame and the limits it is checked against, as
+    /// Run (the HDR scene colour into output_image, `hdr`) and RunScaled (the tonemapped frame
+    /// into the UI image) give it; each built its own copy before. The motion vectors, the
+    /// reactive mask when `reactive`, jitter, camera and sharpening from this frame. Counts the
+    /// frame (frame_id). No command buffer: the caller's, or the recording thread's.
+    void DescribeFsr3(FfxVkPortableUpscaleDispatchInfo& info,
+                      FfxVkPortableUpscaleCreateInfo& create_info, const Fsr3Image& color,
+                      const Fsr3Image& depth, const Fsr3Image& output, bool reactive, bool hdr,
+                      u32 w, u32 h, u32 ow, u32 oh, float frame_ms);
+    /// 0.4.4 beta 21: BB_DUMP_TRIGGER's images of frame `dump` (Run and RunScaled had a copy
+    /// each): `input` (none: null) and `depth` as the upscaler read them (`sw` x `sh`), the motion
+    /// vectors and the result, TAA's history and diagnostic image (`taa_diagnostics`), and the
+    /// object motion when it has the render size. `input_alone`: the input in a copy of its own
+    /// (Run), else with the motion and the result (RunScaled).
+    void DumpUpscale(vk::CommandBuffer cmdbuf, int dump, vk::Image input, u32 input_bytes,
+                     const char* input_format, bool input_alone, vk::Image depth, u32 sw, u32 sh,
+                     u32 w, u32 h, u32 ow, u32 oh, bool taa_diagnostics);
     /// Additional RCAS sharpening; DLSS applies the whole requested range here.
     void ExtraSharpen(vk::Image target, bool ldr, u32 w, u32 h);
     /// The strength ExtraSharpen applies (0: none): the menu's 0..2, less what the backend's own
