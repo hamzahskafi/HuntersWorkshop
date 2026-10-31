@@ -10,7 +10,7 @@ that starts it is in [`../launcher/windows`](../launcher/windows).
 
 ## Where it comes from
 
-This engine is Lantern Engine's as of 0.9.37 beta 9 (commit `08173e6`), by Awaken. Lantern Engine
+This engine started from Lantern Engine 0.9.37 beta 9 (commit `08173e6`), by Awaken. Lantern Engine
 started from [DarkIzuku/bloodborne_pc](https://github.com/DarkIzuku/bloodborne_pc) (tag
 `v0.4.0-darkizuku-preview.1`), itself built on [bbport](https://github.com/deadinside28/bloodborne_pc)
 and [shadPS4](https://github.com/shadps4-emu/shadPS4), and added:
@@ -20,14 +20,20 @@ and [shadPS4](https://github.com/shadps4-emu/shadPS4), and added:
   runtime, saves, files read in place, pads with menu and keyboard bindings);
 - **a direct path away from emulation** ([docs/history/EMULATION_REMOVAL_PLAN.md](docs/history/EMULATION_REMOVAL_PLAN.md)):
   draw calls taken from the game's graphics library as records, the PC memory model (the game's
-  memory used by the GPU in place; off by default since 0.4.0 beta 4, [docs/gpu-memory.md](docs/gpu-memory.md)),
+  memory used by the GPU in place, [docs/gpu-memory.md](docs/gpu-memory.md); in Hunter's Workshop
+  an Experimental option, off by default since 0.4.0 beta 4 and to be removed before 0.4.4 ships),
   and a native compiler for the game's shaders
   ([docs/native_shader_compiler.md](docs/native_shader_compiler.md));
 - **renderer performance work**: draw preparation on worker threads, cached render state, pipeline
   cache warm-up with a crash guard, occlusion culling and frame pacing;
 - **the PC version**: native PC menus and keyboard and mouse controls, high frame rates, widescreen,
-  HDR, DLSS, FSR 3.1, 4 and 4.1.1, frame generation, trophies, and online play through The Hunter's
-  Dream.
+  HDR, TAA, DLSS, FSR 3.1, 4 and 4.1.1, frame generation, trophies, and online play through The
+  Hunter's Dream.
+
+Hunter's Workshop's own changes since then are recorded in
+[docs/community-fixes-plan.md](docs/community-fixes-plan.md) and the release notes
+(`docs/release-notes-*.md`). Among them, the game's per-frame GPU memory (its GX region) is read in
+place by default on Windows since 0.4.4 (`BB_GX_IN_PLACE=0` tracks it as before).
 
 The renderer and shader recompiler are still shadPS4's at their core (`gpu/shadps4`, where changes
 are marked `bbport:`).
@@ -76,7 +82,8 @@ A Windows package is the launcher at the top, `package.json` (its version and en
 default settings, the shader catalogs (`shader-catalog/`: pipelines compiled ahead, so fewer
 shaders compile during play) and the upscalers' files (`fsr4_shaders/`, `fsr4vk/`). The shader
 catalogs and the upscalers' files are not kept in this repository; `tools/fetch_dlss.sh`,
-`tools/fetch_fsr4_assets.sh` and `tools/fetch_streamline.sh` download the NVIDIA and AMD parts.
+`tools/fetch_fsr4_assets.sh` and `tools/fetch_streamline.sh` download DLSS, FSR 4's model files
+and Streamline.
 
 ## Tests and checks
 
@@ -105,8 +112,9 @@ catalogs and the upscalers' files are not kept in this repository; `tools/fetch_
 | `patches/` | the community's game patches and their checks |
 | `tests/` | tests and the shader lab |
 | `tools/` | developer tools |
-| `packaging/` | the Linux package (`packaging/linux`); `default.nix` and `launcher/` are bbport's AppImage and GTK launcher, kept for NixOS |
-| `docs/` | design notes; `docs/history` keeps the notes of the projects it started from |
+| `packaging/` | the Linux package (`packaging/linux`); `default.nix` and `appimage.sh` are bbport's AppImage, kept for NixOS |
+| `launcher/` | bbport's GTK launcher, which that AppImage packages |
+| `docs/` | design notes; `docs/history` keeps notes that no longer describe the engine, many from the projects it started from |
 
 ## Credits and licenses
 

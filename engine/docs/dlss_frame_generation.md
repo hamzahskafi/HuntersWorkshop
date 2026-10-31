@@ -41,7 +41,8 @@ source (`source/core/sl.interposer/vulkan/wrapper.cpp`).
   for the present semaphore and signals the acquire semaphore; by default it blocks the host's
   presenting queue until it has read the inputs.
 - **Limits on Vulkan:** no VSync with frame generation (D3D12 only), no dynamic multi frame
-  generation, no FP16/scRGB swapchain (HDR10 only).
+  generation, no FP16/scRGB swapchain (HDR10 only). (The engine still asks for dynamic multi frame
+  generation where Streamline reports it supported: `frame_gen_dynamic`, below.)
 - **Cost** (NVIDIA's table): 1.1-1.5 ms at 1080p on RTX 4090/5080/5090 for 2x, 1.8-2.4 ms for 4x;
   about 270 MB VRAM at 1080p, 490 MB at 1440p, 725 MB at 4K.
 
@@ -132,7 +133,7 @@ guest flip ─► GPU command thread ──────────────�
 | OptiScaler | Engine before | Now |
 |---|---|---|
 | Upscaler choice | FSR 3.1, FSR 4, FSR 4.1.1, DLSS, TAA, off | same |
-| DLSS presets (render preset override) | `dlss_preset` K/J/M/L/E/F/default | same; letters NVIDIA's 310.9 SDK removed (A-D) or ignores (G-I, N, O) are refused at load |
+| DLSS presets (render preset override) | `dlss_preset` K/J/M/L/E/F/default | + `auto` (K for DLAA, Quality and Balanced, M for Performance, L for Ultra Performance); letters NVIDIA's 310.9 SDK removed (A-D) or ignores (G-I, N, O) are refused at load (K instead) |
 | Quality presets / DLAA | Native AA (DLAA) .. Ultra Performance | + Custom: `render_scale` 1.0-3.0 (render = output / scale) |
 | Ratio overrides per quality mode | fixed 1.5 / 1.7 / 2.0 / 3.0 | Custom covers it |
 | Sharpening (RCAS) and strength | `sharpen`, `sharpness` 0-2 | same |
@@ -141,7 +142,7 @@ guest flip ─► GPU command thread ──────────────�
 | Auto exposure | FSR 4 only | + `dlss_auto_exposure` (DLSS's own, any input) |
 | Reactive mask and its parameters | on/off, scale, threshold, maximum | same (now safe at every output size, below) |
 | Output scaling | `output_res` above the display (downscaled by the presenter) | same |
-| Frame generation choice | FSR 3.1 | + DLSS (2x-6x where the GPU allows) |
+| Frame generation choice | FSR 3.1 | + DLSS (2x-6x where the GPU allows; dynamic where Streamline reports it) |
 | FPS limiter / Reflex | the engine's limiter and precise pacing | + Reflex (`reflex` off/on/boost, with DLSS-G loaded) |
 | HUD handling (HUDFix) | HUD-less frame captured by the engine | same; DLSS-G also gets UI alpha |
 | Init flags (HDR, inverted depth, jitter cancellation, MV resolution) | set by the engine from what it knows | not exposed: the engine's values are right by construction |
@@ -172,9 +173,12 @@ guest flip ─► GPU command thread ──────────────�
 | `config.ini` | Env | Values | Live |
 |---|---|---|---|
 | `frame_gen` | `BB_FRAME_GEN` | `off`, `fsr3`, `dlss` | yes once loaded; `dlss` loads at start |
-| `frame_gen_frames` | `BB_FRAME_GEN_FRAMES` | 1-5 generated frames per real one (DLSS) | yes |
-| `frame_gen_cap` | `BB_FRAME_GEN_CAP` | Uncapped only: game at refresh / (generated + 1) | yes |
-| `reflex` | `BB_REFLEX` | `off`, `on`, `boost` (with Streamline loaded; on while DLSS-G runs) | yes |
+| `frame_gen_frames` | `BB_FRAME_GEN_FRAMES` | 1-5 generated frames per real one (DLSS; default 1) | yes |
+| `frame_gen_dynamic` | | 0/1 (default 0): DLSS dynamic multi frame generation (RTX 50, where Streamline reports it): the driver picks 2x up to `frame_gen_frames` + 1 per moment | yes |
+| `frame_gen_target_fps` | | 0-1000, the dynamic mode's target (0: the display's refresh rate) | yes |
+| `frame_gen_cap` | `BB_FRAME_GEN_CAP` | Uncapped only: game at refresh / (generated + 1) (default on) | yes |
+| `reflex` | `BB_REFLEX` | `off`, `on` (default), `boost` (with Streamline loaded; on while DLSS-G runs) | yes |
+| `dlss_preset` | `BB_DLSS_PRESET` | `auto`, `default`, or E, F, J, K, L, M (default K) | yes |
 | `render_scale` | `BB_RENDER_SCALE` | 1.0-3.0, the Custom preset's ratio | as presets |
 | `mip_bias` | `BB_MIP_BIAS` | -2.0..1.0 added to the scene's LOD bias | yes |
 | `dlss_auto_exposure` | | 0/1 | yes (the feature is made again) |
@@ -193,14 +197,15 @@ guest flip ─► GPU command thread ──────────────�
   buffer state tracking, off here), `FC feedback` (flip metering), `VSync interval 1 not supported
   with FG` (Mailbox), `Invalid backbuffer resource extent` (no back buffer subrect tagged).
 
-## Still to test in game
+## Still to test in game (2026-10-22)
 
 - 3x-6x on this RTX 50 (frame_gen_frames 2-5), and an RTX 40 card (2x only, the menu clamps).
 - Outputs other than 1080p (the scaled path's HUD-less capture), a letterboxed window (the blit
   into the back-buffer-size HUD-less image), fullscreen switches and window resizes (mode off
   first).
 - The in-game menu open (mode off), loading screens and movies (mode off, back on after).
-- HDR output on (DLSS-G stays off and says so).
+- HDR output on (DLSS-G runs with it since 0.9.37 beta 9; with `BB_DLSSG_HDR=0` it stays off and
+  says so).
 - A non-RTX GPU and a missing `sl.interposer.dll` with frame_gen=dlss (clean fallback, the menu's
   reason).
 - Input lag with Reflex on / boost; FrameView's MsBetweenDisplayChange for pacing.

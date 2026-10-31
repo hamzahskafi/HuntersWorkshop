@@ -1,5 +1,12 @@
 # Online with a custom shadNet server
 
+> Historical (moved 2026-10-31): how to set up a custom shadNet server on the Online page of the
+> launcher this project started from; the launcher now plays online only through a Hunter's Dream
+> account and clears the custom server's settings (`online_host`, `online_port`, `online_webapi`,
+> `online_game_api`); the engine's start still has a shadNet path, which the launcher no longer
+> uses; current information: the launcher's Online page (`launcher/windows/BloodborneLauncher/Views/OnlinePage.cs`)
+> and `engine/start/online.cpp`.
+
 Start `BloodborneLauncher.exe`, open ONLINE, enable online play and enter the
 server host, TCP port and complete WebAPI URL, including its port. No server is
 selected by default. The game API uses that same URL unless you explicitly
