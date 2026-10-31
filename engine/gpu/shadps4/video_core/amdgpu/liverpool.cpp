@@ -14,7 +14,6 @@
 #include "bbport_threads.h"
 #include "bbport_ce_stats.h"
 #include "bbport_timeline.h"
-#include "bbport_copy.h"
 #include "bbport_platform.h"
 #include "bbport_toggles.h"
 #include <atomic>
@@ -518,10 +517,17 @@ bool PipelinedOpcode(PM4ItOpcode opcode) {
 
 // 0.4.4 beta 20: BB_HONEST_LABELS fences queued with the bytes they write and whether their value
 // is known (PendingFenceValue; the engine map's fence-1). BB_FENCE_HALF_CHECK=0: as before.
+// 0.4.4 beta 21: said once when off, the first time it is asked (a static's initializer runs on
+// one thread; the others wait for it).
 static bool FenceSizes() {
     static const bool on = [] {
         const char* env = std::getenv("BB_FENCE_HALF_CHECK");
-        return !(env && env[0] == '0');
+        const bool enabled = !(env && env[0] == '0');
+        if (!enabled) {
+            std::printf("GPU: pending fences queued without their size and whether their value "
+                        "is known, as before 0.4.4 beta 20 (BB_FENCE_HALF_CHECK=0)\n");
+        }
+        return enabled;
     }();
     return on;
 }
@@ -547,15 +553,6 @@ void SignalEop(const PM4CmdEventWriteEop& eop, u64 seq) {
     eop.SignalFence(
         [seq](void* address, u64 data, u32 num_bytes) {
             auto* memory = Core::Memory::Instance();
-            // bbport: BB_FENCE_DELAY_TEST=1 (experiment) holds every 200th fence back 80 ms: if
-            // the guest frees label objects after a timeout, late labels corrupt its heap.
-            static const bool delay_test = [] {
-                const char* env = std::getenv("BB_FENCE_DELAY_TEST");
-                return env && env[0] == '1';
-            }();
-            if (delay_test && seq != 0 && seq % 200 == 0) { // seq: BB_FREE_CHECK=1
-                std::this_thread::sleep_for(std::chrono::milliseconds(80));
-            }
             BbFreeCheck::Check(reinterpret_cast<u64>(address), num_bytes, &data, BbFreeCheck::Eop,
                                seq);
             BbFreeCheck::NoteFenceWriting(reinterpret_cast<u64>(address));
@@ -605,16 +602,7 @@ void RunEventWriteEop(Vulkan::Rasterizer& rasterizer, const u8* data) {
         return;
     }
     // Guest memory copies on the copy threads precede the fence the guest sees.
-    // BB_ASYNC_FENCES=1 writes it once they are done instead of waiting for them; measured
-    // slower (79 vs 83 FPS): the guest waits on these fences, and later fences stall it more
-    // than the wait costs.
-    static const bool async_fences = [] {
-        const char* env = std::getenv("BB_ASYNC_FENCES");
-        return env && env[0] == '1';
-    }();
-    if (async_fences && !BbToggle::Disabled(BbToggle::AsyncFences)) {
-        BbCopy::AfterCopies([eop, seq] { SignalEop(eop, seq); });
-    } else if (Vulkan::DrawPipe::OnStageB() && !BbToggle::Disabled(BbToggle::RecorderFences)) {
+    if (Vulkan::DrawPipe::OnStageB() && !BbToggle::Disabled(BbToggle::RecorderFences)) {
         // The draw recording thread does not wait: the Vulkan recording thread signals the
         // fence after the copies queued before it. A fence right behind this one (already in
         // the draw pipe, run next) hands both to the recording threads at once.
@@ -2519,44 +2507,12 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
     FIBER_EXIT;
 }
 
-Liverpool::CmdBuffer Liverpool::CopyCmdBuffers(std::span<const u32> dcb, std::span<const u32> ccb) {
-    auto& queue = mapped_queues[GfxQueueId];
-    ASSERT_MSG(queue.dcb_buffer.capacity() >= queue.dcb_buffer_offset + dcb.size(),
-               "dcb copy buffer out of reserved space");
-    ASSERT_MSG(queue.ccb_buffer.capacity() >= queue.ccb_buffer_offset + ccb.size(),
-               "ccb copy buffer out of reserved space");
-
-    queue.dcb_buffer.resize(
-        std::max(queue.dcb_buffer.size(), queue.dcb_buffer_offset + dcb.size()));
-    queue.ccb_buffer.resize(
-        std::max(queue.ccb_buffer.size(), queue.ccb_buffer_offset + ccb.size()));
-
-    const u32 prev_dcb_buffer_offset = queue.dcb_buffer_offset;
-    const u32 prev_ccb_buffer_offset = queue.ccb_buffer_offset;
-    if (!dcb.empty()) {
-        std::memcpy(queue.dcb_buffer.data() + queue.dcb_buffer_offset, dcb.data(),
-                    dcb.size_bytes());
-        queue.dcb_buffer_offset += dcb.size();
-        dcb = std::span<const u32>{queue.dcb_buffer.begin() + prev_dcb_buffer_offset,
-                                   queue.dcb_buffer.begin() + queue.dcb_buffer_offset};
-    }
-
-    if (!ccb.empty()) {
-        std::memcpy(queue.ccb_buffer.data() + queue.ccb_buffer_offset, ccb.data(),
-                    ccb.size_bytes());
-        queue.ccb_buffer_offset += ccb.size();
-        ccb = std::span<const u32>{queue.ccb_buffer.begin() + prev_ccb_buffer_offset,
-                                   queue.ccb_buffer.begin() + queue.ccb_buffer_offset};
-    }
-
-    return std::make_pair(dcb, ccb);
-}
-
 void Liverpool::SubmitGfx(std::span<const u32> dcb, std::span<const u32> ccb) {
     auto& queue = mapped_queues[GfxQueueId];
 
-    // bbport: one copy per submission, alive until it is decoded (CopyCmdBuffers' shared buffer
-    // is reset at sceGnmSubmitDone, while this thread may still be decoding earlier frames).
+    // bbport: one copy per submission, alive until it is decoded, not one buffer shared by a
+    // frame's submissions and emptied at sceGnmSubmitDone (shadPS4's CopyCmdBuffers, removed in
+    // 0.4.4 beta 21): the GPU thread may still be decoding earlier frames then.
     std::shared_ptr<SubmittedCopy> copy;
     if (EmulatorSettings.IsCopyGpuBuffers()) {
         copy = std::make_shared<SubmittedCopy>();

@@ -809,7 +809,7 @@ void *runtime_low_map(size_t size, int prot) {
  * 32768 hot pages (opt-in with BB_HOT_PAGES=1),
  * 65536 unprotect the 256 KiB window around a guest write fault (BB_FAULT_WINDOW KiB),
  * 131072 large guest memory copies split across copy threads (BB_COPY_THREADS),
- * 262144 with BB_ASYNC_FENCES=1: wait for guest copies at fences again,
+ * 262144 unused (was BB_ASYNC_FENCES, removed in 0.4.4 beta 21),
  * 524288 small guest copies batched for the copy threads instead of the recording thread,
  * 1073741824 the lock-free UpdateImage path for clean, tracked images. */
 /* Bits 32 and up: the draw pipeline and related GPU thread work (gpu/shim/bbport_toggles.h). */

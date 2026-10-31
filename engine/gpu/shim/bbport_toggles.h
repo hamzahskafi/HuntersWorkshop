@@ -54,7 +54,8 @@ enum : std::uint64_t {
     HotPages = 32768,
     FaultWindow = 65536,
     ParallelCopies = 131072,
-    AsyncFences = 262144,
+    // 262144 (bit 18): BB_ASYNC_FENCES, removed in 0.4.4 beta 21 (measured slower). Left unused so
+    // the bit numbers in BB_TOGGLE_FILE and tools/ab.sh stay as they were.
     PoolSmallCopies = 524288,
     RecordPrefetch = 1ull << 32,
     TextureViewMemo = 1ull << 33,

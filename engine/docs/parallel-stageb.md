@@ -168,7 +168,8 @@ It changes no state: the only loads are from the packet ring (committed packets 
 overwrite), the prepared draws (kept alive until stage B passes the packet), the shader infos and
 the memo slot's key and ids; everything else is an address that is prefetched and never read, and
 prefetch instructions do not fault. Risk is therefore low and the whole thing sits behind one
-toggle, default off. The gain is bounded by the DRAM-miss share of stage B's time, which the
+switch (`BB_DRAWREC_WORKERS`; designed default off, now on with 8 or more hardware threads, see
+section 4). The gain is bounded by the DRAM-miss share of stage B's time, which the
 profiles cannot show directly (a flat profile is consistent with it but does not prove it); the
 estimate is in section 5. It is honestly the only one of the five that I could make safe without
 running the game, and it is the one with the best gain-to-risk ratio for a single toggle. It
@@ -177,7 +178,9 @@ does not reach the stated target of stage B well under the main thread's time; B
 ## 4. The lookahead thread (`BB_DRAWREC_WORKERS=1`)
 
 Thread `bb:DrawAhead`, `Rasterizer::LookaheadLoop` (`vk_rasterizer.cpp`), started with the draw
-pipe when `BB_DRAWREC_WORKERS` is set to anything but 0. Normal priority (`BB_DRAWREC_IDLE=1`:
+pipe when `BB_DRAWREC_WORKERS` is set to anything but 0, or, unset, when the process may run on 8
+or more hardware threads (`BbThreads::Available()`, its affinity, as for the draw pipe itself;
+before 0.4.4 beta 21 all of the machine's threads counted). Normal priority (`BB_DRAWREC_IDLE=1`:
 idle priority, only spare cores, starved on a busy CPU). It keeps a cursor into the draw pipe
 ring:
 
@@ -296,8 +299,9 @@ behind; raise nothing, it only loses the benefit).
   `LookaheadWindow`, `LookaheadLoop`, `PrefetchPacket`, `PrefetchDraw`, the static
   `FindPreparedStage`, the thread member, the startup line and the statistics line (CRLF).
 
-Environment: `BB_DRAWREC_WORKERS=1` (on; default off, 0 = today's behaviour; the value is a
-switch, there is one lookahead thread), `BB_DRAWREC_LOOKAHEAD=<packets>` (default 8, 1..256),
+Environment: `BB_DRAWREC_WORKERS=1` (on; 0 = off, the behaviour before the lookahead existed;
+unset: on with 8 or more hardware threads available to the process; the value is a switch, there
+is one lookahead thread), `BB_DRAWREC_LOOKAHEAD=<packets>` (default 8, 1..256),
 `BB_DRAWREC_IDLE=1` (idle priority), experiment bit 16 of `BB_TOGGLE_FILE` (pause, for A/B).
 
 ## 7. Approach B: build plan (2026-10-21)
