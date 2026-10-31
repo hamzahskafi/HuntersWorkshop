@@ -136,7 +136,8 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_, Runtime
     if (DrawPipeWanted()) {
         constant_ring = std::make_unique<ConstantRing>(instance, scheduler);
         draw_pipe = std::make_unique<DrawPipe>(&RunDrawPacket, this);
-        // bbport: the lookahead thread (docs/parallel-stageb.md), off unless asked for.
+        // bbport: the lookahead thread (docs/parallel-stageb.md), on with 8 or more hardware
+        // threads (LookaheadWanted).
         if (LookaheadWanted()) {
             lookahead_thread = std::jthread([this](std::stop_token stop) { LookaheadLoop(stop); });
             std::printf("Draw pipe: lookahead thread prefetching for stage B, %u packets ahead "
@@ -1582,13 +1583,16 @@ void Rasterizer::RunDrawPacket(void* context, const u8* data, u32 size) {
 // recovery (BB_RECOVER_SET) and counted.
 bool Rasterizer::LookaheadWanted() {
     static const bool wanted = [] {
-        // bbport: on by default on CPUs with 8 or more hardware threads (it takes a core of its
-        // own while stage B is busy); BB_DRAWREC_WORKERS=0 turns it off, =1 forces it on.
+        // bbport: on by default with 8 or more hardware threads (it takes a core of its own while
+        // stage B is busy); BB_DRAWREC_WORKERS=0 turns it off, =1 forces it on.
+        // 0.4.4 beta 21: the threads this process may run on (BbThreads::Available(), as the draw
+        // pipe and the other spinning threads count them), not all of the machine's: limited to
+        // fewer than 8 (taskset, affinity) it is off now; BB_DRAWREC_WORKERS=1 as before.
         const char* env = std::getenv("BB_DRAWREC_WORKERS");
         if (env && env[0]) {
             return env[0] != '0';
         }
-        return std::thread::hardware_concurrency() >= 8;
+        return BbThreads::Available() >= 8;
     }();
     return wanted;
 }
