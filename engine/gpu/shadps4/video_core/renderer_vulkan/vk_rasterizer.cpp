@@ -5814,7 +5814,6 @@ void Rasterizer::NoteCommandWrite(VAddr addr, const void* data, u64 size, bool r
     if (!recording_thread) {
         DrainDrawPipe();
     }
-    buffer_cache.DropShadows(addr, size);
     // An invalidation would read the GPU's data back over these bytes first (a readback).
     if (!buffer_cache.UpdateGpuWritten(addr, std::span{static_cast<const u8*>(data), size})) {
         buffer_cache.InvalidateMemory(addr, size, recording_thread);

@@ -1140,9 +1140,6 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
     // decoded later (WriteData, constant RAM dumps) change them on the CPU in decode order, and
     // a draw decoded before must keep its values (buffer renaming). GPU writes are noted for
     // that: a range the GPU has yet to write is not copied.
-    if (is_written && !shadows.empty()) {
-        DropShadows(device_addr, size);
-    }
     // bbport BB_GX_IN_PLACE: the game's GX region, bound in place once imported (PollGxRegion):
     // what is bound inside it is read and written there as the PC memory model's memory is, small
     // read-only bindings still copied (below). Its first binding waits for the import.
@@ -1220,11 +1217,6 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
             }
             TraceBinding(device_addr, size, is_written, is_written ? 0 : 2);
             note_hle(0);
-            if (!is_written && !is_texel_buffer) {
-                if (const auto shadow = ShadowCopy(device_addr, size)) {
-                    return *shadow;
-                }
-            }
             // bbport BB_CHUNK_BUFFERS: through its chunk's own buffer where it lies in one.
             const auto target =
                 ChunkBuffers() ? RouteInPlace(RouteOutside, arena, device_addr, size, is_written)
@@ -3038,53 +3030,6 @@ void BufferCache::ProcessLateWrites() {
     }
 }
 
-std::optional<std::pair<const Buffer*, u64>> BufferCache::ShadowCopy(VAddr addr, u64 size) {
-    static const bool enabled = [] {
-        const char* env = std::getenv("BB_SHADOWS");
-        return env && env[0] == '1';
-    }();
-    constexpr u64 MaxShadow = 4_MB, ShadowRing = 128_MB;
-    // A GPU write there not done yet: the copy (through the chunk's own buffer) would not wait
-    // for it; the arena is read instead.
-    if (!enabled || !GarlicInVram() || WriteTracking() || size > MaxShadow ||
-        IsRegionGpuModified(addr, size)) {
-        return std::nullopt;
-    }
-    if (const u64 tick = scheduler.CurrentTick(); tick != shadow_tick) {
-        shadows.clear();
-        shadow_tick = tick;
-    }
-    for (const auto& shadow : shadows) {
-        if (shadow.addr == addr && shadow.size == size) {
-            return std::pair<const Buffer*, u64>{shadow_buffer.get(), shadow.offset};
-        }
-    }
-    const auto source = GuestChunkSource(addr, size);
-    if (!source) {
-        return std::nullopt;
-    }
-    if (!shadow_buffer) {
-        shadow_buffer = std::make_unique<StreamBuffer>(instance, scheduler, MemoryType::DeviceLocal,
-                                                       ShadowRing);
-    }
-    const auto offset = shadow_buffer->Reserve(size, instance.StorageMinAlignment());
-    if (!offset) {
-        return std::nullopt;
-    }
-    const vk::BufferCopy copy{source->second, *offset, size};
-    runtime.CopyBuffer(source->first, shadow_buffer.get(), std::span{&copy, 1});
-    shadows.push_back({addr, size, *offset});
-    BbStats::shadow_copies.fetch_add(1, std::memory_order_relaxed);
-    BbStats::shadow_bytes.fetch_add(size, std::memory_order_relaxed);
-    return std::pair<const Buffer*, u64>{shadow_buffer.get(), *offset};
-}
-
-void BufferCache::DropShadows(VAddr addr, u64 size) {
-    std::erase_if(shadows, [&](const Shadow& shadow) {
-        return addr < shadow.addr + shadow.size && shadow.addr < addr + size;
-    });
-}
-
 bool BufferCache::UpdateGpuWritten(VAddr addr, std::span<const u8> data) {
     const u64 size = data.size();
     if (!GuestInPlace() || WriteTracking() || size == 0 || ((addr | size) & 3) != 0 ||
@@ -3909,7 +3854,6 @@ bool BufferCache::SynchronizeMemoryFromImage(const Buffer* buffer, u64 offset, V
                 savings.tile_skips.fetch_add(1, std::memory_order_relaxed);
                 savings.tile_bytes_skipped.fetch_add(image.info.guest_size,
                                                      std::memory_order_relaxed);
-                DropShadows(device_addr, size);
                 if (GuestInPlace() && !WriteTracking()) {
                     NoteGpuWrite(device_addr, size);
                 }
@@ -3973,7 +3917,6 @@ bool BufferCache::SynchronizeMemoryFromImage(const Buffer* buffer, u64 offset, V
             };
         }
     }
-    DropShadows(device_addr, size);
     // A GPU write like any other: what the GPU copies there each frame (a render target read as a
     // texel buffer) goes to VRAM instead of crossing PCIe twice (written there, read back).
     if (GuestInPlace() && !WriteTracking()) {

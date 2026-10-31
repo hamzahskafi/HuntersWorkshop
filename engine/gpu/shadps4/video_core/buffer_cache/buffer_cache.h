@@ -217,9 +217,6 @@ public:
     /// Where the GPU's data there lives in VRAM (GPU-modified, not in place) the same bytes are
     /// written into it in stream order and true is returned; else the caller invalidates.
     bool UpdateGpuWritten(VAddr addr, std::span<const u8> data);
-    /// bbport: copies of [addr, addr + size) in VRAM (ShadowCopy) are stale from here on in stream
-    /// order: the GPU or the command processor wrote there (GPU side thread).
-    void DropShadows(VAddr addr, u64 size);
     /// bbport, without write tracking (any thread): the command processor wrote these bytes into the
     /// game's memory outside the command stream (labels, timestamps, occlusion results; through
     /// the backing mapping, which nothing sees). Where VRAM holds a copy of them it gets them too, at
@@ -295,12 +292,6 @@ private:
     /// BB_FRAME_STATS: GPU-written bindings over 64 KiB, reported every 5 s (where they are bound,
     /// which images lie over them).
     void NoteLargeGpuWrite(VAddr addr, u64 size);
-    /// bbport BB_GUEST_IN_PLACE on a discrete GPU, BB_SHADOWS=1 (off by default: 85 copies, 20 MB a
-    /// frame in Yahar'gul cost more than reading in place, 48 -> 44 FPS): a read-only binding of data the
-    /// CPU writes in place is copied once per submission by the GPU into VRAM and bound there, as a
-    /// PC game copies an upload heap into a default heap: one sequential copy over PCIe instead of
-    /// every shader reading it across the bus.
-    std::optional<std::pair<const Buffer*, u64>> ShadowCopy(VAddr addr, u64 size);
     /// NoteImageMadeForCopy's ranges, looked at by ObtainBuffer while any is live: written by one
     /// thread at a time (the mutex), read without it (a range being replaced is skipped).
     void CheckMadeForCopy(VAddr device_addr, u32 size, bool is_written);
@@ -312,13 +303,6 @@ private:
     std::atomic<u32> made_for_copy_live{0};
     u32 made_for_copy_next = 0; ///< the slot replaced next when none is free
     std::mutex made_for_copy_mutex;
-    struct Shadow {
-        VAddr addr;
-        u64 size, offset;
-    };
-    std::unique_ptr<StreamBuffer> shadow_buffer;
-    std::vector<Shadow> shadows; ///< this submission's copies
-    u64 shadow_tick = 0;
     /// BB_TRACE_SIZE=bytes (diagnostics): bindings over GPU-written buffers of that size, counted by
     /// the path they take, reported every 5 s.
     void TraceBinding(VAddr addr, u64 size, bool is_written, int kind);

@@ -973,11 +973,6 @@ void VideoOutDriver::Flip(const Request& req) {
                                 sleep_ns / (frames * 1e6));
                 }
             }
-            if (const u64 copies = BbStats::shadow_copies.exchange(0)) {
-                std::printf("Shadow copies: %.0f/frame, %.1f MB/frame (in-place data the CPU writes, "
-                            "copied into VRAM for reading)\n",
-                            copies / double(frames), BbStats::shadow_bytes.exchange(0) / (frames * 1e6));
-            }
             if (const u64 allocs = BbStats::gpu_range_allocs.exchange(0)) {
                 std::printf("Guest GPU memory: %.0f ranges/s handed out, %.2f MB/s\n", allocs / window,
                             BbStats::gpu_range_alloc_bytes.exchange(0) / (window * 1e6));
