@@ -23,6 +23,7 @@
 #include "video_core/host_shaders/upscale_debug_comp.h"
 #include "video_core/host_shaders/upscale_debug_ldr_comp.h"
 #include "video_core/host_shaders/upscale_reactive_comp.h"
+#include "video_core/host_shaders/edge_clamp_comp.h"
 #include "video_core/host_shaders/taa_comp.h"
 #include "video_core/host_shaders/taa_sharpen_comp.h"
 #include "video_core/host_shaders/taa_sharpen_ldr_comp.h"
@@ -63,6 +64,10 @@ FfxVkPortableImage Describe(vk::Image image, vk::Format format, u32 width, u32 h
 /// column brighter in some phases (a shimmering line at the right and bottom edges once upscaled,
 /// GitHub issue 43). The row and column before them are copied over them before the upscaler
 /// reads the scene: one edge pixel, and jitter keeps its full detail.
+/// 0.4.4 beta 21: whole texels, alpha included. Run clamps the RGB only (ClampEdgesRgb), as the
+/// merge keeps the scene's alpha; this is its BB_EDGE_CLAMP_COPY=1. RunScaled keeps it: its input
+/// is the game's tonemapped 8-bit frame (sRGB formats cannot be storage images), and the
+/// upscaled frame replaces it, alpha and all.
 void ClampSceneEdges(Scheduler& scheduler, vk::Image image, u32 width, u32 height) {
     if (width < 2 || height < 2) {
         return;
@@ -786,6 +791,9 @@ void TemporalUpscaler::CreatePipelines() {
     merge_pipeline = compute(UPSCALE_MERGE_COMP, *merge_pipeline_layout);
     storage_layout(3, reactive_desc_layout, reactive_pipeline_layout, 3 * sizeof(float));
     reactive_pipeline = compute(UPSCALE_REACTIVE_COMP, *reactive_pipeline_layout);
+    // 0.4.4 beta 21: the edge clamp in RGB only (edge_clamp.comp's Params: width, height).
+    storage_layout(1, edge_clamp_desc_layout, edge_clamp_pipeline_layout, 2 * sizeof(u32));
+    edge_clamp_pipeline = compute(EDGE_CLAMP_COMP, *edge_clamp_pipeline_layout);
     storage_layout(2, taa_sharpen_desc_layout, taa_sharpen_pipeline_layout, sizeof(float));
     taa_sharpen_pipeline = compute(TAA_SHARPEN_COMP, *taa_sharpen_pipeline_layout);
     taa_sharpen_ldr_pipeline = compute(TAA_SHARPEN_LDR_COMP, *taa_sharpen_pipeline_layout);
@@ -1319,6 +1327,40 @@ bool TemporalUpscaler::RecordReactive(vk::ImageView color_view) {
     return true;
 }
 
+void TemporalUpscaler::ClampEdgesRgb(vk::ImageView view, u32 w, u32 h) {
+    if (w < 2 || h < 2) {
+        return;
+    }
+    // No barrier before it: Run's own for the scene colour (the transition, or the proxy's read)
+    // already orders the game's writes before this pass's reads and writes. The copies had three
+    // barriers: before, between the row and the column, and after.
+    scheduler.RecordCrumb({.name = "TAA edge clamp"}, [view, w, h,
+                          pipeline = *edge_clamp_pipeline,
+                          layout = *edge_clamp_pipeline_layout](vk::CommandBuffer cmdbuf) {
+        const vk::DescriptorImageInfo info{.imageView = view,
+                                           .imageLayout = vk::ImageLayout::eGeneral};
+        const vk::WriteDescriptorSet write{.dstBinding = 0,
+                                           .descriptorCount = 1,
+                                           .descriptorType = vk::DescriptorType::eStorageImage,
+                                           .pImageInfo = &info};
+        const std::array<u32, 2> size{w, h};
+        cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline);
+        cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute, layout, 0, write);
+        cmdbuf.pushConstants(layout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(size),
+                             size.data());
+        cmdbuf.dispatch((w + h - 1 + 63) / 64, 1, 1); // the row, then the column above it
+        // Whatever reads the scene next (the mask, the upscaler, a dump, the merge) sees the
+        // clamped edge, as after the copies.
+        const vk::MemoryBarrier2 after{
+            .srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+            .srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
+            .dstStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+            .dstAccessMask = vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite,
+        };
+        cmdbuf.pipelineBarrier2({.memoryBarrierCount = 1, .pMemoryBarriers = &after});
+    });
+}
+
 void TemporalUpscaler::Run() {
     BB_SECTION(Upscaler);
     if (auto* profiler = GpuProfiler::Get()) {
@@ -1356,18 +1398,33 @@ void TemporalUpscaler::Run() {
     const auto color_view =
         CachedView(color, vk::Format::eR16G16B16A16Sfloat, vk::ImageAspectFlagBits::eColor);
 
+    // 0.4.4 beta 21: the edge clamp below writes the RGB of the colour the upscaler reads, in a
+    // compute pass (ClampEdgesRgb): the barrier that makes the game's writes visible to it is this
+    // one, made with the clamp's write (the transition, or the proxy's read when reduced: the
+    // image the clamp writes). The scene colour is RGBA16F with storage use (checked above), and
+    // so is its proxy (made like it). BB_EDGE_CLAMP_COPY=1: the whole-texel copies, as before.
+    static const bool edge_clamp_copy = [] {
+        const char* env = std::getenv("BB_EDGE_CLAMP_COPY");
+        return env && env[0] == '1';
+    }();
+    const bool clamp_edges = jitter[0] != 0.0f || jitter[1] != 0.0f;
+    const bool clamp_rgb = clamp_edges && !edge_clamp_copy && w >= 2 && h >= 2;
+    const vk::AccessFlags2 input_access =
+        vk::AccessFlagBits2::eShaderRead |
+        (clamp_rgb ? vk::AccessFlagBits2::eShaderWrite : vk::AccessFlagBits2::eNone);
     scheduler.EndRendering(Vulkan::GpuSavings::PassBreak::Upscaler);
     runtime.Transit(&depth, vk::ImageLayout::eGeneral, vk::PipelineStageFlagBits2::eComputeShader,
                     vk::AccessFlagBits2::eShaderRead);
     runtime.Transit(&color, vk::ImageLayout::eGeneral, vk::PipelineStageFlagBits2::eComputeShader,
-                    vk::AccessFlagBits2::eShaderRead);
+                    reduced ? vk::AccessFlags2{vk::AccessFlagBits2::eShaderRead} : input_access);
     runtime.FlushBarriers();
     vk::Image input_color = color.GetImage(), input_depth = depth.GetImage();
     vk::ImageView input_color_view = color_view, input_depth_view = depth_view;
     if (reduced) {
         VideoCore::ImageViewInfo ci;
         ci.format = color.info.pixel_format;
-        const auto c = scene_targets.Read(scene_color, ci);
+        const auto c = scene_targets.Read(scene_color, ci,
+                                          vk::PipelineStageFlagBits2::eComputeShader, input_access);
         ci.format = depth.info.pixel_format;
         const auto d = scene_targets.Read(camera_motion.Depth(), ci);
         input_color = c.image;
@@ -1375,11 +1432,15 @@ void TemporalUpscaler::Run() {
         input_color_view = c.view;
         input_depth_view = d.view;
     }
-    if (jitter[0] != 0.0f || jitter[1] != 0.0f) {
+    if (clamp_edges) {
         // 0.4.4 beta 20: Run's steps labelled in the GPU profile ("upscaler Run (...)" keeps its
         // setup: transitions, the scene proxies' reads).
         MarkRunStep("upscaler Run: edge clamp");
-        ClampSceneEdges(scheduler, input_color, w, h);
+        if (edge_clamp_copy) {
+            ClampSceneEdges(scheduler, input_color, w, h);
+        } else {
+            ClampEdgesRgb(input_color_view, w, h);
+        }
     }
     const auto cmdbuf = scheduler.CommandBuffer();
     const Breadcrumbs::Scope crumb{cmdbuf, scheduler.CrumbStream(), "TAA"};
