@@ -29,6 +29,9 @@ FPS_PRESETS={'30':[],'60':['60 FPS++'],'90':['90 FPS++','Sprint Fix (High FPS)']
 # fell that much faster).
 SCALED_FPS={'120':120,'144':144}
 SCALED_BASE='90 FPS++'
+# 0.4.4 beta 22: 240 on the frame-rate table only (the corrections below): the patch file's lists have no
+# values for it (run.sh runs 144 without the corrections).
+TABLE_FPS={'240':240}
 # The frame-rate corrections (the engine's frame_rate.cpp; BB_FRAME_FIXES=0, the launcher's "Frame rate
 # corrections" off, or safe mode turns them off): every rate above 30 on the 60 FPS++ list, as bbhost runs
 # it, the engine setting the frame pacer's target, the values for the rate and the cloth (which the 90 FPS++
@@ -47,6 +50,8 @@ def fps_preset(fps, corrections):
     """The FPS preset's patch names, and whether it is the 60 FPS++ list at a rate above 60."""
     if corrections and fps not in ('30','60'):
         return [SIXTY_BASE],True
+    if fps in TABLE_FPS:
+        raise SystemExit(f'{fps} FPS needs the frame-rate corrections (BB_FRAME_FIXES)')
     return (FPS_PRESETS[fps] if fps in FPS_PRESETS else [SCALED_BASE,'Sprint Fix (High FPS)']),False
 
 
@@ -782,7 +787,7 @@ def main():
     p.add_argument('--patches-dir',type=Path,help='third-party patch XML files (shadPS4 format)')
     p.add_argument('--patches-config',type=Path,help='patches.json: enabled/disabled external patches')
     p.add_argument('--xml',type=Path,default=Path(__file__).resolve().parent.parent/'patches/Bloodborne.xml')
-    p.add_argument('--fps',choices=sorted(FPS_PRESETS)+sorted(SCALED_FPS),default='uncap')
+    p.add_argument('--fps',choices=sorted(FPS_PRESETS)+sorted(SCALED_FPS)+sorted(TABLE_FPS),default='uncap')
     p.add_argument('--extra',default='',help='additional patch names, separated by ";"')
     p.add_argument('--app-version',default='01.09')
     p.add_argument('--out',type=Path,default=Path(__file__).resolve().parent.parent/'out')
@@ -839,9 +844,9 @@ def main():
     if on_sixty and SIXTY_BASE in names:
         print(f'Patches: {"uncapped" if a.fps=="uncap" else a.fps+" FPS"} on the 60 FPS++ list: the engine sets the pace '
               f'and the values for the rate (frame-rate corrections; off, the '
-              f'{ {"uncap":"Uncap FPS++","90":"90 FPS++"}.get(a.fps,"scaled 90 FPS++") } list)')
+              f'{ {"uncap":"Uncap FPS++","90":"90 FPS++","240":"144 FPS scaled 90 FPS++"}.get(a.fps,"scaled 90 FPS++") } list)')
     if preset and preset[0] in names:
-        fps={'60':60,'90':90,**SCALED_FPS}.get(a.fps)
+        fps={'60':60,'90':90,**SCALED_FPS,**TABLE_FPS}.get(a.fps)
         if a.fps=='uncap' and on_sixty: fps=UNCAPPED_REFERENCE
         tuning=os.environ.get('BB_CAMERA_TUNING',read_settings(a.settings).get('camera_tuning','original')).lower()
         writes=frame_rate_fixes(writes,fps,elf,tuning!='fps++',corrections)

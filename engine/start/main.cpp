@@ -243,7 +243,13 @@ void ResetStaleGpuCache(const fs::path& cache, const std::string& identity, cons
 
 std::string ConfigureFrameRate() {
     std::string fps = Env("BB_FPS", "60");
-    if (fps == "120" || fps == "144") {
+    // 0.4.4 beta 22: 240 is a fixed rate like 120 and 144, on the frame-rate corrections (their values follow
+    // the rate); without them (BB_FRAME_FIXES=0, safe mode) the patch file's lists stop at 144.
+    if (fps == "240" && Env("BB_FRAME_FIXES", "1").substr(0, 1) == "0") {
+        Log("240 FPS needs the frame-rate corrections (off): running at 144 FPS");
+        fps = "144";
+    }
+    if (fps == "120" || fps == "144" || fps == "240") {
         SetEnv("BB_FPS", fps);
         SetEnv("BB_FPS_LIMIT", fps);
         SetEnv("BB_VBLANK_HZ", fps);

@@ -446,7 +446,7 @@ class FrameRateFixTests(unittest.TestCase):
 
 class FpsPresetTests(unittest.TestCase):
     def test_every_rate_takes_the_60_list_with_the_corrections(self):
-        for fps in ('90', '120', '144', 'uncap'):
+        for fps in ('90', '120', '144', '240', 'uncap'):
             with self.subTest(fps=fps):
                 self.assertEqual(patches.fps_preset(fps, True), (['60 FPS++'], True))
         self.assertEqual(patches.fps_preset('60', True), (['60 FPS++'], False))
@@ -456,6 +456,9 @@ class FpsPresetTests(unittest.TestCase):
         self.assertEqual(patches.fps_preset('90', False), (['90 FPS++', 'Sprint Fix (High FPS)'], False))
         self.assertEqual(patches.fps_preset('144', False), ([patches.SCALED_BASE, 'Sprint Fix (High FPS)'], False))
         self.assertEqual(patches.fps_preset('uncap', False), (['Uncap FPS++', 'Sprint Fix (High FPS)'], False))
+        # 240 has no list of its own (the start runs 144 without the corrections).
+        with self.assertRaises(SystemExit):
+            patches.fps_preset('240', False)
         self.assertFalse(patches.frame_fixes_on({'BB_FRAME_FIXES': '0'}))
         self.assertTrue(patches.frame_fixes_on({}))
 

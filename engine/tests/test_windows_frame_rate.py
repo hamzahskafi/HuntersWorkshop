@@ -33,6 +33,15 @@ class WindowsFrameRateTests(unittest.TestCase):
                 self.assertEqual(env['BB_FPS_LIMIT'], fps)
                 self.assertEqual(env['BB_VBLANK_HZ'], fps)
 
+    def test_240_is_its_own_preset_with_the_corrections(self):
+        # 0.4.4 beta 22: 240 on the frame-rate table (corrections on, the default); 144 without them.
+        env = {'BB_FPS': '240', 'BB_FPS_LIMIT': '0', 'BB_VBLANK_HZ': '0'}
+        self.assertEqual(configure_frame_rate(env), '240')
+        self.assertEqual((env['BB_FPS'], env['BB_FPS_LIMIT'], env['BB_VBLANK_HZ']), ('240', '240', '240'))
+        env = {'BB_FPS': '240', 'BB_FRAME_FIXES': '0'}
+        self.assertEqual(configure_frame_rate(env), '144')
+        self.assertEqual((env['BB_FPS'], env['BB_FPS_LIMIT'], env['BB_VBLANK_HZ']), ('144', '144', '144'))
+
     def test_other_high_rates_use_the_uncapped_patch_with_a_limit(self):
         for fps in ('165', '480'):
             with self.subTest(fps=fps):

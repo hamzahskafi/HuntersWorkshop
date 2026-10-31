@@ -280,9 +280,12 @@ namespace BloodborneLauncher.Core
             {
                 StyleQuality => "60",
                 StyleSmooth => fps == "120" ? "120" : RefreshHz >= 89 && Threads >= 8 ? "90" : "60",
-                StyleFps => RefreshHz >= 143 ? "144" : RefreshHz >= 119 ? "120" : RefreshHz >= 89 ? "90" : "60",
+                StyleFps => RefreshHz >= 239 ? "240" : RefreshHz >= 143 ? "144" : RefreshHz >= 119 ? "120" : RefreshHz >= 89 ? "90" : "60",
                 _ => fps,
             };
+            // From Uncapped, V-Sync Off goes back to On (latest frame), as on the Display page.
+            if (FrameRateSync.After(s.Str("fps_mode"), fps, s.Str("present_mode")) is { } sync)
+                Setting(L.T("V-Sync"), "present_mode", sync, Choices.PresentModes);
             Setting(L.T("Frame rate"), "fps_mode", fps, Choices.FpsModes);
 
             // Character motion vectors cost about 10%: on for the biggest GPUs, off for the smallest.

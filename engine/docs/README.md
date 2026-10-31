@@ -1,6 +1,6 @@
 # Engine documents
 
-What each document here is for. Checked against the code at 0.4.4 beta 21 (2026-10-31); a document
+What each document here is for. Checked against the code at 0.4.4 beta 22 (2026-10-31); a document
 written for an older version says so at its top. Finished plans and closed investigations are in
 [history/](history/README.md).
 

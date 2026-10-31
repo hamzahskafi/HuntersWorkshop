@@ -110,7 +110,7 @@ guest flip ─► GPU command thread ──────────────�
   are written on the presenting queue, which DLSS-G blocks until it is done with them.
 - **Pacing.** DLSS-G presents and paces generated frames; the presenter shows only real frames
   (no half-interval wait, no extra swapchain image: those are FSR 3.1's). The fixed frame-rate
-  presets (30, 60, 90, 120, 144) are fixed-timestep patches whose game speed follows the flip
+  presets (30, 60, 90, 120, 144, 240) are fixed-timestep patches whose game speed follows the flip
   rate, so their flip rate is never lowered for frame generation: 60 game FPS shows 120 with one
   generated frame. Only with the Uncapped preset does the frame limit count frames shown (the game
   at limit / (N + 1), and with "even pacing" at refresh / (N + 1)). The first build halved the 60

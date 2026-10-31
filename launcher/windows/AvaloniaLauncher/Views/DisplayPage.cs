@@ -95,6 +95,29 @@ namespace BloodborneLauncher.Views
             customRow.IsVisible = !Named(Ini.Get("output_res", "1920x1080"));
         }
 
+        /// <summary>The frame rate and V-Sync, side by side (0.4.4 beta 22: V-Sync was the presentation
+        /// mode under Screen › Advanced). Choosing Uncapped turns V-Sync Off and going back to a fixed
+        /// rate turns that Off back on (FrameRateSync); V-Sync's note says when the pair holds the game
+        /// to the display.</summary>
+        private void FrameRateRows()
+        {
+            Group(L.T("Frame rate"));
+            var refresh = Hardware.Detect().RefreshHz;
+            var rate = S.Str("fps_mode");
+            Control sync = null!;
+            SettingCombo(SymbolRegular.Gauge24, L.T("Frame rate"), L.T("Every rate above 30 runs on Kyo's 60 FPS++, the engine setting the game's values for the rate (More › Engine › Frame rate corrections). 30 is the game as on the PS4"),
+                Choices.FpsModes, "fps_mode", changed: () =>
+                {
+                    var now = S.Str("fps_mode");
+                    var after = FrameRateSync.After(rate, now, S.Str("present_mode"));
+                    rate = now;
+                    if (after != null) Pick(sync, Choices.IndexOf(Choices.PresentModes, after));
+                    RefreshNotes();
+                }, noteOf: c => c.Note);
+            sync = SettingCombo(SymbolRegular.Image24, L.T("V-Sync"), L.T("How finished frames reach the screen"),
+                Choices.PresentModes, "present_mode", noteOf: c => FrameRateSync.Note(S.Str("fps_mode"), c.Value, refresh) ?? c.Note);
+        }
+
         public DisplayPage() : base(L.T("Display"), L.T("Resolution, window mode, frame rate and menu language. Applied when the game starts."))
         {
             ComboSearch.Attach(_monitor);
@@ -124,10 +147,8 @@ namespace BloodborneLauncher.Views
             var screenMore = Advanced();
             IniCombo(SymbolRegular.ArrowSync24, L.T("Live resolution change"),
                 L.T("Change the resolution in the game menu without restarting. Off is faster; turn on only if you switch resolutions in game"), Choices.LiveResolution, "live_resolution", into: screenMore);
-            SettingCombo(SymbolRegular.Image24, L.T("Presentation mode"), null, Choices.PresentModes, "present_mode", into: screenMore);
 
-            Group(L.T("Frame rate"));
-            SettingCombo(SymbolRegular.Gauge24, L.T("Frame rate"), L.T("Every rate above 30 runs on Kyo's 60 FPS++, the engine setting the game's values for the rate (More › Engine › Frame rate corrections). 30 is the game as on the PS4"), Choices.FpsModes, "fps_mode");
+            FrameRateRows();
 
             Group("HDR");
             var hdrHint = !OperatingSystem.IsWindows()

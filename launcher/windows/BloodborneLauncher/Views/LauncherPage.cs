@@ -583,14 +583,20 @@ namespace BloodborneLauncher.Views
         // ---------------------------------------------------------------- bound rows
 
         /// <summary>A choice: segmented buttons for a few short options, a drop-down otherwise.
-        /// The chosen option's note shows under the row.</summary>
+        /// The chosen option's note shows under the row: its first sentence, or what
+        /// <paramref name="noteOf"/> gives for it in full (RefreshNotes shows it again).</summary>
         protected FrameworkElement ComboRow(SymbolRegular icon, string title, string? hint, IReadOnlyList<Choice> choices,
             Func<string> get, Action<string> set, Panel? into = null, double width = 240, Action? changed = null,
-            Func<Choice, bool>? enabled = null)
+            Func<Choice, bool>? enabled = null, Func<Choice, string?>? noteOf = null)
         {
             TextBlock note = null!;
             void ShowNote(int index)
             {
+                if (noteOf != null)
+                {
+                    SetHint(note, index >= 0 ? noteOf(choices[index]) : null);
+                    return;
+                }
                 var full = index >= 0 ? choices[index].Note : null;
                 var brief = full == null ? null : Brief(full, 110);
                 SetHint(note, brief);
@@ -605,8 +611,11 @@ namespace BloodborneLauncher.Views
             }
 
             var options = string.Join(" · ", choices.Select(c => c.Label));
-            var shortLabels = choices.Sum(c => Segmented.Short(c.Label).Length);
-            if (!SettingRow.Classic && choices.Count is >= 2 and <= 6 && shortLabels <= 72)
+            var shortLabels = choices.Select(c => Segmented.Short(c.Label)).ToList();
+            // Buttons only when their short labels tell the options apart (V-Sync's "On (latest
+            // frame)" and "On (every frame)" are both "On").
+            if (!SettingRow.Classic && choices.Count is >= 2 and <= 6 && shortLabels.Sum(l => l.Length) <= 72 &&
+                shortLabels.Distinct().Count() == choices.Count)
             {
                 var segmented = new Segmented(choices, enabled);
                 var row = Add(Card(icon, title, hint, segmented, out note, wide: true), into);
@@ -615,6 +624,7 @@ namespace BloodborneLauncher.Views
                 ShowNote(segmented.SelectedIndex);
                 segmented.Changed += Picked;
                 row.Tag = note;
+                if (noteOf != null) _noteRefreshes.Add(() => ShowNote(segmented.SelectedIndex));
                 return segmented;
             }
 
@@ -628,12 +638,26 @@ namespace BloodborneLauncher.Views
             ShowNote(box.SelectedIndex);
             box.SelectionChanged += (_, _) => { if (box.SelectedIndex >= 0) Picked(box.SelectedIndex); };
             card.Tag = note;
+            if (noteOf != null) _noteRefreshes.Add(() => ShowNote(box.SelectedIndex));
             return box;
         }
 
+        /// <summary>The rows whose note depends on more than their own choice (ComboRow's noteOf).</summary>
+        private readonly List<Action> _noteRefreshes = new();
+
+        /// <summary>Shows those notes again, after what they depend on changed.</summary>
+        protected void RefreshNotes() => _noteRefreshes.ForEach(refresh => refresh());
+
+        /// <summary>Picks a ComboRow's option from code, as a click does (the setting saved, its note shown).</summary>
+        protected static void Pick(FrameworkElement control, int index)
+        {
+            if (control is Segmented segmented) segmented.Select(index, notify: true);
+            else if (control is ComboBox box) box.SelectedIndex = index;
+        }
+
         protected FrameworkElement SettingCombo(SymbolRegular icon, string title, string? hint, IReadOnlyList<Choice> choices,
-            string key, Panel? into = null, Action? changed = null) =>
-            ComboRow(icon, title, hint, choices, () => S.Str(key), v => S.Set(key, v), into, changed: changed);
+            string key, Panel? into = null, Action? changed = null, Func<Choice, string?>? noteOf = null) =>
+            ComboRow(icon, title, hint, choices, () => S.Str(key), v => S.Set(key, v), into, changed: changed, noteOf: noteOf);
 
         protected FrameworkElement IniCombo(SymbolRegular icon, string title, string? hint, IReadOnlyList<Choice> choices,
             string key, Panel? into = null, Action? changed = null, Func<Choice, bool>? enabled = null) =>

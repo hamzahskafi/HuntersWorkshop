@@ -160,13 +160,17 @@
         public static readonly Choice[] FpsModes =
         {
             // 0.4.4 beta 22: what each rate runs since 0.3.0 (Kyo's 60 FPS++ with the engine's values for
-            // the rate, start/patches.cpp; with Frame rate corrections off, the patch file's lists).
+            // the rate, start/patches.cpp; with Frame rate corrections off, the patch file's lists). In
+            // order, with 240 (on the corrections only: without them the start runs 144) and Uncapped
+            // last, no longer held to the display's refresh rate (the V-Sync below says how frames
+            // reach the screen; FrameRateSync).
+            new(L.T("30 FPS (as on PS4)"), "30"),
             new("60 FPS", "60", L.F($"Kyo's 60 FPS++ with the engine's values for {60} FPS (Frame rate corrections). On a slower display the extra frames are drawn but never shown")),
             new("90 FPS", "90", L.F($"Kyo's 60 FPS++ with the engine's values for {90} FPS (Frame rate corrections). On a slower display the extra frames are drawn but never shown")),
             new("120 FPS", "120", L.F($"Kyo's 60 FPS++ with the engine's values for {120} FPS (Frame rate corrections). On a slower display the extra frames are drawn but never shown")),
             new("144 FPS", "144", L.F($"Kyo's 60 FPS++ with the engine's values for {144} FPS (Frame rate corrections). On a slower display the extra frames are drawn but never shown")),
-            new(L.T("Uncapped"), "uncap", L.T("Any rate, held to your display's refresh rate (no limit with the Immediate presentation mode). With Frame rate corrections off it uses the community uncapped patch, which can freeze at the end of a boss intro (Vicar Amelia's)")),
-            new(L.T("30 FPS (as on PS4)"), "30"),
+            new("240 FPS", "240", L.F($"Kyo's 60 FPS++ with the engine's values for {240} FPS. Needs Frame rate corrections (More › Engine): without them the game runs at {144}. On a slower display the extra frames are drawn but never shown")),
+            new(L.T("Uncapped"), "uncap", L.T("No limit: as fast as your PC can go, up to 480 FPS. Above 240 FPS the game is untested, and the old community uncapped patch froze in boss fights at such rates. For a high frame rate we recommend 240")),
         };
 
         /// <summary>The DLSS model (BB_DLSS_PRESET): NVIDIA's render presets.</summary>
@@ -205,12 +209,15 @@
             new("Русский", "ru"),
         };
 
+        /// <summary>V-Sync (BB_PRESENT_MODE): how finished frames reach the screen. The values are
+        /// Vulkan's present modes, named in brackets at the end of each description (0.4.4 beta 22:
+        /// plain names; the values, and so settings files, are as before).</summary>
         public static readonly Choice[] PresentModes =
         {
-            new(L.T("Mailbox"), "Mailbox", L.T("Low latency without tearing")),
-            new(L.T("FIFO (VSync)"), "Fifo", L.T("Classic vertical sync")),
-            new(L.T("FIFO Relaxed"), "FifoRelaxed", L.T("VSync that tears instead of stuttering when a frame is late")),
-            new(L.T("Immediate"), "Immediate", L.T("Lowest latency; may tear")),
+            new(L.T("On (latest frame)"), FrameRateSync.Latest, L.T("No tearing, low latency: each refresh shows the newest finished frame. Default (Mailbox)")),
+            new(L.T("On (every frame)"), "Fifo", L.T("Classic V-Sync: every frame shown in order, no tearing, a little more latency. The game can't run faster than the screen (FIFO)")),
+            new(L.T("Adaptive"), "FifoRelaxed", L.T("Like On (every frame), but tears instead of stuttering when a frame is late (FIFO Relaxed)")),
+            new(L.T("Off"), FrameRateSync.Off, L.T("Frames go out the moment they're ready: lowest latency, may tear (Immediate)")),
         };
 
         public static readonly Choice[] DrawPipe =

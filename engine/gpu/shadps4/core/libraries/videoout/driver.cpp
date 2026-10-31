@@ -1137,29 +1137,23 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
     // bbport: frame limit (see EmulatorSettings::GetFrameLimit). A request waits in the queue
     // until its slot; slots advance by one period (no drift) but never lag behind by more.
     u32 frame_limit = EmulatorSettings.GetFrameLimit();
-    // bbport: uncapped presets never present faster than the display refreshes. With Mailbox
-    // (the default) every frame past the refresh rate is rendered in full - scene, upscaler,
-    // post process - and then replaced in the mailbox before it is ever shown: GPU work and
-    // power for nothing (240 FPS on a 144 Hz screen threw away 40% of it). Fixed presets are
-    // left alone (their game speed follows the flip rate), and so is Immediate, chosen for
-    // tearing at the lowest latency. BB_CAP_TO_REFRESH=0 turns it off.
-    // 0.4.4 beta 22: the 144 preset is a fixed preset with its own vblank now
-    // (EmulatorSettings::MaxFixedVblank); it ran Uncapped's 480 Hz and was held to the display's
-    // rate here with it (60 FPS on a 60 Hz screen), where 120 renders 120.
-    if (EmulatorSettings.IsUncappedVblank() && EmulatorSettings.GetPresentMode() != "Immediate") {
-        const char* env = std::getenv("BB_CAP_TO_REFRESH");
-        const u32 refresh = Frontend::DisplayRefreshHz();
-        if (!(env && env[0] == '0') && refresh >= 30 && (frame_limit == 0 || frame_limit > refresh)) {
-            std::printf("VideoOut: frame limit %u FPS lowered to the display's %u Hz "
-                        "(BB_CAP_TO_REFRESH=0 keeps it)\n", frame_limit, refresh);
-            frame_limit = refresh;
-        }
-    } else if (const u32 refresh = Frontend::DisplayRefreshHz();
-               refresh >= 30 && frame_limit > refresh + 1 &&
-               EmulatorSettings.GetPresentMode() == "Mailbox") {
-        std::printf("VideoOut: the %u FPS preset is faster than the display's %u Hz: about %u%% "
-                    "of the frames are rendered and never shown (a lower FPS preset saves that GPU "
-                    "work)\n", frame_limit, refresh, 100 - refresh * 100 / frame_limit);
+    // 0.4.4 beta 22: Uncapped is not held to the display's refresh rate any more (bbport's
+    // BB_CAP_TO_REFRESH did that with every present mode but Immediate, so Uncapped ran 60 on a
+    // 60 Hz screen): the launcher's V-Sync says how frames reach the screen, Off when Uncapped is
+    // chosen. What a rate above the display's costs, or where the display holds it, is logged.
+    const std::string present_mode = EmulatorSettings.GetPresentMode();
+    if (const u32 refresh = Frontend::DisplayRefreshHz();
+        refresh >= 30 && (frame_limit == 0 || frame_limit > refresh + 1)) {
+        if (present_mode == "Mailbox" && frame_limit)
+            std::printf("VideoOut: the %u FPS preset is faster than the display's %u Hz: about %u%% "
+                        "of the frames are rendered and never shown (a lower FPS preset saves that "
+                        "GPU work)\n", frame_limit, refresh, 100 - refresh * 100 / frame_limit);
+        else if (present_mode == "Mailbox")
+            std::printf("VideoOut: Uncapped with Mailbox: frames past the display's %u Hz are "
+                        "rendered and never shown\n", refresh);
+        else if (present_mode == "Fifo" || present_mode == "FifoRelaxed")
+            std::printf("VideoOut: %s waits for the display: the game runs at its %u Hz at most\n",
+                        present_mode.c_str(), refresh);
     }
     auto frame_period = frame_limit ? std::chrono::nanoseconds(1000000000 / frame_limit)
                                     : std::chrono::nanoseconds(0);

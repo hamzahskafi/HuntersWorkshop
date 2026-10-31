@@ -11,8 +11,8 @@ applies the patch file's list) and the engine's corrections (`gpu/shim/engine/fr
 `frame_rate_sites.inc`), which give it the real frame time and correct what the list gets wrong;
 `frame_rate_fixes` (`scripts/patches.py`, `FrameRateFixes` in `start/patches.cpp`) adjusts the
 list's writes (the effects' rate, the follow camera). With the corrections off, the older presets
-apply (`FPS_PRESETS`, `SCALED_FPS`: the 90 FPS++ list scaled for 120 and 144). This note tracks
-what is left.
+apply (`FPS_PRESETS`, `SCALED_FPS`: the 90 FPS++ list scaled for 120 and 144; 240, on the base
+only, runs at 144 without them). This note tracks what is left.
 
 ## Tools
 

@@ -90,7 +90,7 @@ if [[ ${BB_AUTO_RENDER_RES:-} == 1 ]]; then
     unset BB_RENDER_RES BB_OUTPUT_RES BB_AUTO_RENDER_RES
 fi
 # BB_RENDER_RES=WxH explicitly sets the game's render resolution (a patch at start).
-# Frame rate: BB_FPS=uncap (default; vblank 480 Hz, frames shown at once), 60/90/120/144 or 30
+# Frame rate: BB_FPS=uncap (default; vblank 480 Hz, frames shown at once), 60/90/120/144/240 or 30
 # (unpatched). Above 30 the 60 FPS++ patch, the engine setting the pace and the values for the rate
 # (frame_rate.cpp; BB_FRAME_FIXES=0: the older FPS++ patches above 60). BB_PATCHES adds patch names ("a;b").
 # Fixes for the game's own bugs (gpu/shim/engine/game_fixes.cpp; the recording's compression level in
@@ -103,6 +103,12 @@ fi
 # controller details (ids, connection, rumble, disconnects, the first vibration request, round gate).
 # BB_HITCH_REPORT_MS=N: a frame over N ms gets every thread's wait and stack (about twice the frame time).
 fps=${BB_FPS:-uncap}
+# 0.4.4 beta 22: 240 is a fixed rate on the frame-rate corrections; without them (BB_FRAME_FIXES=0) the
+# patch file's lists stop at 144.
+if [[ $fps == 240 && ${BB_FRAME_FIXES:-1} == 0* ]]; then
+    echo '240 FPS needs the frame-rate corrections (BB_FRAME_FIXES=0): running at 144 FPS' >&2
+    fps=144
+fi
 # The engine reads it too (fast loading above 60, frame generation's limit with uncapped).
 export BB_FPS=$fps
 # config.ini output_res other than 1080p (720p for the Steam Deck, 1440p, 2160p): the whole game
@@ -199,9 +205,9 @@ export BB_COPY_GPU_BUFFERS=${BB_COPY_GPU_BUFFERS:-1}
 # up to BB_GPU_WRITE_TWINS_MAX bytes per page) does not wait for the GPU (BufferCache twins).
 export BB_GPU_WRITE_TWINS=${BB_GPU_WRITE_TWINS:-1} BB_GPU_WRITE_TWINS_MAX=${BB_GPU_WRITE_TWINS_MAX:-65536}
 if [[ -z ${BB_VBLANK_HZ:-} ]]; then
-    # 0.4.4 beta 22: 120 and 144 at their own rate, as on Windows (60 before: their frame limit
+    # 0.4.4 beta 22: 120, 144 and 240 at their own rate, as on Windows (60 before: their frame limit
     # followed it, so they ran at 60).
-    case $fps in uncap) export BB_VBLANK_HZ=480 ;; 90|120|144) export BB_VBLANK_HZ=$fps ;; *) export BB_VBLANK_HZ=60 ;; esac
+    case $fps in uncap) export BB_VBLANK_HZ=480 ;; 90|120|144|240) export BB_VBLANK_HZ=$fps ;; *) export BB_VBLANK_HZ=60 ;; esac
 fi
 # FSR 4: faster post passes next to the downloaded ones (incremental; tools/fsr4_optimize.sh).
 if [[ -z ${BB_PREBUILT:-} && -d fsr4_shaders ]] && command -v spirv-cross >/dev/null; then

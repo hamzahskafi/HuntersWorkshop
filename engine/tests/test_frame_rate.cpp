@@ -346,7 +346,7 @@ void TestSixty() {
     Free(image.base, Pages(image.size));
 }
 
-// 90, 120 and 144 on the 60 FPS++ list: the pacer's target, the values and counts for the rate, the cloth
+// 90, 120, 144 and 240 on the 60 FPS++ list: the pacer's target, the values and counts for the rate, the cloth
 // caves with their scale per frame.
 void TestFixedRate(int fps) {
     const Image image = Build(kSize, true);
@@ -654,7 +654,7 @@ int main() {
     TestPlayTime();
     TestTable();
     TestSixty();
-    for (int fps : {90, 120, 144}) TestFixedRate(fps);
+    for (int fps : {90, 120, 144, 240}) TestFixedRate(fps);
     TestUncapped();
     TestNoPace();
     TestNoRoom();

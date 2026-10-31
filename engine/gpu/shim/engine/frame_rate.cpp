@@ -8,7 +8,7 @@
 // cloth (frame_rate_sites.inc says what each one is). Every byte is checked before anything is written; a
 // group with a mismatch is left out whole, the others still go in.
 //
-// The rates: 60, 90, 120 and 144 as they are; uncapped with the pacer's target at its limit and, for what
+// The rates: 60, 90, 120, 144 and 240 as they are; uncapped with the pacer's target at its limit and, for what
 // cannot follow the frame's time (code immediates, frame counts), the values of 120, as bbhost and Kyo's
 // uncapped list take them. The list's fixed steps (1/30 made 1/60) follow the frame here, at 60 too: each one
 // was read and is either the frame's step now (the step-infos handed to updates, "steps") or, where it is
@@ -231,7 +231,7 @@ struct Rate {
 };
 bool RateOf(const char* fps, Rate& rate) {
     if (!fps) return false;
-    for (const double fixed : {60.0, 90.0, 120.0, 144.0}) {
+    for (const double fixed : {60.0, 90.0, 120.0, 144.0, 240.0}) {
         if (std::to_string(int(fixed)) == fps) {
             rate = {fixed, fixed, fixed, false};
             return true;
@@ -477,7 +477,7 @@ bool Install(std::uint8_t* image, std::size_t size) {
     const char* fps = std::getenv("BB_FPS");
     Rate rate;
     if (!RateOf(fps, rate)) {
-        host_log("Frame rate fixes: not at %s FPS (60, 90, 120, 144 or uncapped)", fps ? fps : "an unknown");
+        host_log("Frame rate fixes: not at %s FPS (60, 90, 120, 144, 240 or uncapped)", fps ? fps : "an unknown");
         return false;
     }
     const auto at = [&](std::uint64_t address) { return image + (address - kBase); };

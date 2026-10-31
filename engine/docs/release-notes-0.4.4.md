@@ -61,6 +61,25 @@ What changed since 0.4.3, for the release page. The engine work behind each line
 - **Less VRAM for the upscaler:** images for features that are off (the reactive mask, FSR 4 with
   another upscaler chosen) are made only when first needed: about 35 MB at 1080p with DLSS.
 
+## Frame rate and V-Sync
+
+- **The frame rates in order, with 240:** 30 (as on PS4), 60, 90, 120, 144, 240 and Uncapped, each
+  saying what it runs: every rate above 30 is Kyo's 60 FPS++ with the engine's values for the rate
+  (Frame rate corrections). 240 is a fixed rate like 120 and 144; it needs Frame rate corrections
+  (on by default) and runs at 144 without them, as in safe mode.
+- **Uncapped is uncapped:** it was held to the display's refresh rate (60 FPS on a 60 Hz screen)
+  unless the presentation mode was Immediate. Now it runs as fast as the PC can, up to 480 FPS. The
+  launcher says that above 240 FPS the game is untested (the old community uncapped patch froze in
+  boss fights at such rates) and recommends 240 for a high frame rate.
+- **V-Sync beside the frame rate:** the presentation mode, under Screen › Advanced before, is now
+  V-Sync in the Frame rate section, with plain names: On (latest frame) (Mailbox, the default), On
+  (every frame) (FIFO), Adaptive (FIFO Relaxed) and Off (Immediate). Settings files keep their
+  choice.
+- **V-Sync follows Uncapped:** choosing Uncapped turns V-Sync Off, and going back to a fixed rate
+  turns it On (latest frame), unless another choice was made in between. Nothing is blocked: a
+  note under V-Sync says when the pair holds the game to the display (On (every frame) or Adaptive
+  with 120 FPS on a 60 Hz screen runs at 60).
+
 ## Fixes
 
 - **Uncapped frame rate:** the vblank is signalled on time even when frames keep coming (with
@@ -68,9 +87,6 @@ What changed since 0.4.3, for the release page. The engine work behind each line
 - **144 FPS is a fixed rate like the others:** it runs the console's vblank at 144 Hz, as 120 runs
   120, and renders 144 frames on a slower display as 120 does. Before, it was handled as Uncapped and
   held to the display's refresh rate (60 FPS on a 60 Hz screen). On Linux, 120 and 144 ran at 60.
-- **The launcher's frame-rate descriptions** say what each rate runs: every rate above 30 is Kyo's
-  60 FPS++ with the engine's values for the rate (Frame rate corrections), and Uncapped is held to
-  the display's refresh rate.
 - **The screen's last row and column keep the game's own alpha** with DLAA and TAA at native
   resolution: the fix for the shimmering line at the right and bottom edges (GitHub issue 43) copied
   the neighbouring pixels whole, alpha included; it now copies their colour only.
@@ -99,6 +115,8 @@ What changed since 0.4.3, for the release page. The engine work behind each line
   the merge). Frame statistics count render passes begun again and what ended them, the copy
   shader's dispatches that interrupt a pass, depth and colour copies by kind, and the GPU command
   thread's work per draw without its idle spin.
+- The log says when the frame rate is above the display's and what that costs (`VideoOut:` the
+  share of frames drawn and never shown with Mailbox), or that FIFO holds the game to the display.
 - `BB_SHADER_DISASM=<hash>` writes a compute shader's game code into the log, decoded, at its first
   dispatch. `BB_BREADCRUMBS=both` puts back the hang marker before each draw.
 - Experiments removed: `BB_ASYNC_FENCES`, `BB_FENCE_DELAY_TEST`, `BB_SUBMIT_LOCK=ahead`,

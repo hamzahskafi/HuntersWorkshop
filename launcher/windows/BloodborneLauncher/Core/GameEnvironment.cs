@@ -97,9 +97,11 @@ namespace BloodborneLauncher.Core
         public static string PatchesDir(LauncherSettings s) =>
             s.Str("patches_dir") is { Length: > 0 } dir ? Paths.Expand(dir) : Path.Combine(Paths.DataDir, "patches");
 
-        /// <summary>30, 60 and 90 are the engine's fixed presets; 120 and uncapped use the uncapped
-        /// patch (scripts\run_windows.py turns them into BB_FPS=uncap with a limit).</summary>
-        public static string Fps(LauncherSettings s) => s.Str("fps_mode") is "30" or "90" or "120" or "144" or "uncap" ? s.Str("fps_mode") : "60";
+        /// <summary>The frame rate (Display › Frame rate): 30, 60, 90, 120, 144 and 240 are fixed rates,
+        /// each with the console's vblank at its rate (the start program sets 120, 144 and 240's,
+        /// start/main.cpp ConfigureFrameRate, and runs 240 at 144 without the frame-rate
+        /// corrections); uncap has no limit.</summary>
+        public static string Fps(LauncherSettings s) => s.Str("fps_mode") is "30" or "90" or "120" or "144" or "240" or "uncap" ? s.Str("fps_mode") : "60";
 
         /// <summary>This launch's answer about a region-changing patch while online ("keep" or
         /// "skip"; scripts/patches.py leaves it out unless "keep"), or null when none is on.</summary>

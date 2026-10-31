@@ -217,10 +217,16 @@ def configure_frame_rate(env):
     legacy uncapped launch cannot saturate the desktop during menus or loading.
     """
     fps = env.get('BB_FPS', '60')
+    # 0.4.4 beta 22: 240 is a fixed rate on the frame-rate corrections (their values follow the rate);
+    # without them (BB_FRAME_FIXES=0, safe mode) the patch file's lists stop at 144.
+    if fps == '240' and env.get('BB_FRAME_FIXES', '1').startswith('0'):
+        print('240 FPS needs the frame-rate corrections (off): running at 144 FPS', flush=True)
+        fps = '144'
     # Bloodborne PC: 120 and 144 are the 90 FPS++ patch with its frame-rate values for that rate
-    # (patches.py SCALED_FPS; the uncapped patch froze Vicar Amelia's intro at any rate). Each runs
-    # the console's vblank at its rate (144 too since 0.4.4 beta 22; 480 Hz before, as Uncapped).
-    if fps in ('120', '144'):
+    # (patches.py SCALED_FPS; the uncapped patch froze Vicar Amelia's intro at any rate), 240 the
+    # frame-rate table's (with the corrections, every rate above 30 is). Each runs the console's
+    # vblank at its rate (144 and 240 too since 0.4.4 beta 22; 480 Hz before, as Uncapped).
+    if fps in ('120', '144', '240'):
         env.update(BB_FPS=fps, BB_FPS_LIMIT=fps, BB_VBLANK_HZ=fps)
         return fps
     # Other rates above 90 use the uncapped patch (with the sprint fix) and the frame limiter;

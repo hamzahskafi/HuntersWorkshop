@@ -28,7 +28,7 @@ private:
     double carry = 0;
 };
 
-/// Loader start, after the patches and the executable's verification: at 60, 90, 120, 144 FPS or uncapped
+/// Loader start, after the patches and the executable's verification: at 60, 90, 120, 144, 240 FPS or uncapped
 /// (BB_FPS; uncapped's limit BB_FPS_LIMIT) with the 60 FPS++ list in place, checks and applies the sites,
 /// sets the frame pacer's target and the values for the rate, and points the per-frame loads at slots past
 /// the end of the game's data segment, in its last page (`size`: the whole image, the linked modules after

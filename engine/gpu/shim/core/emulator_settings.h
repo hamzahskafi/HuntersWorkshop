@@ -33,14 +33,14 @@ public:
     // 480 Hz they snap to ~2.1 ms steps). The frame rate is not limited unless BB_FPS_LIMIT
     // (launcher: "FPS limit") asks for it. Other values are used as given (60/90: the
     // fixed-timestep presets, flips on vblank ticks).
-    /// 0.4.4 beta 22: the fastest fixed-timestep preset's vblank, 144 Hz: each fixed preset (60,
-    /// 90, 120, 144) runs the console's vblank at its own rate, and the game's vblank events and
-    /// flips follow it. Before, only up to 120 Hz: the 144 preset ran the uncapped presets' 480 Hz
-    /// (its flips paced by the frame limit, the game seeing 480 vblanks a second) and was taken
-    /// for Uncapped where that matters (the display's refresh cap held it at 60 on a 60 Hz
-    /// screen).
+    /// 0.4.4 beta 22: the fastest fixed-timestep preset's vblank, 240 Hz: each fixed preset (60,
+    /// 90, 120, 144, 240) runs the console's vblank at its own rate, and the game's vblank events
+    /// and flips follow it. Before, only up to 120 Hz: the 144 preset ran the uncapped presets'
+    /// 480 Hz (its flips paced by the frame limit, the game seeing 480 vblanks a second) and was
+    /// taken for Uncapped where that mattered (the display's refresh cap held it at 60 on a
+    /// 60 Hz screen).
     static constexpr long MaxFixedVblank() {
-        return 144;
+        return 240;
     }
     u32 GetVblankFrequency() {
         static const u32 value = [] {
@@ -51,7 +51,7 @@ public:
         }();
         return value;
     }
-    /// Vblank faster than any fixed-timestep preset (above 144 Hz, or 0): flips at once.
+    /// Vblank faster than any fixed-timestep preset (above 240 Hz, or 0): flips at once.
     bool IsUncappedVblank() {
         static const bool value = [] {
             const long hz = Number("BB_VBLANK_HZ", 60);

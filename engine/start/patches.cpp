@@ -792,9 +792,15 @@ PatchResult CompilePatches(const PatchRequest& request) {
     const PatchFile xml(request.xml);
     const auto& presets = FpsPresets();
     const std::map<std::string, int> scaled_fps{{"120", 120}, {"144", 144}};
+    // 0.4.4 beta 22: 240 on the frame-rate table only: the patch file's lists have no values for it (the
+    // start runs 144 without the corrections, main.cpp ConfigureFrameRate).
+    const std::map<std::string, int> table_fps{{"240", 240}};
     const auto preset_it = presets.find(request.fps);
-    if (preset_it == presets.end() && !scaled_fps.count(request.fps)) throw Error("invalid FPS preset " + request.fps);
     const bool corrections = FrameFixesOn();
+    if (table_fps.count(request.fps) && !corrections)
+        throw Error(request.fps + " FPS needs the frame-rate corrections (BB_FRAME_FIXES)");
+    if (preset_it == presets.end() && !scaled_fps.count(request.fps) && !table_fps.count(request.fps))
+        throw Error("invalid FPS preset " + request.fps);
     const bool own = corrections && request.fps != "30";      // our frame-rate table, not the patch file's lists
     const bool on_sixty = own && request.fps != "60";         // above 60 on it
     const std::vector<std::string> preset =
@@ -884,12 +890,14 @@ PatchResult CompilePatches(const PatchRequest& request) {
             request.fps == "uncap" ? "uncapped" : (request.fps + " FPS").c_str(), base.size(),
             on_sixty ? ": the engine sets the pace and the values for the rate" : "",
             request.fps == "uncap" ? "Uncap FPS++" : request.fps == "90" ? "90 FPS++"
-                                   : request.fps == "60" ? "60 FPS++" : "scaled 90 FPS++");
+                                   : request.fps == "60" ? "60 FPS++"
+                                   : table_fps.count(request.fps) ? "144 FPS scaled 90 FPS++" : "scaled 90 FPS++");
     if ((!preset.empty() && has(preset[0])) || !base.empty()) {
         std::optional<int> fps;
         if (request.fps == "60") fps = 60;
         else if (request.fps == "90") fps = 90;
         else if (scaled_fps.count(request.fps)) fps = scaled_fps.at(request.fps);
+        else if (table_fps.count(request.fps)) fps = table_fps.at(request.fps);
         else if (request.fps == "uncap" && on_sixty) fps = kUncappedReference;
         const std::string tuning = Lower(Env("BB_CAMERA_TUNING", Setting(settings, "camera_tuning").value_or("original")));
         writes = FrameRateFixes(writes, fps, elf, tuning != "fps++", corrections);
