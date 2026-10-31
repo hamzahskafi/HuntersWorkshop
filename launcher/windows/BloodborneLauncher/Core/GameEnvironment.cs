@@ -191,8 +191,8 @@ namespace BloodborneLauncher.Core
             if (s.Bool("exp_hot_pages")) env["BB_HOT_PAGES"] = "2";
             // The PC memory model (the GPU reads the game's memory in place; the engine checks the
             // GPU first and keeps copying where it cannot): off by default since 0.4.0 beta 4 (late
-            // frames while it moves memory), to be removed before 0.4.4 ships. The game's draw calls
-            // handed over directly (exp_native_calls, below): on by default.
+            // frames while it moves memory), to be removed before 0.4.4 ships. The game's draw
+            // calls handed over directly (exp_native_calls, below): on by default.
             if (s.Bool("exp_guest_in_place")) env["BB_GUEST_IN_PLACE"] = "1";
             // The game's per-frame GPU memory read in place (on unless 0; safe mode sets 0 below).
             if (!s.Bool("exp_gx_in_place")) env["BB_GX_IN_PLACE"] = "0";
