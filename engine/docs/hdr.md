@@ -1,12 +1,12 @@
 # HDR output
 
-`hdr=1` in `config.ini` (`BB_HDR=1`, the menu's "HDR output", applied on restart) presents the
-game in an HDR swapchain when the display offers one (Windows HDR on): HDR10 (BT.2020, PQ,
-`A2B10G10R10`) or scRGB (linear BT.709 in FP16). The game itself only makes an 8-bit SDR frame;
-`hdr_output.frag` encodes it. SDR white is shown at `hdr_paper_white` nits (10-500, default 200),
-nothing goes above the peak. The settings menu is drawn into its own layer and composed at paper
-white. SDR is decoded with a 2.2 power curve (the piecewise sRGB curve lifts Bloodborne's shadows
-into grey).
+`hdr=1` in `config.ini` (`BB_HDR=1`, the menu's and the launcher's "HDR output", applied on
+restart) presents the game in an HDR swapchain when the display offers one (Windows HDR on): HDR10
+(BT.2020, PQ, `A2B10G10R10`) or scRGB (linear BT.709 in FP16). The game itself only makes an 8-bit
+SDR frame; `hdr_output.frag` encodes it. SDR white is shown at `hdr_paper_white` nits (10-500,
+default 200), nothing goes above the peak. The settings menu is drawn into its own layer and
+composed at paper white. SDR is decoded with a 2.2 power curve (the piecewise sRGB curve lifts
+Bloodborne's shadows into grey).
 
 The peak is the display's by default (`hdr_peak_auto=1`, the menu's and launcher's "Peak
 brightness from the display"): the window asks DXGI about the output its monitor is on
@@ -18,12 +18,18 @@ default 1000) is used; `BB_HDR_PEAK` sets it for one run and turns auto off.
 `BbSettings::HdrPeakNits` is the one place that decides.
 
 How the highlights get above paper white is `hdr_mode` (`BB_HDR_MODE`, the menu's "HDR mode",
-live):
+the launcher's "HDR source", live):
 
 | mode | highlights from | midtones | UI |
 |---|---|---|---|
-| `native` (default) | the game's own linear HDR scene, before its tonemap | exactly the SDR picture | paper white |
+| `native` (default) | the game's own linear HDR scene, before its tonemap | exactly the SDR picture | `hdr_ui_brightness` times paper white |
 | `expand` | the clipped SDR picture (a guess) | exactly the SDR picture | expanded like the rest |
+
+In native mode the game's UI (HUD, menus, subtitles, and the whole of a frame without a scene) has
+two settings of its own, live, in the menu while native mode is on and under Advanced in the
+launcher's HDR group: `hdr_ui_brightness` (the menu's "UI brightness", 0.5-2, default 1) is its
+white, times paper white; `hdr_ui_color` ("UI colour", 0-1, default 1) goes from its exact sRGB
+colours (0) to the wider ones a wide-gamut monitor shows SDR with (1: the values taken as DCI-P3).
 
 ## Expand
 
@@ -99,8 +105,9 @@ much brighter the scene really is there, measured every frame on the GPU:
 
 A frame without a scene (title, menus, loading screens, pre-rendered movies), or whose display
 pass reads another image than the UI-free copy came from (or whose UI target was not found),
-has no map: it is shown as plain SDR at paper white. A frame with a scene but no UI pass (in-engine
-cutscenes without subtitles) is its own UI-free copy.
+has no map: it is shown as plain SDR, nothing expanded, and all of it counts as UI (at
+`hdr_ui_brightness` times paper white, with `hdr_ui_color`). A frame with a scene but no UI pass
+(in-engine cutscenes without subtitles) is its own UI-free copy.
 
 `hdr_boost` in native mode is the share of the scene's highlight range shown, in log2:
 `sqrt(boost)`. The default 0.25 shows half of it (a lamp the scene has 10x brighter than SDR
@@ -113,6 +120,11 @@ colours) and the right half as set, with a grey line between them.
 HDR metadata (`VK_EXT_hdr_metadata`): max mastering luminance is the peak, MaxFALL paper white;
 MaxCLL is the peak in native mode and expand's SDR white level in expand mode. It changes with
 the settings, not per frame.
+
+Frame generation runs with HDR output: FSR 3.1 interpolates the 8-bit frame before the encode, and
+the generated frame is encoded with the real frame's gain map; DLSS Frame Generation gets the
+frame and the frame without its UI encoded alike (`BB_DLSSG_HDR=0` turns it off with HDR;
+docs/dlss_frame_generation.md).
 
 ### Cost
 
