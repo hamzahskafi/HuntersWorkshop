@@ -119,8 +119,6 @@ public:
         if (frame != 0) {
             frame_ends.emplace_back(submissions_total, frame);
         }
-        mapped_queues[GfxQueueId].ccb_buffer_offset = 0;
-        mapped_queues[GfxQueueId].dcb_buffer_offset = 0;
         submit_done = true;
         submit_cv.notify_one();
     }
@@ -187,14 +185,6 @@ public:
         }
     }
 
-    void ReserveCopyBufferSpace() {
-        GpuQueue& gfx_queue = mapped_queues[GfxQueueId];
-        std::scoped_lock lk(gfx_queue.m_access);
-        constexpr size_t GfxReservedSize = 2_MB >> 2;
-        gfx_queue.ccb_buffer.reserve(GfxReservedSize);
-        gfx_queue.dcb_buffer.reserve(GfxReservedSize);
-    }
-
     inline ComputeProgram& GetCsRegs() {
         return mapped_queues[curr_qid].cs_state;
     }
@@ -253,8 +243,6 @@ private:
         Handle handle;
     };
 
-    using CmdBuffer = std::pair<std::span<const u32>, std::span<const u32>>;
-    CmdBuffer CopyCmdBuffers(std::span<const u32> dcb, std::span<const u32> ccb);
     /// bbport: a submission's command buffers copied when the guest submits them
     /// (BB_COPY_GPU_BUFFERS): the guest reused their memory before the GPU thread decoded
     /// them ("PM4 type 0" from zeros or the next frame's commands, while an area loads).
@@ -279,10 +267,6 @@ private:
 
     struct GpuQueue {
         std::mutex m_access{};
-        std::atomic<u32> dcb_buffer_offset;
-        std::atomic<u32> ccb_buffer_offset;
-        std::vector<u32> dcb_buffer;
-        std::vector<u32> ccb_buffer;
         std::queue<Task::Handle> submits{};
         ComputeProgram cs_state{};
     };
