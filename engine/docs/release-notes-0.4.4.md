@@ -65,6 +65,12 @@ What changed since 0.4.3, for the release page. The engine work behind each line
 
 - **Uncapped frame rate:** the vblank is signalled on time even when frames keep coming (with
   precise pacing off).
+- **144 FPS is a fixed rate like the others:** it runs the console's vblank at 144 Hz, as 120 runs
+  120, and renders 144 frames on a slower display as 120 does. Before, it was handled as Uncapped and
+  held to the display's refresh rate (60 FPS on a 60 Hz screen). On Linux, 120 and 144 ran at 60.
+- **The launcher's frame-rate descriptions** say what each rate runs: every rate above 30 is Kyo's
+  60 FPS++ with the engine's values for the rate (Frame rate corrections), and Uncapped is held to
+  the display's refresh rate.
 - **The screen's last row and column keep the game's own alpha** with DLAA and TAA at native
   resolution: the fix for the shimmering line at the right and bottom edges (GitHub issue 43) copied
   the neighbouring pixels whole, alpha included; it now copies their colour only.
