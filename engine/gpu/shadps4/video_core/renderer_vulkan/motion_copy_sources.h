@@ -1,10 +1,16 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Hunter's Workshop 0.4.4 beta 14: where the game's copy shader (cs fefebf9e, vk_shader_hle.cpp)
+// Hunter's Workshop 0.4.4 beta 14: where the game's copy shader (cs fefebf9f, vk_shader_hle.cpp)
 // took the bytes it wrote, for object motion. Small skeletons whose bone palette the GPU wrote are
 // stored every frame (their CPU copy is stale, so the palette cannot be compared with the last
 // frame's); facing the lamps of the dense area that was 360 draws and 3.7 M vertices a frame. When
 // the copy shader wrote the palette, its source is the game's memory, current on the CPU: the
 // palette can be compared through it (BB_MOTION_GPU_SMALL=source).
+// 0.4.4 beta 21: fefebf9f is the program hash the HLE compares (COPY_SHADER_HASH; this said
+// fefebf9e). BB_SHADER_DISASM and the GPU profile's "dispatch cs" labels print hashes whole (the
+// profile names this shader "copy shader HLE" instead, as it is not run). The stage B
+// statistics' "dispatches by shader" list prints it as fefebf9e: that table marks a used slot by
+// setting the key's bit 0 (BbSections::ByKey) and prints keys with it cleared, so every odd hash
+// shows there one lower (a040875f as a040875e, a954e79d as a954e79c).
 #pragma once
 
 #include <cstdint>
@@ -63,7 +69,8 @@ public:
         return instance;
     }
 
-    /// Whether copies are recorded: object motion on, with frame statistics or the source mode.
+    /// Whether copies are recorded: object motion on, in the source mode (0.4.4 beta 21: before,
+    /// with frame statistics in any mode too).
     void SetWanted(bool on) {
         wanted = on;
     }
@@ -176,9 +183,10 @@ private:
 
 /// Frame statistics on those draws (with frame statistics on, in any mode): how many; how many had
 /// every such palette's newest GPU write known, and of those how many found it as in the last
-/// frame (what the version mode leaves to camera vectors, its hold aside); how many had every
-/// palette from one copy of the copy shader with a source the CPU holds current, and of those how
-/// many found the source as in the last frame. Draw recording thread only.
+/// frame (what the version mode leaves to camera vectors, its hold aside); in the source mode
+/// only (the copies are traced there only, 0.4.4 beta 21), how many had every palette from one
+/// copy of the copy shader with a source the CPU holds current, and of those how many found the
+/// source as in the last frame. Draw recording thread only.
 class GpuSmallStats {
 public:
     static GpuSmallStats& Get() {
@@ -218,12 +226,20 @@ public:
     /// The line for the 600-frame report, then the counts start again.
     void Report() {
         if (frames && draws) {
+            // The copy shader's part only where its sources are traced (the source mode): 0
+            // elsewhere would read as "none came from it".
+            char from_copy_text[128] = "";
+            if (GpuSmallMode() == GpuSmall::Source) {
+                std::snprintf(from_copy_text, sizeof(from_copy_text),
+                              "; every palette from the copy shader %.0f (as in the last frame "
+                              "%.0f)",
+                              double(from_copy) / frames, double(unchanged) / frames);
+            }
             std::printf("Object motion: small skeletons the GPU wrote %.0f draws a frame; newest GPU "
-                        "write known %.0f (none since the last frame %.0f); every palette from the "
-                        "copy shader %.0f (as in the last frame %.0f) (BB_MOTION_GPU_SMALL=%s)\n",
+                        "write known %.0f (none since the last frame %.0f)%s "
+                        "(BB_MOTION_GPU_SMALL=%s)\n",
                         double(draws) / frames, double(known) / frames,
-                        double(same_version) / frames, double(from_copy) / frames,
-                        double(unchanged) / frames, GpuSmallModeName());
+                        double(same_version) / frames, from_copy_text, GpuSmallModeName());
         }
         draws = known = same_version = from_copy = unchanged = frames = 0;
     }

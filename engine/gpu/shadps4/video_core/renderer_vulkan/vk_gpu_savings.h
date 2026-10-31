@@ -25,15 +25,6 @@ inline bool TileMemoOn() {
     static const bool on = EnvOn("BB_IMAGE_TILE_MEMO");
     return on;
 }
-/// BB_HLE_COPY_MERGE=1: the copy shader's batches merged into one dispatch per guest dispatch.
-/// Off by default: rainbow noise in some ground textures was seen with it on (beta 8 test).
-inline bool HleMergeOn() {
-    static const bool on = [] {
-        const char* env = std::getenv("BB_HLE_COPY_MERGE");
-        return env && env[0] == '1';
-    }();
-    return on;
-}
 
 /// What ended a render pass (Scheduler::EndRendering's reason; beta 19: named where it ends;
 /// beta 20: transfers by operation).
@@ -107,7 +98,9 @@ struct Counters {
     // Why a fill was not skipped although a memo for the range existed.
     std::atomic<std::uint64_t> tile_miss_image{0}, tile_miss_buffer{0}, tile_miss_proxy{0},
         tile_miss_other{0};
-    // HLE copy shader: batches, and dispatches/barrier checks recorded for them.
+    // HLE copy shader: batches; those copied by a dispatch (MultiCopy; the others, of fewer than
+    // 8 ranges or not whole dwords, by vkCmdCopyBuffer); those dispatches that flushed barriers
+    // first.
     std::atomic<std::uint64_t> hle_batches{0}, hle_dispatches{0}, hle_barriers{0};
     // Lookahead thread: sleeps instead of yields while stage B is stuck (BB_LOOKAHEAD_SLEEP).
     std::atomic<std::uint64_t> lookahead_sleeps{0};
@@ -250,8 +243,8 @@ inline void Report() {
     const double depth_upload_mb = take(c.depth_upload_bytes) / s / (1024.0 * 1024.0);
     std::printf("GPU savings per second: image->texel buffer fills %.1f, skipped unchanged %.1f "
                 "(%.1f MB; refilled after image write %.1f, buffer write %.1f, proxy %.1f, other "
-                "%.1f) [BB_IMAGE_TILE_MEMO]; HLE copy %.0f batches in %.0f dispatches, %.0f "
-                "barrier flushes [BB_HLE_COPY_MERGE]; lookahead sleeps %.0f "
+                "%.1f) [BB_IMAGE_TILE_MEMO]; HLE copy %.0f batches, %.0f of them as dispatches "
+                "(%.0f after a barrier flush; the rest vkCmdCopyBuffer); lookahead sleeps %.0f "
                 "[BB_LOOKAHEAD_SLEEP]\n",
                 fills / s, skips / s, skipped_mb / s, mi / s, mb / s, mp / s, mo / s, batches / s,
                 dispatches / s, barriers / s, sleeps / s);

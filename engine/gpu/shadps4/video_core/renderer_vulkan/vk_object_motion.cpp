@@ -202,11 +202,13 @@ ObjectMotion::~ObjectMotion() {
 }
 
 void ObjectMotion::OnFrameStart() {
-    // 0.4.4 beta 14: the copy shader's ranges are recorded while they are looked at (frame
-    // statistics, or BB_MOTION_GPU_SMALL=source), this frame's and the last.
+    // 0.4.4 beta 14: the copy shader's ranges are recorded while they are looked at
+    // (BB_MOTION_GPU_SMALL=source), this frame's and the last. 0.4.4 beta 21: no longer with frame
+    // statistics in the other modes: thousands of ranges a frame under a lock on the draw
+    // recording thread, and in the version mode the traced source gave draws without a palette
+    // the CPU holds an anchor players' runs never had (statistics runs now match them).
     auto& copy_sources = Motion::CopySources::Get();
-    copy_sources.SetWanted(enabled && (BbStats::enabled ||
-                                       Motion::GpuSmallMode() == Motion::GpuSmall::Source));
+    copy_sources.SetWanted(enabled && Motion::GpuSmallMode() == Motion::GpuSmall::Source);
     copy_sources.NextFrame();
     // 0.4.4 beta 16: GPU writes numbered for the version mode (and its statistics).
     VideoCore::GpuWriteStamps::Get().SetWanted(

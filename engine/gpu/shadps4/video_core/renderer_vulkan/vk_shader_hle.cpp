@@ -30,11 +30,6 @@ namespace Vulkan {
 
 static constexpr u64 COPY_SHADER_HASH = 0xfefebf9f;
 
-/// A range of each buffer a batch reads or writes (barrier checks and access tracking).
-struct AccessRange {
-    u64 src_min, src_max, dst_min, dst_max;
-};
-
 // 0.4.4 beta 20: whether the game dispatch being run interrupted a render pass, sampled at its
 // start (ExecuteCopyShaderHLE), before its uploads, copies or the profiler's mark end the pass,
 // and taken by its first MultiCopy for the frame statistics. Beta 18 and 19 sampled it in
@@ -42,14 +37,15 @@ struct AccessRange {
 // renderer-1). One thread runs the HLE at a time.
 static bool copy_dispatch_in_pass = false;
 
-// bbport: the copy shader runs ~57 times per frame with ~1024 small ranges each. As one
-// vkCmdCopyBuffer with that many regions it cost ~37 ns of GPU time per range (~2.1 ms per
-// frame) plus the recording; buffer_multi_copy.comp copies all ranges in one dispatch.
-/// `ranges`: the batches merged into this dispatch (BB_HLE_COPY_MERGE), each checked and
-/// tracked on its own; empty: the bounds of all the copies, as one batch.
+// bbport: buffer_multi_copy.comp copies a batch's ranges in one dispatch (a workgroup per
+// range). As one vkCmdCopyBuffer with a region per range they cost ~37 ns of GPU time each,
+// measured when a game dispatch was one batch: ~57 game dispatches a frame of ~1,024 ranges
+// each, ~2.1 ms a frame, plus the recording. Since the 64 KiB merge distance (BB_COPY_MERGE_KB,
+// ExecuteCopyShaderHLE) a game dispatch is split into batches; 0.4.4 beta 21's logs show ~54
+// game dispatches a frame of ~80 ranges each (~525,000 ranges a second). Batches of fewer than
+// 8 ranges still go through vkCmdCopyBuffer.
 static bool MultiCopy(Rasterizer& rasterizer, const VideoCore::Buffer* src,
-                      const VideoCore::Buffer* dst, std::span<const vk::BufferCopy> copies,
-                      std::span<const AccessRange> ranges = {}) {
+                      const VideoCore::Buffer* dst, std::span<const vk::BufferCopy> copies) {
     if (copies.size() < 8 || BbToggle::Disabled(BbToggle::MultiCopyShader)) {
         return false;
     }
@@ -69,13 +65,6 @@ static bool MultiCopy(Rasterizer& rasterizer, const VideoCore::Buffer* src,
     const u64 align = instance.StorageMinAlignment();
     src_min = Common::AlignDown(src_min, align);
     dst_min = Common::AlignDown(dst_min, align);
-    // Merged batches may span more than a descriptor or a dispatch can hold.
-    if (!ranges.empty() &&
-        (src_max - src_min > instance.MaxStorageBufferRange() ||
-         dst_max - dst_min > instance.MaxStorageBufferRange() ||
-         copies.size() > instance.MaxComputeWorkGroupCountX())) {
-        return false;
-    }
 
     struct Pipeline {
         vk::UniqueDescriptorSetLayout set_layout;
@@ -142,21 +131,8 @@ static bool MultiCopy(Rasterizer& rasterizer, const VideoCore::Buffer* src,
     const u64 src_size = src_max - src_min, dst_size = dst_max - dst_min;
     auto& savings = GpuSavings::Get();
     savings.hle_dispatches.fetch_add(1, std::memory_order_relaxed);
-    bool flush = false;
-    if (ranges.empty()) {
-        flush = runtime.IsBufferAccessed(src, src_min, src_size) ||
-                runtime.IsBufferAccessed(dst, dst_min, dst_size, true);
-    } else {
-        // The batches of one guest dispatch run unordered on the hardware too: one barrier
-        // before all of them, for what came before.
-        for (const auto& r : ranges) {
-            if (runtime.IsBufferAccessed(src, r.src_min, r.src_max - r.src_min) ||
-                runtime.IsBufferAccessed(dst, r.dst_min, r.dst_max - r.dst_min, true)) {
-                flush = true;
-                break;
-            }
-        }
-    }
+    const bool flush = runtime.IsBufferAccessed(src, src_min, src_size) ||
+                       runtime.IsBufferAccessed(dst, dst_min, dst_size, true);
     if (in_pass) {
         // No barrier needed: nothing since the last barrier, so nothing in this pass, wrote its
         // source or touched its destination; a snapshot (the stream buffer) cannot change later.
@@ -189,21 +165,10 @@ static bool MultiCopy(Rasterizer& rasterizer, const VideoCore::Buffer* src,
                              &count);
         cmdbuf.dispatch(count, 1, 1);
     });
-    if (ranges.empty()) {
-        runtime.AccessBuffer(src, src_min, src_size, vk::PipelineStageFlagBits2::eComputeShader,
-                             vk::AccessFlagBits2::eShaderRead);
-        runtime.AccessBuffer(dst, dst_min, dst_size, vk::PipelineStageFlagBits2::eComputeShader,
-                             vk::AccessFlagBits2::eShaderWrite);
-        return true;
-    }
-    for (const auto& r : ranges) {
-        runtime.AccessBuffer(src, r.src_min, r.src_max - r.src_min,
-                             vk::PipelineStageFlagBits2::eComputeShader,
-                             vk::AccessFlagBits2::eShaderRead);
-        runtime.AccessBuffer(dst, r.dst_min, r.dst_max - r.dst_min,
-                             vk::PipelineStageFlagBits2::eComputeShader,
-                             vk::AccessFlagBits2::eShaderWrite);
-    }
+    runtime.AccessBuffer(src, src_min, src_size, vk::PipelineStageFlagBits2::eComputeShader,
+                         vk::AccessFlagBits2::eShaderRead);
+    runtime.AccessBuffer(dst, dst_min, dst_size, vk::PipelineStageFlagBits2::eComputeShader,
+                         vk::AccessFlagBits2::eShaderWrite);
     return true;
 }
 
@@ -302,56 +267,6 @@ bool GroupByDestination(std::span<const vk::BufferCopy> copies, u32 window_shift
         grouped[starts[group_of[i]]++] = copies[i];
     }
     return true;
-}
-/// bbport (BB_HLE_COPY_MERGE): whether ranges of two different batches write the same bytes.
-/// Batch after batch, the later one's bytes won; in one dispatch the order would be lost.
-bool DestinationsShared(std::span<const vk::BufferCopy> copies,
-                        std::span<const CopyBatch> batches) {
-    // Cheap first: batches whose destination bounds are disjoint share nothing.
-    bool bounds_overlap = false;
-    for (size_t i = 0; i < batches.size() && !bounds_overlap; ++i) {
-        for (size_t j = i + 1; j < batches.size(); ++j) {
-            if (batches[i].dst_min < batches[j].dst_max && batches[j].dst_min < batches[i].dst_max) {
-                bounds_overlap = true;
-                break;
-            }
-        }
-    }
-    if (!bounds_overlap) {
-        return false;
-    }
-    struct Interval {
-        vk::DeviceSize begin, end;
-        u32 batch;
-    };
-    thread_local std::vector<Interval> intervals;
-    intervals.clear();
-    u32 start = 0;
-    for (u32 b = 0; b < batches.size(); ++b) {
-        for (u32 i = start; i < batches[b].end; ++i) {
-            intervals.push_back({copies[i].dstOffset, copies[i].dstOffset + copies[i].size, b});
-        }
-        start = batches[b].end;
-    }
-    std::sort(intervals.begin(), intervals.end(),
-              [](const Interval& a, const Interval& b) { return a.begin < b.begin; });
-    // Sweep: the furthest end so far and its batch, and whether two batches reach it.
-    vk::DeviceSize reach = 0;
-    u32 reach_batch = 0;
-    bool any = false;
-    for (const auto& interval : intervals) {
-        if (any && interval.begin < reach && interval.batch != reach_batch) {
-            return true;
-        }
-        if (!any || interval.end > reach) {
-            // A longer interval of another batch hides the one before; both were checked
-            // against everything before them.
-            reach = interval.end;
-            reach_batch = interval.batch;
-            any = true;
-        }
-    }
-    return false;
 }
 } // namespace
 
@@ -541,91 +456,6 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
             GpuSavings::Count(GpuSavings::Get().hle_dispatches_in_pass);
         }
         scheduler.EndRendering(GpuSavings::PassBreak::CopyShader);
-    }
-    // bbport (BB_HLE_COPY_MERGE): every batch's buffers obtained first (uploads and residency
-    // all before the copies), then one barrier check and one dispatch per run of batches on the
-    // same buffers, instead of a barrier check and a dispatch per batch. Only when no source
-    // range overlaps a destination range in guest memory: the order of the batches cannot
-    // matter then (the guest's single dispatch has no order between its ranges either).
-    if (batches.size() > 1 && GpuSavings::HleMergeOn() &&
-        !BbToggle::Disabled(BbToggle::MultiCopyShader)) {
-        vk::DeviceSize src_lo = ~0ull, src_hi = 0, dst_lo = ~0ull, dst_hi = 0;
-        for (const auto& batch : batches) {
-            src_lo = std::min(src_lo, batch.src_min);
-            src_hi = std::max(src_hi, batch.src_max);
-            dst_lo = std::min(dst_lo, batch.dst_min);
-            dst_hi = std::max(dst_hi, batch.dst_max);
-        }
-        const VAddr src_base = src_buf_sharp.base_address;
-        const VAddr dst_base = dst_buf_sharp.base_address;
-        const bool overlap =
-            (src_base + src_lo < dst_base + dst_hi && dst_base + dst_lo < src_base + src_hi) ||
-            DestinationsShared(copies, batches);
-        if (!overlap) {
-            struct Obtained {
-                const VideoCore::Buffer* src;
-                const VideoCore::Buffer* dst;
-                AccessRange range;
-            };
-            static std::vector<Obtained> obtained;
-            static std::vector<AccessRange> run_ranges;
-            obtained.clear();
-            u32 start = 0;
-            for (const auto& batch : batches) {
-                BbSections::Scope obtain_scope{BbSections::HleObtain};
-                VideoCore::BufferCache::hle_obtain = BbStats::enabled;
-                VideoCore::BufferCache::copy_source = true;
-                const auto [src_buf, src_buf_offset] = buffer_cache.ObtainBuffer(
-                    src_base + batch.src_min, batch.src_max - batch.src_min, false);
-                VideoCore::BufferCache::copy_source = false;
-                const auto [dst_buf, dst_buf_offset] = buffer_cache.ObtainBuffer(
-                    dst_base + batch.dst_min, batch.dst_max - batch.dst_min, true);
-                VideoCore::BufferCache::hle_obtain = false;
-                obtain_scope.End();
-                for (auto& copy : std::span{copies}.subspan(start, batch.end - start)) {
-                    copy.srcOffset = copy.srcOffset - batch.src_min + src_buf_offset;
-                    copy.dstOffset = copy.dstOffset - batch.dst_min + dst_buf_offset;
-                }
-                obtained.push_back(
-                    {src_buf, dst_buf,
-                     {src_buf_offset, src_buf_offset + (batch.src_max - batch.src_min),
-                      dst_buf_offset, dst_buf_offset + (batch.dst_max - batch.dst_min)}});
-                start = batch.end;
-            }
-            BB_SECTION(HleCopy);
-            u32 first = 0, copy_start = 0;
-            while (first < batches.size()) {
-                u32 last = first + 1;
-                while (last < batches.size() && obtained[last].src == obtained[first].src &&
-                       obtained[last].dst == obtained[first].dst) {
-                    ++last;
-                }
-                const u32 copy_end = batches[last - 1].end;
-                run_ranges.clear();
-                for (u32 b = first; b < last; ++b) {
-                    run_ranges.push_back(obtained[b].range);
-                }
-                const auto run = std::span{copies}.subspan(copy_start, copy_end - copy_start);
-                if (!MultiCopy(rasterizer, obtained[first].src, obtained[first].dst, run,
-                               run_ranges)) {
-                    // Batch by batch, as without the merge.
-                    u32 at = copy_start;
-                    for (u32 b = first; b < last; ++b) {
-                        const auto part = std::span{copies}.subspan(at, batches[b].end - at);
-                        if (!MultiCopy(rasterizer, obtained[b].src, obtained[b].dst, part)) {
-                            runtime.CopyBuffer(obtained[b].src, obtained[b].dst, part);
-                        }
-                        copy_dispatch_in_pass = false; // the first batch's only (the audit)
-                        at = batches[b].end;
-                    }
-                }
-                copy_dispatch_in_pass = false;
-                first = last;
-                copy_start = copy_end;
-            }
-            copy_dispatch_in_pass = false;
-            return true;
-        }
     }
     u32 batch_start = 0;
     for (const auto& batch : batches) {

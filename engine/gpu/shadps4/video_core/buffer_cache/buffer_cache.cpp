@@ -1140,9 +1140,6 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
     // decoded later (WriteData, constant RAM dumps) change them on the CPU in decode order, and
     // a draw decoded before must keep its values (buffer renaming). GPU writes are noted for
     // that: a range the GPU has yet to write is not copied.
-    if (is_written && !shadows.empty()) {
-        DropShadows(device_addr, size);
-    }
     // bbport BB_GX_IN_PLACE: the game's GX region, bound in place once imported (PollGxRegion):
     // what is bound inside it is read and written there as the PC memory model's memory is, small
     // read-only bindings still copied (below). Its first binding waits for the import.
@@ -1163,7 +1160,21 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
         NoteBeforeGx(device_addr, size);
     }
     const Buffer* const gx = gx_in_place ? gx_own.load(std::memory_order_acquire) : nullptr;
-    if (gx && (is_written || size > STREAM_THRESHOLD || IsRegionGpuModified(device_addr, size))) {
+    // 0.4.4 beta 21: whether the GPU has written the range or has a write there pending
+    // (IsRegionGpuModified), asked once for the three paths below instead of once each. Only the
+    // thread binding buffers makes a range GPU-modified (bindings for writes, the command
+    // processor's writes in stream order); the GPU's progress, EnsureResident's housekeeping and
+    // NoteFreshRange (any thread) only clear it. So a "no" holds for the whole binding, and a
+    // "yes" is asked again after the in-place path (below). The tail check above asks about
+    // another range (the part in the tail page).
+    std::optional<bool> gpu_modified;
+    const auto is_gpu_modified = [&] {
+        if (!gpu_modified) {
+            gpu_modified = IsRegionGpuModified(device_addr, size);
+        }
+        return *gpu_modified;
+    };
+    if (gx && (is_written || size > STREAM_THRESHOLD || is_gpu_modified())) {
         // Through the region's own buffer: no arena, residency or sparse binding. A write counts
         // as GPU-modified until the GPU has done it (IsRegionGpuModified).
         if (is_written) {
@@ -1182,7 +1193,7 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
         return target;
     }
     if ((GuestInPlace() || gx_in_place) &&
-        (is_written || size > STREAM_THRESHOLD || IsRegionGpuModified(device_addr, size))) {
+        (is_written || size > STREAM_THRESHOLD || is_gpu_modified())) {
         const u64 first_block = device_addr >> block_shift;
         const u64 last_block = (device_addr + size - 1) >> block_shift;
         const auto* arena = GetArena(first_block, last_block);
@@ -1220,11 +1231,6 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
             }
             TraceBinding(device_addr, size, is_written, is_written ? 0 : 2);
             note_hle(0);
-            if (!is_written && !is_texel_buffer) {
-                if (const auto shadow = ShadowCopy(device_addr, size)) {
-                    return *shadow;
-                }
-            }
             // bbport BB_CHUNK_BUFFERS: through its chunk's own buffer where it lies in one.
             const auto target =
                 ChunkBuffers() ? RouteInPlace(RouteOutside, arena, device_addr, size, is_written)
@@ -1234,6 +1240,10 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
             }
             return target;
         }
+        // Not in place. Only a "yes" (or no answer yet) gets here: asked again below, since
+        // EnsureResident may have evicted the blocks the GPU wrote, and the GPU may have done its
+        // write meanwhile.
+        gpu_modified.reset();
     }
     // For read-only buffers use device local stream buffer to reduce renderpass breaks.
     // The copy shader's sources too, up to 64 KiB (BB_HLE_STREAM_KB; 16 or less: as any buffer):
@@ -1258,8 +1268,7 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
     constexpr u64 GxEdgeCopyLimit = 8_MB;
     const bool gx_edge = !gx_in_place && size <= GxEdgeCopyLimit && GxOverlaps(device_addr, size) &&
                          gx_own.load(std::memory_order_acquire) != nullptr;
-    if (!is_written && (size <= stream_limit || gx_edge) &&
-        !IsRegionGpuModified(device_addr, size)) {
+    if (!is_written && (size <= stream_limit || gx_edge) && !is_gpu_modified()) {
         BB_SECTION(ObtainStream);
         note_hle(1);
         if (gx_edge) {
@@ -3038,53 +3047,6 @@ void BufferCache::ProcessLateWrites() {
     }
 }
 
-std::optional<std::pair<const Buffer*, u64>> BufferCache::ShadowCopy(VAddr addr, u64 size) {
-    static const bool enabled = [] {
-        const char* env = std::getenv("BB_SHADOWS");
-        return env && env[0] == '1';
-    }();
-    constexpr u64 MaxShadow = 4_MB, ShadowRing = 128_MB;
-    // A GPU write there not done yet: the copy (through the chunk's own buffer) would not wait
-    // for it; the arena is read instead.
-    if (!enabled || !GarlicInVram() || WriteTracking() || size > MaxShadow ||
-        IsRegionGpuModified(addr, size)) {
-        return std::nullopt;
-    }
-    if (const u64 tick = scheduler.CurrentTick(); tick != shadow_tick) {
-        shadows.clear();
-        shadow_tick = tick;
-    }
-    for (const auto& shadow : shadows) {
-        if (shadow.addr == addr && shadow.size == size) {
-            return std::pair<const Buffer*, u64>{shadow_buffer.get(), shadow.offset};
-        }
-    }
-    const auto source = GuestChunkSource(addr, size);
-    if (!source) {
-        return std::nullopt;
-    }
-    if (!shadow_buffer) {
-        shadow_buffer = std::make_unique<StreamBuffer>(instance, scheduler, MemoryType::DeviceLocal,
-                                                       ShadowRing);
-    }
-    const auto offset = shadow_buffer->Reserve(size, instance.StorageMinAlignment());
-    if (!offset) {
-        return std::nullopt;
-    }
-    const vk::BufferCopy copy{source->second, *offset, size};
-    runtime.CopyBuffer(source->first, shadow_buffer.get(), std::span{&copy, 1});
-    shadows.push_back({addr, size, *offset});
-    BbStats::shadow_copies.fetch_add(1, std::memory_order_relaxed);
-    BbStats::shadow_bytes.fetch_add(size, std::memory_order_relaxed);
-    return std::pair<const Buffer*, u64>{shadow_buffer.get(), *offset};
-}
-
-void BufferCache::DropShadows(VAddr addr, u64 size) {
-    std::erase_if(shadows, [&](const Shadow& shadow) {
-        return addr < shadow.addr + shadow.size && shadow.addr < addr + size;
-    });
-}
-
 bool BufferCache::UpdateGpuWritten(VAddr addr, std::span<const u8> data) {
     const u64 size = data.size();
     if (!GuestInPlace() || WriteTracking() || size == 0 || ((addr | size) & 3) != 0 ||
@@ -3909,7 +3871,6 @@ bool BufferCache::SynchronizeMemoryFromImage(const Buffer* buffer, u64 offset, V
                 savings.tile_skips.fetch_add(1, std::memory_order_relaxed);
                 savings.tile_bytes_skipped.fetch_add(image.info.guest_size,
                                                      std::memory_order_relaxed);
-                DropShadows(device_addr, size);
                 if (GuestInPlace() && !WriteTracking()) {
                     NoteGpuWrite(device_addr, size);
                 }
@@ -3973,7 +3934,6 @@ bool BufferCache::SynchronizeMemoryFromImage(const Buffer* buffer, u64 offset, V
             };
         }
     }
-    DropShadows(device_addr, size);
     // A GPU write like any other: what the GPU copies there each frame (a render target read as a
     // texel buffer) goes to VRAM instead of crossing PCIe twice (written there, read back).
     if (GuestInPlace() && !WriteTracking()) {
