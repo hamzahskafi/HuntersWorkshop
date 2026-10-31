@@ -159,11 +159,13 @@
 
         public static readonly Choice[] FpsModes =
         {
-            new("60 FPS", "60"),
-            new("90 FPS", "90", L.T("Includes the sprint fix for high frame rates")),
-            new("120 FPS", "120", L.T("The 90 FPS patch made for 120")),
-            new("144 FPS", "144", L.T("The 90 FPS patch made for 144")),
-            new(L.T("Uncapped"), "uncap", L.T("The community uncapped patch, no limit. It can freeze at the end of a boss intro (Vicar Amelia's); 120 and 144 use another patch")),
+            // 0.4.4 beta 22: what each rate runs since 0.3.0 (Kyo's 60 FPS++ with the engine's values for
+            // the rate, start/patches.cpp; with Frame rate corrections off, the patch file's lists).
+            new("60 FPS", "60", L.F($"Kyo's 60 FPS++ with the engine's values for {60} FPS (Frame rate corrections). On a slower display the extra frames are drawn but never shown")),
+            new("90 FPS", "90", L.F($"Kyo's 60 FPS++ with the engine's values for {90} FPS (Frame rate corrections). On a slower display the extra frames are drawn but never shown")),
+            new("120 FPS", "120", L.F($"Kyo's 60 FPS++ with the engine's values for {120} FPS (Frame rate corrections). On a slower display the extra frames are drawn but never shown")),
+            new("144 FPS", "144", L.F($"Kyo's 60 FPS++ with the engine's values for {144} FPS (Frame rate corrections). On a slower display the extra frames are drawn but never shown")),
+            new(L.T("Uncapped"), "uncap", L.T("Any rate, held to your display's refresh rate (no limit with the Immediate presentation mode). With Frame rate corrections off it uses the community uncapped patch, which can freeze at the end of a boss intro (Vicar Amelia's)")),
             new(L.T("30 FPS (as on PS4)"), "30"),
         };
 
