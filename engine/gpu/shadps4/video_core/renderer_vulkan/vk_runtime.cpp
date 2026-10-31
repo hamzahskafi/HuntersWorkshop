@@ -1,8 +1,12 @@
 // SPDX-FileCopyrightText: Copyright 2025 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <algorithm>
 #include <boost/container/small_vector.hpp>
+#include <cstdio>
 #include <cstdlib>
+#include <mutex>
+#include <vector>
 #include "bbport_toggles.h"
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
@@ -294,12 +298,21 @@ void Runtime::UploadImage(VideoCore::Image* dst, const VideoCore::Buffer* src,
     bool needs_flush =
         Transit(dst, vk::ImageLayout::eTransferDstOptimal, vk::PipelineStageFlagBits2::eCopy,
                 vk::AccessFlagBits2::eTransferWrite);
+    u64 upload_bytes = 0;
     for (const auto& copy : upload_copies) {
         const auto copy_size = BufferImageCopySize(copy, dst->info.pixel_format);
         needs_flush |= IsBufferAccessed(src, copy.bufferOffset, copy_size);
+        upload_bytes += copy_size;
     }
     if (needs_flush) {
         FlushBarriers();
+    }
+    // 0.4.4 beta 18: the game's memory written into depth images by a transfer (the frame
+    // statistics' depth and colour copies line).
+    if (dst->info.props.is_depth) {
+        auto& savings = GpuSavings::Get();
+        GpuSavings::Count(savings.depth_uploads);
+        savings.depth_upload_bytes.fetch_add(upload_bytes, std::memory_order_relaxed);
     }
 
     scheduler.Record([src_handle = src->Handle(), image = dst->GetImage(),
@@ -536,11 +549,56 @@ void Runtime::CopyMip(VideoCore::Image* src, VideoCore::Image* dst, u32 mip, u32
     dst->flags &= ~VideoCore::ImageFlagBits::Dirty;
 }
 
+// 0.4.4 beta 18: each kind of copy between depth and colour (formats, sizes, samples, levels)
+// named once in the log, at most 16 kinds; with the frame statistics' counts of each.
+static void NoteColorDepthCopy(const VideoCore::Image& src, const VideoCore::Image& dst,
+                               const char* how) {
+    static std::mutex mutex;
+    static std::vector<u64> seen;
+    const auto& a = src.info;
+    const auto& b = dst.info;
+    u64 key = u64(a.pixel_format) * 0x9E3779B97F4A7C15ull ^ u64(b.pixel_format) << 17;
+    key ^= (u64(a.size.width) << 32 | a.size.height) * 31;
+    key ^= u64(b.size.width) << 32 | b.size.height;
+    key ^= u64(a.num_samples) << 48 ^ u64(b.num_samples) << 52 ^ u64(a.resources.levels) << 56;
+    key ^= reinterpret_cast<std::uintptr_t>(how);
+    std::scoped_lock lock{mutex};
+    if (seen.size() >= 16 || std::find(seen.begin(), seen.end(), key) != seen.end()) {
+        return;
+    }
+    seen.push_back(key);
+    std::printf("Depth and colour copy (each kind once): %s, %s %ux%u (%u levels, %u layers, "
+                "%u samples) -> %s %ux%u (%u levels, %u layers, %u samples)\n",
+                how, vk::to_string(a.pixel_format).c_str(), a.size.width, a.size.height,
+                a.resources.levels, a.resources.layers, a.num_samples,
+                vk::to_string(b.pixel_format).c_str(), b.size.width, b.size.height,
+                b.resources.levels, b.resources.layers, b.num_samples);
+    std::fflush(stdout);
+}
+
 void Runtime::CopyColorAndDepth(VideoCore::Image* src, VideoCore::Image* dst) {
+    using GpuSavings::ColorDepthCopy;
+    const auto count = [](ColorDepthCopy kind) {
+        GpuSavings::Count(GpuSavings::Get().color_depth_copies[static_cast<u32>(kind)]);
+    };
+    const bool src_depth = src->info.props.is_depth;
+    const bool dst_depth = dst->info.props.is_depth;
     if (src->info.num_samples == 1 && dst->info.num_samples == 1) {
         // 0.4.4 beta 17: depth into colour read by a shader where it applies (CopyDepthToColor).
-        if (src->info.props.is_depth && !dst->info.props.is_depth && CopyDepthToColor(src, dst)) {
+        if (src_depth && !dst_depth && CopyDepthToColor(src, dst)) {
+            count(ColorDepthCopy::DepthToColorShader);
             return;
+        }
+        if (src_depth == dst_depth) {
+            count(ColorDepthCopy::SameKind);
+        } else {
+            const bool direct = instance.IsMaintenance8Supported();
+            count(src_depth ? ColorDepthCopy::DepthToColorCopy : ColorDepthCopy::ColorToDepth);
+            NoteColorDepthCopy(*src, *dst,
+                               src_depth ? (direct ? "depth->colour by a copy"
+                                                   : "depth->colour through a buffer")
+                                         : (direct ? "colour->depth by a copy"
+                                                   : "colour->depth through a buffer"));
         }
         if (instance.IsMaintenance8Supported() ||
             src->info.props.is_depth == dst->info.props.is_depth) {
@@ -569,8 +627,12 @@ void Runtime::CopyColorAndDepth(VideoCore::Image* src, VideoCore::Image* dst) {
         blit_helper->ReinterpretColorAsMsDepth(
             dst->info.size.width, dst->info.size.height, dst->info.num_samples,
             src->info.pixel_format, dst->info.pixel_format, src->GetImage(), dst->GetImage());
+        count(ColorDepthCopy::ColorToMsDepth);
+        NoteColorDepthCopy(*src, *dst, "into MSAA depth by a draw");
     } else {
         LOG_WARNING(Render_Vulkan, "Unimplemented depth overlap copy");
+        count(ColorDepthCopy::NotDone);
+        NoteColorDepthCopy(*src, *dst, "not done (MSAA)");
     }
 }
 
@@ -583,19 +645,36 @@ bool Runtime::DepthCopyShaderOn() {
 }
 
 bool Runtime::CopyDepthToColor(VideoCore::Image* src, VideoCore::Image* dst) {
-    if (!DepthCopyShaderOn()) {
+    // 0.4.4 beta 18: why not, in the frame statistics.
+    const auto refuse = [](GpuSavings::DepthCopyRefusal why) {
+        GpuSavings::Count(GpuSavings::Get().depth_copy_refusals[static_cast<u32>(why)]);
         return false;
-    }
+    };
+    using GpuSavings::DepthCopyRefusal;
     const auto& from = src->info;
     const auto& to = dst->info;
+    if (!from.props.is_depth || to.props.is_depth) {
+        return false; // not a depth->colour copy: nothing to count
+    }
+    if (!DepthCopyShaderOn()) {
+        return refuse(DepthCopyRefusal::SwitchedOff);
+    }
     // One subresource of one size, both single-sample; the images' own (host) formats.
-    if (!from.props.is_depth || to.props.is_depth || from.num_samples != 1 ||
-        to.num_samples != 1 || from.resources.levels != 1 || from.resources.layers != 1 ||
-        to.resources.levels != 1 || to.resources.layers != 1 ||
-        from.size.width != to.size.width || from.size.height != to.size.height ||
-        !src->backing || !dst->backing ||
-        !(dst->usage_flags & vk::ImageUsageFlagBits::eStorage)) {
-        return false;
+    if (from.num_samples != 1 || to.num_samples != 1) {
+        return refuse(DepthCopyRefusal::Samples);
+    }
+    if (from.resources.levels != 1 || from.resources.layers != 1 || to.resources.levels != 1 ||
+        to.resources.layers != 1) {
+        return refuse(DepthCopyRefusal::LevelsOrLayers);
+    }
+    if (from.size.width != to.size.width || from.size.height != to.size.height) {
+        return refuse(DepthCopyRefusal::Size);
+    }
+    if (!src->backing || !dst->backing) {
+        return refuse(DepthCopyRefusal::NoImage);
+    }
+    if (!(dst->usage_flags & vk::ImageUsageFlagBits::eStorage)) {
+        return refuse(DepthCopyRefusal::NoStorage);
     }
     const vk::Format depth_format = src->backing->image.image_ci.format;
     const vk::Format color_format = dst->backing->image.image_ci.format;
@@ -603,7 +682,7 @@ bool Runtime::CopyDepthToColor(VideoCore::Image* src, VideoCore::Image* dst) {
                              depth_format == vk::Format::eD32SfloatS8Uint;
     const bool uint_output = color_format == vk::Format::eR32Uint;
     if (!float_depth || (color_format != vk::Format::eR32Sfloat && !uint_output)) {
-        return false;
+        return refuse(DepthCopyRefusal::Formats);
     }
     SetBackingSamples(dst, 1, false);
     SetBackingSamples(src, 1);

@@ -200,6 +200,11 @@ void Scheduler::BeginRendering(const RenderState& new_state) {
     // in the next command buffer without clearing its attachments again.
     const bool resume = resume_rendering && !is_rendering && render_state == new_state;
     resume_rendering = false;
+    // 0.4.4 beta 18: the pass that ended last begun again as it was: split by what ended it.
+    if (!is_rendering && !resume && render_state == new_state) {
+        GpuSavings::Count(GpuSavings::Get().pass_splits[static_cast<u32>(pass_break)]);
+    }
+    pass_break = GpuSavings::PassBreak::Other;
     EndRendering();
     is_rendering = true;
     render_state = new_state;

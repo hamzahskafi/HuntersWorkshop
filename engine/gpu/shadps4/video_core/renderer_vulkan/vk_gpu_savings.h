@@ -46,7 +46,50 @@ struct Counters {
     // Scene proxy resolves by the native access that needed them: transfer (copies, downloads,
     // texel buffer fills), sampled read, storage write, native attachment, other.
     std::array<std::atomic<std::uint64_t>, 5> scene_resolves{};
+    // 0.4.4 beta 18: render passes begun again with the same targets after something ended them
+    // (a split), by what ended them (PassBreak).
+    std::array<std::atomic<std::uint64_t>, 4> pass_splits{};
+    // 0.4.4 beta 18: copy shader dispatches recorded inside a render pass: with no barrier needed
+    // before them (nothing since the pass began wrote their source or touched their destination)
+    // and their source a snapshot in the stream buffer; the same with their source the game's
+    // memory; needing a barrier.
+    std::array<std::atomic<std::uint64_t>, 3> hle_in_pass{};
+    // 0.4.4 beta 18: Runtime::CopyColorAndDepth by kind (ColorDepthCopy), why a depth->colour
+    // copy was not done by the shader (DepthCopyRefusal), and the texture cache's conversions of
+    // an image into one of the other kind (colour->depth, depth->colour).
+    std::array<std::atomic<std::uint64_t>, 6> color_depth_copies{};
+    std::array<std::atomic<std::uint64_t>, 7> depth_copy_refusals{};
+    std::array<std::atomic<std::uint64_t>, 2> overlap_conversions{};
+    // 0.4.4 beta 18: uploads of the game's memory into depth images (Runtime::UploadImage).
+    std::atomic<std::uint64_t> depth_uploads{0}, depth_upload_bytes{0};
 };
+
+/// What ended a render pass (Scheduler::NotePassBreak).
+enum class PassBreak : std::uint8_t { Other, CopyShader, ImageCopy, Dispatch };
+/// Runtime::CopyColorAndDepth's kinds: depth->colour by the shader (0.4.4 beta 17), by a copy;
+/// colour->depth by a copy; a single-sample image into MSAA depth by a draw; both of one kind;
+/// not done (other MSAA copies).
+enum class ColorDepthCopy : std::uint8_t {
+    DepthToColorShader,
+    DepthToColorCopy,
+    ColorToDepth,
+    ColorToMsDepth,
+    SameKind,
+    NotDone
+};
+/// Why Runtime::CopyDepthToColor left a depth->colour copy to the copy before it.
+enum class DepthCopyRefusal : std::uint8_t {
+    SwitchedOff,
+    Samples,
+    LevelsOrLayers,
+    Size,
+    NoImage,
+    NoStorage,
+    Formats
+};
+inline void Count(std::atomic<std::uint64_t>& counter) {
+    counter.fetch_add(1, std::memory_order_relaxed);
+}
 inline Counters& Get() {
     static Counters counters;
     return counters;
@@ -74,6 +117,24 @@ inline void Report() {
     for (int i = 0; i < 5; ++i) {
         resolves[i] = take(c.scene_resolves[i]);
     }
+    double splits[4], in_pass[3], kinds[6], refusals[7], overlaps[2];
+    for (int i = 0; i < 4; ++i) {
+        splits[i] = take(c.pass_splits[i]) / s;
+    }
+    for (int i = 0; i < 3; ++i) {
+        in_pass[i] = take(c.hle_in_pass[i]) / s;
+    }
+    for (int i = 0; i < 6; ++i) {
+        kinds[i] = take(c.color_depth_copies[i]) / s;
+    }
+    for (int i = 0; i < 7; ++i) {
+        refusals[i] = take(c.depth_copy_refusals[i]) / s;
+    }
+    for (int i = 0; i < 2; ++i) {
+        overlaps[i] = take(c.overlap_conversions[i]) / s;
+    }
+    const double depth_uploads = take(c.depth_uploads) / s;
+    const double depth_upload_mb = take(c.depth_upload_bytes) / s / (1024.0 * 1024.0);
     std::printf("GPU savings per second: image->texel buffer fills %.1f, skipped unchanged %.1f "
                 "(%.1f MB; refilled after image write %.1f, buffer write %.1f, proxy %.1f, other "
                 "%.1f) [BB_IMAGE_TILE_MEMO]; HLE copy %.0f batches in %.0f dispatches, %.0f "
@@ -84,6 +145,21 @@ inline void Report() {
     std::printf("  scene proxy resolves per second by native access: transfer %.1f, sampled %.1f, "
                 "storage %.1f, attachment %.1f, other %.1f\n",
                 resolves[0] / s, resolves[1] / s, resolves[2] / s, resolves[3] / s, resolves[4] / s);
+    std::printf("  render passes per second begun again with the same targets, by what ended them: "
+                "copy shader %.1f, image copy %.1f, other dispatch %.1f, other %.1f; copy shader "
+                "dispatches inside a pass %.1f (no barrier needed and the source a snapshot %.1f, "
+                "the source the game's memory %.1f; a barrier needed %.1f)\n",
+                splits[1], splits[2], splits[3], splits[0], in_pass[0] + in_pass[1] + in_pass[2],
+                in_pass[0], in_pass[1], in_pass[2]);
+    std::printf("  depth and colour copies per second (Runtime::CopyColorAndDepth): depth->colour "
+                "by the shader %.1f, by a copy %.1f (switched off %.1f, MSAA %.1f, levels or "
+                "layers %.1f, sizes %.1f, no image %.1f, no storage %.1f, formats %.1f); "
+                "colour->depth %.1f, into MSAA depth %.1f; same kind %.1f; not done (MSAA) %.1f; "
+                "texture cache conversions colour->depth %.1f, depth->colour %.1f; uploads of "
+                "the game's memory into depth images %.1f (%.1f MB)\n",
+                kinds[0], kinds[1], refusals[0], refusals[1], refusals[2], refusals[3],
+                refusals[4], refusals[5], refusals[6], kinds[2], kinds[3], kinds[4], kinds[5],
+                overlaps[0], overlaps[1], depth_uploads, depth_upload_mb);
 }
 
 } // namespace Vulkan::GpuSavings

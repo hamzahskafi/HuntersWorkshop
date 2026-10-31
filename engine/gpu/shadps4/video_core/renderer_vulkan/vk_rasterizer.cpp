@@ -48,6 +48,7 @@
 #include "video_core/renderer_vulkan/vk_runtime.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_shader_hle.h"
+#include "video_core/renderer_vulkan/vk_shader_disasm.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
 #include "video_core/host_shaders/indirect_clamp_comp.h"
 #include "video_core/texture_cache/image_view.h"
@@ -66,6 +67,23 @@ static bool SkipFailed(const Pipeline* pipeline) {
         ForgetPipelineData(*pipeline);
     }
     return true;
+}
+
+// 0.4.4 beta 18: BB_SHADER_DISASM (vk_shader_disasm.h): the shader's code into the log at its
+// first dispatch.
+static void DisasmCompute(u64 hash, const AmdGpu::ComputeProgram& cs, bool indirect) {
+    if (!ShaderDisasm::Take(hash)) {
+        return;
+    }
+    char setup[192];
+    char groups[48] = "groups from an indirect buffer";
+    if (!indirect) {
+        std::snprintf(groups, sizeof(groups), "%ux%ux%u groups", cs.dim_x, cs.dim_y, cs.dim_z);
+    }
+    std::snprintf(setup, sizeof(setup), "%ux%ux%u threads a group, %u bytes of shared memory, %s",
+                  u32(cs.num_thread_x.full), u32(cs.num_thread_y.full),
+                  u32(cs.num_thread_z.full), cs.SharedMemSize(), groups);
+    ShaderDisasm::Print("cs", hash, AmdGpu::GetParams(cs).code, setup);
 }
 
 static Shader::PushData MakeUserData(const AmdGpu::Regs& regs) {
@@ -2608,6 +2626,7 @@ void Rasterizer::DispatchRecord(const ComputePipeline* pipeline) {
     if (upscaler->Enabled()) {
         upscaler->OnDispatch(cs.pgm_hash);
     }
+    DisasmCompute(cs.pgm_hash, cs_program, false);
     bool hle;
     {
         BB_SECTION(ShaderHle);
@@ -2616,6 +2635,7 @@ void Rasterizer::DispatchRecord(const ComputePipeline* pipeline) {
     if (hle) {
         return;
     }
+    scheduler.NotePassBreak(GpuSavings::PassBreak::Dispatch); // 0.4.4 beta 18: frame statistics
 
     if (!BindResources(pipeline)) {
         return;
@@ -2780,6 +2800,8 @@ void Rasterizer::DispatchIndirectRecord(const ComputePipeline* pipeline, VAddr a
     buffer_cache.NewPacket();
     scheduler.PopPendingOperations();
     const u32 offset = 0;
+    DisasmCompute(pipeline->GetStage(Shader::SwStage::Compute).pgm_hash, CsRegs(), true);
+    scheduler.NotePassBreak(GpuSavings::PassBreak::Dispatch); // 0.4.4 beta 18: frame statistics
 
     if (!BindResources(pipeline)) {
         return;
@@ -3698,6 +3720,7 @@ bool Rasterizer::IsComputeImageCopy(const Pipeline* pipeline) {
         // Perform image copy
         VideoCore::Image& src_image = desc0.is_written ? image1 : image0;
         VideoCore::Image& dst_image = desc0.is_written ? image0 : image1;
+        scheduler.NotePassBreak(GpuSavings::PassBreak::ImageCopy); // 0.4.4 beta 18
         scheduler.EndRendering();
         // 0.4.4 beta 14: its GPU time labelled in BB_GPU_PROFILE.
         const Runtime::TransferMark mark{runtime, "image copy", dst_image};
@@ -3770,6 +3793,7 @@ bool Rasterizer::IsComputeImageCopy(const Pipeline* pipeline) {
                                                 : &ImageCopyStats::padding;
     }
     runtime.BeforeImageAccess();
+    scheduler.NotePassBreak(GpuSavings::PassBreak::ImageCopy); // 0.4.4 beta 18: frame statistics
     scheduler.EndRendering();
     // 0.4.4 beta 14: its GPU time labelled in BB_GPU_PROFILE, the bytes past the image included.
     const Runtime::TransferMark mark{runtime, "image copy", dst};

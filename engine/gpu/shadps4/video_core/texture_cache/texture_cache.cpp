@@ -20,6 +20,7 @@
 #include "video_core/buffer_cache/buffer_cache.h"
 #include "video_core/page_manager.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
+#include "video_core/renderer_vulkan/vk_gpu_savings.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_runtime.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
@@ -795,6 +796,11 @@ ImageId TextureCache::ResolveDepthOverlap(const ImageInfo& requested_info, Bindi
         RefreshImage(source_image);
         // When creating a depth buffer through overlap resolution don't clear it on first use.
         new_image.info.meta_info.htile_clear_mask = 0;
+        // 0.4.4 beta 18: the conversions between kinds, in the frame statistics.
+        if (source_image.info.props.is_depth != new_image.info.props.is_depth) {
+            const u32 kind = source_image.info.props.is_depth ? 1 : 0;
+            Vulkan::GpuSavings::Count(Vulkan::GpuSavings::Get().overlap_conversions[kind]);
+        }
         runtime.CopyColorAndDepth(&source_image, &new_image);
 
         // Keep bound attachments valid until the renderer notices the replacement.

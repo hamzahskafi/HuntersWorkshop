@@ -126,6 +126,9 @@ static bool MultiCopy(Rasterizer& rasterizer, const VideoCore::Buffer* src,
     if (auto* profiler = GpuProfiler::Get()) {
         profiler->Mark(0xC0B1ull, [] { return std::string{"copy shader HLE: barrier + dispatch"}; });
     }
+    // 0.4.4 beta 18: a dispatch ends the open render pass (frame statistics: what splits passes).
+    const bool in_pass = scheduler.IsRendering();
+    scheduler.NotePassBreak(GpuSavings::PassBreak::CopyShader);
     scheduler.EndRendering();
     const u64 src_size = src_max - src_min, dst_size = dst_max - dst_min;
     auto& savings = GpuSavings::Get();
@@ -144,6 +147,12 @@ static bool MultiCopy(Rasterizer& rasterizer, const VideoCore::Buffer* src,
                 break;
             }
         }
+    }
+    if (in_pass) {
+        // No barrier needed: nothing since the last barrier, so nothing in this pass, wrote its
+        // source or touched its destination; a snapshot (the stream buffer) cannot change later.
+        const u32 kind = flush ? 2 : src->Handle() == stream.Handle() ? 0 : 1;
+        GpuSavings::Count(savings.hle_in_pass[kind]);
     }
     if (flush) {
         savings.hle_barriers.fetch_add(1, std::memory_order_relaxed);
