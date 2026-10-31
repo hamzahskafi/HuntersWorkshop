@@ -194,6 +194,16 @@ private:
     [[nodiscard]] bool Active() const;
     [[nodiscard]] bool ReactiveOn() const;
     bool EnsureResources(u32 width, u32 height, u32 out_width, u32 out_height, bool hdr);
+    /// 0.4.4 beta 21: makes `image` (render size) if it has none: the images only some features
+    /// use (reactive mask, FSR 4's linear input, TAA's diagnostics) are made on first need, not
+    /// by EnsureResources, which drops them with the rest (BB_UPSCALER_EAGER_IMAGES=1: made
+    /// there, as before). Unwritten; each use starts it from the undefined layout. `what`: for the
+    /// log.
+    void EnsureImage(VideoCore::UniqueImage& image, vk::UniqueImageView& view, vk::Format format,
+                     vk::ImageUsageFlags usage, const char* what);
+    /// 0.4.4 beta 21: the reactive mask's view for the bindings that read it only when this frame
+    /// has a mask (the merge, the debug view): a 1x1 stand-in in General while it has no image.
+    vk::ImageView MaskBinding();
     void CreatePipelines();
     /// Records the reactive mask pass; false when there is no snapshot this frame.
     bool RecordReactive(vk::ImageView color_view);
@@ -321,6 +331,8 @@ private:
     VideoCore::UniqueImage reactive_image; ///< R8 reactive mask
     vk::UniqueImageView opaque_view;
     vk::UniqueImageView reactive_view;
+    VideoCore::UniqueImage mask_stand_in; ///< 0.4.4 beta 21: MaskBinding, kept for the session
+    vk::UniqueImageView mask_stand_in_view;
     vk::UniqueDescriptorSetLayout reactive_desc_layout;
     vk::UniquePipelineLayout reactive_pipeline_layout;
     vk::UniquePipeline reactive_pipeline;
@@ -365,6 +377,7 @@ private:
     void RecordFsr4Reactive(vk::CommandBuffer cmdbuf, vk::ImageView color, u32 w, u32 h, u32 ow,
                             u32 oh);
     // ExtraSharpen: a copy of the upscaled frame (RCAS reads neighbours) and the target views.
+    // 0.4.4 beta 21: the copy is released by EnsureResources (made again when next needed).
     VideoCore::UniqueImage extra_sharpen_image;
     vk::UniqueImageView extra_sharpen_view;
     u32 extra_sharpen_width = 0, extra_sharpen_height = 0;
