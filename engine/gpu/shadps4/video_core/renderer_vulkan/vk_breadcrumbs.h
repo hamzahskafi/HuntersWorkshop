@@ -4,7 +4,9 @@
 // recording order, and the GPU writes 2n before command n and 2n+1 after it into a host-visible
 // buffer (VK_AMD_buffer_marker at the bottom of the pipe: written once all earlier work of the
 // queue has finished). On device lost the last value says which command never finished, and the
-// notes kept here say what it was. BB_BREADCRUMBS=0 turns them off.
+// notes kept here say what it was. BB_BREADCRUMBS=0 turns them off. 0.4.4 beta 21: only 2n+1 by
+// default (the marker before a command repeats the one after the command before it, but for the
+// work recorded between them); BB_BREADCRUMBS=both writes 2n too.
 #pragma once
 
 #include "common/types.h"
@@ -33,7 +35,8 @@ u32 NewStream(const Instance& instance, const char* name);
 [[nodiscard]] bool Enabled() noexcept;
 /// Recording side, in command order: numbers the next command of `stream`.
 u32 Note(u32 stream, const Crumb& crumb);
-/// Recorded right before (`after` false) and right after the command numbered `id`.
+/// Recorded right before (`after` false; only with BB_BREADCRUMBS=both) and right after the
+/// command numbered `id`.
 void Mark(vk::CommandBuffer cmdbuf, u32 stream, u32 id, bool after);
 /// Indirect dispatches: a slot of a host-visible buffer for the arguments the GPU reads (the
 /// report and the statistics show them), ~0u when off. CopyArgs is recorded before the dispatch.
