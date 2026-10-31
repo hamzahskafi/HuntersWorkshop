@@ -197,6 +197,10 @@ private:
     void CreatePipelines();
     /// Records the reactive mask pass; false when there is no snapshot this frame.
     bool RecordReactive(vk::ImageView color_view);
+    /// 0.4.4 beta 21: ClampSceneEdges (the .cpp) in RGB only, a compute pass (edge_clamp.comp)
+    /// over `view` (RGBA16F, storage, General): the scene's alpha stays as the game wrote it. The
+    /// caller's barrier for the image must already include this pass's write.
+    void ClampEdgesRgb(vk::ImageView view, u32 w, u32 h);
     /// FSR 4 is selected, possible in this session (not BB_RENDER_RES) and has not failed.
     [[nodiscard]] bool UseFsr4() const;
     /// The upscaler that runs now, for the log and the GPU profile: TAA, DLSS (DLAA at 1:1),
@@ -320,6 +324,9 @@ private:
     vk::UniqueDescriptorSetLayout reactive_desc_layout;
     vk::UniquePipelineLayout reactive_pipeline_layout;
     vk::UniquePipeline reactive_pipeline;
+    vk::UniqueDescriptorSetLayout edge_clamp_desc_layout; ///< 0.4.4 beta 21: ClampEdgesRgb
+    vk::UniquePipelineLayout edge_clamp_pipeline_layout;
+    vk::UniquePipeline edge_clamp_pipeline;
     vk::UniqueDescriptorSetLayout merge_desc_layout;
     vk::UniquePipelineLayout merge_pipeline_layout;
     vk::UniquePipeline merge_pipeline;
