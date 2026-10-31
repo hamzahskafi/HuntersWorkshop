@@ -63,7 +63,8 @@ public:
         return instance;
     }
 
-    /// Whether copies are recorded: object motion on, with frame statistics or the source mode.
+    /// Whether copies are recorded: object motion on, in the source mode (0.4.4 beta 21: before,
+    /// with frame statistics in any mode too).
     void SetWanted(bool on) {
         wanted = on;
     }
@@ -176,9 +177,10 @@ private:
 
 /// Frame statistics on those draws (with frame statistics on, in any mode): how many; how many had
 /// every such palette's newest GPU write known, and of those how many found it as in the last
-/// frame (what the version mode leaves to camera vectors, its hold aside); how many had every
-/// palette from one copy of the copy shader with a source the CPU holds current, and of those how
-/// many found the source as in the last frame. Draw recording thread only.
+/// frame (what the version mode leaves to camera vectors, its hold aside); in the source mode
+/// only (the copies are traced there only, 0.4.4 beta 21), how many had every palette from one
+/// copy of the copy shader with a source the CPU holds current, and of those how many found the
+/// source as in the last frame. Draw recording thread only.
 class GpuSmallStats {
 public:
     static GpuSmallStats& Get() {
@@ -218,12 +220,20 @@ public:
     /// The line for the 600-frame report, then the counts start again.
     void Report() {
         if (frames && draws) {
+            // The copy shader's part only where its sources are traced (the source mode): 0
+            // elsewhere would read as "none came from it".
+            char from_copy_text[128] = "";
+            if (GpuSmallMode() == GpuSmall::Source) {
+                std::snprintf(from_copy_text, sizeof(from_copy_text),
+                              "; every palette from the copy shader %.0f (as in the last frame "
+                              "%.0f)",
+                              double(from_copy) / frames, double(unchanged) / frames);
+            }
             std::printf("Object motion: small skeletons the GPU wrote %.0f draws a frame; newest GPU "
-                        "write known %.0f (none since the last frame %.0f); every palette from the "
-                        "copy shader %.0f (as in the last frame %.0f) (BB_MOTION_GPU_SMALL=%s)\n",
+                        "write known %.0f (none since the last frame %.0f)%s "
+                        "(BB_MOTION_GPU_SMALL=%s)\n",
                         double(draws) / frames, double(known) / frames,
-                        double(same_version) / frames, double(from_copy) / frames,
-                        double(unchanged) / frames, GpuSmallModeName());
+                        double(same_version) / frames, from_copy_text, GpuSmallModeName());
         }
         draws = known = same_version = from_copy = unchanged = frames = 0;
     }

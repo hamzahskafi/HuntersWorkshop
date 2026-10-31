@@ -2167,6 +2167,8 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
         // 0.4.4 beta 14: small skeletons the GPU wrote (BB_MOTION_GPU_SMALL, Motion::GpuSmall).
         static const Motion::GpuSmall gpu_small_mode = Motion::GpuSmallMode();
         auto& copy_sources = Motion::CopySources::Get();
+        // The copy shader's sources, traced in the source mode only (0.4.4 beta 21: with frame
+        // statistics too before, ObjectMotion::OnFrameStart).
         const bool trace_sources = copy_sources.Wanted();
         // 0.4.4 beta 16: their newest GPU write, numbered while object motion is on with frame
         // statistics or the version mode (VideoCore::GpuWriteStamps).
@@ -2257,11 +2259,9 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
                 // 0.4.4 beta 16: gated like a palette the CPU holds, its newest GPU write standing
                 // for its contents: compared with the last frame's below, moved bones held as
                 // there (History::Moving). Not written since the last frame, it did not change,
-                // and the camera vector is exact.
+                // and the camera vector is exact. 0.4.4 beta 21: no source anchor here (sources
+                // are traced in the source mode only; statistics runs gave one, players never).
                 palette = XXH3_64bits_withSeed(&version_hash, sizeof(version_hash), palette);
-                if (!anchor.valid) {
-                    anchor = source_anchor;
-                }
             } else if (gpu_small_mode == Motion::GpuSmall::Source && traced) {
                 // Gated like a palette the CPU holds: compared with the last frame's below.
                 palette = XXH3_64bits_withSeed(&source_hash, sizeof(source_hash), palette);

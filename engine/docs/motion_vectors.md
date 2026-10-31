@@ -162,3 +162,9 @@ as a palette the CPU holds is by its contents: not written since the last frame,
 and gets the camera vector; written since, it is stored and held as moved bones are.
 `BB_MOTION_GPU_SMALL=store` stores them every frame, as before.
 
+Since 0.4.4 beta 21 the copy shader's ranges are recorded and traced in the source mode only. Frame
+statistics used to turn the tracing on in every mode: thousands of ranges a frame recorded under a
+lock on the draw recording thread, and in the version mode a draw whose palettes the CPU could not
+read took its anchor from a traced source, which players' runs never had. The motion report prints
+the copy-shader counts in the source mode only.
+
