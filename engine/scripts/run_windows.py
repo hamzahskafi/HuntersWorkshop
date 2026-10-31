@@ -218,8 +218,8 @@ def configure_frame_rate(env):
     """
     fps = env.get('BB_FPS', '60')
     # Bloodborne PC: 120 and 144 are the 90 FPS++ patch with its frame-rate values for that rate
-    # (patches.py SCALED_FPS; the uncapped patch froze Vicar Amelia's intro at any rate). 144 Hz
-    # is above the vblank rates the engine paces on (it runs 480 Hz then); the limit holds 144.
+    # (patches.py SCALED_FPS; the uncapped patch froze Vicar Amelia's intro at any rate). Each runs
+    # the console's vblank at its rate (144 too since 0.4.4 beta 22; 480 Hz before, as Uncapped).
     if fps in ('120', '144'):
         env.update(BB_FPS=fps, BB_FPS_LIMIT=fps, BB_VBLANK_HZ=fps)
         return fps

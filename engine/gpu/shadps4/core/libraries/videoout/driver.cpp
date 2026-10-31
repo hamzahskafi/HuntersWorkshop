@@ -1143,19 +1143,11 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
     // power for nothing (240 FPS on a 144 Hz screen threw away 40% of it). Fixed presets are
     // left alone (their game speed follows the flip rate), and so is Immediate, chosen for
     // tearing at the lowest latency. BB_CAP_TO_REFRESH=0 turns it off.
-    // 0.4.4 beta 22: the Uncapped preset only (BB_FPS=uncap). The 144 preset runs its vblank at
-    // 480 Hz like Uncapped (IsUncappedVblank) and was held to the display's rate with it (60 FPS
-    // on a 60 Hz screen), where 120 renders 120: it now renders 144 as 120 does, with the note
-    // below. BB_CAP_TO_REFRESH=all: as before, 144 capped too.
-    static const bool uncapped_preset = [] {
-        const char* fps = std::getenv("BB_FPS");
-        return fps && std::string_view{fps} == "uncap";
-    }();
-    const char* cap_env = std::getenv("BB_CAP_TO_REFRESH");
-    const bool cap_all = cap_env && std::string_view{cap_env} == "all";
-    if (EmulatorSettings.IsUncappedVblank() && (uncapped_preset || cap_all) &&
-        EmulatorSettings.GetPresentMode() != "Immediate") {
-        const char* env = cap_env;
+    // 0.4.4 beta 22: the 144 preset is a fixed preset with its own vblank now
+    // (EmulatorSettings::MaxFixedVblank); it ran Uncapped's 480 Hz and was held to the display's
+    // rate here with it (60 FPS on a 60 Hz screen), where 120 renders 120.
+    if (EmulatorSettings.IsUncappedVblank() && EmulatorSettings.GetPresentMode() != "Immediate") {
+        const char* env = std::getenv("BB_CAP_TO_REFRESH");
         const u32 refresh = Frontend::DisplayRefreshHz();
         if (!(env && env[0] == '0') && refresh >= 30 && (frame_limit == 0 || frame_limit > refresh)) {
             std::printf("VideoOut: frame limit %u FPS lowered to the display's %u Hz "

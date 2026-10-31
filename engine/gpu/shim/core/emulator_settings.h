@@ -33,19 +33,33 @@ public:
     // 480 Hz they snap to ~2.1 ms steps). The frame rate is not limited unless BB_FPS_LIMIT
     // (launcher: "FPS limit") asks for it. Other values are used as given (60/90: the
     // fixed-timestep presets, flips on vblank ticks).
-    u32 GetVblankFrequency() {
-        static const u32 value = [] {
-            const long hz = Number("BB_VBLANK_HZ", 60);
-            // Bloodborne PC: Windows runs uncapped too (0 or above 120: 480 Hz), as on Linux.
-            return hz > 0 && hz <= 120 ? u32(hz) : 480u;
+    /// 0.4.4 beta 22: the fastest fixed-timestep preset's vblank, 144 Hz: each fixed preset (60,
+    /// 90, 120, 144) runs the console's vblank at its own rate, and the game's vblank events and
+    /// flips follow it. Before, only up to 120 Hz: the 144 preset ran the uncapped presets' 480 Hz
+    /// (its flips paced by the frame limit, the game seeing 480 vblanks a second) and was taken
+    /// for Uncapped where that matters (the display's refresh cap held it at 60 on a 60 Hz
+    /// screen). BB_VBLANK_FIXED_MAX=120: as before.
+    long MaxFixedVblank() {
+        static const long value = [] {
+            const long max = Number("BB_VBLANK_FIXED_MAX", 144);
+            return max == 120 ? 120L : 144L;
         }();
         return value;
     }
-    /// Vblank faster than any fixed-timestep preset (above 120 Hz, or 0): flips at once.
-    bool IsUncappedVblank() {
-        static const bool value = [] {
+    u32 GetVblankFrequency() {
+        static const u32 value = [this] {
             const long hz = Number("BB_VBLANK_HZ", 60);
-            return hz <= 0 || hz > 120;
+            // Bloodborne PC: Windows runs uncapped too (0 or above the fixed presets: 480 Hz), as
+            // on Linux.
+            return hz > 0 && hz <= MaxFixedVblank() ? u32(hz) : 480u;
+        }();
+        return value;
+    }
+    /// Vblank faster than any fixed-timestep preset (above 144 Hz, or 0): flips at once.
+    bool IsUncappedVblank() {
+        static const bool value = [this] {
+            const long hz = Number("BB_VBLANK_HZ", 60);
+            return hz <= 0 || hz > MaxFixedVblank();
         }();
         return value;
     }
@@ -55,7 +69,9 @@ public:
             // Bloodborne PC: any limit the launcher asks for (0 = none); without one, the fixed
             // presets still limit to their own rate.
             const u32 vblank = GetInstance()->GetVblankFrequency();
-            return u32(std::max(0L, Number("BB_FPS_LIMIT", vblank <= 120 ? long(vblank) : 0L)));
+            return u32(std::max(
+                0L, Number("BB_FPS_LIMIT",
+                           long(vblank) <= GetInstance()->MaxFixedVblank() ? long(vblank) : 0L)));
         }();
         return value;
     }
