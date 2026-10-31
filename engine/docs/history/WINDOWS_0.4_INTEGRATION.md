@@ -1,5 +1,13 @@
 # Windows integration of upstream 0.4
 
+Historical (moved 2026-10-31): notes on merging bbport 0.4 (deadinside28/bloodborne_pc) into a
+Windows build, and on the bbhost ports that followed, from before Hunter's Workshop started from
+Lantern Engine 0.9.37 beta 9; the branches named here are not in this repository, and the 30/60/90
+caps below have since been widened (120 and 144 FPS presets and an uncapped mode,
+`scripts/run_windows.py`). Current information: [README.md](../../README.md) (where the engine comes
+from), [community-fixes-plan.md](../community-fixes-plan.md) (what was taken from later bbport and
+Lantern versions) and [COMPATIBILITY.md](../COMPATIBILITY.md).
+
 Integration branch: `upstream-0.4-core-port`.
 
 - Custom base: `f62f2da39e7f92058465abd112df26e2c6256e31` (the installed Windows build).

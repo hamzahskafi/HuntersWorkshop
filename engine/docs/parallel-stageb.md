@@ -1,7 +1,15 @@
 # Stage B across more than one thread: design notes
 
 Stage B is the draw recording thread `bb:DrawRec` (`vk_draw_pipe.h`, `Rasterizer::RunDrawPacket`).
-In heavy fights on the Ryzen 5 5600 / RTX 5060 it is the frame rate limit: 62-94 FPS,
+
+**Status at 0.4.4 beta 21.** Built: the lookahead thread (sections 4 to 6), on by default with 8 or
+more threads available to the process; no A/B of it at a CPU-bound spot is recorded yet
+(`engine-map.md`, `clean-3`). Not built: the split of stage B into two threads (approach B, the
+plan in section 7); stage B is one thread. The measurements below are from Lantern, before
+Hunter's Workshop. On the 0.4.4 tester (i5-14600KF, RTX 3070 Ti, beta 17) stage B took 1.85 us a
+packet and was 67% busy, and the GPU was the limit (`engine-map.md` 1.5).
+
+In heavy fights on the Ryzen 5 5600 / RTX 5060 it was the frame rate limit: 62-94 FPS,
 1300-1900 draws per frame, stage B busy 89-94%, ~5.3 us per packet, ~2500 packets per frame
 (13.3 ms of a 14.4 ms frame in the 69.6 FPS window of `route\p10.log`). The game's main thread
 would allow ~130 FPS. This note records what stage B does per packet, which parts are order
@@ -45,8 +53,9 @@ Already parallel: Vulkan command recording (`bb:VkRecorder` threads record the c
 pushes into record chunks; `HandOver`/`KickRecording`), host copies (copy threads and the
 ordered copies on the recorders), draw preparation (`bb:DrawScan`, `bb:DrawPrep`: pipeline keys,
 sharps, texture description hashes, vertex inputs, all validated by stage A), and since the plan
-in `perf-plan.md`, page re-protection (`bb:Protect`, `BB_DEFER_PROTECT`: off by default since
-it left Cathedral Ward textures half-written in 0.9.21 to 0.9.23; `=1` turns it on). The CPU profile of
+in `perf-plan.md` (Lantern's; not in this repository), page re-protection (`bb:Protect`,
+`BB_DEFER_PROTECT`: off by default since it left Cathedral Ward textures half-written in 0.9.21 to
+0.9.23; `=1` turns it on). The CPU profile of
 stage B is flat (`symprofile.py`: `BindTextures` 4.8%, the spin in `DrawPipe::Run` 2.5%,
 `RunDrawPacket` 2.4%, `DrawRecord` 2.2%, `Image::GetBarriers` 1.7%, `BindBuffers` 1.7%, nothing
 else above 1.5%; ~21% in ntdll, mostly the sleeps, protects and waits the applied plan removes).
@@ -128,7 +137,7 @@ What it needs, and why I did not do it here:
   memos would have to be reasoned about against B1's uploads landing in between.
 - Ordered tasks: WriteData/DMA stores (B1) are ordered against host copies and deferred fences
   that the recorders run after B2's commands; the fence barrier logic of `perf-plan.md` C2-3
-  assumes a single stage B position.
+  (Lantern's plan, above) assumes a single stage B position.
 
 That is a multi-week refactor across `vk_scheduler`, `buffer_cache`, `texture_cache`,
 `vk_rasterizer` and `vk_shader_hle`, with failure modes that only show in play (stale uploads,
@@ -187,8 +196,10 @@ ring:
 1. If stage B passed the cursor (it fell behind), it jumps to stage B's position (counted:
    `behind stage B`).
 2. If it is more than `BB_DRAWREC_LOOKAHEAD` packets (default 8) ahead of stage B's count, it
-   waits (pause spin, yields after 100 us; counted: `waited for it`): lines fetched too early
-   would be evicted before use and only pollute the cache.
+   waits (pause spin, yields after 100 us, and after 1 ms sleeps in 250 us steps while stage B
+   is stuck on one long packet; `BB_LOOKAHEAD_SLEEP=0`: it yields to the end; counted: `waited for
+   it`, and `lookahead sleeps` in the `GPU savings` line): lines fetched too early would be
+   evicted before use and only pollute the cache.
 3. If no packet is committed past the cursor it spins 20 us and then sleeps; `DrawPipe::Commit`
    wakes it with the same announce-then-check protocol as stage B's own sleep
    (`DrawPipe::WaitForCommit`; one extra atomic load on stage A per commit).
@@ -237,15 +248,16 @@ Safety:
 - Stop: the thread is a `std::jthread` member declared after `draw_pipe`, so it is joined before
   the ring goes; `WaitForCommit` registers a stop callback on its sleep.
 - Live A/B: experiment bit 16 of `BB_TOGGLE_FILE` pauses it (it sleeps in 1 ms steps and
-  re-syncs on resume), so `-AbBits 16` compares on/off within one run.
+  re-syncs on resume), so `-AbBits 16` (a Windows A/B script, not in this repository) compares
+  on/off within one run.
 
 What can still go wrong (not ruled out without running it):
 
-- It takes a hardware thread. On 12 threads with the game's own pools, stage A, stage B, two
-  recorders, copy threads and `bb:Protect`, a spinning thread can slow a game thread or stage B
-  itself; the spin is short (20 us) and it sleeps between frames, but heavy fights keep it busy.
-  If the FPS drops with it on, `BB_DRAWREC_IDLE=1` is the first thing to try, then a smaller
-  window.
+- It takes a hardware thread. On 12 threads with the game's own pools, stage A, stage B, the
+  recorders, copy threads (and `bb:Protect` with `BB_DEFER_PROTECT=1`), a spinning thread can slow
+  a game thread or stage B itself; the spin is short (20 us) and it sleeps between frames, but
+  heavy fights keep it busy. If the FPS drops with it on, `BB_DRAWREC_IDLE=1` is the first thing
+  to try, then a smaller window.
 - Bandwidth and pollution: ~20-60 lines per draw at ~5 us per draw is ~1 GB/s of extra traffic
   if every line missed; prefetches past the L2's outstanding-miss capacity are dropped, which
   only loses the benefit.
@@ -288,23 +300,27 @@ behind; raise nothing, it only loses the benefit).
 
 ## 6. Files changed
 
-- `gpu/shim/bbport_toggles.h`: `BbStats::lookahead_*` counters (CRLF).
+- `gpu/shim/bbport_toggles.h`: `BbStats::lookahead_*` counters.
 - `gpu/shadps4/video_core/renderer_vulkan/vk_draw_pipe.h`: `Published`, `ConsumedPackets`,
-  `PacketAt`, `WaitForCommit`; the lookahead's wake flag checked in `Commit` (CRLF).
-- `gpu/shadps4/common/slot_vector.h`: `SlotAddress` (CRLF).
-- `gpu/shadps4/video_core/texture_cache/texture_cache.h`: `ImageSlotAddress` (LF).
-- `gpu/shadps4/video_core/buffer_cache/memory_tracker.h`: `Prefetch` (CRLF).
-- `gpu/shadps4/video_core/buffer_cache/buffer_cache.h/.cpp`: `PrefetchBinding` (CRLF).
+  `PacketAt`, `WaitForCommit`; the lookahead's wake flag checked in `Commit`.
+- `gpu/shadps4/common/slot_vector.h`: `SlotAddress`.
+- `gpu/shadps4/video_core/texture_cache/texture_cache.h`: `ImageSlotAddress`.
+- `gpu/shadps4/video_core/buffer_cache/memory_tracker.h`: `Prefetch`.
+- `gpu/shadps4/video_core/buffer_cache/buffer_cache.h/.cpp`: `PrefetchBinding`.
 - `gpu/shadps4/video_core/renderer_vulkan/vk_rasterizer.h/.cpp`: `LookaheadWanted`,
   `LookaheadWindow`, `LookaheadLoop`, `PrefetchPacket`, `PrefetchDraw`, the static
-  `FindPreparedStage`, the thread member, the startup line and the statistics line (CRLF).
+  `FindPreparedStage`, the thread member, the startup line and the statistics line.
 
 Environment: `BB_DRAWREC_WORKERS=1` (on; 0 = off, the behaviour before the lookahead existed;
 unset: on with 8 or more hardware threads available to the process; the value is a switch, there
 is one lookahead thread), `BB_DRAWREC_LOOKAHEAD=<packets>` (default 8, 1..256),
-`BB_DRAWREC_IDLE=1` (idle priority), experiment bit 16 of `BB_TOGGLE_FILE` (pause, for A/B).
+`BB_DRAWREC_IDLE=1` (idle priority), `BB_LOOKAHEAD_SLEEP=0` (no sleep while stage B is stuck),
+experiment bit 16 of `BB_TOGGLE_FILE` (pause, for A/B).
 
 ## 7. Approach B: build plan (2026-10-21)
+
+Planned and not built (as of 0.4.4 beta 21): there is no `BB_STAGEB_SPLIT`, and stage B is one
+thread. Kept as the plan should stage B limit again.
 
 Measured before starting (`lantern-20261021_193312.log`, Cathedral Ward, RTX 5060, PC memory
 model on): stage B 3.83 us per packet, 84-91% busy at 1300-1600 draws per frame (80-98 FPS).

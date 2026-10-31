@@ -1,5 +1,18 @@
 # Moving away from emulation: what is done and what comes next (2026-10-06)
 
+Historical (moved 2026-10-31): the plan, from 2026-10-06 to Lantern 0.9.37 beta 9, for moving the
+engine away from emulation (the PC memory model as the default and the old memory model removed,
+stage B split, descriptors on the GPU, textures as objects, shaders compiled ahead). It was
+overtaken: the PC memory model (`BB_GUEST_IN_PLACE`) is an Experimental launcher option, off by
+default since Hunter's Workshop 0.4.0 beta 4 and to be removed before 0.4.4 ships, so the tracked
+memory model stayed, and since 0.4.4 beta 5 the game's GX region (its per-frame data) is read in
+place by default on Windows instead (`BB_GX_IN_PLACE`; through a buffer of its own since beta 9).
+Native draw calls (`BB_NATIVE_CALLS`) are on by default; stage B got a lookahead thread, not a
+split; descriptors on the GPU, textures as objects and part two of the chunk buffers were not
+built. Current information: [engine-map.md](../engine-map.md), [gpu-memory.md](../gpu-memory.md),
+[parallel-stageb.md](../parallel-stageb.md), [native_shader_compiler.md](../native_shader_compiler.md)
+and [community-fixes-plan.md](../community-fixes-plan.md).
+
 ## Where the API boundary is
 
 Bloodborne is linked with a static libGnm. The PM4 packets are written not by a driver but by the
