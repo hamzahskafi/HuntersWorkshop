@@ -1,5 +1,13 @@
 # Linux/RADV startup, dispatch hangs, and remaining visual issues
 
+Historical (moved 2026-10-31): a Lantern 0.9.37 beta 9 investigation of one Linux/RADV report. Both
+of its fixes are in Hunter's Workshop: the Linux start configures online play (`run.sh` runs
+`scripts/online_env.py`), and the indirect dispatch cap (65,535 per dimension) is kept as an
+opt-in, `BB_INDIRECT_CLAMP=1` (the launcher's "Particle work safety cap"), off by default and on in
+the safe-mode run after a crash. The lighting and torch reports were not followed up; Linux work
+waits until Windows is done. Current information: [community-fixes-plan.md](../community-fixes-plan.md)
+and [COMPATIBILITY.md](../COMPATIBILITY.md).
+
 Reported with v0.9.37 beta 9 (`lantern-fps93`) on an RX 7900 XT (20 GiB), Ryzen 9
 9900X, Mesa/RADV 26.2.5, and Linux 7.2.11. Output and scene were 2560x1440, using
 FSR 4 Native AA and FSR 3.1 frame generation (90 game FPS, 180 displayed FPS), HDR off.

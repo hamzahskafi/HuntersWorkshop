@@ -98,7 +98,9 @@ of those passes get the 16-bit attachment format (part of the pipeline key, as t
 - **Upscalers**: their input is the scene before the composite, so they are unchanged; the
   composite's output is already output-sized (the hook `9a9cf8a9` is before it).
 - **Encode** (`hdr_output.frag`): the 16-bit frame times paper white, capped at the peak, in HDR10
-  or scRGB. Frame generation stays off with HDR, as now.
+  or scRGB. Frame generation was off with HDR when this was written; it runs with HDR now
+  (docs/hdr.md), but FSR 3.1's needs an 8-bit display buffer (`vk_frame_generation.cpp`), which
+  this chain replaces.
 
 Wide gamut (BT.2020 colours beyond BT.709) is left for later: the game grades in BT.709 and its
 colour table is BT.709.
@@ -202,4 +204,5 @@ and 0. Knees 0.6, 0.75 and 0.85, peaks 2.5, 5 and 10, strengths 0.5 and 1:
 
 All checks pass for the five player composites and the two of the development install.
 
-Steps 3-5 (16-bit chain, colour table and encode, settings) are not started.
+Steps 3-5 (16-bit chain, colour table and encode, settings) are not started (still so in 0.4.4
+beta 21: `hdr_mode` has only `native` and `expand`).

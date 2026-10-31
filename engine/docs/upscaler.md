@@ -1,14 +1,51 @@
 # Temporal upscaling and frame generation — frame analysis and plan
 
+## Today (0.4.4)
+
+The sections after this one are the record of the work from the first frame analysis (bbport,
+2026-10-01) on, dated; what runs now:
+
+- **Upscalers** (`upscaler` in `config.ini`, `BB_UPSCALER`; the launcher's Graphics page and the
+  in-game menu): `fsr4` (FSR 4, the v07 INT8 model in `fsr4_shaders/`), `fsr411` (FSR 4.1.1: the
+  `fsr4_411` set built from one's own DLL, below, where it is present and the GPU runs its
+  shaders; otherwise, on Windows, fsr4vk: `amd_fidelityfx_upscaler_vk.dll` in the package's
+  `fsr4vk` folder or `BB_FSR4VK_DIR`), `fsr3` (FSR 3.1, FireBurn/FSR-Vulkan), `dlss` (DLSS Super
+  Resolution, NVIDIA RTX), `taa` (below) and `off`. A `config.ini` without the key gets `fsr3`.
+  `BB_UPSCALER=none` leaves the whole path out.
+- **Where:** at a 1920x1080 output on the HDR scene colour right before the post-processing
+  combine (compute shader `9a9cf8a9`), written back so that the game's own post-processing,
+  tonemap and UI run on it; at other outputs on the game's tonemapped frame before its UI, which
+  is then drawn at the output size. Inputs: the scene depth, camera motion vectors, object motion
+  vectors (`object_motion`, on by default) and sub-pixel jitter (`jitter`, on).
+- **Presets** (`preset`): Native AA (DLAA with DLSS), Quality x1.5, Balanced x1.7, Performance x2,
+  Ultra Performance x3 and Custom (`render_scale`, 1.0-3.0). TAA always renders at the output.
+- **Render size:** outputs other than 1920x1080 (TAA aside) get the game's render size patched at
+  the start (`live_resolution=0`, the default; a preset or output change then needs a restart), as
+  in "Startup patch is the default again" below; `live_resolution=1`, or `auto` by a GPU check,
+  takes the live path.
+- **Fallbacks:** before the first frame, `dlss` without an RTX GPU, the driver's NGX or
+  `nvngx_dlss` becomes FSR 3.1; `fsr411` that cannot run here becomes FSR 4, and FSR 4 on a GPU
+  that cannot run it FSR 3.1. A fatal failure in play falls back the same way (FSR 4.1.1 to FSR 4
+  to FSR 3.1, DLSS to FSR 3.1); while FSR 4's model is being built, FSR 3.1 runs. The menu shows
+  the upscaler in use and why.
+- **Sharpening:** `sharpen` (on) and `sharpness` (0-2, default 0.20). FSR 3.1 and 4 apply their own
+  RCAS up to 1 and an extra RCAS pass above it; DLSS, which has no sharpening of its own, gets the
+  whole range from that pass; TAA has its own pass (docs/MODS.md, "TAA sharpening").
+- **Reactive mask** (`reactive`, off by default): FSR 3.1's reactive mask and DLSS's
+  bias-current-colour mask; FSR 4 takes none, so its output is blended with the current frame where
+  the mask marks blended effects (`fsr4_reactive.comp`); TAA does not use it.
+- **Frame generation, DLSS's options and the mip bias:**
+  [dlss_frame_generation.md](dlss_frame_generation.md).
+
 ## Native TAA and missing FSR 4 assets (2026-10-01)
 
 `upscaler=taa` / `BB_UPSCALER=taa` is a separate native-resolution temporal AA
 mode, available live in the launcher and overlay. It uses the existing jitter and
 camera/object motion vectors, reprojection, depth rejection and 3×3 neighborhood
-clipping in one compute pass with two ping-pong RGBA16F histories. History stores
-depth in alpha; the scene's original alpha is preserved by the HDR merge. HUD is
-composed afterwards and never enters history. Output changes and AA/provider
-changes reset history. TAA uses Native AA dimensions while preserving the saved
+clipping in one compute pass with two ping-pong histories (RGBA16F then, RGBA32F
+now). History stores depth in alpha; the scene's original alpha is preserved by
+the HDR merge. HUD is composed afterwards and never enters history. Output changes
+and AA/provider changes reset history. TAA uses Native AA dimensions while preserving the saved
 FSR preset, and does not allocate an FSR context or execute an FSR model/RCAS.
 It still adds GPU work compared with disabling temporal AA; native 4K raster cost
 also remains. The explicit `BB_RENDER_RES` compatibility path must be unset.
@@ -24,7 +61,9 @@ assets, not a GPU feature failure. These assets are not bundled: build the full
 set with `tools/fsr4cap/build_assets.sh` and put it in `BB_FSR411_DIR` or the
 packaged data directory's `fsr4_411`. Fatal asset failures now select FSR 3.1 in
 the live settings, so the menu shows the active provider, retains the error, and
-allows retrying FSR 4 after changing the output/installing assets.
+allows retrying FSR 4 after changing the output/installing assets. (Today FSR 4.1.1
+falls back to FSR 4 first, and without these assets fsr4vk runs it on Windows: Today,
+above.)
 
 `taa-shader-test` checks real SPIR-V output for accumulation, clipping, depth
 disocclusion, invalid history and out-of-frame motion on Vulkan (Lavapipe works).
@@ -127,6 +166,10 @@ The previous frame's matrices are not there; the port keeps them itself.
    also frame generation), then DLSS (native on Linux), XeSS/XeFG and OptiScaler through a
    loader for their Windows DLLs.
 
+Steps 1-3 were done, and step 4 with FSR 3.1 and DLSS (Today, above), FSR 4, FSR 4.1.1 and TAA
+besides. XeSS and XeFG were not added (docs/dlss_frame_generation.md); the engine does not load
+OptiScaler, which players add themselves, but has a compatibility mode for it (`vk_optiscaler.h`).
+
 ## Status
 
 - Camera motion vectors: verified by reprojecting the previous frame (`BB_DEBUG_MOTION=1`,
@@ -139,7 +182,9 @@ The previous frame's matrices are not there; the port keeps them itself.
   1:1 jitter trades high-frequency aliasing for a slightly softer image). Toggle 1<<25 off.
 - Frame-to-frame difference while standing still: ~33% lower with FSR.
 - Missing: motion of animated objects (characters, cloth, foliage), reactive/transparency
-  masks for particles and fog, render-resolution scaling, frame generation.
+  masks for particles and fog, render-resolution scaling, frame generation. All four were added
+  later: object motion vectors (`object_motion`), the reactive mask (`reactive`), the presets'
+  render sizes and frame generation (Today, above).
 
 
 ## 2026-10-01: FSR 4 did not work at 1440p/2160p output (flicker and shaking)
@@ -199,7 +244,9 @@ from run to run on identical inputs a stripe at the left edge (columns 0–132) 
 race or a read of uninitialized memory somewhere in the model or provider. At 1080p output this can
 show as flicker at the left edge of the frame. Not investigated.
 
-The reactive mask is no longer computed with FSR 4 (FSR 4 does not take it).
+The reactive mask is no longer computed with FSR 4 (FSR 4 does not take it). (Later, with
+`reactive` on, FSR 4's output is blended with the current frame where the mask marks blended
+effects: Today, above.)
 
 ### Also checked (same place, 4K Balanced)
 

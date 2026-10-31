@@ -1,11 +1,14 @@
 # Kyo's "60 FPS++", entry by entry
 
-Our frame-rate base (`start/frame_rate_base.inc`) is Kyo's "60 FPS++" list for 1.09: 244 entries,
-written at every rate. The list was made at 60 and fixes most constants for 60. This note goes
+Our frame-rate base (`start/frame_rate_base.inc`) is Kyo's "60 FPS++" list for 1.09: 244 entries
+(the list's three others, the effects' rate's two and the timed wait's bare ret, are left out),
+written at every rate above 30 while the frame-rate corrections are on (the default; off, the patch
+file's older FPS++ lists). The list was made at 60 and fixes most constants for 60. This note goes
 through every entry: what it is, and what the frame-rate corrections (`gpu/shim/engine/frame_rate.cpp`,
 `frame_rate_sites.inc`) do with it now that the game can run at any rate. A value should follow the
 frame time only if the game uses it per frame. A duration in seconds, a frame count from data turned
-into seconds, or a limit in m/s is the game's at every rate.
+into seconds, or a limit in m/s is the game's at every rate. Written for 0.3.0 (2026-10-25);
+checked against the code of 0.4.4 beta 21 (2026-10-31).
 
 How each entry was read (scratchpad tooling, then `tools/re/frame_rate_steps.py` for the rewrites):
 the instruction or the constant's readers in the 1.09 executable, the function around it (bounds
@@ -26,9 +29,9 @@ and others). They are right at every rate.
 
 | Entries | What | Now |
 | --- | --- | --- |
-| 3 | the frame's step cave (0x2418e3d) | kept; the frame timer replaces it when on |
+| 3 | the frame's step cave (0x2418e3d) | kept; the frame timer replaces it when on (the default since 0.4.4 beta 1; `BB_FRAME_TIMER=0` leaves it out) |
 | 33 | the frame pacer (sub_2434770) | kept; its four targets set for the rate (FRAME_TARGET) |
-| 45 | the follow camera's retune | converted above 60 (patches.cpp); its eases per frame with the timer |
+| 45 | the follow camera's retune | left out with the Original camera (the default: the game's, its eases converted from 30); kept with FPS++ tuning, converted from 60 above 60 (`start/patches.cpp`); the eases per frame with the timer |
 | 77 | a 1/30 s step made 1/60 | see below: 57 follow the frame or the rate, 8 the game's, 12 kept |
 | 27 | 30 a second made 60 | see below: 9 follow the rate, 17 the game's, 1 kept |
 | 28 | a value for a 60 FPS frame | see below: 24 follow the frame or the rate, 4 the game's |
@@ -40,7 +43,7 @@ and others). They are right at every rate.
 | 7 | 0x21bc181: a fixed step times the frame's | kept: it already follows the frame (status effects' second step) |
 | 2 | the frame modes' names | kept: a debug display |
 | 1 | status effects' first step | kept: reads the frame's step |
-| 2 | the cloth's damping exponent and substep count | kept; above 60 the cloth caves add the stiffness scale |
+| 2 | the cloth's damping exponent and substep count | kept; since 0.4.3 the code that reads the count again follows it (group `clothstep`, `BB_CLOTH_STEP=0` leaves it out): the damping operator reads the count as the list's one substep, Havok's stiffness factor gets the last substep on each frame that completes a 1/30 s; above 60 the cloth caves add the stiffness scale |
 | 1 | 0x575a908's first value | kept |
 
 ## A 1/30 s step made 1/60 (77)
@@ -105,6 +108,8 @@ Nothing new; each was already right.
   0x267784b, 0x2677892, 0x2713db7, 0x2715d71, 0x2713dad, 0xeb9f0d) read 0x575a908 at every rate.
 - Already corrected: the clip drive's path B (0x1915fab, plus paths A and C, which the list left at
   1/30), grass, the jump momentum (0.95 a frame, 4 lanes), the ghost fades, and the 0.1-a-frame timers.
+  Since 0.4.0 beta 5 the grass wind steps by half the frame's time and weighs its force by the game's
+  1/60 (B13 in `docs/community-fixes-plan.md`).
 - 8 entries where the list writes the game's own 1/30:
   - 4 are steps, which the table sets for the rate (0x1972a80, 0x4d2577c, 0x4d29170, 0xf383ca).
   - 4 are frame counts turned into seconds, right as they are: 0x4caf1c0 (0x131e64e), 0x4d26364 (the
@@ -114,9 +119,9 @@ Nothing new; each was already right.
 ## The game's other 30s
 
 `tools/re/fps_constants.py` finds every instruction that reads 1/30, 30.0 or their doubles, or stores
-one as an immediate. With everything our base and corrections write marked as patched, it leaves 91
-sites in 69 functions. These are the sites outside Kyo's list. All 91 were read, and none needs
-converting. Addresses here are the patch lists' (the scanner prints VAs, 0x400000 less).
+one as an immediate. With everything the 0.3.0 base and corrections write marked as patched, it
+leaves 91 sites in 69 functions. These are the sites outside Kyo's list. All 91 were read, and none
+needs converting. Addresses here are the patch lists' (the scanner prints VAs, 0x400000 less).
 
 - **Frame counts from data turned into seconds (27):**
   - `vcvtsi2ss` then times 1/30, or divided by 30: 0x131e607, 0x131f7b7, 0x1320214, 0x1337a64,

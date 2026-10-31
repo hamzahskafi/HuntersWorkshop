@@ -369,7 +369,7 @@ Priority 3, partly confirmed. Memory area. Windows only.
 - **Skeptic corrections.**
   1. This is not a clash between two rules. The copy-source rule exists to keep these spans off the tracked path (write faults), not to put them in video memory (`buffer_cache.cpp:1238-1245`; `community-fixes-plan.md:45`).
   2. The gain is bounded. A near-empty dispatch on video memory (cs a040875f) costs about 5 us and a copy dispatch about 7 us. So PCIe latency is at most about 2 us times 54, or about 0.1 ms a frame, and likely less.
-  3. GX in place measured equal to the tracked path within 0.05 ms (`gpu-memory.md:285`). A GPU-copy variant of the same idea (`ShadowCopy`) measured slower, 48 to 44 FPS (`buffer_cache.h:298-302`).
+  3. GX in place measured equal to the tracked path within 0.05 ms (`gpu-memory.md:334`). A GPU-copy variant of the same idea (`ShadowCopy`) measured slower, 48 to 44 FPS (`buffer_cache.h:298-302`).
 - **Disagreement resolved.** The skeptic also called the benefit "more copies could run before the pass" refuted, citing beta 18's "no copy-shader dispatches inside a pass". `renderer-1` shows that count is invalid, so this benefit is **unknown**, not refuted.
 - **Fix.** A cheap A/B test: a switch that moves the copy-source test ahead of `:1166`. Note that the snapshot copies the whole span, not just its ranges. In the worst case, copy-thread writes into BAR memory could reach about 1.5 GB/s (23,000 batches a second times 64 KiB).
 - **Evidence.** Suspected. First read the share of "src in place" and its KiB per call from the existing `HLE copy ObtainBuffer paths` line (`vk_shader_hle.cpp:441-452`).
@@ -536,7 +536,7 @@ Priority 4, partly confirmed. Memory area. Shares a root with `renderer-6`.
   - This happens only on the tracked path. If the destination is in the GX region, only a 64 KiB tick is noted (`buffer_cache.cpp:1166-1182`, `57-62`).
   - Most claimed consequences are already measured as negligible:
     - Object motion: since beta 16, 354 to 358 of about 362 GPU-written small skeletons are unchanged and only 7 small draws are stored (`community-fixes-plan.md:64`). Beta 15 traced only 3 of 360 palettes to the copy shader (`:63`).
-    - Readbacks: write faults are about 1 a second in play (`gpu-memory.md:265`).
+    - Readbacks: write faults are about 1 a second in play (`gpu-memory.md:314`).
     - Write ticks work in 64 KiB pages, so exact bytes would not help.
     - The write-stamp lock is uncontended.
   - What is left is unmeasured: small read-only bindings of gap-page bytes losing the ring and stream path.
@@ -667,7 +667,7 @@ Priority 3, confirmed. Command area.
 
 - **What and where.**
   - The lookahead is on with 8 or more hardware threads (`vk_rasterizer.cpp:1561-1571`). Its design note says "default off" (`parallel-stageb.md:297-299`, `168-169`), and no A/B result exists in the docs. It uses `hardware_concurrency`, while other spinning threads use the affinity-aware `BbThreads::Available()` (`vk_draw_pipe.h:337`; `liverpool.cpp:249`).
-  - Native calls are on by default (`LauncherSettings.cs:92`; `GameEnvironment.cs:198`). The only recorded result is "their cost on stage B barely changed" (`EMULATION_REMOVAL_PLAN.md:97-98`). Stage A still reads each draw record twice (`liverpool.cpp:1098-1110`, `1401-1404`).
+  - Native calls are on by default (`LauncherSettings.cs:92`; `GameEnvironment.cs:198`). The only recorded result is "their cost on stage B barely changed" (`history/EMULATION_REMOVAL_PLAN.md`). Stage A still reads each draw record twice (`liverpool.cpp:1098-1110`, `1401-1404`).
 - **Fix.** Run the A/Bs at a **CPU-bound** spot (`BB_FPS_LIMIT=0`): experiment bit 16 pauses the lookahead live, and `BB_NATIVE_CALLS=1/0` covers native calls. Keep what wins and document it. If the lookahead stays, gate it on `BbThreads::Available()` and fix the doc.
 - **Evidence.** The settings and docs are confirmed; neither default has a measurement.
 - **Expected effect.** Either a documented gain, or one fewer spinning thread or game-code patch.
@@ -717,7 +717,7 @@ Priority 4, partly confirmed.
 - **What and where.**
   - `page_manager.cpp:436` says "on by default"; `:481-490` makes it off unless `BB_DEFER_PROTECT=1`. It was turned off after half-written Cathedral Ward textures in Lantern 0.9.21 to 0.9.23, and the cause was never found.
   - `parallel-stageb.md:48` and `:80` describe it as live.
-  - Protection now costs about 0.004 ms a frame (`gpu-memory.md:265-267`).
+  - Protection now costs about 0.004 ms a frame (`gpu-memory.md:314-316`).
   - Default cost: 4 `FlushDeferredProtects` call sites (`buffer_cache.cpp:722`, `1477`, `3800`, `3830`, not 8), each one atomic load (`page_manager.cpp:1167-1172`), plus a check in `region_manager.h:250-255`.
   - It can still be turned on live through experiment bit 4 (`page_manager.cpp:478`, `496-500`).
 - **Fix.** Fix the comment and the doc first. Removal is optional. If done, credit Lantern and bbport in the note.

@@ -2,8 +2,9 @@
 
 Every change is checked against the hardware players actually use before it ships. A change that
 works on the development PC (RTX 5060, Intel CPU, Windows 11) has proven nothing about an AMD card,
-a GTX 10, a laptop iGPU or a 4-thread CPU. 0.9.37 beta 6 shipped a cache fix tested on that one PC:
-every RX 9070 XT player crashed at the start (below, "What went wrong").
+a GTX 10, a laptop iGPU or a 4-thread CPU. 0.9.37 beta 6 (Lantern Engine, which this project
+started from; versions 0.9.x below are Lantern's) shipped a cache fix tested on that one PC: every
+RX 9070 XT player crashed at the start (below, "What went wrong").
 
 ## Who plays
 
@@ -164,12 +165,19 @@ call stack (`shim/common/assert.cpp`), which found this.
 - **AMD**: no Mailbox present mode on some setups ("falling back to Fifo").
 - **AMD legacy driver (Polaris, Vega, old APUs)**: Vulkan 1.3.260, no dynamic vertex input: the
   vertex input is baked into every pipeline (GetVertexInputs).
-- **NVIDIA, the PC memory model**: the arena lists no memory type a host import may use, and the
-  engine binds imports anyway, outside the Vulkan spec ("Guest memory: ... outside the Vulkan spec").
+- **NVIDIA, the PC memory model** (`BB_GUEST_IN_PLACE=1`, the launcher's Experimental
+  `exp_guest_in_place`: off by default since 0.4.0 beta 4, to be removed before 0.4.4 ships): the
+  arena lists no memory type a host import may use, and the engine binds imports anyway, outside
+  the Vulkan spec ("Guest memory: ... outside the Vulkan spec").
   Treat it as unproven on every driver: the arena is not made for external memory either
   (`VUID-VkSparseMemoryBind-memory-02731`), and on lavapipe the GPU reads other bytes through such a
   binding than the CPU wrote (`tools/chunk_buffer_probe.cpp`). `BB_CHUNK_BUFFERS=1` moves bindings in
-  one chunk off it (EMULATION_REMOVAL_PLAN.md, step 6 item 2).
+  one chunk off it (history/EMULATION_REMOVAL_PLAN.md, step 6 item 2). The game's GX region, read in
+  place by default on Windows (`BB_GX_IN_PLACE`, 0.4.4), goes through a buffer of its own, within
+  the spec; only when the arena is needed over the region (a binding across its edge, or a
+  shader's page fault there) are the arena's blocks bound to its import, logged "(outside the
+  Vulkan spec on this GPU)" where the arena does not take imports. `BB_GX_OWN_BUFFER=0` binds the
+  whole region in the arena, as 0.4.4 betas 5 to 8 did.
 - **NVIDIA Pascal (GTX 10)**: the 580 branch is the last driver; features in later drivers never
   reach these cards.
 

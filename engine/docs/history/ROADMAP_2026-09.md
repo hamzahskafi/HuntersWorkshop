@@ -1,7 +1,7 @@
 # The native Bloodborne port: what was done and what comes next (September 2026)
 
-> Historical (bbport, before Lantern Engine). The current plan is
-> [EMULATION_REMOVAL_PLAN.md](../EMULATION_REMOVAL_PLAN.md); who plays and the release rules are in
+> Historical (bbport, before Lantern Engine). The plan that followed (also historical now) is
+> [EMULATION_REMOVAL_PLAN.md](EMULATION_REMOVAL_PLAN.md); who plays and the release rules are in
 > [COMPATIBILITY.md](../COMPATIBILITY.md).
 
 The main text is the state on 2026-09-26; the first section below is what changed by 30.09. The most
