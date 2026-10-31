@@ -19,7 +19,7 @@ Oldest first:
   [motion_vectors.md](../motion_vectors.md).
 - [ROADMAP_2026-09.md](ROADMAP_2026-09.md) (English): what was done and what came next, as of
   2026-09-26 with an update of 2026-09-30; superseded, by its own note, by
-  [EMULATION_REMOVAL_PLAN.md](../EMULATION_REMOVAL_PLAN.md) and [COMPATIBILITY.md](../COMPATIBILITY.md).
+  [EMULATION_REMOVAL_PLAN.md](EMULATION_REMOVAL_PLAN.md) and [COMPATIBILITY.md](../COMPATIBILITY.md).
 - [CHANGELOG_2026-09-27.md](CHANGELOG_2026-09-27.md): the day's changes (the reactive mask setting
   saved, upscaler presets switched without a restart on cards that cannot blit D32S8, `jitter=1`),
   2026-09-27; the upscaler's later state: [upscaler.md](../upscaler.md).
@@ -53,7 +53,7 @@ Oldest first:
 - [CHANGES_0.4.md](CHANGES_0.4.md): bbport 0.4, from 2026-10-06 (sections to 2026-10-07): its PC
   memory model the default again and for NVIDIA, the game's libGnm as the API level, weak CPUs,
   depth of field, the shader cache, motion vectors, FSR 4.1.1; the libGnm work continues in
-  [EMULATION_REMOVAL_PLAN.md](../EMULATION_REMOVAL_PLAN.md), the memory model in Hunter's Workshop
+  [EMULATION_REMOVAL_PLAN.md](EMULATION_REMOVAL_PLAN.md), the memory model in Hunter's Workshop
   in [gpu-memory.md](../gpu-memory.md).
 - [bbport-README.md](bbport-README.md) (English): bbport's README (deadinside28), undated, from after
   bbport 0.3 (its new memory model still an option for AMD GPUs only); Hunter's Workshop's own:
