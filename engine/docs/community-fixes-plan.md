@@ -40,7 +40,7 @@ bbhost v0.2.20–v0.2.22, reviewed" below.
 | Credits | AMD and NVIDIA items credit AMD's SDK and NVIDIA's guide (ground rules). |
 | FSR frame generation | Set aside. The current one (FireBurn's) goes with FireBurn in beta 25; AMD's official one needs AMD's swapchain (its docs call dispatching without it "highly discouraged") and comes after 0.4.4. DLSS frame generation is unaffected. |
 | OptiScaler | Set aside: the compatibility mode (`vk_optiscaler.h`) stays as it is, untested. The tester uses neither OptiScaler nor frame generation. Re-check after 0.4.4. |
-| Original camera | Fixed in HW's engine (beta 24): every per-frame weight of the follow camera, converted each frame with the frame timer. bbhost's weight list is a cross-check only; no code is taken from it or from Lantern. |
+| Original camera | Fixed in HW's engine (beta 24): every per-frame weight of the follow camera, converted each frame with the frame timer. bbhost's weight list is a cross-check only; no code is taken from it or from Lantern. FPS++ becomes that base plus only what Kyo changed (beta 24). |
 | When AMD's or NVIDIA's runtime can't start | TAA, with a log line and a note in the game. |
 | Linux | Set aside until Windows is done; notes kept below ("Linux, for later"). |
 | Test PC | RTX 3070 Ti; Windows HDR is off. HDR-output items are checked in the code, not in the tester's runs. DLSS's input point (§3.1, before tone mapping) concerns the game's internal image, so the runs do cover it. |
@@ -109,19 +109,67 @@ decompilation; each use is confirmed with HW's own tools in beta 24):
 | +0x240 | Lock-on's and the auto turn's swing | Not converted | Once |
 | +0x330 (0.05, the constructor's immediate at patch 0x183A7DE) | Eases the distance, the pitch floor, lock-on's framing, the look-at height and the field of view toward the camera's current LockCamParam row (the camera settings the game selects for where the player is, e.g. a boss arena) | Not converted | Once, from 60 (0.05 is the game's own 30 FPS value; Kyo's retune does not change it) |
 
-+0x130 (the pitch return's weight) and the focus are time-based and need nothing.
++0x130 (the pitch return's weight) and the focus are time-based and need nothing. The game's debug menu
+names every camera setting (about 60, registered by patch 0x183fb60): the checklist for the survey. Three
+more may be per-frame and are checked too: +0x288 (ロックカメラ調整回転追尾率, the lock-on camera's turn
+chase), +0x2b4 (EscapeWallRotDampRatio, the wall turn's damping) and +0x190 (CamSafeMarginRate).
+
+**Kyo's retune, value by value (checked 2026-10-31 against the 1.09 executable).** The constructor (patch
+0x183a0e0) writes the defaults twice: a first set (from patch 0x183a4c3), then, after reading the
+`Game.IsUseChrFollowCam` setting into +0x342, a second one (from patch 0x183a8c1) that always overwrites it.
+The second set is the game's camera. Kyo's list writes both, and stores the same values again in the camera's
+debug-menu setup (patch 0x183fb60: each call to patch 0x2dad100 registers one field's slider, with its name,
+range, step and display scale), jumping over the rest of it. **Correction:** this doc and `patches.cpp` said
+those stores stop the game's per-area camera parameters from loading. They replace debug-menu sliders; no
+per-area setting is lost.
+
+| Field (the game's debug-menu name) | Game, 30 FPS | Kyo, 60 FPS | What it is |
+|---|---|---|---|
+| +0x19c ChrTransChaseRateForNormal | 0.10 | 0.05 | Halved: his 60 FPS conversion |
+| +0x1b0 TargetChaseRateXZForNormal | 0.10 | 0.05 | Halved |
+| +0x1b8 TargetChaseRateY | 0.03 | 0.015 | Halved |
+| +0x1c4 TargetChaseDistRate | 0.40 | 0.20 | Halved |
+| +0x1c8/+0x1cc TargetChaseRateAtLockXZ/Y | 0.40/0.30 | 0.20/0.15 | Halved |
+| +0x240 LockRotChaseRate | 0.30 | 0.15 | Halved |
+| +0x1a0 ChrTransChaseRateForEscapeWall, +0x1b4 TargetChaseRateXZForEscapeWall | 0.25 | 0.05 | **Retune:** no faster chase near walls (as the normal rates) |
+| +0x1a4 TargetTransChaseRate | 0.30 | 0.05 | **Retune:** the aimed-for point chases about 3x slower than a conversion (the lag) |
+| +0x1a8 TargetRotXChaseRate | 0.30 | 0.05 | **Retune:** a kept share (patch 0x183cef0: `ref + wrap(pitch - ref) * w`), so lower tilts back faster, near at once |
+| +0x238 DirectPitchAng | 60° | 40° | **Retune** (an angle) |
+| +0x23c DirectPitchRate | 0.06 | 0.04 | **Retune:** a little quicker than a conversion |
+| Distance ease (patch 0x4D25E68) | 0.10 | 0.025 | **Retune:** half a conversion (the pull-back while sprinting) |
+| Chase-rate ease (patch 0x4D25E94) | 1/30 | 1/30 | Not changed: runs twice the game's speed at 60 (no visible effect in FPS++: its normal and escape rates are equal) |
+| +0x330, the settings blend | 0.05 | 0.05 | Not changed: twice the game's speed at 60 |
+| The jump at patch 0x183dc96 | to 0x183e2f2 | to 0x183e271 | **Code:** the chase-rate update also runs on the game's other camera path |
+| The byte at patch 0x183dcfe | 1 | 0 | **Code:** no wall-escape hold when neither wall probe hits |
+
+No distance setting (CamDist, FulcrumDist...) is changed: the camera sits further back because it chases
+and eases its distance more slowly.
+
+**The approach (agreed in principle 2026-10-31; to be confirmed at the start of beta 24).** One base for both
+tunings: the game's values, converted every frame from 30 by the engine with the frame timer (Original).
+FPS++ is the base plus Kyo's seven retunes and his two code changes, his values stored as their exact 30 FPS
+equivalents (a weight w at 60 is 1 - (1 - w)^2 at 30: 0.05 → 0.0975, 0.04 → 0.0784, the distance ease
+0.025 → 0.049375; the kept share 0.05 → 0.0025), so the per-frame conversion gives his 60 FPS camera
+exactly at every rate. His halved values go (the exact conversion replaces them: up to 10% quicker on the
+larger ones); the chase-rate ease and +0x330, which he did not change, are the base's, from 30. His
+debug-menu stores are no longer needed: the game's slider setup stays as in Original today.
 
 | Work | Size |
 |---|---|
 | Every use of these weights in the game's follow-camera update found with HW's own reverse-engineering tools (`tools/re`, as for the frame-rate survey) on the 1.09 executable, each use checked byte for byte as `kEases` are | M |
-| Each use converted where the game uses it (the combined +0x1a4 value after the game combines it), with the frame timer's actual frame length: Original from 30, FPS++ from 60, +0x330 as decided below. At 30 FPS every value stays the game's to the bit | L |
+| Each use converted where the game uses it (the combined +0x1a4 value after the game combines it), with the frame timer's actual frame length, from 30 for both tunings (FPS++ as above). At 30 FPS every value stays the game's to the bit | L |
+| FPS++: Kyo's seven retunes as 30 FPS equivalents in the second default set, his two code changes kept, his halved values and debug-menu stores dropped | M |
 | `FrameRateFixes`' one-time camera conversions dropped while the timer is on (no double conversion); with `BB_FRAME_TIMER=0` today's behaviour stays as the fallback | S |
 | Tests: the game's bits at 30, the maths (weights and kept shares), the checks at each use | M |
-| The claims above corrected: the launcher text, this doc, the comment, the frame-rate survey; the 0.4.4 notes say Original was incomplete before | S |
+| The claims above corrected: the launcher text, this doc, the comments in `patches.cpp` (also the per-area parameters), the frame-rate survey; the 0.4.4 notes say Original was incomplete before | S |
 
-**Open: +0x330 under FPS++.** From 30 (the game's speed: 90% of a change of camera settings in 1.5 s, as on
-the PS4) or from 60 (today's FPS++: in 0.75 s, twice the PS4's speed, an artefact of running Kyo's 60 list
-that the retune never chose). Recommended: from 30. Original converts it from 30 either way.
+**To ask the tester again at the start of beta 24** (the tester, 2026-10-31: "ask me again about those two
+things once we get to beta 24"):
+
+1. The approach above. With it, +0x330 under FPS++ runs at the game's speed (90% of a change of camera
+   settings in 1.5 s, as on the PS4) instead of today's 0.75 s, since Kyo did not change it.
+2. +0x1a8 (TargetRotXChaseRate) under FPS++: Kyo's value (FPS++ tilts back as now, near at once;
+   recommended: he chose to change it) or the game's (its tilt back, at its speed).
 
 Test, at 30, 60, 120, 144 and Uncapped, Original and FPS++: lock-on's swing, the tilt back after letting go
 of the stick, the chase while sprinting, entering a boss arena: each should match 30 FPS.
@@ -137,10 +185,11 @@ of the stick, the chase while sprinting, entering a boss arena: each should matc
 | The upscaling settings cleanup (discussed with the tester before any code): one Upscaling section with each choice described; the render resolution with its real size; one sharpening slider; options per upscaler; no "preset" wording; the in-game menu's names to match | L |
 | Translations: 13 launcher languages, 10 in-game | M |
 
-To settle in the settings discussion: upscaler "Off"; merging the mip-bias settings; an "FSR version:
-Automatic / 3.1" choice (`ffxOverrideVersion`; recommended, a way out if 4.1.2 misbehaves on a card).
-Test: the tester, FSR 3.1.6 through the SDK on the RTX 3070 Ti against FireBurn's FSR 3.1 (0.64 ms at the
-lamp spot, Quality). AMD testers needed: RX 6000/7000, RX 9000, an APU.
+To settle in the settings discussion: upscaler "Off"; merging the mip-bias settings. An "FSR version:
+Automatic / 3.1" choice (`ffxOverrideVersion`) is in: no AMD testers (the tester, 2026-10-31), so FSR 4.1.2
+on AMD cards ships untested and AMD players need a way back to 3.1 without waiting for a fix; the release
+notes say it is untested. Test: the tester alone, FSR 3.1.6 through the SDK on the RTX 3070 Ti against
+FireBurn's FSR 3.1 (0.64 ms at the lamp spot, Quality); the TAA fallback (the SDK's DLLs taken out).
 
 ### Beta 26: the PC memory model removed
 
@@ -171,12 +220,16 @@ with Match display (pinned); the AMD/Intel shader-3 and CPU-bound items.
 | DLSS | Streamline is Windows only and NVIDIA's Linux loader library (`libnvsdk_ngx.a`) has the same licence problem: Linux keeps HW's own path (`libnvidia-ngx.so.1`), to which the Project ID is still to be added |
 | FSR frame generation | Gone with FireBurn on Linux too |
 
+### Settled since (2026-10-31)
+
+- The beta order: the camera (24) before AMD (25).
+- No AMD testers: the tester tests FSR alone (beta 25's note above).
+- Beta 23 started.
+
 ### Open questions
 
-1. +0x330 under FPS++: from 30 (recommended) or from 60.
-2. Beta order: the camera (24) before AMD (25), so the tester can test it alone while AMD testers are found (recommended).
-3. AMD testers for beta 25.
-4. The go-ahead for beta 23.
+1. At the start of beta 24: the camera approach and +0x1a8 under FPS++ (beta 24's two questions).
+2. In beta 25's settings discussion: upscaler "Off"; merging the mip-bias settings.
 
 ## Done since the analysis
 
