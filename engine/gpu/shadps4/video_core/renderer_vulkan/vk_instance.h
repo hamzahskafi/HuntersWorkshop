@@ -458,16 +458,6 @@ public:
         return vk11_props.subgroupSize;
     }
 
-    /// Returns the largest storage buffer descriptor range.
-    u32 MaxStorageBufferRange() const {
-        return properties.limits.maxStorageBufferRange;
-    }
-
-    /// Returns the largest dispatch width (workgroups in X).
-    u32 MaxComputeWorkGroupCountX() const {
-        return properties.limits.maxComputeWorkGroupCount[0];
-    }
-
     /// Returns the maximum size of compute shared memory.
     u32 MaxComputeSharedMemorySize() const {
         return properties.limits.maxComputeSharedMemorySize;

@@ -1,10 +1,16 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Hunter's Workshop 0.4.4 beta 14: where the game's copy shader (cs fefebf9e, vk_shader_hle.cpp)
+// Hunter's Workshop 0.4.4 beta 14: where the game's copy shader (cs fefebf9f, vk_shader_hle.cpp)
 // took the bytes it wrote, for object motion. Small skeletons whose bone palette the GPU wrote are
 // stored every frame (their CPU copy is stale, so the palette cannot be compared with the last
 // frame's); facing the lamps of the dense area that was 360 draws and 3.7 M vertices a frame. When
 // the copy shader wrote the palette, its source is the game's memory, current on the CPU: the
 // palette can be compared through it (BB_MOTION_GPU_SMALL=source).
+// 0.4.4 beta 21: fefebf9f is the program hash the HLE compares (COPY_SHADER_HASH; this said
+// fefebf9e). BB_SHADER_DISASM and the GPU profile's "dispatch cs" labels print hashes whole (the
+// profile names this shader "copy shader HLE" instead, as it is not run). The stage B
+// statistics' "dispatches by shader" list prints it as fefebf9e: that table marks a used slot by
+// setting the key's bit 0 (BbSections::ByKey) and prints keys with it cleared, so every odd hash
+// shows there one lower (a040875f as a040875e, a954e79d as a954e79c).
 #pragma once
 
 #include <cstdint>
