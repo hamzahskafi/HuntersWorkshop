@@ -1160,7 +1160,21 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
         NoteBeforeGx(device_addr, size);
     }
     const Buffer* const gx = gx_in_place ? gx_own.load(std::memory_order_acquire) : nullptr;
-    if (gx && (is_written || size > STREAM_THRESHOLD || IsRegionGpuModified(device_addr, size))) {
+    // 0.4.4 beta 21: whether the GPU has written the range or has a write there pending
+    // (IsRegionGpuModified), asked once for the three paths below instead of once each. Only the
+    // thread binding buffers makes a range GPU-modified (bindings for writes, the command
+    // processor's writes in stream order); the GPU's progress, EnsureResident's housekeeping and
+    // NoteFreshRange (any thread) only clear it. So a "no" holds for the whole binding, and a
+    // "yes" is asked again after the in-place path (below). The tail check above asks about
+    // another range (the part in the tail page).
+    std::optional<bool> gpu_modified;
+    const auto is_gpu_modified = [&] {
+        if (!gpu_modified) {
+            gpu_modified = IsRegionGpuModified(device_addr, size);
+        }
+        return *gpu_modified;
+    };
+    if (gx && (is_written || size > STREAM_THRESHOLD || is_gpu_modified())) {
         // Through the region's own buffer: no arena, residency or sparse binding. A write counts
         // as GPU-modified until the GPU has done it (IsRegionGpuModified).
         if (is_written) {
@@ -1179,7 +1193,7 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
         return target;
     }
     if ((GuestInPlace() || gx_in_place) &&
-        (is_written || size > STREAM_THRESHOLD || IsRegionGpuModified(device_addr, size))) {
+        (is_written || size > STREAM_THRESHOLD || is_gpu_modified())) {
         const u64 first_block = device_addr >> block_shift;
         const u64 last_block = (device_addr + size - 1) >> block_shift;
         const auto* arena = GetArena(first_block, last_block);
@@ -1226,6 +1240,10 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
             }
             return target;
         }
+        // Not in place. Only a "yes" (or no answer yet) gets here: asked again below, since
+        // EnsureResident may have evicted the blocks the GPU wrote, and the GPU may have done its
+        // write meanwhile.
+        gpu_modified.reset();
     }
     // For read-only buffers use device local stream buffer to reduce renderpass breaks.
     // The copy shader's sources too, up to 64 KiB (BB_HLE_STREAM_KB; 16 or less: as any buffer):
@@ -1250,8 +1268,7 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
     constexpr u64 GxEdgeCopyLimit = 8_MB;
     const bool gx_edge = !gx_in_place && size <= GxEdgeCopyLimit && GxOverlaps(device_addr, size) &&
                          gx_own.load(std::memory_order_acquire) != nullptr;
-    if (!is_written && (size <= stream_limit || gx_edge) &&
-        !IsRegionGpuModified(device_addr, size)) {
+    if (!is_written && (size <= stream_limit || gx_edge) && !is_gpu_modified()) {
         BB_SECTION(ObtainStream);
         note_hle(1);
         if (gx_edge) {
