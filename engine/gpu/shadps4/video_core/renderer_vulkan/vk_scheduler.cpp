@@ -201,10 +201,44 @@ void Scheduler::BeginRendering(const RenderState& new_state) {
     const bool resume = resume_rendering && !is_rendering && render_state == new_state;
     resume_rendering = false;
     // 0.4.4 beta 18: the pass that ended last begun again as it was: split by what ended it.
+    auto& savings = GpuSavings::Get();
     if (!is_rendering && !resume && render_state == new_state) {
-        GpuSavings::Count(GpuSavings::Get().pass_splits[static_cast<u32>(pass_break)]);
+        GpuSavings::Count(savings.pass_splits[static_cast<u32>(pass_break)]);
+        // 0.4.4 beta 20: a barrier's detail, only for a pass begun again.
+        for (u32 bit = 0; bit < savings.pass_barrier_waits.size(); ++bit) {
+            if (pass_break_detail & (1u << bit)) {
+                GpuSavings::Count(savings.pass_barrier_waits[bit]);
+            }
+        }
+        for (u32 bit = 0; bit < savings.pass_barrier_layouts.size(); ++bit) {
+            if (pass_break_detail & (1u << (8 + bit))) {
+                GpuSavings::Count(savings.pass_barrier_layouts[bit]);
+            }
+        }
+    } else if (resume) {
+        GpuSavings::Count(savings.pass_resumes_after_cut);
+    } else if (render_state.width == new_state.width && render_state.height == new_state.height &&
+               render_state.num_layers == new_state.num_layers &&
+               render_state.num_color_attachments == new_state.num_color_attachments) {
+        // 0.4.4 beta 20: the same colour targets again, the state changed: another depth view (a
+        // depth write toggle at native size), or other layouts or clears (a pass begun with a
+        // clear goes on without it).
+        bool same_colour = true;
+        for (u32 i = 0; i < new_state.num_color_attachments && i < 8; ++i) {
+            same_colour &= render_state.color_attachments[i].image_view ==
+                           new_state.color_attachments[i].image_view;
+        }
+        if (same_colour) {
+            if (render_state.depth_stencil_attachment.image_view !=
+                new_state.depth_stencil_attachment.image_view) {
+                GpuSavings::Count(savings.pass_restarts_depth_view);
+            } else if (!(render_state == new_state)) {
+                GpuSavings::Count(savings.pass_restarts_layout_or_clear);
+            }
+        }
     }
     pass_break = GpuSavings::PassBreak::Other;
+    pass_break_detail = 0;
     EndRendering();
     is_rendering = true;
     render_state = new_state;
@@ -278,11 +312,12 @@ void Scheduler::EndRendering() {
     EndRendering(GpuSavings::PassBreak::Other);
 }
 
-void Scheduler::EndRendering(GpuSavings::PassBreak why) {
+void Scheduler::EndRendering(GpuSavings::PassBreak why, u32 detail) {
     if (!is_rendering) {
         return;
     }
     pass_break = why;
+    pass_break_detail = detail;
     is_rendering = false;
     Record([](vk::CommandBuffer cmdbuf) { cmdbuf.endRendering(); });
 }

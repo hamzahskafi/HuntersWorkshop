@@ -85,6 +85,11 @@ struct Liverpool {
         u64 position;
     };
     std::deque<PendingFence> pending_fences;
+    /// 0.4.4 beta 20: waits on label+4 no longer answered from a 4-byte fence's "high half"
+    /// (PendingFenceValue; the frame statistics, with the fence submissions line).
+    static inline std::atomic<u64> fence_high_half_refused{0};
+    /// 0.4.4 beta 20: WRITE_DATA packets on the compute queues (stored by the CPU at decode).
+    static inline std::atomic<u64> compute_write_data{0};
     void NotePendingFences(const auto& event);
     bool PendingFenceValue(VAddr address, u32& value);
     void NotePendingWrite(const struct PM4CmdWriteData& write_data, u32 num_bytes);

@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cstdio>
 #include <span>
+#include <utility>
 #include <vector>
 
 #include "shader_recompiler/info.h"
@@ -33,6 +34,13 @@ static constexpr u64 COPY_SHADER_HASH = 0xfefebf9f;
 struct AccessRange {
     u64 src_min, src_max, dst_min, dst_max;
 };
+
+// 0.4.4 beta 20: whether the game dispatch being run interrupted a render pass, sampled at its
+// start (ExecuteCopyShaderHLE), before its uploads, copies or the profiler's mark end the pass,
+// and taken by its first MultiCopy for the frame statistics. Beta 18 and 19 sampled it in
+// MultiCopy after the profiler's mark: with BB_GPU_PROFILE on, never in a pass (the engine map's
+// renderer-1). One thread runs the HLE at a time.
+static bool copy_dispatch_in_pass = false;
 
 // bbport: the copy shader runs ~57 times per frame with ~1024 small ranges each. As one
 // vkCmdCopyBuffer with that many regions it cost ~37 ns of GPU time per range (~2.1 ms per
@@ -123,12 +131,14 @@ static bool MultiCopy(Rasterizer& rasterizer, const VideoCore::Buffer* src,
     const u64 table_size = regions.size() * sizeof(u32);
     const u64 table_offset = stream.Copy(regions.data(), table_size, align);
 
+    // 0.4.4 beta 18: a dispatch ends the open render pass (frame statistics: what splits passes);
+    // beta 20: whether it was open is taken from the game dispatch's start, and the pass ends
+    // before the profiler's mark (which would end it as the profiler's).
+    const bool in_pass = std::exchange(copy_dispatch_in_pass, false);
+    scheduler.EndRendering(GpuSavings::PassBreak::CopyShader);
     if (auto* profiler = GpuProfiler::Get()) {
         profiler->Mark(0xC0B1ull, [] { return std::string{"copy shader HLE: barrier + dispatch"}; });
     }
-    // 0.4.4 beta 18: a dispatch ends the open render pass (frame statistics: what splits passes).
-    const bool in_pass = scheduler.IsRendering();
-    scheduler.EndRendering(GpuSavings::PassBreak::CopyShader);
     const u64 src_size = src_max - src_min, dst_size = dst_max - dst_min;
     auto& savings = GpuSavings::Get();
     savings.hle_dispatches.fetch_add(1, std::memory_order_relaxed);
@@ -491,6 +501,47 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
         }
     }
     GpuSavings::Get().hle_batches.fetch_add(batches.size(), std::memory_order_relaxed);
+    // 0.4.4 beta 20 (frame statistics on): a copy-shader destination over an image the texture
+    // cache holds, said once per image. The HLE marks no image over what it writes stale, where
+    // the game's own shader would have (BindBuffers' InvalidateMemoryFromGPU; the engine map's
+    // mem-5): whether any is ever written decides the fix.
+    if (BbStats::enabled) {
+        static std::vector<VAddr> told;
+        auto& texture_cache = rasterizer.GetTextureCache();
+        for (const auto& batch : batches) {
+            const VAddr start = dst_buf_sharp.base_address + batch.dst_min;
+            const u64 size = batch.dst_max - batch.dst_min;
+            texture_cache.ForEachImageInRegion(start, size, [&](VideoCore::ImageId,
+                                                                VideoCore::Image& image) {
+                const VAddr base = image.info.guest_address;
+                if (told.size() >= 16 || std::ranges::find(told, base) != told.end()) {
+                    return;
+                }
+                told.push_back(base);
+                std::printf("Copy shader writes over an image: %#llx+%#llx over %s %ux%u at "
+                            "%#llx+%#llx (%s)\n",
+                            static_cast<unsigned long long>(start),
+                            static_cast<unsigned long long>(size),
+                            vk::to_string(image.info.pixel_format).c_str(), image.info.size.width,
+                            image.info.size.height, static_cast<unsigned long long>(base),
+                            static_cast<unsigned long long>(image.info.guest_size),
+                            image.flags & VideoCore::ImageFlagBits::GpuModified
+                                ? "the GPU wrote it"
+                                : "as in memory");
+            });
+        }
+    }
+    // 0.4.4 beta 20: the pass this dispatch interrupts ends here, named as the copy shader's:
+    // its uploads (ObtainBuffer), copies and the profiler's mark would end it anyway, each under
+    // its own name. Counted once per game dispatch.
+    if (!batches.empty()) {
+        auto& scheduler = runtime.GetScheduler();
+        copy_dispatch_in_pass = scheduler.IsRendering();
+        if (copy_dispatch_in_pass) {
+            GpuSavings::Count(GpuSavings::Get().hle_dispatches_in_pass);
+        }
+        scheduler.EndRendering(GpuSavings::PassBreak::CopyShader);
+    }
     // bbport (BB_HLE_COPY_MERGE): every batch's buffers obtained first (uploads and residency
     // all before the copies), then one barrier check and one dispatch per run of batches on the
     // same buffers, instead of a barrier check and a dispatch per batch. Only when no source
@@ -570,6 +621,7 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
                 first = last;
                 copy_start = copy_end;
             }
+            copy_dispatch_in_pass = false;
             return true;
         }
     }
@@ -609,7 +661,7 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
         }
         batch_start = batch_end;
     }
-
+    copy_dispatch_in_pass = false; // a first batch copied without MultiCopy did not take it
     return true;
 }
 

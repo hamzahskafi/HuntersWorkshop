@@ -433,8 +433,9 @@ struct PageManager::Impl {
         }
     }
 
-    // bbport BB_DEFER_PROTECT (on by default; =0 off, or experiment bit 4 of BB_TOGGLE_FILE while
-    // the game runs): pages the buffer cache uploaded are watched for writes again
+    // bbport BB_DEFER_PROTECT (off by default since Lantern 0.9.24: =1 on, or experiment bit 4 of
+    // BB_TOGGLE_FILE while the game runs; see DeferEnv): pages the buffer cache uploaded are
+    // watched for writes again
     // (UpdateProtection after ForEachModifiedRange<CPU, true>) by a count change on the calling
     // thread, the draw recording thread; the system call that write-protects them is made by
     // bb:Protect, or by the first upload copy that runs before it did (FlushDeferredProtects).

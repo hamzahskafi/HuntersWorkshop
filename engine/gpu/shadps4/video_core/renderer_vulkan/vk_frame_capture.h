@@ -35,8 +35,6 @@ public:
     static bool Active() {
         return state.load(std::memory_order_relaxed) != Idle;
     }
-    /// GPU thread, at every draw/dispatch: starts or ends a recording at frame boundaries.
-    static void Poll();
 
     static void BeginPass(const VideoCore::ImageInfo* const* colors, u32 num_colors,
                           const VideoCore::ImageInfo* depth);

@@ -131,7 +131,7 @@ void Runtime::TickFrame() {
 
 void Runtime::CopyBuffer(const VideoCore::Buffer* src, const VideoCore::Buffer* dst,
                          std::span<const vk::BufferCopy> copies) {
-    scheduler.EndRendering(GpuSavings::PassBreak::Transfer);
+    scheduler.EndRendering(GpuSavings::PassBreak::BufferCopy);
 
     // bbport: many regions (HLE copy shaders) are tracked as one bounding range per buffer:
     // conservative for barriers, and two tree lookups instead of two per region.
@@ -181,7 +181,7 @@ void Runtime::CopyBuffer(const VideoCore::Buffer* src, const VideoCore::Buffer* 
 }
 
 void Runtime::FillBuffer(const VideoCore::Buffer* dst, u64 offset, u64 size, u32 value) {
-    scheduler.EndRendering(GpuSavings::PassBreak::Transfer);
+    scheduler.EndRendering(GpuSavings::PassBreak::BufferFill);
 
     if (IsBufferAccessed(dst, offset, size, true)) {
         FlushBarriers();
@@ -200,7 +200,7 @@ void Runtime::CopyFromGuestChunk(vk::Buffer src, const VideoCore::Buffer* dst,
     if (copies.empty()) {
         return;
     }
-    scheduler.EndRendering(GpuSavings::PassBreak::Transfer);
+    scheduler.EndRendering(GpuSavings::PassBreak::BufferUpload);
     bool needs_flush = false;
     for (const auto& copy : copies) {
         needs_flush |= IsBufferAccessed(dst, copy.dstOffset, copy.size, true);
@@ -222,7 +222,7 @@ void Runtime::UpdateBuffer(const VideoCore::Buffer* dst, u64 offset, std::span<c
     if (data.empty()) {
         return;
     }
-    scheduler.EndRendering(GpuSavings::PassBreak::Transfer);
+    scheduler.EndRendering(GpuSavings::PassBreak::BufferUpdate);
     if (IsBufferAccessed(dst, offset, data.size(), true)) {
         FlushBarriers();
     }
@@ -239,7 +239,7 @@ void Runtime::UpdateBuffer(const VideoCore::Buffer* dst, u64 offset, std::span<c
 }
 
 void Runtime::InlineData(VideoCore::Buffer* dst, u64 offset, u32 value) {
-    scheduler.EndRendering(GpuSavings::PassBreak::Transfer);
+    scheduler.EndRendering(GpuSavings::PassBreak::BufferUpdate);
 
     if (IsBufferAccessed(dst, offset, sizeof(value), true)) {
         FlushBarriers();
@@ -298,7 +298,7 @@ Runtime::TransferMark::~TransferMark() {
 void Runtime::UploadImage(VideoCore::Image* dst, const VideoCore::Buffer* src,
                           std::span<const vk::BufferImageCopy> upload_copies) {
     SetBackingSamples(dst, dst->info.num_samples, false);
-    scheduler.EndRendering(GpuSavings::PassBreak::Transfer);
+    scheduler.EndRendering(GpuSavings::PassBreak::ImageUpload);
     const TransferMark mark{*this, "image upload", *dst};
 
     bool needs_flush =
@@ -339,7 +339,7 @@ void Runtime::UploadImage(VideoCore::Image* dst, const VideoCore::Buffer* src,
 void Runtime::DownloadImage(VideoCore::Image* src, const VideoCore::Buffer* dst,
                             std::span<const vk::BufferImageCopy> download_copies) {
     SetBackingSamples(src, src->info.num_samples);
-    scheduler.EndRendering(GpuSavings::PassBreak::Transfer);
+    scheduler.EndRendering(GpuSavings::PassBreak::ImageDownload);
     const TransferMark mark{*this, "image download", *src};
 
     bool needs_flush =
@@ -403,7 +403,7 @@ void Runtime::CopyImage(VideoCore::Image* src, VideoCore::Image* dst) {
         return;
     }
 
-    scheduler.EndRendering(GpuSavings::PassBreak::Transfer);
+    scheduler.EndRendering(GpuSavings::PassBreak::ImageTransferCopy);
 
     bool needs_flush =
         Transit(src, vk::ImageLayout::eTransferSrcOptimal, vk::PipelineStageFlagBits2::eCopy,
@@ -470,7 +470,7 @@ void Runtime::CopyImageWithBuffer(VideoCore::Image* src, VideoCore::Image* dst,
     ASSERT(copy_size <= 128_MB && offset <= buffer->SizeBytes() &&
            copy_size <= buffer->SizeBytes() - offset);
 
-    scheduler.EndRendering(GpuSavings::PassBreak::Transfer);
+    scheduler.EndRendering(GpuSavings::PassBreak::ImageTransferCopy);
 
     bool needs_flush =
         Transit(src, vk::ImageLayout::eTransferSrcOptimal, vk::PipelineStageFlagBits2::eCopy,
@@ -543,7 +543,7 @@ void Runtime::CopyMip(VideoCore::Image* src, VideoCore::Image* dst, u32 mip, u32
     SetBackingSamples(dst, dst->info.num_samples);
     SetBackingSamples(src, src->info.num_samples);
 
-    scheduler.EndRendering(GpuSavings::PassBreak::Transfer);
+    scheduler.EndRendering(GpuSavings::PassBreak::ImageTransferCopy);
 
     bool needs_flush =
         Transit(src, vk::ImageLayout::eTransferSrcOptimal, vk::PipelineStageFlagBits2::eCopy,
@@ -730,7 +730,7 @@ bool Runtime::CopyDepthToColor(VideoCore::Image* src, VideoCore::Image* dst) {
     }
     SetBackingSamples(dst, 1, false);
     SetBackingSamples(src, 1);
-    scheduler.EndRendering(GpuSavings::PassBreak::Transfer);
+    scheduler.EndRendering(GpuSavings::PassBreak::DepthColor);
     // The layout the game's passes sample depth in (Rasterizer::BindTextures): nothing more to
     // change for its next read of it.
     constexpr auto depth_layout = vk::ImageLayout::eDepthStencilReadOnlyOptimal;
@@ -802,7 +802,7 @@ bool Runtime::CopyColorToDepth(VideoCore::Image* src, VideoCore::Image* dst) {
     const vk::Pipeline pipeline = ColorToDepthPipeline(depth_format, variant);
     SetBackingSamples(dst, 1, false);
     SetBackingSamples(src, 1);
-    scheduler.EndRendering(GpuSavings::PassBreak::Transfer);
+    scheduler.EndRendering(GpuSavings::PassBreak::DepthColor);
     bool needs_flush =
         Transit(src, vk::ImageLayout::eShaderReadOnlyOptimal,
                 vk::PipelineStageFlagBits2::eFragmentShader, vk::AccessFlagBits2::eShaderRead);
@@ -1055,7 +1055,7 @@ vk::ImageView Runtime::DepthCopyView(const VideoCore::Image& image, vk::Format f
 
 void Runtime::CopyDepthStencil(VideoCore::Image* src, VideoCore::Image* dst,
                                const VideoCore::SubresourceRange& sub_range) {
-    scheduler.EndRendering(GpuSavings::PassBreak::Transfer);
+    scheduler.EndRendering(GpuSavings::PassBreak::ImageTransferCopy);
 
     bool needs_flush =
         Transit(src, vk::ImageLayout::eTransferSrcOptimal, vk::PipelineStageFlagBits2::eCopy,
@@ -1100,7 +1100,7 @@ void Runtime::ResolveImage(VideoCore::Image* src, VideoCore::Image* dst,
                            const VideoCore::SubresourceRange& src_range,
                            const VideoCore::SubresourceRange& dst_range) {
     SetBackingSamples(dst, 1, false);
-    scheduler.EndRendering(GpuSavings::PassBreak::Transfer);
+    scheduler.EndRendering(GpuSavings::PassBreak::ImageTransferCopy);
 
     const bool needs_resolve = src->backing->num_samples != 1;
     const auto dst_stage =
@@ -1177,7 +1177,7 @@ void Runtime::ResolveImage(VideoCore::Image* src, VideoCore::Image* dst,
 
 void Runtime::ClearImage(VideoCore::Image* dst, const VideoCore::SubresourceRange& range,
                          const vk::ClearValue& clear_value) {
-    scheduler.EndRendering(GpuSavings::PassBreak::Transfer);
+    scheduler.EndRendering(GpuSavings::PassBreak::ImageClear);
 
     const bool needs_flush =
         Transit(dst, vk::ImageLayout::eTransferDstOptimal, vk::PipelineStageFlagBits2::eClear,
@@ -1234,7 +1234,7 @@ void Runtime::SetBackingSamples(VideoCore::Image* image, u32 num_samples, bool c
     }
 
     if (copy_backing) {
-        scheduler.EndRendering(GpuSavings::PassBreak::Transfer);
+        scheduler.EndRendering(GpuSavings::PassBreak::BackingSamples);
         ASSERT(image->info.resources.levels == 1 && image->info.resources.layers == 1);
 
         // Transition current backing to shader read layout
@@ -1415,17 +1415,53 @@ void Runtime::FlushBarriers() {
         return;
     }
 
-    // 0.4.4 beta 19: a barrier that ends an open pass, and what it waits for (frame statistics).
+    // 0.4.4 beta 19: a barrier that ends an open pass, and what it waits for (frame statistics);
+    // beta 20: as detail bits, counted only if the pass is begun again (Scheduler), and also the
+    // layouts its images move to.
+    u32 detail = 0;
     if (scheduler.IsRendering()) {
         using GpuSavings::BarrierWait;
         using Stage = vk::PipelineStageFlagBits2;
         vk::PipelineStageFlags2 stages = memory_barrier.srcStageMask;
         for (const auto& barrier : image_barriers) {
             stages |= barrier.srcStageMask;
+            using Layout = vk::ImageLayout;
+            using GpuSavings::BarrierLayout;
+            BarrierLayout to = BarrierLayout::Other;
+            switch (barrier.newLayout) {
+            case Layout::eDepthStencilAttachmentOptimal:
+            case Layout::eDepthAttachmentOptimal:
+            case Layout::eDepthAttachmentStencilReadOnlyOptimal:
+            case Layout::eDepthReadOnlyStencilAttachmentOptimal:
+                to = BarrierLayout::DepthAttachment;
+                break;
+            case Layout::eDepthStencilReadOnlyOptimal:
+            case Layout::eDepthReadOnlyOptimal:
+                to = BarrierLayout::DepthReadOnly;
+                break;
+            case Layout::eShaderReadOnlyOptimal:
+            case Layout::eReadOnlyOptimal:
+                to = BarrierLayout::ShaderRead;
+                break;
+            case Layout::eGeneral:
+                to = BarrierLayout::General;
+                break;
+            case Layout::eColorAttachmentOptimal:
+            case Layout::eAttachmentOptimal:
+                to = BarrierLayout::ColorAttachment;
+                break;
+            case Layout::eTransferSrcOptimal:
+            case Layout::eTransferDstOptimal:
+                to = BarrierLayout::Transfer;
+                break;
+            default:
+                break;
+            }
+            detail |= 1u << (8 + static_cast<u32>(to));
         }
         const auto count = [&](BarrierWait wait, vk::PipelineStageFlags2 mask) {
             if (stages & mask) {
-                GpuSavings::Count(GpuSavings::Get().pass_barrier_waits[static_cast<u32>(wait)]);
+                detail |= 1u << static_cast<u32>(wait);
                 stages &= ~mask;
             }
         };
@@ -1444,7 +1480,8 @@ void Runtime::FlushBarriers() {
         count(BarrierWait::Other, ~vk::PipelineStageFlags2{});
     }
     scheduler.EndRendering(dep_info.imageMemoryBarrierCount ? GpuSavings::PassBreak::ImageBarrier
-                                                            : GpuSavings::PassBreak::BufferBarrier);
+                                                            : GpuSavings::PassBreak::BufferBarrier,
+                           detail);
 
     // Repeated area transitions exposed a crash inside the NVIDIA driver while an image
     // pipelineBarrier2 was being emitted by the deferred VkRecorder thread. Upstream shadPS4

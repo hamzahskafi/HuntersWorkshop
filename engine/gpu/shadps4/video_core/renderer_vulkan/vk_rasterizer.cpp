@@ -7,6 +7,8 @@
 #include "bbport_platform.h"
 #include <bit>
 #include <map>
+#include <mutex>
+#include <unordered_map>
 #include <set>
 #include <thread>
 #include <unordered_set>
@@ -229,10 +231,11 @@ u64 Rasterizer::SignalTick() const {
     return HonestLabels() && tick > 1 && !scheduler.RecordedSinceSubmit() ? tick - 1 : tick;
 }
 
-void Rasterizer::SignalAfterGpu(std::function<void()> signal, VAddr label, u64 value) {
+void Rasterizer::SignalAfterGpu(std::function<void()> signal, VAddr label, u64 value,
+                                u32 size) {
     if (DrawPipe::OnStageB()) {
         // Kept here until the end of the guest submission or the next flush (in tick order).
-        local_signals.push_back({SignalTick(), std::move(signal), label, value});
+        local_signals.push_back({SignalTick(), std::move(signal), label, value, size});
         local_signal_count.store(u32(local_signals.size()), std::memory_order_release);
         return;
     }
@@ -247,7 +250,7 @@ void Rasterizer::SignalAfterGpu(std::function<void()> signal, VAddr label, u64 v
                 std::jthread([this](std::stop_token token) { GpuSignalLoop(token); });
         }
         was_empty = gpu_signals.empty();
-        gpu_signals.push_back({SignalTick(), std::move(signal), label, value});
+        gpu_signals.push_back({SignalTick(), std::move(signal), label, value, size});
     }
     // The signal thread waits on the condition only with nothing queued (else it waits for the
     // GPU and takes the rest when it gets back): no notify per fence (~60 a frame).
@@ -332,7 +335,7 @@ bool Rasterizer::WriteDataOnGpu(VAddr address, const void* data, u32 size) {
     if (size <= sizeof(u64) && HonestLabels()) {
         u64 value = 0;
         std::memcpy(&value, data, size);
-        SignalAfterGpu([] {}, address, value);
+        SignalAfterGpu([] {}, address, value, size);
     }
     return true;
 }
@@ -444,11 +447,14 @@ void Rasterizer::SubmitForGpu(bool nothing_coming) {
     Flush();
 }
 
-bool Rasterizer::PendingSignalValue(VAddr address, u64& value) {
+bool Rasterizer::PendingSignalValue(VAddr address, u64& value, u32* size) {
     std::scoped_lock lk{gpu_signals_mutex};
     for (auto it = gpu_signals.rbegin(); it != gpu_signals.rend(); ++it) {
         if (it->label == address) {
             value = it->value;
+            if (size) {
+                *size = it->size;
+            }
             return true;
         }
     }
@@ -1513,7 +1519,6 @@ void Rasterizer::RunDrawPacket(void* context, const u8* data, u32 size) {
     self.pipe_db_extent = packet.db_extent;
     if (packet.kind == PacketKind::Special) {
         // A draw FilterDraw handles (fast clear elimination, resolve, depth copy, skip).
-        FrameCapture::Poll();
         self.scheduler.PopPendingOperations();
         self.FilterDraw();
     } else if (cs) {
@@ -1996,7 +2001,6 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset, const PreparedDraw* pre
     }
     if (!pipelined || !FilterDrawPasses()) {
         DrainDrawPipe(DrawPipe::ReasonDraw);
-        FrameCapture::Poll();
         scheduler.PopPendingOperations();
         if (!FilterDraw()) {
             return;
@@ -2013,6 +2017,10 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset, const PreparedDraw* pre
                          prepared->reg_checksum == liverpool->gfx_reg_checksum);
     }
     if (!pipeline || Shader::Info::srt_walk_faults != srt_faults) {
+        // 0.4.4 beta 20: counted when the resource-table walker faulted (the frame statistics).
+        if (Shader::Info::srt_walk_faults != srt_faults) {
+            GpuSavings::Count(GpuSavings::Get().table_fault_drops);
+        }
         return;
     }
     if (pipelined && FilterDrawPasses()) {
@@ -2031,7 +2039,6 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     BB_SECTION(DrawRecord);
     buffer_cache.NewPacket();
     if (DrawPipe::OnStageB()) {
-        FrameCapture::Poll();
         scheduler.PopPendingOperations();
     }
     // bbport: under SET_PREDICATION on a block known to read occluded (vk_occlusion.h).
@@ -2430,6 +2437,10 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
     const u32 srt_faults = Shader::Info::srt_walk_faults;
     const GraphicsPipeline* pipeline = pipeline_cache.GetGraphicsPipeline(params);
     if (!pipeline || Shader::Info::srt_walk_faults != srt_faults) {
+        // 0.4.4 beta 20: counted when the resource-table walker faulted (the frame statistics).
+        if (Shader::Info::srt_walk_faults != srt_faults) {
+            GpuSavings::Count(GpuSavings::Get().table_fault_drops);
+        }
         return;
     }
     const IndirectDraw indirect = {arg_address + offset, count_address, stride, max_count};
@@ -2444,7 +2455,6 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
                                     const IndirectDraw& indirect) {
     buffer_cache.NewPacket();
     if (DrawPipe::OnStageB()) {
-        FrameCapture::Poll();
         scheduler.PopPendingOperations();
     }
     if (occlusion && occlusion->SkipDraw()) {
@@ -2593,6 +2603,10 @@ void Rasterizer::DispatchDirect() {
     const u32 srt_faults = Shader::Info::srt_walk_faults;
     const ComputePipeline* pipeline = pipeline_cache.GetComputePipeline();
     if (!pipeline || Shader::Info::srt_walk_faults != srt_faults) {
+        // 0.4.4 beta 20: counted when the resource-table walker faulted (the frame statistics).
+        if (Shader::Info::srt_walk_faults != srt_faults) {
+            GpuSavings::Count(GpuSavings::Get().table_fault_drops);
+        }
         return;
     }
     if (pipelined) {
@@ -2605,7 +2619,6 @@ void Rasterizer::DispatchDirect() {
 void Rasterizer::DispatchRecord(const ComputePipeline* pipeline) {
     BB_SECTION(DispatchRecord);
     buffer_cache.NewPacket();
-    FrameCapture::Poll();
     gbuffer_draw = false;
 
     scheduler.PopPendingOperations();
@@ -2695,6 +2708,10 @@ void Rasterizer::DispatchIndirect(VAddr address, u32 offset, u32 size) {
     const u32 srt_faults = Shader::Info::srt_walk_faults;
     const ComputePipeline* pipeline = pipeline_cache.GetComputePipeline();
     if (!pipeline || Shader::Info::srt_walk_faults != srt_faults) {
+        // 0.4.4 beta 20: counted when the resource-table walker faulted (the frame statistics).
+        if (Shader::Info::srt_walk_faults != srt_faults) {
+            GpuSavings::Count(GpuSavings::Get().table_fault_drops);
+        }
         return;
     }
     if (pipelined) {
@@ -3905,6 +3922,51 @@ bool Rasterizer::IsComputeImageClear(const Pipeline* pipeline) {
 }
 
 namespace {
+// 0.4.4 beta 20 (frame statistics on): a written buffer whose V# MTYPE differs between draws of
+// one shader. Its SPIR-V says Coherent or not from the draw that compiled it (MTYPE 3,
+// EmitContext::DefineBuffers), and the permutation key has no MTYPE: later draws use that
+// module whatever theirs (the engine map's shader-7). Said once per shader and buffer, 16 at most.
+void NoteWrittenBufferMtype(u64 hash, u32 buffer_index, bool shared) {
+    static std::mutex mutex;
+    static std::unordered_map<u64, bool> first;
+    static u32 said = 0;
+    std::scoped_lock lock{mutex};
+    const u64 key = hash ^ (u64(buffer_index) << 56);
+    const auto [it, inserted] = first.try_emplace(key, shared);
+    if (inserted || it->second == shared || said >= 16) {
+        return;
+    }
+    it->second = shared; // said once per change
+    ++said;
+    std::printf("Shader %016llx: written buffer %u bound with MTYPE %s after %s (its Coherent "
+                "decoration follows the draw that compiled it)\n",
+                static_cast<unsigned long long>(hash), buffer_index,
+                shared ? "3 (shared)" : "other than 3", shared ? "other" : "3");
+}
+
+// 0.4.4 beta 20: with BB_TRACE_SHADER, the memory of the GDS stand-in a traced shader binds
+// (BufferCache::gds_buffer, MemoryType::Stream: whatever VMA chose for it), said once.
+void TraceGdsBinding(const Shader::Info& stage, u32 memory_properties) {
+    static const char* env = std::getenv("BB_TRACE_SHADER");
+    static bool told = false;
+    if (!env || told) {
+        return;
+    }
+    char hash[24];
+    std::snprintf(hash, sizeof(hash), "%llx", static_cast<unsigned long long>(stage.pgm_hash));
+    if (!std::strstr(env, hash)) {
+        return;
+    }
+    told = true;
+    const vk::MemoryPropertyFlags flags{memory_properties};
+    std::printf("Shader %016llx binds the GDS stand-in: %s%s%s (memory properties %s)\n",
+                static_cast<unsigned long long>(stage.pgm_hash),
+                flags & vk::MemoryPropertyFlagBits::eDeviceLocal ? "device-local" : "host memory",
+                flags & vk::MemoryPropertyFlagBits::eHostVisible ? ", host-visible" : "",
+                flags & vk::MemoryPropertyFlagBits::eHostCached ? ", host-cached" : "",
+                vk::to_string(flags).c_str());
+}
+
 // bbport: BB_TRACE_SHADER=hash[,hash...] (diagnostics) — the buffers those shaders bind: address,
 // size, written or read, where the data is (in place: the game's memory over PCIe on a discrete
 // GPU; VRAM; partly), how often; printed every 5 s.
@@ -3982,6 +4044,9 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, const PreparedStage* pre
         } else if (desc.IsSpecial()) {
             if (desc.buffer_type == Shader::BufferType::GdsBuffer) {
                 const auto* gds_buf = buffer_cache.GetGdsBuffer();
+                // 0.4.4 beta 20: with BB_TRACE_SHADER on this shader, where the GDS stand-in
+                // lives (its atomics' memory: VRAM, or host memory over PCIe), once.
+                TraceGdsBinding(stage, gds_buf->memory_properties);
                 buffer_infos.emplace_back(gds_buf->Handle(), 0, gds_buf->SizeBytes());
                 needs_barrier |= runtime.IsBufferAccessed(gds_buf, 0, gds_buf->SizeBytes());
             } else if (desc.buffer_type == Shader::BufferType::Flatbuf) {
@@ -4088,6 +4153,9 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, const PreparedStage* pre
                 TraceShaderBinding(stage, vsharp.base_address, size, desc.is_written,
                                    buffer_cache.IsInPlace(vsharp.base_address, size),
                                    buffer_cache.IsAnyInPlace(vsharp.base_address, size));
+                if (BbStats::enabled && desc.is_written) {
+                    NoteWrittenBufferMtype(stage.pgm_hash, buffer_index, vsharp.mtype == 3);
+                }
                 // bbport: a uniform buffer's offset follows the uniform alignment (64 on NVIDIA);
                 // the shader adds the remainder (push data, at most 255 bytes).
                 const u64 offset_aligned =

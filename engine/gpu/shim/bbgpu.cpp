@@ -48,6 +48,7 @@
 extern "C" {
 // runtime_memory.c
 int runtime_memory_is_mapped(uintptr_t address, uint64_t size);
+int runtime_memory_readable(uintptr_t address, uint64_t size);
 int runtime_memory_write_backing(uintptr_t address, const void* data, uint64_t size);
 void runtime_memory_read_backing(uintptr_t address, void* data, uint64_t size);
 uint64_t runtime_memory_clamp(uintptr_t address, uint64_t size);
@@ -137,9 +138,12 @@ public:
 
 void MemoryManager::SetRasterizer(Vulkan::Rasterizer* rasterizer_) {
     rasterizer = rasterizer_;
-    // bbport: resource table plans (BB_NATIVE_TABLES) read only mapped guest memory.
+    // bbport: resource table plans (BB_NATIVE_TABLES) read only mapped guest memory; 0.4.4 beta
+    // 20: and readable under the game's own protection (a page it made unreadable faulted in the
+    // plan's memcpy, outside any handler: the engine map's shader-1).
     Shader::Native::TablePlan::guest_readable = [](u64 address, u64 bytes) {
-        return Memory::Instance()->ClampRangeSize(address, bytes) >= bytes;
+        return Memory::Instance()->ClampRangeSize(address, bytes) >= bytes &&
+               runtime_memory_readable(address, bytes) != 0;
     };
     // Existing guest mappings are replayed by the runtime when hooks are installed.
     runtime_memory_set_gpu_hooks(

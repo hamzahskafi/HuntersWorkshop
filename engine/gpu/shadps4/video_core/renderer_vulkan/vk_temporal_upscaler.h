@@ -209,6 +209,11 @@ private:
     void RecordTaa(vk::CommandBuffer cmdbuf, vk::ImageView color, vk::ImageView depth);
     /// Additional RCAS sharpening; DLSS applies the whole requested range here.
     void ExtraSharpen(vk::Image target, bool ldr, u32 w, u32 h);
+    /// The strength ExtraSharpen applies (0: none): the menu's 0..2, less what the backend's own
+    /// RCAS already did (FSR 3 and 4 up to 1; DLSS none).
+    [[nodiscard]] float ExtraSharpenAmount() const;
+    /// 0.4.4 beta 20: Run's profiler label for one of its steps (GPU profile).
+    void MarkRunStep(const char* label);
     /// bbport: the menu's mask / motion debug view over the scaled path's output (ldr: the 8-bit
     /// UI image), in place; upscale_merge.comp draws it on the 1080p path. `reactive`: a mask
     /// was made this frame.

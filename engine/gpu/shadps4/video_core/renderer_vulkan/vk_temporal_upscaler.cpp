@@ -775,7 +775,7 @@ void TemporalUpscaler::CreatePipelines() {
         }));
         const vk::PushConstantRange push{.stageFlags = vk::ShaderStageFlagBits::eCompute,
                                          .offset = 0,
-                                         .size = sizeof(u32)};
+                                         .size = 2 * sizeof(u32)}; // mode, sharpen (beta 20)
         merge_pipeline_layout = Check(device.createPipelineLayoutUnique({
             .setLayoutCount = 1,
             .pSetLayouts = &*merge_desc_layout,
@@ -971,13 +971,25 @@ void TemporalUpscaler::RecordTaa(vk::CommandBuffer cmdbuf, vk::ImageView color,
     taa_next = 1 - taa_next;
 }
 
-void TemporalUpscaler::ExtraSharpen(vk::Image target, bool ldr, u32 w, u32 h) {
+float TemporalUpscaler::ExtraSharpenAmount() const {
     const auto& settings = BbSettings::Get();
     // FSR 3 and 4 sharpen up to 1 themselves (RCAS). DLSS has no sharpening of its own (NVIDIA
     // retired its Sharpness parameter), so for DLSS this pass applies the whole 0..2.
     const float own = settings.upscaler == BbSettings::UpscalerDlss ? 0.0f : 1.0f;
     const float extra = std::clamp(settings.sharpness.load(), 0.0f, 2.0f) - own;
-    if (!settings.sharpen || extra <= 0.0f) {
+    return settings.sharpen && extra > 0.0f ? extra : 0.0f;
+}
+
+void TemporalUpscaler::MarkRunStep(const char* label) {
+    if (auto* profiler = GpuProfiler::Get()) {
+        profiler->Mark(0xF5A2'0000ull ^ std::hash<std::string_view>{}(label),
+                       [label] { return std::string{label}; });
+    }
+}
+
+void TemporalUpscaler::ExtraSharpen(vk::Image target, bool ldr, u32 w, u32 h) {
+    const float extra = ExtraSharpenAmount();
+    if (extra <= 0.0f) {
         return;
     }
     const auto device = instance.GetDevice();
@@ -1361,6 +1373,9 @@ void TemporalUpscaler::Run() {
         input_depth_view = d.view;
     }
     if (jitter[0] != 0.0f || jitter[1] != 0.0f) {
+        // 0.4.4 beta 20: Run's steps labelled in the GPU profile ("upscaler Run (...)" keeps its
+        // setup: transitions, the scene proxies' reads).
+        MarkRunStep("upscaler Run: edge clamp");
         ClampSceneEdges(scheduler, input_color, w, h);
     }
     const auto cmdbuf = scheduler.CommandBuffer();
@@ -1391,6 +1406,7 @@ void TemporalUpscaler::Run() {
     own_barrier(vk::Image(output_image), vk::ImageLayout::eUndefined, all,
                 vk::AccessFlagBits2::eNone, vk::ImageLayout::eGeneral, all, rw);
 
+    MarkRunStep("upscaler Run: motion vectors");
     camera_motion.RecordMotion(input_depth_view, *motion_view, w, h);
     own_barrier(vk::Image(motion_image), vk::ImageLayout::eGeneral,
                 vk::PipelineStageFlagBits2::eComputeShader, vk::AccessFlagBits2::eShaderWrite,
@@ -1407,6 +1423,8 @@ void TemporalUpscaler::Run() {
     last_frame = now;
 
     bool dispatched = false;
+    MarkRunStep(BbSettings::Get().upscaler == BbSettings::UpscalerTaa ? "upscaler Run: TAA"
+                                                                     : "upscaler Run: evaluate");
     BbSections::Scope eval_scope{BbSections::UpscalerEval};
     if (BbSettings::Get().upscaler == BbSettings::UpscalerTaa) {
         RecordTaa(cmdbuf, input_color_view, input_depth_view);
@@ -1489,11 +1507,24 @@ void TemporalUpscaler::Run() {
         }
     }
     eval_scope.End();
+    // 0.4.4 beta 20: the extra sharpening done in the merge (upscale_merge.comp, rcas_extra.glsl):
+    // no RGBA32F copy of the output, no pass of its own and its barriers; the same result.
+    // BB_SHARPEN_FUSED=0: its own pass before the merge, as before.
+    static const bool sharpen_fused = [] {
+        const char* env = std::getenv("BB_SHARPEN_FUSED");
+        return !(env && env[0] == '0');
+    }();
+    float merge_sharpen = 0.0f;
     if (dispatched) {
         reset = false;
         dispatched_last_frame = true;
         if (BbSettings::Get().upscaler != BbSettings::UpscalerTaa) {
-            ExtraSharpen(vk::Image(output_image), false, ow, oh);
+            if (sharpen_fused) {
+                merge_sharpen = ExtraSharpenAmount();
+            } else {
+                MarkRunStep("upscaler Run: extra sharpen");
+                ExtraSharpen(vk::Image(output_image), false, ow, oh);
+            }
         }
         // bbport: BB_DUMP_TRIGGER on this (HDR scene color) path too: the upscaler's inputs and
         // its result, for ghosting and history checks (tools/dump_view.py).
@@ -1518,6 +1549,8 @@ void TemporalUpscaler::Run() {
             }
         }
         // The result replaces the scene color's RGB (its alpha carries data for the post).
+        MarkRunStep(merge_sharpen > 0.0f ? "upscaler Run: merge with sharpening"
+                                         : "upscaler Run: merge");
         own_barrier(vk::Image(output_image), vk::ImageLayout::eGeneral, all, rw,
                     vk::ImageLayout::eGeneral, vk::PipelineStageFlagBits2::eComputeShader,
                     vk::AccessFlagBits2::eShaderRead);
@@ -1572,8 +1605,13 @@ void TemporalUpscaler::Run() {
         cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, *merge_pipeline);
         cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute, *merge_pipeline_layout, 0,
                                     writes);
+        // 0.4.4 beta 20: with the sharpening's strength (upscale_merge.comp's Params).
+        const struct {
+            u32 mode;
+            float sharpen;
+        } params{mode, merge_sharpen};
         cmdbuf.pushConstants(*merge_pipeline_layout, vk::ShaderStageFlagBits::eCompute, 0,
-                             sizeof(mode), &mode);
+                             sizeof(params), &params);
         cmdbuf.dispatch((ow + 7) / 8, (oh + 7) / 8, 1);
     }
 }

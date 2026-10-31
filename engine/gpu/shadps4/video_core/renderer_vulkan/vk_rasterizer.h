@@ -243,7 +243,10 @@ public:
     /// before this call (the submission of the current tick), in call order, on a thread that
     /// waits on the work semaphore: fences the guest sees when the work is done, not when it is
     /// recorded. `label` and `value`: the fence it writes (PendingSignalValue).
-    void SignalAfterGpu(std::function<void()> signal, VAddr label = 0, u64 value = 0);
+    /// 0.4.4 beta 20: `size`, the bytes it writes (4 or 8): a wait on label+4 is answered from
+    /// an 8-byte fence only (the engine map's fence-1).
+    void SignalAfterGpu(std::function<void()> signal, VAddr label = 0, u64 value = 0,
+                        u32 size = 8);
     /// Whether signals wait for work not submitted yet (the GPU command thread submits it when
     /// it runs out of work, or the guest could wait for them forever).
     bool HasUnsubmittedSignals();
@@ -296,7 +299,7 @@ public:
     }
     /// The newest queued value of the fence at `address` (a WaitRegMem in the same stream is met
     /// by it in stream order).
-    bool PendingSignalValue(VAddr address, u64& value);
+    bool PendingSignalValue(VAddr address, u64& value, u32* size = nullptr);
     static bool HonestLabels();
     /// The GPU command thread or the draw recording thread (fault handling runs inline there).
     bool IsGpuSideThread() const;
@@ -892,6 +895,7 @@ private:
         std::function<void()> signal;
         VAddr label;
         u64 value;
+        u32 size = 8; ///< 0.4.4 beta 20: the bytes the fence writes at `label`
     };
     void GpuSignalLoop(std::stop_token token);
     /// bbport: GpuSignalLoop has waited 10 s for `tick`: prints whether the GPU or the port is stuck.

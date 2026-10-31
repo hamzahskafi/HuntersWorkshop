@@ -165,6 +165,8 @@ struct Buffer {
     size_t size_bytes = 0;
     std::span<u8> mapped_data{};
     bool is_coherent{};
+    /// 0.4.4 beta 20: the memory it was given (VkMemoryPropertyFlags), for diagnostics.
+    u32 memory_properties = 0;
     MemoryType mem_type{MemoryType::DeviceLocal};
     UniqueBuffer buffer;
 };

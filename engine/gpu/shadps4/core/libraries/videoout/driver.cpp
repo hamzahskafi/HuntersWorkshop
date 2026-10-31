@@ -772,19 +772,27 @@ void VideoOutDriver::Flip(const Request& req) {
                                            ? double(gpu_us - window_gpu_us) / (all_draws - window_draws)
                                            : 0.0;
             const double draws_per_frame = frames ? double(all_draws - window_draws) / frames : 0.0;
+            // 0.4.4 beta 20: its work alone, without the idle spin counted in its CPU time (the
+            // engine map's clean-4): CPU time less idle time, per draw.
+            const u64 idle_ns = BbStats::gpu_idle_ns.exchange(0);
+            const double work_us_per_draw =
+                all_draws > window_draws
+                    ? std::max(0.0, double(gpu_us - window_gpu_us) - idle_ns / 1e3) /
+                          (all_draws - window_draws)
+                    : 0.0;
             window_draws = all_draws;
             window_gpu_us = gpu_us;
             std::printf("Frame stats: %.1f FPS, worst frame %.1f ms (vblank %u Hz); "
                         "%u shader/pipeline compiles, %.1f ms; %llu recorder syncs; "
                         "%.0f write faults/s, %lld hot pages; GPU thread %.2f us/draw, "
-                        "%.0f draws/frame, idle %.1f%%; blocked: recorder %.1f%%, host copies "
+                        "%.0f draws/frame, idle %.1f%%, work %.2f us/draw; blocked: recorder "
+                        "%.1f%%, host copies "
                         "%.1f%% (%.0f/frame, %.0f/frame not needed), copy threads %.1f%%, GPU ticks %.1f%%; "
                         "reduced-size draws %.0f/frame of %.0f in the scene\n",
                         frames / window, worst_ms, EmulatorSettings.GetVblankFrequency(), compiles,
                         compile_ns / 1e6, static_cast<unsigned long long>(direct),
                         faults / window, static_cast<long long>(BbStats::hot_pages.load()),
-                        us_per_draw, draws_per_frame,
-                        BbStats::gpu_idle_ns.exchange(0) / (window * 1e7),
+                        us_per_draw, draws_per_frame, idle_ns / (window * 1e7), work_us_per_draw,
                         BbStats::sync_recording_ns.exchange(0) / (window * 1e7),
                         BbStats::host_copies_wait_ns.exchange(0) / (window * 1e7),
                         frames ? double(BbStats::host_copy_waits.exchange(0)) / frames : 0.0,
@@ -935,18 +943,24 @@ void VideoOutDriver::Flip(const Request& req) {
                 const u64 with_end = BbStats::retired_with_end.exchange(0);
                 const u64 alone = BbStats::retired_alone.exchange(0);
                 const u64 empty = BbStats::empty_flushes.exchange(0);
-                if (dry || ahead || announced || net || empty) {
+                // 0.4.4 beta 20: waits on label+4 read from memory, not from a 4-byte fence's
+                // "high half" (0 before: the engine map's fence-1).
+                const u64 half = AmdGpu::Liverpool::fence_high_half_refused.exchange(0);
+                const u64 compute_writes = AmdGpu::Liverpool::compute_write_data.exchange(0);
+                if (dry || ahead || announced || net || empty || half || compute_writes) {
                     std::printf("Fence submissions: %.1f/frame at the game's submission ends (GPU "
                                 "out of work %.1f, on its last %.1f), %.1f/frame when the GPU got "
                                 "to its last, %.1f/frame by the safety net (expected 0); frames "
                                 "retired with the frame end %.0f%%; empty ones not made "
-                                "%.1f/frame\n",
+                                "%.1f/frame; waits on a 4-byte fence's next word read from memory "
+                                "%llu; compute-queue WRITE_DATA %llu\n",
                                 (dry + ahead) / double(frames), dry / double(frames),
                                 ahead / double(frames), announced / double(frames),
                                 net / double(frames),
                                 with_end + alone ? 100.0 * with_end / double(with_end + alone)
                                                  : 0.0,
-                                empty / double(frames));
+                                empty / double(frames), static_cast<unsigned long long>(half),
+                                static_cast<unsigned long long>(compute_writes));
                 }
             }
             {

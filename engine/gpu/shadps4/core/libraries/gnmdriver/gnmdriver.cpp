@@ -157,6 +157,23 @@ static void WatchOverlapLeak() {
     }
     if (!BbHeapSites::Counting()) {
         BbHeapSites::InstallCounters();
+        // 0.4.4 beta 20: without the allocation counters (Windows: a stub; Linux when the malloc
+        // table is refused) the heap's growth was never looked at (the engine map's gnm-1). Said
+        // once, not acted on yet: whether area streaming grows it too decides whether it may
+        // turn the overlap off.
+        static u64 frames_uncounted = 0;
+        static std::uint64_t growths_at_start = 0;
+        static bool said = false;
+        if (++frames_uncounted == 600) {
+            growths_at_start = runtime_heap_growths(); // warmed up: area loads
+        } else if (frames_uncounted > 600 && !said &&
+                   runtime_heap_growths() > growths_at_start) {
+            said = true;
+            std::printf("Gnm: the game's heap asked for more memory (%llu times since warm-up): "
+                        "on Linux frame overlap would stop now (BB_SUBMIT_AHEAD 0); here it is "
+                        "only said (0.4.4 beta 20)\n",
+                        static_cast<unsigned long long>(runtime_heap_growths() - growths_at_start));
+        }
         return;
     }
     static u64 frames = 0;

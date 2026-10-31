@@ -8,6 +8,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <iterator>
+#include <string>
 
 namespace Vulkan::GpuSavings {
 
@@ -33,6 +35,72 @@ inline bool HleMergeOn() {
     return on;
 }
 
+/// What ended a render pass (Scheduler::EndRendering's reason; beta 19: named where it ends;
+/// beta 20: transfers by operation).
+enum class PassBreak : std::uint8_t {
+    Other,
+    CopyShader,
+    ImageCopy,
+    Dispatch,
+    BufferBarrier,
+    ImageBarrier,
+    Transfer,
+    TextureCache,
+    SceneProxy,
+    Motion,
+    Upscaler,
+    Profiler,
+    Submission,
+    BufferCopy,
+    BufferUpload,
+    BufferUpdate,
+    BufferFill,
+    ImageUpload,
+    ImageDownload,
+    ImageTransferCopy,
+    ImageClear,
+    DepthColor,
+    BackingSamples,
+    Count
+};
+inline constexpr const char* PassBreakNames[] = {
+    "other",          "copy shader",        "image copy (copy shader)", "other dispatch",
+    "buffer barrier", "image barrier",      "transfer",                 "texture cache",
+    "scene proxy",    "motion",             "upscaler or presentation", "profiler",
+    "submission",     "buffer copy",        "buffer upload from the game's memory",
+    "buffer update",  "buffer fill",        "image upload",             "image download",
+    "image copy (transfer)",                "image clear",              "depth/colour copy",
+    "sample count change",
+};
+static_assert(std::size(PassBreakNames) == static_cast<std::size_t>(PassBreak::Count));
+/// What a barrier that ended a pass waits for (its source stages); detail bits 0 to 5.
+enum class BarrierWait : std::uint8_t {
+    GraphicsShaders,
+    Attachments,
+    Compute,
+    Transfer,
+    Host,
+    Other,
+    Count
+};
+inline constexpr const char* BarrierWaitNames[] = {"graphics shaders", "attachments", "compute",
+                                                   "transfers", "host", "all commands or other"};
+/// 0.4.4 beta 20: the layouts an image barrier that ended a pass moves images to; detail bits 8
+/// to 14.
+enum class BarrierLayout : std::uint8_t {
+    DepthAttachment,
+    DepthReadOnly,
+    ShaderRead,
+    General,
+    ColorAttachment,
+    Transfer,
+    Other,
+    Count
+};
+inline constexpr const char* BarrierLayoutNames[] = {
+    "depth attachment", "depth read-only", "shader read", "general",
+    "colour attachment", "transfer", "other"};
+
 struct Counters {
     // Texel buffer fills from images (BufferCache::SynchronizeMemoryFromImage).
     std::atomic<std::uint64_t> tile_fills{0}, tile_skips{0}, tile_bytes_skipped{0};
@@ -48,15 +116,34 @@ struct Counters {
     std::array<std::atomic<std::uint64_t>, 5> scene_resolves{};
     // 0.4.4 beta 18: render passes begun again with the same targets after something ended them
     // (a split), by what ended them (PassBreak; beta 19: every place that ends a pass named).
-    std::array<std::atomic<std::uint64_t>, 13> pass_splits{};
-    // 0.4.4 beta 19: barriers that ended an open pass, by what they wait for (BarrierWait): the
-    // work that wrote what the next commands read.
-    std::array<std::atomic<std::uint64_t>, 6> pass_barrier_waits{};
+    std::array<std::atomic<std::uint64_t>, static_cast<std::size_t>(PassBreak::Count)>
+        pass_splits{};
+    // 0.4.4 beta 19: barriers that ended a pass, by what they wait for (BarrierWait); beta 20:
+    // only those of a pass begun again with the same targets, and also by the layouts their
+    // images move to (BarrierLayout).
+    std::array<std::atomic<std::uint64_t>, static_cast<std::size_t>(BarrierWait::Count)>
+        pass_barrier_waits{};
+    std::array<std::atomic<std::uint64_t>, static_cast<std::size_t>(BarrierLayout::Count)>
+        pass_barrier_layouts{};
+    // 0.4.4 beta 20: passes begun again after a recording cut closed them (Scheduler::MaybeSplit,
+    // EnterDirectMode); passes begun again on the same colour targets with another depth view, or
+    // with the same views and other layouts or clears.
+    std::atomic<std::uint64_t> pass_resumes_after_cut{0}, pass_restarts_depth_view{0},
+        pass_restarts_layout_or_clear{0};
+    // 0.4.4 beta 20: draws and dispatches bound by a descriptor set, not pushed (pipelines with
+    // more descriptors than the device pushes: Pipeline::BindResources).
+    std::atomic<std::uint64_t> descriptor_set_binds{0};
+    // 0.4.4 beta 20: draws and dispatches left out because the resource-table walker faulted on
+    // a table pointer (Shader::Info::srt_walk_faults; the engine map's shader-1).
+    std::atomic<std::uint64_t> table_fault_drops{0};
     // 0.4.4 beta 18: copy shader dispatches recorded inside a render pass: with no barrier needed
     // before them (nothing since the pass began wrote their source or touched their destination)
     // and their source a snapshot in the stream buffer; the same with their source the game's
     // memory; needing a barrier.
     std::array<std::atomic<std::uint64_t>, 3> hle_in_pass{};
+    // 0.4.4 beta 20: copy shader game dispatches that interrupted a render pass (counted at their
+    // start; hle_in_pass splits those whose first batch went through MultiCopy).
+    std::atomic<std::uint64_t> hle_dispatches_in_pass{0};
     // 0.4.4 beta 18: Runtime::CopyColorAndDepth by kind (ColorDepthCopy), why a depth->colour
     // copy was not done by the shader (DepthCopyRefusal), and the texture cache's conversions of
     // an image into one of the other kind (colour->depth, depth->colour).
@@ -70,31 +157,6 @@ struct Counters {
     std::atomic<std::uint64_t> depth_uploads{0}, depth_upload_bytes{0};
 };
 
-/// What ended a render pass (Scheduler::EndRendering's reason; beta 19: named where it ends).
-enum class PassBreak : std::uint8_t {
-    Other,
-    CopyShader,
-    ImageCopy,
-    Dispatch,
-    BufferBarrier,
-    ImageBarrier,
-    Transfer,
-    TextureCache,
-    SceneProxy,
-    Motion,
-    Upscaler,
-    Profiler,
-    Submission
-};
-/// What a barrier that ended a pass waits for (its source stages).
-enum class BarrierWait : std::uint8_t {
-    GraphicsShaders,
-    Attachments,
-    Compute,
-    Transfer,
-    Host,
-    Other
-};
 /// Runtime::CopyColorAndDepth's kinds: depth->colour by the shader (0.4.4 beta 17), by a copy;
 /// colour->depth by a copy; a single-sample image into MSAA depth by a draw; both of one kind;
 /// not done (other MSAA copies).
@@ -148,14 +210,31 @@ inline void Report() {
     for (int i = 0; i < 5; ++i) {
         resolves[i] = take(c.scene_resolves[i]);
     }
-    double splits[13], waits[6], in_pass[3], kinds[7], refusals[7], color_refusals[7],
-        overlaps[2];
-    for (int i = 0; i < 13; ++i) {
-        splits[i] = take(c.pass_splits[i]) / s;
+    double in_pass[3], kinds[7], refusals[7], color_refusals[7], overlaps[2];
+    // 0.4.4 beta 20: the pass reasons named, those above 0.05 a second.
+    std::string splits, waits, layouts;
+    const auto add = [&](std::string& out, const char* name, double value) {
+        if (value >= 0.05) {
+            char text[96];
+            std::snprintf(text, sizeof(text), "%s%s %.1f", out.empty() ? "" : ", ", name, value);
+            out += text;
+        }
+    };
+    for (std::size_t i = 0; i < c.pass_splits.size(); ++i) {
+        add(splits, PassBreakNames[i], take(c.pass_splits[i]) / s);
     }
-    for (int i = 0; i < 6; ++i) {
-        waits[i] = take(c.pass_barrier_waits[i]) / s;
+    for (std::size_t i = 0; i < c.pass_barrier_waits.size(); ++i) {
+        add(waits, BarrierWaitNames[i], take(c.pass_barrier_waits[i]) / s);
     }
+    for (std::size_t i = 0; i < c.pass_barrier_layouts.size(); ++i) {
+        add(layouts, BarrierLayoutNames[i], take(c.pass_barrier_layouts[i]) / s);
+    }
+    const double resumes = take(c.pass_resumes_after_cut) / s;
+    const double depth_view = take(c.pass_restarts_depth_view) / s;
+    const double layout_or_clear = take(c.pass_restarts_layout_or_clear) / s;
+    const double dispatches_in_pass = take(c.hle_dispatches_in_pass) / s;
+    const double set_binds = take(c.descriptor_set_binds) / s;
+    const double table_drops = take(c.table_fault_drops) / s;
     for (int i = 0; i < 3; ++i) {
         in_pass[i] = take(c.hle_in_pass[i]) / s;
     }
@@ -180,17 +259,18 @@ inline void Report() {
                 "storage %.1f, attachment %.1f, other %.1f\n",
                 resolves[0] / s, resolves[1] / s, resolves[2] / s, resolves[3] / s, resolves[4] / s);
     std::printf("  render passes per second begun again with the same targets, by what ended them: "
-                "buffer barrier %.1f, image barrier %.1f, transfer %.1f, texture cache %.1f, scene "
-                "proxy %.1f, motion %.1f, upscaler or presentation %.1f, profiler %.1f, submission "
-                "%.1f, copy shader %.1f, image copy %.1f, other dispatch %.1f, other %.1f; "
-                "barriers per second that ended a pass, waiting for graphics shaders %.1f, "
-                "attachments %.1f, compute %.1f, transfers %.1f, host %.1f, other %.1f; copy "
-                "shader dispatches inside a pass %.1f (no barrier needed and the source a snapshot "
+                "%s; their barriers waiting for: %s; moving images to: %s; begun again after a "
+                "recording cut %.1f; on the same colour targets with another depth view %.1f; with "
+                "the same views and other layouts or clears %.1f; copy shader dispatches that "
+                "interrupted a pass %.1f (first batch: no barrier needed and the source a snapshot "
                 "%.1f, the source the game's memory %.1f; a barrier needed %.1f)\n",
-                splits[4], splits[5], splits[6], splits[7], splits[8], splits[9], splits[10],
-                splits[11], splits[12], splits[1], splits[2], splits[3], splits[0], waits[0],
-                waits[1], waits[2], waits[3], waits[4], waits[5],
-                in_pass[0] + in_pass[1] + in_pass[2], in_pass[0], in_pass[1], in_pass[2]);
+                splits.empty() ? "none" : splits.c_str(), waits.empty() ? "none" : waits.c_str(),
+                layouts.empty() ? "none" : layouts.c_str(), resumes, depth_view, layout_or_clear,
+                dispatches_in_pass, in_pass[0], in_pass[1], in_pass[2]);
+    std::printf("  draws and dispatches per second bound by a descriptor set, not pushed (more "
+                "descriptors than the device pushes): %.1f; left out because the resource-table "
+                "walker faulted: %.1f\n",
+                set_binds, table_drops);
     std::printf("  depth and colour copies per second (Runtime::CopyColorAndDepth): depth->colour "
                 "by the shader %.1f, by a copy %.1f (switched off %.1f, MSAA %.1f, volume %.1f, "
                 "sizes %.1f, no image %.1f, no storage %.1f, formats %.1f); "

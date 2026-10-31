@@ -1004,7 +1004,6 @@ void Instance::CreateAllocator() {
     }();
     const VmaAllocatorCreateInfo allocator_info = {
         .flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT,
-        .preferredLargeHeapBlockSize = block_size,
         .physicalDevice = physical_device,
         .device = *device,
         .preferredLargeHeapBlockSize = block_size,
@@ -1042,6 +1041,21 @@ void Instance::CollectDeviceParameters() {
     std::printf("GPU: %s%s, driver %s (%s), Vulkan %s\n", model_name.c_str(),
                 IsIntegrated() ? " (integrated)" : "", driver_version.c_str(), vendor_name.c_str(),
                 api_version.c_str());
+    // 0.4.4 beta 20: the wave size the pipelines ask for (64, every stage) against the stages the
+    // driver allows a required size on (the engine map's shader-3). Said, not changed: graphics
+    // shaders count on 64 lanes, so dropping it where it is not allowed needs the recompiler to
+    // decide per stage first.
+    if (IsSubgroupSize64Supported()) {
+        const auto allowed = vk13_props.requiredSubgroupSizeStages;
+        const bool graphics = (allowed & vk::ShaderStageFlagBits::eVertex) &&
+                              (allowed & vk::ShaderStageFlagBits::eFragment);
+        std::printf("GPU: subgroups %u lanes by default, %u to %u settable; a size can be required "
+                    "on %s%s\n",
+                    vk11_props.subgroupSize, vk13_props.minSubgroupSize,
+                    vk13_props.maxSubgroupSize, vk::to_string(allowed).c_str(),
+                    graphics ? "" : "; the pipelines require 64 on graphics stages too, which "
+                                    "the driver does not list");
+    }
     std::fflush(stdout);
     LOG_INFO(Render_Vulkan, "GPU_Vendor: {}", vendor_name);
     LOG_INFO(Render_Vulkan, "GPU_Model: {}", model_name);

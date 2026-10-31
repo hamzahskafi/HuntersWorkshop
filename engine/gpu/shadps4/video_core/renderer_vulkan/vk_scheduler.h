@@ -780,8 +780,10 @@ public:
     /// Ends current rendering scope.
     void EndRendering();
     /// 0.4.4 beta 19: the same, naming why (the frame statistics' render passes begun again with
-    /// the same targets, by what ended them). A plain EndRendering counts as other.
-    void EndRendering(GpuSavings::PassBreak why);
+    /// the same targets, by what ended them). A plain EndRendering counts as other. Beta 20:
+    /// `detail`, for a barrier, what it waits for (BarrierWait bits 0 to 5) and the layouts it
+    /// moves images to (BarrierLayout bits 8 to 14), counted if the pass is begun again.
+    void EndRendering(GpuSavings::PassBreak why, u32 detail = 0);
 
     /// Sets a function to be called on every scheduler submission.
     void SetSubmitCallback(SubmitFunc&& on_submit) {
@@ -1263,6 +1265,7 @@ private:
     RenderState render_state;
     bool is_rendering = false;
     GpuSavings::PassBreak pass_break = GpuSavings::PassBreak::Other; ///< what ended the last pass
+    u32 pass_break_detail = 0;                                         ///< and its detail bits
     // bbport: threaded recording. Commands go into chunks of the current segment; segments are
     // recorded in parallel, each into its own command buffer, and a submission runs their
     // command buffers in order. Guest memory copies and fence signals go into ordered chunks,

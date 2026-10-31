@@ -145,7 +145,6 @@ void FrameCapture::OnFlip(VAddr presented_address) {
     }
 }
 
-void FrameCapture::Poll() {}
 
 bool FrameCapture::IsDisplayBuffer(VAddr address) {
     const u32 count = display_count.load(std::memory_order_acquire);

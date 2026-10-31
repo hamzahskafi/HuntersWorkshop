@@ -45,7 +45,8 @@ Already parallel: Vulkan command recording (`bb:VkRecorder` threads record the c
 pushes into record chunks; `HandOver`/`KickRecording`), host copies (copy threads and the
 ordered copies on the recorders), draw preparation (`bb:DrawScan`, `bb:DrawPrep`: pipeline keys,
 sharps, texture description hashes, vertex inputs, all validated by stage A), and since the plan
-in `perf-plan.md`, page re-protection (`bb:Protect`, `BB_DEFER_PROTECT`). The CPU profile of
+in `perf-plan.md`, page re-protection (`bb:Protect`, `BB_DEFER_PROTECT`: off by default since
+it left Cathedral Ward textures half-written in 0.9.21 to 0.9.23; `=1` turns it on). The CPU profile of
 stage B is flat (`symprofile.py`: `BindTextures` 4.8%, the spin in `DrawPipe::Run` 2.5%,
 `RunDrawPacket` 2.4%, `DrawRecord` 2.2%, `Image::GetBarriers` 1.7%, `BindBuffers` 1.7%, nothing
 else above 1.5%; ~21% in ntdll, mostly the sleeps, protects and waits the applied plan removes).
@@ -76,7 +77,8 @@ Everything a draw does on stage B reads or writes state that the previous packet
 - CPU side effects of tasks: WriteData and CPU DMA store into guest memory in order with the
   host copies of earlier draws (`WaitHostCopiesFor`) and the deferred fences (`WaitDeferredSignals`);
   later draws read what they wrote (constants, index data).
-- The deferred-protect invariant (`page_manager.cpp` ~430): pages an upload copied may stay
+- The deferred-protect invariant (`page_manager.cpp` ~430), with `BB_DEFER_PROTECT=1` only (off
+  by default): pages an upload copied may stay
   writable until `bb:Protect` or the copy itself applies the protection; every reader of guest
   memory on the GPU side goes through `CopySparseMemory`, which flushes pending protects first.
 

@@ -37,6 +37,8 @@ uintptr_t runtime_memory_resolve(const char *name);
 void runtime_memory_report(void);
 /* bbport: entries in the guest memory map now (it splits as the game maps and protects). */
 uint64_t runtime_memory_regions(void);
+/* 0.4.4 beta 20: mapped and host-readable under the game's own protection. */
+int runtime_memory_readable(uintptr_t address, uint64_t size);
 int runtime_memory_is_mapped(uintptr_t address, uint64_t size);
 /* Guest memory whose guest protection allows writing, all of the range. */
 int runtime_memory_guest_writable(uintptr_t address, uint64_t size);

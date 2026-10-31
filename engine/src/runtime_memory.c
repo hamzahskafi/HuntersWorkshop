@@ -1155,6 +1155,25 @@ int runtime_memory_is_mapped(uintptr_t address, uint64_t size) {
     read_unlock();
     return result;
 }
+/* 0.4.4 beta 20: [address, address+size) mapped and readable from the host under the game's own
+   protection (host_prot): the GPU side's resource-table plan reads such memory with memcpy, where
+   a page the game made unreadable would fault outside any handler (the engine map's shader-1). */
+int runtime_memory_readable(uintptr_t address, uint64_t size) {
+    const uintptr_t end=address+size;
+    int readable=size!=0;
+    read_lock();
+    size_t i=vma_index(address);
+    uintptr_t at=address;
+    for (; readable && at<end; ++i) {
+        if (i==vma_count || vmas[i].start>at || vmas[i].kind==KIND_RESERVED || !(vmas[i].prot & 0x37)) {
+            readable=0;
+        } else {
+            at=vmas[i].end;
+        }
+    }
+    read_unlock();
+    return readable;
+}
 uint64_t runtime_memory_regions(void) {
     read_lock();
     const uint64_t n=vma_count;

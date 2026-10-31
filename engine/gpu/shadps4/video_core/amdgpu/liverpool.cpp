@@ -577,11 +577,14 @@ void RunEventWriteEop(Vulkan::Rasterizer& rasterizer, const u8* data) {
     // BB_HONEST_LABELS: written once the GPU has finished the work before it, as the hardware
     // does (an end-of-pipe event), instead of when that work is recorded.
     if (Vulkan::Rasterizer::HonestLabels()) {
-        const bool writes = eop.data_sel.Value() != DataSelect::None;
-        const u64 value = eop.data_sel.Value() == DataSelect::Data32Low ? eop.DataDWord()
-                                                                        : eop.DataQWord();
+        // 0.4.4 beta 20: the value and size it writes; the clock and counter modes write a time,
+        // not the packet's data: no value to answer waits with (polled in memory).
+        const auto sel = eop.data_sel.Value();
+        const bool known = sel == DataSelect::Data32Low || sel == DataSelect::Data64;
+        const u64 value = sel == DataSelect::Data32Low ? eop.DataDWord() : eop.DataQWord();
         rasterizer.SignalAfterGpu([eop, seq] { SignalEop(eop, seq); },
-                                  writes ? reinterpret_cast<VAddr>(eop.Address<u8>()) : 0, value);
+                                  known ? reinterpret_cast<VAddr>(eop.Address<u8>()) : 0, value,
+                                  sel == DataSelect::Data32Low ? 4u : 8u);
         return;
     }
     // Guest memory copies on the copy threads precede the fence the guest sees.
@@ -808,7 +811,7 @@ void RunEventWriteEos(Vulkan::Rasterizer& rasterizer, const u8* data) {
         rasterizer.ProcessDownloadImages();
         const PM4CmdEventWriteEos eos = event_eos;
         rasterizer.SignalAfterGpu([eos] { eos.SignalFence(&WriteEosLabel); },
-                                  reinterpret_cast<VAddr>(eos.Address()), eos.DataDWord());
+                                  reinterpret_cast<VAddr>(eos.Address()), eos.DataDWord(), 4);
         return;
     }
     // Copies deferred to the recording thread precede writes the guest sees.
@@ -884,9 +887,20 @@ bool Liverpool::PendingFenceValue(VAddr address, u32& value) {
             value = static_cast<u32>(data);
             return true;
         }
-        if ((address & 7) == 4 && rasterizer->PendingSignalValue(address - 4, data)) {
-            value = static_cast<u32>(data >> 32); // the high half of a 64-bit fence
-            return true;
+        u32 size = 8;
+        if ((address & 7) == 4 && rasterizer->PendingSignalValue(address - 4, data, &size)) {
+            // 0.4.4 beta 20: only an 8-byte fence writes label+4 (the engine map's fence-1): a
+            // 4-byte one leaves it as it is in memory, polled as such. Before, its "high half"
+            // read 0. BB_FENCE_HALF_CHECK=0: as before.
+            static const bool half_check = [] {
+                const char* env = std::getenv("BB_FENCE_HALF_CHECK");
+                return !(env && env[0] == '0');
+            }();
+            if (size == 8 || !half_check) {
+                value = static_cast<u32>(data >> 32); // the high half of a 64-bit fence
+                return true;
+            }
+            fence_high_half_refused.fetch_add(1, std::memory_order_relaxed);
         }
     }
     return false;
@@ -2350,6 +2364,10 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
             break;
         }
         case PM4ItOpcode::WriteData: {
+            // 0.4.4 beta 20: counted (frame statistics): on the compute queues WRITE_DATA is
+            // stored by the CPU at decode, before the GPU ran the work before it (the engine
+            // map's asc-1); whether the game issues any decides the fix.
+            compute_write_data.fetch_add(1, std::memory_order_relaxed);
             // bbport: copies deferred to the recording thread precede writes the guest sees, and
             // so do graphics fences deferred to it (the pipe was drained before this packet).
             if (rasterizer) {
@@ -2406,7 +2424,9 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
                 rasterizer->ProcessDownloadImages();
                 const PM4CmdReleaseMem release = *rm;
                 const u32 pipe_id = queue.pipe_id;
-                const bool writes = release.data_sel.Value() != DataSelect::None;
+                // 0.4.4 beta 20: value and size by its data select, as EOP's.
+                const auto sel = release.data_sel.Value();
+                const bool writes = sel == DataSelect::Data32Low || sel == DataSelect::Data64;
                 rasterizer->SignalAfterGpu(
                     [release, pipe_id] {
                         release.SignalFence(
@@ -2416,7 +2436,9 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
                             },
                             [](VAddr, u16, u16) {});
                     },
-                    writes ? release.Address<VAddr>() : 0, release.DataQWord());
+                    writes ? release.Address<VAddr>() : 0,
+                    sel == DataSelect::Data32Low ? release.DataDWord() : release.DataQWord(),
+                    sel == DataSelect::Data32Low ? 4u : 8u);
                 break;
             }
             // bbport: copies deferred to the recording thread precede writes the guest sees, and
