@@ -1,6 +1,6 @@
 # Community fixes: the vetted list and plan
 
-Updated 2026-10-31 (0.4.4 through beta 22; A1–A12 in since 0.4.0 beta 1). Hunter's Workshop (HW) started from Lantern Engine 0.9.37 beta 9 (`08173e6`).
+Updated 2026-10-31 (0.4.4 through beta 22; the plan to 0.4.4 stable is the next section; A1–A12 in since 0.4.0 beta 1). Hunter's Workshop (HW) started from Lantern Engine 0.9.37 beta 9 (`08173e6`).
 This is the analysis of what the other Bloodborne PC projects fixed after that point, checked
 against HW's own code, with what has been done since. Nothing here is merged wholesale: each fix
 is taken on its own, with its author credited.
@@ -10,7 +10,9 @@ Ground rules for this work:
 - No merge with Lantern Engine. Its 0.9.37 stable regressed from beta 8 (the fixed-refresh frame
   lock and the particle cap, both off in HW) and it removed community patches and their credits.
 - Community patches and their credits stay. A fix taken from another project is credited in
-  `README.md` and in its commit.
+  `README.md` and in its commit. What implements AMD's or NVIDIA's own documents (the FSR SDK, the
+  DLSS Programming Guide) credits those documents, not a project that applied them first (the
+  tester, 2026-10-31: "this is AMD spec not theirs", "also nVidia spec and not theirs").
 - The particle cap (`BB_INDIRECT_CLAMP`) and the fixed-refresh frame lock (`BB_VBLANK_PACING`)
   stay off. Pinned for a later version, after the important work: the frame lock with a "Match
   display" frame rate (the display's own rate, its flips on the display's vblanks). The tester
@@ -21,6 +23,160 @@ Ground rules for this work:
 Addresses: **patch** addresses are the ones `Bloodborne.xml`, `frame_rate_sites.inc`, bbhost and
 Binary Ninja use (image offset + 0x400000). **Image offsets** are what bbport's `ImageBase + x`,
 HW's `Prepare()` calls and the sampler's `+0x...` print. Each address below says which it is.
+
+## Plan to 0.4.4 stable (decided 2026-10-31)
+
+Beta 22 is the last build (built and tested by the tester); nothing of beta 23 is started. Each beta
+gets its own branch, `claude/0.4.4-beta-N`. The reviews behind this plan are under "Lantern 0.9.39 and
+bbhost v0.2.20–v0.2.22, reviewed" below.
+
+### Decisions
+
+| Topic | Decision |
+|---|---|
+| FSR | AMD FSR SDK 2.4 (FidelityFX-SDK `v2.4.0`, 28 October 2026) on Windows: AMD's signed `amd_fidelityfx_loader_vk.dll` and `amd_fidelityfx_upscaler_vk.dll` with AMD's licence notice. Every unofficial FSR path is removed, not kept (beta 25). |
+| DLSS | NVIDIA's Streamline route, DLSS Programming Guide 310.6.0 §3.21: DLSS upscaling through Streamline's `sl.dlss.dll`, with HW's own Project ID (§5.2.1) instead of the shared 231313132 (beta 23). NVIDIA's NGX loader library (`nvsdk_ngx_s.lib`/`_d.lib`, §5.1.1) is not an option: the DLSS SDK licence (§2e) forbids use that puts the SDK under an open-source licence (HW is GPL), and the library is built for MSVC while HW's Windows build is MSYS2 CLANG64. Streamline is MIT. |
+| NVIDIA guide items | In beta 23 (its table). No DLSS cost table until a proper test (after 0.4.4). |
+| Credits | AMD and NVIDIA items credit AMD's SDK and NVIDIA's guide (ground rules). |
+| FSR frame generation | Set aside. The current one (FireBurn's) goes with FireBurn in beta 25; AMD's official one needs AMD's swapchain (its docs call dispatching without it "highly discouraged") and comes after 0.4.4. DLSS frame generation is unaffected. |
+| OptiScaler | Set aside: the compatibility mode (`vk_optiscaler.h`) stays as it is, untested. The tester uses neither OptiScaler nor frame generation. Re-check after 0.4.4. |
+| Original camera | Fixed in HW's engine (beta 24): every per-frame weight of the follow camera, converted each frame with the frame timer. bbhost's weight list is a cross-check only; no code is taken from it or from Lantern. |
+| When AMD's or NVIDIA's runtime can't start | TAA, with a log line and a note in the game. |
+| Linux | Set aside until Windows is done; notes kept below ("Linux, for later"). |
+| Test PC | RTX 3070 Ti; Windows HDR is off. HDR-output items are checked in the code, not in the tester's runs. DLSS's input point (§3.1, before tone mapping) concerns the game's internal image, so the runs do cover it. |
+| Frame lock / Match display | Pinned (ground rules). |
+| PC memory model | Removed before 0.4.4 ships, when the tester says (beta 26). |
+| Live-path proxy trimming (upscale-2/3) | After 0.4.4 (recommended). |
+
+### Beta 23: fixes, NVIDIA's guide, DLSS through Streamline (`claude/0.4.4-beta-23`)
+
+Betas 23 and 24 of the first draft, combined at the tester's request.
+
+| Item | Source / credit | Size |
+|---|---|---|
+| **Fixes** | | |
+| Leaving a room and destroying the online context send their server request from the online thread (`THD:np`), not the game's thread with `g.mu` held: no freeze of up to 8 s (NpPost's timeout) at session end. `m2_leave_room`/`m2_destroy_context` → `end_session_locked` → `ServerLeaveRoom` today | bbhost (droogie) | M |
+| A connection that dies in the 200–400 ms before the ESTABLISHED/ACTIVE notices (`announce_locked`) is not announced as live: `sig_fire` checks `Conn.dead` | bbhost (droogie) | S |
+| Cached graphics pipelines: one whose vertex shader writes motion vectors while its key has none is not built at start (an invalid layout; a crash risk on stricter drivers). `LoadGraphicsPipeline` checks only the opposite pairing | Lantern 0.9.39 beta 26 | S |
+| **NVIDIA's guide** | | |
+| History reset on a camera cut, for every upscaler (DLSS InReset; FSR's reset). A cautious threshold: §3.13 warns that misused resets flicker | NVIDIA §3.13 | M |
+| DLSS: the bias mask (BiasCurrentColor, `vk_dlss.cpp` ~517–523) no longer sent. FSR keeps its reactive mask (AMD's advice) | NVIDIA §3.15, 310.4.0 changelog | S |
+| DLSS models: "CNN (preset E)" and "(preset F)" removed from the launcher and the in-game menu (A–E removed in 310.4.0; F deprecated, "should not be used"); a saved `e`/`f` becomes Automatic. Automatic already matches NVIDIA's defaults (K for DLAA/Quality/Balanced, M Performance, L Ultra Performance) | NVIDIA 310.4.0 | S |
+| **DLSS through Streamline** | | |
+| DLSS upscaling through `sl.dlss.dll` (it wraps `nvngx_dlss.dll`); one Streamline setup for upscaling, frame generation and Reflex. Streamline becomes the Vulkan loader whenever DLSS is on (today only with DLSS frame generation) | NVIDIA §3.21 | L |
+| HW's own Project ID (a fixed GUID, engine type Custom, HW's version) instead of the shared 231313132, in `slInit`'s preferences | NVIDIA §5.2.1, §2.5 checklist | S |
+| Windows: HW's own NGX loading removed (the `NGXCore` registry key, the newest `nv*` DriverStore folder fallback, the parameter interface through fixed vtable slots). Streamline can't start: TAA with a note | — | M |
+| `tools/fetch_streamline.sh`: `sl.dlss.dll` added; `nvngx_dlss.dll` stays NVIDIA's 310.9.16 from github.com/NVIDIA/DLSS | — | S |
+| **Text and docs** | | |
+| Live resolution change explained properly (launcher and in-game): it matters only when the game starts at an output other than 1080p with an upscaler other than TAA; Off is faster, renders at the preset's size, needs a restart for changes, and gives DLSS/FSR the image after the game's post-processing (§3.1 asks for before tone mapping); at 1080p presets always change in the game | NVIDIA §3.1 | S |
+| The HDR mode hint checked against the code (fixed if wrong) | — | S |
+| Translations: 13 launcher languages, 10 in-game | — | M |
+| Docs: `docs/upscaler.md` (Streamline), release notes, this plan; version 0.4.4-beta.23, engine id | — | S |
+| ~~FSR 3 dispatches recorded in frame order (`BB_FSR3_RECORDER` the default)~~ | Dropped: that code goes with FireBurn in beta 25 | — |
+
+Test (none of it needs HDR): DLSS at the lamp spot, Quality and DLAA: the log says Streamline with the
+Project ID; the image as beta 22's or better on fire and particles; FPS against beta 22 (what Streamline
+itself costs: a quick A/B, not the DLSS cost table). Camera cuts (cutscenes, lamp travel, death, the
+Hunter's Dream): no smear or flicker on the first frame. The model list without E and F. Co-op: leaving a
+room and quitting do not freeze.
+
+### Beta 24: the follow camera's weights, per frame, in the engine
+
+**Finding (2026-10-31).** The launcher ("Original: As the game has it, at any frame rate"), the 0.4.0 notes
+("the game's own camera at every frame rate"), the comment in `start/patches.cpp` ("the camera of the game
+at 30 at every rate") and this doc (section C: "already in HW, from Lantern 0.9.37") say Original is
+complete. It is not: Original converts 2 of the follow camera's per-frame weights (the eases at patch
+0x4D25E68 and 0x4D25E94, per frame with the frame timer, `frame_rate.cpp` `kEases`). The others stay the
+game's 30 FPS values every frame, so at 120 FPS they act four times per PS4 frame: the camera chases,
+swings and settles faster than on the PS4. FPS++ converts its weights, but once, at the preset's rate
+(`FrameRateFixes`): right only while the game holds that rate (Uncapped converts as at 120,
+`kUncappedReference`; at the 144 preset in busy areas the game runs about 121, so the camera is about 16%
+slow).
+
+`ChrExFollowCam` (update at patch 0x183ac60), field offsets (from HW's camera tables and bbhost's
+decompilation; each use is confirmed with HW's own tools in beta 24):
+
+| Weight | What it does | Original today | FPS++ today |
+|---|---|---|---|
+| Distance ease (0x4D25E68, 0.1), chase-rate ease (0x4D25E94, 1/30) | The camera's distance; the chase rate moving between normal and wall escape | Per frame (timer) | Per frame (timer) |
+| +0x198, easing to +0x19c/+0x1a0 | Following the character | Not converted | Once, at the preset rate |
+| +0x1a4 (the game combines it with the follow weight +0x154 first) | The chase of the point the camera aims for | Not converted | Once |
+| +0x1a8, a kept share (`pow(v, frames)`) | Tilting back after the stick is let go | Not converted | Once |
+| +0x1ac/+0x1b8, easing to +0x1b0/+0x1b4 | The chase sideways and vertically | Not converted | Once |
+| +0x1c4 | The chase's distance | Not converted | Once |
+| +0x1c8/+0x1cc | The chase under lock-on | Not converted | Once |
+| +0x23c | The pitch on a fast turn | Not converted | Once |
+| +0x240 | Lock-on's and the auto turn's swing | Not converted | Once |
+| +0x330 (0.05, the constructor's immediate at patch 0x183A7DE) | Eases the distance, the pitch floor, lock-on's framing, the look-at height and the field of view toward the camera's current LockCamParam row (the camera settings the game selects for where the player is, e.g. a boss arena) | Not converted | Once, from 60 (0.05 is the game's own 30 FPS value; Kyo's retune does not change it) |
+
++0x130 (the pitch return's weight) and the focus are time-based and need nothing.
+
+| Work | Size |
+|---|---|
+| Every use of these weights in the game's follow-camera update found with HW's own reverse-engineering tools (`tools/re`, as for the frame-rate survey) on the 1.09 executable, each use checked byte for byte as `kEases` are | M |
+| Each use converted where the game uses it (the combined +0x1a4 value after the game combines it), with the frame timer's actual frame length: Original from 30, FPS++ from 60, +0x330 as decided below. At 30 FPS every value stays the game's to the bit | L |
+| `FrameRateFixes`' one-time camera conversions dropped while the timer is on (no double conversion); with `BB_FRAME_TIMER=0` today's behaviour stays as the fallback | S |
+| Tests: the game's bits at 30, the maths (weights and kept shares), the checks at each use | M |
+| The claims above corrected: the launcher text, this doc, the comment, the frame-rate survey; the 0.4.4 notes say Original was incomplete before | S |
+
+**Open: +0x330 under FPS++.** From 30 (the game's speed: 90% of a change of camera settings in 1.5 s, as on
+the PS4) or from 60 (today's FPS++: in 0.75 s, twice the PS4's speed, an artefact of running Kyo's 60 list
+that the retune never chose). Recommended: from 30. Original converts it from 30 either way.
+
+Test, at 30, 60, 120, 144 and Uncapped, Original and FPS++: lock-on's swing, the tilt back after letting go
+of the stick, the chase while sprinting, entering a boss arena: each should match 30 FPS.
+
+### Beta 25: AMD FSR SDK 2.4 and the upscaling settings
+
+| Item | Size |
+|---|---|
+| AMD's signed DLLs and licence notice (binary redistribution with the notice; no reverse engineering, decompilation or disassembly); a download script from AMD's release | M |
+| One "FSR" choice; AMD's SDK picks (`ffxQueryDescGetVersions`): FSR 4.1.2 FP8 on RX 9000; INT8 on RX 7000, RX 6000 and Ryzen AI Max 300/400; lightweight INT8 on Ryzen AI 300/400 and Z2 A/Z2 Extreme; FSR 3.1.6 elsewhere (RX 5000 and older, NVIDIA, Intel). The log names the version. Saved `fsr4`, `fsr411` and `fsr3` become `fsr` | M |
+| Removed: FSR 4.1.1 (`fsr411/`, `tools/fsr4cap`, the `tools/fsr4*` scripts, the `fsr4-bench` tool: it replays AMD's DLL with shaders and weights taken from it, which AMD's licence forbids), the built-in FSR 4 (`vk_fsr4.cpp`, `fsr4_shaders`, `fetch_fsr4_assets.sh`: the source-v07 model), fsr4vk (`vk_fsr4vk.cpp`, `fetch_fsr4vk.py`), FireBurn FSR-Vulkan (`third_party/fsr-vulkan`, 35 MB) with FSR 3.1 upscaling and frame generation; their menu entries, switches and docs. Credits for the removed code (FireBurn, 0xCydral, dvj5411) move to an "earlier versions used" line | M |
+| The SDK can't start: TAA with a note | S |
+| The upscaling settings cleanup (discussed with the tester before any code): one Upscaling section with each choice described; the render resolution with its real size; one sharpening slider; options per upscaler; no "preset" wording; the in-game menu's names to match | L |
+| Translations: 13 launcher languages, 10 in-game | M |
+
+To settle in the settings discussion: upscaler "Off"; merging the mip-bias settings; an "FSR version:
+Automatic / 3.1" choice (`ffxOverrideVersion`; recommended, a way out if 4.1.2 misbehaves on a card).
+Test: the tester, FSR 3.1.6 through the SDK on the RTX 3070 Ti against FireBurn's FSR 3.1 (0.64 ms at the
+lamp spot, Quality). AMD testers needed: RX 6000/7000, RX 9000, an APU.
+
+### Beta 26: the PC memory model removed
+
+When the tester says; before 0.4.4 ships.
+
+### Release candidate, then 0.4.4
+
+An independent review (a sub-agent; the tester is told before it starts); version 0.4.4, engine id,
+release notes, docs, `README.md` credits. The tester: a long session (heap growth, `gnm-1`), safe mode,
+broad play, online.
+
+### After 0.4.4
+
+AMD's official FSR frame generation (AMD's swapchain); OptiScaler compatibility re-checked, then kept or
+dropped; the proper DLSS test, then its cost table, then the §3.1 decision (DLSS at outputs other than
+1080p taking the image before tone mapping); live-path proxy trimming (upscale-2/3); the SSR patch's
+tuning writes measured (bbhost: 7.8 ms against the game's 6.1); smoothness and load hitches; less detail
+when the startup patch renders below 1080; the passes left unjittered (Lantern's DLSS audit; a likely slight
+wobble while panning) checked in HW; the message boxes' confirm delay (bbhost, Kyoskii; optional,
+a feel change); features: Anti-Lag 2, lighting effects, lamp to lamp, SMAA/FXAA, FSR 1; the frame lock
+with Match display (pinned); the AMD/Intel shader-3 and CPU-bound items.
+
+### Linux, for later
+
+| Topic | Note |
+|---|---|
+| FSR | AMD's SDK is Windows only. With FireBurn removed, Linux has no FSR until AMD ships for Linux. The Linux build keeps compiling; FSR is not offered there |
+| DLSS | Streamline is Windows only and NVIDIA's Linux loader library (`libnvsdk_ngx.a`) has the same licence problem: Linux keeps HW's own path (`libnvidia-ngx.so.1`), to which the Project ID is still to be added |
+| FSR frame generation | Gone with FireBurn on Linux too |
+
+### Open questions
+
+1. +0x330 under FPS++: from 30 (recommended) or from 60.
+2. Beta order: the camera (24) before AMD (25), so the tester can test it alone while AMD testers are found (recommended).
+3. AMD testers for beta 25.
+4. The go-ahead for beta 23.
 
 ## Done since the analysis
 
@@ -533,7 +689,9 @@ at 60. The options weighed:
   - *Performance Patch* never applies in HW: about 40 of its writes come from another game version
     and land mid-instruction, so HW's checks refuse it.
 - **Lens and camera tuning** (bbhost's "Original" camera, the game's own camera converted from 30
-  instead of Kyo's retune): already in HW, from Lantern 0.9.37. The launcher's Graphics > Follow camera,
+  instead of Kyo's retune): in HW from Lantern 0.9.37, but **incomplete** (found 2026-10-31): Original
+  converts only the two eases, not the camera's other per-frame weights; fixed in 0.4.4 beta 24 (the plan
+  to 0.4.4 stable, above). The launcher's Graphics > Follow camera,
   `camera_tuning=original` (the default) or `fps++` (`start/patches.cpp`, `FrameRateFixes`); the lens
   filter's rate is the frame-rate fixes' Lens group.
 
@@ -595,6 +753,51 @@ only, off by default in HW), the game status and Discord presence, the Extra Mes
 cheats' online message, the Wayland scale hint (Linux later), the Russian PC menus (GHusr-y5; HW's menu
 builder has changed too much to copy) and the Help & FAQ redesign.
 
+## Lantern 0.9.39 and bbhost v0.2.20–v0.2.22, reviewed (2026-10-31)
+
+From their release notes and changes (Lantern 0.9.39 betas 1–26, 29–31 October; bbhost v0.2.20 to
+v0.2.22, droogie and Kyoskii), each item checked against HW's code first. bbport has nothing after 0.7.
+Where each went is in the plan to 0.4.4 stable, above.
+
+**Lantern 0.9.39.** Mostly seamless co-op (a party kept across bosses, deaths and lamps, on Lantern's own
+server: a feature tied to that server) and a rewrite toward its own engine (its own system libraries, a
+new renderer and shader compiler, on by default in beta 24, with no measured gain): neither for HW.
+
+| Item | In HW? | Where it went |
+|---|---|---|
+| DLSS audit: the history reset on a camera cut | HW resets only on setting changes | Beta 23, credited to NVIDIA's guide §3.13 |
+| DLSS audit: the bias mask only for preset F | HW sends it with every preset | Beta 23: not sent at all (§3.15); F itself removed (310.4.0) |
+| DLSS audit: the "less wobble while turning" jitter fade off by default | Never in HW (Lantern added it after the fork) | — |
+| Left open by the audit: DLSS gets the tone-mapped image at outputs other than 1080p | The same in HW (the startup patch) | The §3.1 decision after the proper DLSS test; the live path at 1080p is right |
+| Left open by the audit: some passes not jittered (a likely slight wobble while panning) | To check in HW | After 0.4.4 |
+| Left open by the audit: an NVIDIA sample application ID | HW uses the shared 231313132 | Beta 23: HW's own Project ID |
+| Cached pipelines with a motion-vector vertex shader and no motion in the key not built (beta 26) | HW checks only the opposite pairing | Beta 23, credited to Lantern |
+| Camera timing (beta 25): nine of the follow camera's rates scaled by the frame's length | Checked against HW: two of the nine are wrong (the pitch return's kept share treated as a rate; the focus is time-based already), and with FPS++ they would convert a second time | Not taken. HW's own conversion of every weight in beta 24 |
+| FSR through AMD's FSR SDK 2.4 | — | Beta 25, from AMD's SDK and credited to it |
+| Anti-Lag 2, the 8 GB VRAM tweaks, optional lighting effects (heavy; ghosting listed as a known issue), a lamp-to-lamp patch, bbhost-format patches | — | Features, after 0.4.4 (Anti-Lag 2, lighting, lamp to lamp) or not taken |
+| The save repair (for seamless co-op); the PC memory model off on old AMD drivers | Not applicable (HW removes the model) | — |
+
+**bbhost v0.2.20–v0.2.22.** Mostly its own renderer, a new launcher, Quake and Lo-Hit plugins, fixed
+rates up to 960, and Uncapped capped to the display (the opposite of HW's choice in beta 22).
+
+| Item | In HW? | Where it went |
+|---|---|---|
+| Leaving a room called the server on the game's thread: a freeze at every session end (droogie) | Yes: `end_session_locked` calls `ServerLeaveRoom` synchronously with `g.mu` held | Beta 23, credited to droogie |
+| A connection that died before its ESTABLISHED/ACTIVE notices announced as live again (droogie) | Yes: `sig_fire` does not check `Conn.dead` | Beta 23, credited to droogie |
+| OK in message boxes ignored for the first 0.5 s (Kyoskii) | The game's behaviour | Optional, after 0.4.4 (a feel change) |
+| The community SSR patch's tuning writes slower than the game's values, 7.8 ms against 6.1 (Kyoskii) | HW ships another version with its own constants; SSR is off by default | Measured after 0.4.4 |
+| Korean menu text cut short (Kyoskii) | Not affected: HW finds the end of UTF-16 text two bytes at a time | — |
+| Its decompiled follow camera (`src/decomp/camera/follow_camera.cpp`), every weight converted | HW's Original converts two | A cross-check for beta 24; no code taken |
+
+**AMD and NVIDIA documents.** AMD FSR SDK 2.4 (FidelityFX-SDK `v2.4.0`, `7539ae8`): the FSR versions per
+GPU and the licence terms in beta 25's table; Vulkan games ship the DLLs (no driver override), and games
+on 4.1.2 or newer can take later driver upgrades; frame generation on Vulkan is FSR 3.1.6 through AMD's
+swapchain (4.0.2 needs RX 9000 and Windows 11). NVIDIA DLSS Programming Guide 310.6.0 (31 March 2026,
+NVIDIA/DLSS `9981c63`): §3.1 before tone mapping; §3.5 mip bias log2(render/display) − 1 (HW already);
+§3.13 reset on a camera cut; §3.15 BiasCurrentColor "should not be used"; presets A–E removed and F
+deprecated (310.4.0), K the default for DLAA/Quality/Balanced, M Performance, L Ultra Performance (HW's
+Automatic already); §3.21 DLSS through Streamline; §5.1.1 the loader library; §5.2.1 the Project ID.
+
 ## Smoothness leads (for the smoothness phase)
 
 - The hitch report's findings (above), first.
@@ -629,3 +832,8 @@ Beta 9 changed alters Windows defaults in a way that could regress:
 | bbhost (droogie) | v0.2.19, `56b868e` | Independent engine; its game-level fixes and frame-rate work are portable |
 | DarkIzuku | `2f9f1c0` | Lantern's own starting point |
 | eFMann (shadPS4 DLSS/FSR fork) | `36e2116a` | Upstream-shadPS4 based; ideas rather than patches |
+| Lantern Engine (Awaken), later | 0.9.38 (2026-10-29); 0.9.39 betas 1–26 (2026-10-31) | Reviewed in their own sections |
+| bbport (deadinside28), later | 0.7, `0fc2921` | Reviewed 2026-10-29 |
+| bbhost (droogie, Kyoskii), later | v0.2.22 | Reviewed 2026-10-31 |
+| AMD FSR SDK | v2.4.0, `7539ae8` | The FSR plan (beta 25) |
+| NVIDIA DLSS | Programming Guide 310.6.0 (NVIDIA/DLSS `9981c63`); Streamline 2.14.16 | The DLSS plan (beta 23) |
