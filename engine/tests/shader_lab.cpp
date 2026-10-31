@@ -1348,8 +1348,9 @@ int CheckCache(const fs::path& dir) {
                     spec2.info = &info2;
                     if (meta_version != 8) { // ShaderMetaVersion
                         why = "shader record version " + std::to_string(meta_version);
-                    } else if (binary_version != 7 && // ShaderBinaryVersion, MotionShaderBinaryVersion
-                               binary_version != 8) {
+                    } else if (binary_version != 7 && // ShaderBinaryVersion,
+                               binary_version != 8 && // MotionShaderBinaryVersion,
+                               binary_version != 9) { // GdsShaderBinaryVersion (0.4.4 beta 19)
                         why = "shader binary version " + std::to_string(binary_version);
                     } else if (!spec2.Deserialize(again)) {
                         why = "specialization unreadable";
@@ -1362,9 +1363,14 @@ int CheckCache(const fs::path& dir) {
                                HashCombine(info2.pgm_hash, perm_idx) != hash) {
                         why = "hash mismatch";
                     } else {
+                        bool gds = false;
+                        for (const auto& buffer : info2.buffers) {
+                            gds = gds || buffer.buffer_type == BufferType::GdsBuffer;
+                        }
                         why = "binary version " + std::to_string(binary_version) + " for motion " +
                               std::to_string(info2.hw_stage == HwStage::Vertex &&
-                                             spec2.runtime_info.hw.vs.motion_vectors);
+                                             spec2.runtime_info.hw.vs.motion_vectors) +
+                              ", GDS " + std::to_string(gds);
                     }
                     break;
                 }

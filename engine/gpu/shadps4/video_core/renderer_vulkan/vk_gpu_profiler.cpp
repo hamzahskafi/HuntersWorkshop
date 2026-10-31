@@ -38,7 +38,7 @@ void GpuProfiler::WriteTimestamp(u64 key) {
     }
     // Outside render passes: radv_CmdWriteTimestamp2 crashed inside some. Marks sit where a
     // pass, dispatch or submission ends anyway.
-    scheduler.EndRendering();
+    scheduler.EndRendering(Vulkan::GpuSavings::PassBreak::Profiler);
     const u32 query = slice * SliceQueries + used[slice]++;
     keys[slice].push_back(key);
     current = key;
@@ -50,7 +50,7 @@ void GpuProfiler::WriteTimestamp(u64 key) {
 void GpuProfiler::BeginFrame() {
     // Close the frame: one more timestamp without a label.
     if (!held[slice] && used[slice] > 0 && used[slice] < SliceQueries) {
-        scheduler.EndRendering();
+        scheduler.EndRendering(Vulkan::GpuSavings::PassBreak::Profiler);
         const u32 query = slice * SliceQueries + used[slice]++;
         scheduler.Record([pool = *pool, query](vk::CommandBuffer cmdbuf) {
             cmdbuf.writeTimestamp2(vk::PipelineStageFlagBits2::eAllCommands, pool, query);

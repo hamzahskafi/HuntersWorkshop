@@ -95,7 +95,9 @@ void BlitHelper::ReinterpretColorAsMsDepth(u32 width, u32 height, u32 num_sample
     state.height = height;
     state.num_layers = 1;
     state.depth_stencil_attachment.image_view = depth_view;
-    state.depth_stencil_attachment.image_layout = vk::ImageLayout::eDepthAttachmentOptimal;
+    // 0.4.4 beta 19: the layout Runtime::CopyColorAndDepth moved the image to and tracks (it said
+    // depth-only, the tracked layout covering stencil too).
+    state.depth_stencil_attachment.image_layout = vk::ImageLayout::eDepthStencilAttachmentOptimal;
     state.depth_stencil_attachment.has_depth = true;
     state.depth_stencil_attachment.depth_clear = true;
     scheduler.BeginRendering(state);
@@ -144,7 +146,7 @@ void BlitHelper::ReinterpretColorAsMsDepth(u32 width, u32 height, u32 num_sample
 
     cmdbuf.draw(3, 1, 0, 0);
 
-    scheduler.EndRendering();
+    scheduler.EndRendering(Vulkan::GpuSavings::PassBreak::TextureCache);
     scheduler.GetDynamicState().Invalidate();
 }
 
@@ -246,7 +248,7 @@ void BlitHelper::CopyBetweenMsImages(u32 width, u32 height, u32 num_samples,
 
     cmdbuf.draw(3, 1, 0, 0);
 
-    scheduler.EndRendering();
+    scheduler.EndRendering(Vulkan::GpuSavings::PassBreak::TextureCache);
     scheduler.GetDynamicState().Invalidate();
 }
 

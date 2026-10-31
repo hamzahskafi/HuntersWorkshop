@@ -9,6 +9,14 @@
 namespace Shader::Optimization {
 
 void Visit(Info& info, const IR::Inst& inst, const Profile& profile) {
+    // 0.4.4 beta 19: a GDS append for the subgroup uses ballot, elect and broadcast (the
+    // DataAppend it replaced counted for these before this pass).
+    if ((inst.GetOpcode() == IR::Opcode::BufferAtomicIAdd32 ||
+         inst.GetOpcode() == IR::Opcode::BufferAtomicISub32) &&
+        inst.Flags<IR::BufferInstInfo>().subgroup_append) {
+        info.uses_group_ballot = true;
+        info.uses_lane_id = true;
+    }
     switch (inst.GetOpcode()) {
     case IR::Opcode::GetAttribute:
     case IR::Opcode::GetAttributeU1:

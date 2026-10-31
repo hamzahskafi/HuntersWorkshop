@@ -779,6 +779,9 @@ public:
 
     /// Ends current rendering scope.
     void EndRendering();
+    /// 0.4.4 beta 19: the same, naming why (the frame statistics' render passes begun again with
+    /// the same targets, by what ended them). A plain EndRendering counts as other.
+    void EndRendering(GpuSavings::PassBreak why);
 
     /// Sets a function to be called on every scheduler submission.
     void SetSubmitCallback(SubmitFunc&& on_submit) {
@@ -1055,13 +1058,7 @@ public:
         return is_rendering;
     }
 
-    /// 0.4.4 beta 18: what is about to end the open render pass (the last note before it ends
-    /// counts), for the frame statistics' render passes begun again with the same targets.
-    void NotePassBreak(GpuSavings::PassBreak why) {
-        if (is_rendering) {
-            pass_break = why;
-        }
-    }
+
 
     /// Whether BeginRendering(state) would start a new render pass.
     [[nodiscard]] bool WillBeginRendering(const RenderState& state) const {
@@ -1265,7 +1262,7 @@ private:
     std::jthread priority_pending_ops_thread;
     RenderState render_state;
     bool is_rendering = false;
-    GpuSavings::PassBreak pass_break = GpuSavings::PassBreak::Other; ///< NotePassBreak
+    GpuSavings::PassBreak pass_break = GpuSavings::PassBreak::Other; ///< what ended the last pass
     // bbport: threaded recording. Commands go into chunks of the current segment; segments are
     // recorded in parallel, each into its own command buffer, and a submission runs their
     // command buffers in order. Guest memory copies and fence signals go into ordered chunks,

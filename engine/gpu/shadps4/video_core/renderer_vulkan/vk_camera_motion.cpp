@@ -501,7 +501,7 @@ void CameraMotion::Overlay(VideoCore::ImageId frame) {
         .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
     }));
 
-    scheduler.EndRendering();
+    scheduler.EndRendering(Vulkan::GpuSavings::PassBreak::Motion);
     runtime.Transit(&depth, vk::ImageLayout::eGeneral, vk::PipelineStageFlagBits2::eComputeShader,
                     vk::AccessFlagBits2::eShaderRead);
     runtime.Transit(&color, vk::ImageLayout::eGeneral, vk::PipelineStageFlagBits2::eComputeShader,

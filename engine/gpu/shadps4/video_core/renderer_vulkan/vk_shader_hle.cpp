@@ -128,8 +128,7 @@ static bool MultiCopy(Rasterizer& rasterizer, const VideoCore::Buffer* src,
     }
     // 0.4.4 beta 18: a dispatch ends the open render pass (frame statistics: what splits passes).
     const bool in_pass = scheduler.IsRendering();
-    scheduler.NotePassBreak(GpuSavings::PassBreak::CopyShader);
-    scheduler.EndRendering();
+    scheduler.EndRendering(GpuSavings::PassBreak::CopyShader);
     const u64 src_size = src_max - src_min, dst_size = dst_max - dst_min;
     auto& savings = GpuSavings::Get();
     savings.hle_dispatches.fetch_add(1, std::memory_order_relaxed);

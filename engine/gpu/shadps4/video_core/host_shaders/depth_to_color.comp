@@ -4,15 +4,21 @@
 // layout (directly with maintenance8, through a buffer without): a transfer read of a depth image
 // the driver keeps compressed can cost a decompression of all of it (the game's copy of its depth
 // for the next frame took 0.36 ms a frame that way). Each texel's 32 bits are copied unchanged.
-// UINT_OUTPUT: an R32_UINT image, the float's bits.
+// UINT_OUTPUT: an R32_UINT image, the float's bits. 0.4.4 beta 19, from a 16-bit depth image:
+// R16_OUTPUT, an R16 unorm image (the same value, exact); R16_UINT_OUTPUT, an R16_UINT image (its
+// 16 bits).
 #version 450
 #extension GL_EXT_samplerless_texture_functions : require
 
 layout(local_size_x = 8, local_size_y = 8) in;
 
 layout(binding = 0) uniform texture2D depth_tex; // depth aspect
-#ifdef UINT_OUTPUT
+#if defined(UINT_OUTPUT)
 layout(binding = 1, r32ui) uniform writeonly uimage2D out_img;
+#elif defined(R16_UINT_OUTPUT)
+layout(binding = 1, r16ui) uniform writeonly uimage2D out_img;
+#elif defined(R16_OUTPUT)
+layout(binding = 1, r16) uniform writeonly image2D out_img;
 #else
 layout(binding = 1, r32f) uniform writeonly image2D out_img;
 #endif
@@ -27,8 +33,10 @@ void main() {
         return;
     }
     const float depth = texelFetch(depth_tex, ivec2(pixel), 0).r;
-#ifdef UINT_OUTPUT
+#if defined(UINT_OUTPUT)
     imageStore(out_img, ivec2(pixel), uvec4(floatBitsToUint(depth)));
+#elif defined(R16_UINT_OUTPUT)
+    imageStore(out_img, ivec2(pixel), uvec4(uint(round(depth * 65535.0))));
 #else
     imageStore(out_img, ivec2(pixel), vec4(depth));
 #endif

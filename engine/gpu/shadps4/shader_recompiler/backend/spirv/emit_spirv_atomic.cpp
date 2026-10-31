@@ -3,6 +3,7 @@
 
 #include "shader_recompiler/backend/spirv/emit_spirv_instructions.h"
 #include "shader_recompiler/backend/spirv/spirv_emit_context.h"
+#include "shader_recompiler/ir/microinstruction.h"
 
 namespace Shader::Backend::SPIRV {
 
@@ -243,7 +244,46 @@ Id EmitSharedAtomicDec64(EmitContext& ctx, Id offset) {
     return SharedAtomicU64IncDec(ctx, offset, &Sirit::Module::OpAtomicIDecrement);
 }
 
+// 0.4.4 beta 19: a GDS append or consume (gds_append.h): the subgroup's active lanes counted,
+// one atomic by the first of them, its result handed to all, and each lane given the value a
+// lane-by-lane order would have given it (the counter before, plus or minus the active lanes
+// below it). Elect and BroadcastFirst both pick the lowest active lane.
+Id SubgroupAppend(EmitContext& ctx, u32 handle, Id address, bool consume) {
+    const auto& buffer = ctx.buffers[handle];
+    if (const Id offset = buffer.Offset(PointerSize::B32); Sirit::ValidId(offset)) {
+        address = ctx.OpIAdd(ctx.U32[1], address, offset);
+    }
+    const auto [id, pointer_type] = buffer.Alias(PointerType::U32);
+    const Id ptr = ctx.OpAccessChain(pointer_type, id, ctx.u32_zero_value, address);
+    const auto [scope, semantics]{AtomicArgs(ctx)};
+    const Id subgroup = ctx.ConstU32(static_cast<u32>(spv::Scope::Subgroup));
+    const Id ballot = ctx.OpGroupNonUniformBallot(ctx.U32[4], subgroup, ctx.true_value);
+    const Id count = ctx.OpGroupNonUniformBallotBitCount(ctx.U32[1], subgroup,
+                                                         spv::GroupOperation::Reduce, ballot);
+    const Id below = ctx.OpGroupNonUniformBallotBitCount(
+        ctx.U32[1], subgroup, spv::GroupOperation::ExclusiveScan, ballot);
+    const Id first = ctx.OpGroupNonUniformElect(ctx.U1[1], subgroup);
+    const Id atomic_label = ctx.OpLabel();
+    const Id other_label = ctx.OpLabel();
+    const Id merge_label = ctx.OpLabel();
+    ctx.OpSelectionMerge(merge_label, spv::SelectionControlMask::MaskNone);
+    ctx.OpBranchConditional(first, atomic_label, other_label);
+    ctx.AddLabel(atomic_label);
+    const Id before = consume ? ctx.OpAtomicISub(ctx.U32[1], ptr, scope, semantics, count)
+                              : ctx.OpAtomicIAdd(ctx.U32[1], ptr, scope, semantics, count);
+    ctx.OpBranch(merge_label);
+    ctx.AddLabel(other_label);
+    ctx.OpBranch(merge_label);
+    ctx.AddLabel(merge_label);
+    const Id merged = ctx.OpPhi(ctx.U32[1], before, atomic_label, ctx.u32_zero_value, other_label);
+    const Id base = ctx.OpGroupNonUniformBroadcastFirst(ctx.U32[1], subgroup, merged);
+    return consume ? ctx.OpISub(ctx.U32[1], base, below) : ctx.OpIAdd(ctx.U32[1], base, below);
+}
+
 Id EmitBufferAtomicIAdd32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address, Id value) {
+    if (inst->Flags<IR::BufferInstInfo>().subgroup_append) {
+        return SubgroupAppend(ctx, handle, address, false);
+    }
     return BufferAtomicU32(ctx, inst, handle, address, value, &Sirit::Module::OpAtomicIAdd);
 }
 
@@ -252,6 +292,9 @@ Id EmitBufferAtomicIAdd64(EmitContext& ctx, IR::Inst* inst, u32 handle, Id addre
 }
 
 Id EmitBufferAtomicISub32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address, Id value) {
+    if (inst->Flags<IR::BufferInstInfo>().subgroup_append) {
+        return SubgroupAppend(ctx, handle, address, true);
+    }
     return BufferAtomicU32(ctx, inst, handle, address, value, &Sirit::Module::OpAtomicISub);
 }
 

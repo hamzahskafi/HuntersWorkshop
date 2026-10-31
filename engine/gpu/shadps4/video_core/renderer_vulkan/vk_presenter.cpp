@@ -718,7 +718,7 @@ Frame* Presenter::PrepareLastFrame() {
     }
 
     auto& scheduler = flip_scheduler;
-    scheduler.EndRendering();
+    scheduler.EndRendering(Vulkan::GpuSavings::PassBreak::Upscaler);
     const auto cmdbuf = scheduler.CommandBuffer();
 
     const auto frame_subresources = vk::ImageSubresourceRange{
@@ -799,7 +799,7 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
     // bbport: recorded like draws, on the recording threads. CommandBuffer() would first wait
     // for them to record everything handed over before (~90 us a frame of the draw recording
     // thread) and then submit from this thread.
-    draw_scheduler.EndRendering();
+    draw_scheduler.EndRendering(Vulkan::GpuSavings::PassBreak::Upscaler);
 
     VideoCore::ImageViewInfo view_info{};
     view_info.format = GetFrameViewFormat(attribute.attrib.pixel_format);
@@ -1049,7 +1049,7 @@ Frame* Presenter::PrepareBlankFrame(bool present_thread) {
     frame->hdr_native = false; // bbport: no game frame, no gain map
 
     auto& scheduler = present_thread ? present_scheduler : draw_scheduler;
-    scheduler.EndRendering();
+    scheduler.EndRendering(Vulkan::GpuSavings::PassBreak::Upscaler);
 
     const auto cmdbuf = scheduler.CommandBuffer();
 

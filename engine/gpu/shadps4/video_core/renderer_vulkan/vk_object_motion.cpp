@@ -268,7 +268,7 @@ void ObjectMotion::OnFrameStart() {
     for (auto& target : targets) {
         target.written = false;
     }
-    scheduler.EndRendering();
+    scheduler.EndRendering(Vulkan::GpuSavings::PassBreak::Motion);
     // Last frame's stores must be visible to this frame's loads. Also finish old reads
     // before the ping-pong half they reference is reused for writes.
     scheduler.Record([](vk::CommandBuffer cmd) {
@@ -386,7 +386,7 @@ void ObjectMotion::Attach(RenderState& state, u32 width, u32 height) {
     attachment.image_layout = vk::ImageLayout::eColorAttachmentOptimal;
     if (!target.written || target.layout != vk::ImageLayout::eColorAttachmentOptimal) {
         // Clear once per frame; later reads must not erase the validity of this history.
-        scheduler.EndRendering();
+        scheduler.EndRendering(Vulkan::GpuSavings::PassBreak::Motion);
         const vk::ImageMemoryBarrier2 barrier{
             .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
             .srcAccessMask = vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite,

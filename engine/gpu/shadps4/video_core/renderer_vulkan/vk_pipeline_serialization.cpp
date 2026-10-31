@@ -17,6 +17,7 @@
 #include "bbport_threads.h"
 #include "core/emulator_settings.h"
 #include "shader_recompiler/frontend/fetch_shader.h"
+#include "shader_recompiler/gds_append.h"
 #include "shader_recompiler/info.h"
 #include "video_core/cache_storage.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
@@ -27,9 +28,27 @@ namespace Serialization {
 /* You should increment versions below once corresponding serialization scheme is changed. */
 static constexpr u32 ShaderBinaryVersion = 7u; // bbport: interpolated integer fix (Pascal)
 static constexpr u32 MotionShaderBinaryVersion = 8u; // runtime address descriptor, set 1
+static constexpr u32 GdsShaderBinaryVersion = 9u; // 0.4.4 beta 19: GDS append per subgroup
 static constexpr u32 ShaderMetaVersion = 8u; // bbport: HwFragmentRuntimeInfo::depth_first
 static constexpr u32 PipelineKeyVersion = 7u; // pointer-free pipeline state + generated fragment,
                                                // decided by the draw's own registers without a pixel shader
+
+/// The binary version a shader's record carries. 0.4.4 beta 19: shaders that use the GDS buffer
+/// carry their own while GDS appends are translated per subgroup (gds_append.h), so only they
+/// are compiled again, and BB_GDS_APPEND=lane takes their earlier binaries back; others as
+/// before (vertex shaders with motion vectors: their own since 0.4.4 beta 15).
+static u32 BinaryVersionFor(const Shader::Info& info, const Shader::StageSpecialization& spec) {
+    if (Shader::GdsAppendPerSubgroup()) {
+        for (const auto& buffer : info.buffers) {
+            if (buffer.buffer_type == Shader::BufferType::GdsBuffer) {
+                return GdsShaderBinaryVersion;
+            }
+        }
+    }
+    const bool vertex_motion = info.hw_stage == Shader::HwStage::Vertex &&
+                               spec.runtime_info.hw.vs.motion_vectors;
+    return vertex_motion ? MotionShaderBinaryVersion : ShaderBinaryVersion;
+}
 } // namespace Serialization
 
 namespace Vulkan {
@@ -91,10 +110,7 @@ std::vector<u8> SerializeShaderMeta(const Shader::Info& info, const Shader::Stag
     Serialization::Writer meta{ar};
 
     meta.Write(Serialization::ShaderMetaVersion);
-    const bool vertex_motion = info.hw_stage == Shader::HwStage::Vertex &&
-                               spec.runtime_info.hw.vs.motion_vectors;
-    meta.Write(vertex_motion ? Serialization::MotionShaderBinaryVersion
-                             : Serialization::ShaderBinaryVersion);
+    meta.Write(Serialization::BinaryVersionFor(info, spec));
     meta.Write(perm_hash);
     meta.Write(perm_idx);
     spec.Serialize(ar);
@@ -129,10 +145,7 @@ void RegisterShaderMeta(const Shader::Info& info,
     Serialization::Writer meta{ar};
 
     meta.Write(Serialization::ShaderMetaVersion);
-    const bool vertex_motion = info.hw_stage == Shader::HwStage::Vertex &&
-                               spec.runtime_info.hw.vs.motion_vectors;
-    meta.Write(vertex_motion ? Serialization::MotionShaderBinaryVersion
-                             : Serialization::ShaderBinaryVersion);
+    meta.Write(Serialization::BinaryVersionFor(info, spec));
 
     meta.Write(perm_hash);
     meta.Write(perm_idx);
@@ -168,7 +181,8 @@ bool LoadShaderMeta(Serialization::Archive& ar, Shader::Info& info,
     u32 binary_version{};
     meta.Read(binary_version);
     if (binary_version != Serialization::ShaderBinaryVersion &&
-        binary_version != Serialization::MotionShaderBinaryVersion) {
+        binary_version != Serialization::MotionShaderBinaryVersion &&
+        binary_version != Serialization::GdsShaderBinaryVersion) {
         return false;
     }
 
@@ -186,10 +200,8 @@ bool LoadShaderMeta(Serialization::Archive& ar, Shader::Info& info,
 
     // Only old motion vertex binaries embed process-local addresses. Other v7 shaders remain
     // reusable; v8 motion binaries load the current addresses from a renderer-owned descriptor.
-    const bool vertex_motion = info.hw_stage == Shader::HwStage::Vertex &&
-                               spec.runtime_info.hw.vs.motion_vectors;
-    if (binary_version != (vertex_motion ? Serialization::MotionShaderBinaryVersion
-                                        : Serialization::ShaderBinaryVersion)) {
+    // v9: shaders that use the GDS buffer, with appends per subgroup (0.4.4 beta 19).
+    if (binary_version != Serialization::BinaryVersionFor(info, spec)) {
         return false;
     }
 

@@ -47,8 +47,11 @@ struct Counters {
     // texel buffer fills), sampled read, storage write, native attachment, other.
     std::array<std::atomic<std::uint64_t>, 5> scene_resolves{};
     // 0.4.4 beta 18: render passes begun again with the same targets after something ended them
-    // (a split), by what ended them (PassBreak).
-    std::array<std::atomic<std::uint64_t>, 4> pass_splits{};
+    // (a split), by what ended them (PassBreak; beta 19: every place that ends a pass named).
+    std::array<std::atomic<std::uint64_t>, 13> pass_splits{};
+    // 0.4.4 beta 19: barriers that ended an open pass, by what they wait for (BarrierWait): the
+    // work that wrote what the next commands read.
+    std::array<std::atomic<std::uint64_t>, 6> pass_barrier_waits{};
     // 0.4.4 beta 18: copy shader dispatches recorded inside a render pass: with no barrier needed
     // before them (nothing since the pass began wrote their source or touched their destination)
     // and their source a snapshot in the stream buffer; the same with their source the game's
@@ -57,15 +60,41 @@ struct Counters {
     // 0.4.4 beta 18: Runtime::CopyColorAndDepth by kind (ColorDepthCopy), why a depth->colour
     // copy was not done by the shader (DepthCopyRefusal), and the texture cache's conversions of
     // an image into one of the other kind (colour->depth, depth->colour).
-    std::array<std::atomic<std::uint64_t>, 6> color_depth_copies{};
+    std::array<std::atomic<std::uint64_t>, 7> color_depth_copies{};
     std::array<std::atomic<std::uint64_t>, 7> depth_copy_refusals{};
+    // 0.4.4 beta 19: why Runtime::CopyColorToDepth left a colour->depth copy to the copy before
+    // it (DepthCopyRefusal: storage meaning the depth image's attachment use here).
+    std::array<std::atomic<std::uint64_t>, 7> color_copy_refusals{};
     std::array<std::atomic<std::uint64_t>, 2> overlap_conversions{};
     // 0.4.4 beta 18: uploads of the game's memory into depth images (Runtime::UploadImage).
     std::atomic<std::uint64_t> depth_uploads{0}, depth_upload_bytes{0};
 };
 
-/// What ended a render pass (Scheduler::NotePassBreak).
-enum class PassBreak : std::uint8_t { Other, CopyShader, ImageCopy, Dispatch };
+/// What ended a render pass (Scheduler::EndRendering's reason; beta 19: named where it ends).
+enum class PassBreak : std::uint8_t {
+    Other,
+    CopyShader,
+    ImageCopy,
+    Dispatch,
+    BufferBarrier,
+    ImageBarrier,
+    Transfer,
+    TextureCache,
+    SceneProxy,
+    Motion,
+    Upscaler,
+    Profiler,
+    Submission
+};
+/// What a barrier that ended a pass waits for (its source stages).
+enum class BarrierWait : std::uint8_t {
+    GraphicsShaders,
+    Attachments,
+    Compute,
+    Transfer,
+    Host,
+    Other
+};
 /// Runtime::CopyColorAndDepth's kinds: depth->colour by the shader (0.4.4 beta 17), by a copy;
 /// colour->depth by a copy; a single-sample image into MSAA depth by a draw; both of one kind;
 /// not done (other MSAA copies).
@@ -75,9 +104,11 @@ enum class ColorDepthCopy : std::uint8_t {
     ColorToDepth,
     ColorToMsDepth,
     SameKind,
-    NotDone
+    NotDone,
+    ColorToDepthShader ///< 0.4.4 beta 19: by a draw (Runtime::CopyColorToDepth)
 };
-/// Why Runtime::CopyDepthToColor left a depth->colour copy to the copy before it.
+/// Why Runtime::CopyDepthToColor left a depth->colour copy to the copy before it (beta 19:
+/// LevelsOrLayers only for volume images, every level and layer being copied now).
 enum class DepthCopyRefusal : std::uint8_t {
     SwitchedOff,
     Samples,
@@ -117,18 +148,21 @@ inline void Report() {
     for (int i = 0; i < 5; ++i) {
         resolves[i] = take(c.scene_resolves[i]);
     }
-    double splits[4], in_pass[3], kinds[6], refusals[7], overlaps[2];
-    for (int i = 0; i < 4; ++i) {
+    double splits[13], waits[6], in_pass[3], kinds[7], refusals[7], color_refusals[7],
+        overlaps[2];
+    for (int i = 0; i < 13; ++i) {
         splits[i] = take(c.pass_splits[i]) / s;
+    }
+    for (int i = 0; i < 6; ++i) {
+        waits[i] = take(c.pass_barrier_waits[i]) / s;
     }
     for (int i = 0; i < 3; ++i) {
         in_pass[i] = take(c.hle_in_pass[i]) / s;
     }
-    for (int i = 0; i < 6; ++i) {
-        kinds[i] = take(c.color_depth_copies[i]) / s;
-    }
     for (int i = 0; i < 7; ++i) {
+        kinds[i] = take(c.color_depth_copies[i]) / s;
         refusals[i] = take(c.depth_copy_refusals[i]) / s;
+        color_refusals[i] = take(c.color_copy_refusals[i]) / s;
     }
     for (int i = 0; i < 2; ++i) {
         overlaps[i] = take(c.overlap_conversions[i]) / s;
@@ -146,20 +180,30 @@ inline void Report() {
                 "storage %.1f, attachment %.1f, other %.1f\n",
                 resolves[0] / s, resolves[1] / s, resolves[2] / s, resolves[3] / s, resolves[4] / s);
     std::printf("  render passes per second begun again with the same targets, by what ended them: "
-                "copy shader %.1f, image copy %.1f, other dispatch %.1f, other %.1f; copy shader "
-                "dispatches inside a pass %.1f (no barrier needed and the source a snapshot %.1f, "
-                "the source the game's memory %.1f; a barrier needed %.1f)\n",
-                splits[1], splits[2], splits[3], splits[0], in_pass[0] + in_pass[1] + in_pass[2],
-                in_pass[0], in_pass[1], in_pass[2]);
+                "buffer barrier %.1f, image barrier %.1f, transfer %.1f, texture cache %.1f, scene "
+                "proxy %.1f, motion %.1f, upscaler or presentation %.1f, profiler %.1f, submission "
+                "%.1f, copy shader %.1f, image copy %.1f, other dispatch %.1f, other %.1f; "
+                "barriers per second that ended a pass, waiting for graphics shaders %.1f, "
+                "attachments %.1f, compute %.1f, transfers %.1f, host %.1f, other %.1f; copy "
+                "shader dispatches inside a pass %.1f (no barrier needed and the source a snapshot "
+                "%.1f, the source the game's memory %.1f; a barrier needed %.1f)\n",
+                splits[4], splits[5], splits[6], splits[7], splits[8], splits[9], splits[10],
+                splits[11], splits[12], splits[1], splits[2], splits[3], splits[0], waits[0],
+                waits[1], waits[2], waits[3], waits[4], waits[5],
+                in_pass[0] + in_pass[1] + in_pass[2], in_pass[0], in_pass[1], in_pass[2]);
     std::printf("  depth and colour copies per second (Runtime::CopyColorAndDepth): depth->colour "
-                "by the shader %.1f, by a copy %.1f (switched off %.1f, MSAA %.1f, levels or "
-                "layers %.1f, sizes %.1f, no image %.1f, no storage %.1f, formats %.1f); "
-                "colour->depth %.1f, into MSAA depth %.1f; same kind %.1f; not done (MSAA) %.1f; "
-                "texture cache conversions colour->depth %.1f, depth->colour %.1f; uploads of "
-                "the game's memory into depth images %.1f (%.1f MB)\n",
+                "by the shader %.1f, by a copy %.1f (switched off %.1f, MSAA %.1f, volume %.1f, "
+                "sizes %.1f, no image %.1f, no storage %.1f, formats %.1f); "
+                "colour->depth by a draw %.1f, by a copy %.1f (switched off %.1f, MSAA %.1f, "
+                "volume %.1f, sizes %.1f, no image %.1f, no attachment use %.1f, formats %.1f), "
+                "into MSAA depth %.1f; same kind %.1f; not done (MSAA) %.1f; texture cache "
+                "conversions colour->depth %.1f, depth->colour %.1f; uploads of the game's memory "
+                "into depth images %.1f (%.1f MB)\n",
                 kinds[0], kinds[1], refusals[0], refusals[1], refusals[2], refusals[3],
-                refusals[4], refusals[5], refusals[6], kinds[2], kinds[3], kinds[4], kinds[5],
-                overlaps[0], overlaps[1], depth_uploads, depth_upload_mb);
+                refusals[4], refusals[5], refusals[6], kinds[6], kinds[2], color_refusals[0],
+                color_refusals[1], color_refusals[2], color_refusals[3], color_refusals[4],
+                color_refusals[5], color_refusals[6], kinds[3], kinds[4], kinds[5], overlaps[0],
+                overlaps[1], depth_uploads, depth_upload_mb);
 }
 
 } // namespace Vulkan::GpuSavings

@@ -140,7 +140,7 @@ void FaultManager::ProcessFaultBuffer() {
             .pBufferInfo = &download_info,
         },
     }};
-    scheduler.EndRendering();
+    scheduler.EndRendering(Vulkan::GpuSavings::PassBreak::TextureCache);
     const auto cmdbuf = scheduler.CommandBuffer();
     const Vulkan::Breadcrumbs::Scope crumb{cmdbuf, scheduler.CrumbStream(), "fault buffer"};
     cmdbuf.pipelineBarrier2(vk::DependencyInfo{

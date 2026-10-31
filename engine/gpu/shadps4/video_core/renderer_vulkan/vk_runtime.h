@@ -4,6 +4,7 @@
 #pragma once
 
 #include <optional>
+#include <vector>
 #include "common/types.h"
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/renderer_vulkan/vk_barrier_tracker.h"
@@ -79,27 +80,38 @@ public:
                        std::span<const vk::BufferImageCopy> download_copies);
 
     void CopyImage(VideoCore::Image* src, VideoCore::Image* dst);
+    /// Through `buffer` at `offset`; 0.4.4 beta 19: a null buffer takes a staging range of the
+    /// size the copy needs.
     void CopyImageWithBuffer(VideoCore::Image* src, VideoCore::Image* dst,
                              const VideoCore::Buffer* buffer, u64 offset);
     void CopyMip(VideoCore::Image* src, VideoCore::Image* dst, u32 mip, u32 slice);
 
     void CopyColorAndDepth(VideoCore::Image* src, VideoCore::Image* dst);
 
-    /// 0.4.4 beta 17: a single-sample 32-bit float depth image's depth (one level, one layer)
-    /// into a 32-bit colour image of its size (R32F, or R32_UINT as the float's bits), by a
-    /// compute shader reading it where it lies, as the game's own passes sample it
-    /// (DepthStencilReadOnlyOptimal): no transfer layout, which can cost a decompression of the
-    /// whole depth image, and no round trip through a buffer. Bit-exact; stencil is not copied
-    /// (as by the copies before). False when it does not apply (nothing done): the caller copies
-    /// as before.
-    /// BB_DEPTH_COPY_SHADER=0 turns it off (CopyColorAndDepth as before 0.4.4 beta 17).
+    /// 0.4.4 beta 17: a single-sample 32-bit float depth image's depth into a 32-bit colour image
+    /// of its size (R32F, or R32_UINT as the float's bits), by a compute shader reading it where
+    /// it lies, as the game's own passes sample it (DepthStencilReadOnlyOptimal): no transfer
+    /// layout, which can cost a decompression of the whole depth image, and no round trip through
+    /// a buffer. Bit-exact; stencil is not copied (as by the copies before). Beta 19: also 16-bit
+    /// depth into R16 unorm or R16_UINT, and every level and layer both images have. False when
+    /// it does not apply (nothing done): the caller copies as before.
+    /// BB_DEPTH_COPY_SHADER=0 turns it off (CopyColorAndDepth as before 0.4.4 beta 17), with
+    /// CopyColorToDepth.
     bool CopyDepthToColor(VideoCore::Image* src, VideoCore::Image* dst);
+    /// 0.4.4 beta 19: the other way, a single-sample colour image (R32F, R32_UINT holding a
+    /// float's bits, R16 unorm, R16_UINT holding 16-bit depth's bits) into a depth image of its
+    /// size, by a full-screen draw into the depth image as an attachment, for every level and
+    /// layer both have: no transfer write into the depth image, no buffer. Its stencil is left as
+    /// it is (as by the copies before). False when it does not apply.
+    bool CopyColorToDepth(VideoCore::Image* src, VideoCore::Image* dst);
+    /// What CopyDepthToColor's shader writes.
+    enum class DepthCopyOutput : u32 { R32Float, R32Bits, R16Unorm, R16Bits };
     /// Its dispatch, for images the texture cache does not hold (SceneTargets' proxies): `depth`
-    /// a depth-aspect view in `depth_layout`, `color` an R32F (or, `uint_output`, R32_UINT)
-    /// storage view in General, `width` x `height`. The caller transitions both and keeps the
-    /// views alive until the GPU is done.
+    /// a depth-aspect view in `depth_layout`, `color` a storage view in General of the format
+    /// `output` names, `width` x `height`. The caller transitions both and keeps the views alive
+    /// until the GPU is done.
     void RecordDepthToColor(vk::ImageView depth, vk::ImageLayout depth_layout, vk::ImageView color,
-                            bool uint_output, u32 width, u32 height);
+                            DepthCopyOutput output, u32 width, u32 height);
     [[nodiscard]] static bool DepthCopyShaderOn();
 
     void CopyDepthStencil(VideoCore::Image* src, VideoCore::Image* dst,
@@ -181,23 +193,30 @@ private:
     };
     std::optional<AliasedAccess> aliased;
     // 0.4.4 beta 17: CopyDepthToColor's pipelines (made on first use) and views (the last few
-    // images', as TemporalUpscaler::CachedView).
+    // subresources', as TemporalUpscaler::CachedView).
     void CreateDepthCopyPipelines();
     vk::ImageView DepthCopyView(const VideoCore::Image& image, vk::Format format,
-                                vk::ImageAspectFlags aspect);
+                                vk::ImageAspectFlags aspect, u32 level = 0, u32 layer = 0);
     vk::UniqueDescriptorSetLayout depth_copy_set_layout;
     vk::UniquePipelineLayout depth_copy_layout;
-    std::array<vk::UniquePipeline, 2> depth_copy_pipelines; ///< R32F, R32_UINT
+    std::array<vk::UniquePipeline, 4> depth_copy_pipelines; ///< by DepthCopyOutput
+    bool depth_copy_r16 = false; ///< R16 storage images (shaderStorageImageExtendedFormats)
     struct DepthCopyViewEntry {
         vk::Image image{};
         u64 uid = 0;
         vk::Format format{};
         vk::ImageAspectFlags aspect{};
+        u32 level = 0, layer = 0;
         vk::ImageView view{};
         u64 last_use = 0;
     };
     std::array<DepthCopyViewEntry, 8> depth_copy_views{};
     u64 depth_copy_uses = 0;
+    // 0.4.4 beta 19: CopyColorToDepth's pipelines by depth format and what the colour holds.
+    vk::Pipeline ColorToDepthPipeline(vk::Format depth_format, u32 variant);
+    vk::UniqueDescriptorSetLayout color_copy_set_layout;
+    vk::UniquePipelineLayout color_copy_layout;
+    std::vector<std::pair<std::pair<vk::Format, u32>, vk::UniquePipeline>> color_copy_pipelines;
 };
 
 } // namespace Vulkan

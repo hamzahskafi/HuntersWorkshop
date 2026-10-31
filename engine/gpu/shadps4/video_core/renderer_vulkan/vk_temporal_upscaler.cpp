@@ -1156,7 +1156,7 @@ void TemporalUpscaler::OnBlendedSceneDraw() {
         failed = true;
         return;
     }
-    scheduler.EndRendering();
+    scheduler.EndRendering(Vulkan::GpuSavings::PassBreak::Upscaler);
     vk::Image source = color.GetImage();
     vk::ImageLayout source_layout = vk::ImageLayout::eTransferSrcOptimal;
     if (reduced) {
@@ -1218,7 +1218,7 @@ void TemporalUpscaler::OnSceneComposite() {
     if (w != width || h != height || !(color.usage_flags & vk::ImageUsageFlagBits::eStorage)) {
         return;
     }
-    scheduler.EndRendering();
+    scheduler.EndRendering(Vulkan::GpuSavings::PassBreak::Upscaler);
     if (reduced) {
         VideoCore::ImageViewInfo ci;
         ci.format = color.info.pixel_format;
@@ -1341,7 +1341,7 @@ void TemporalUpscaler::Run() {
     const auto color_view =
         CachedView(color, vk::Format::eR16G16B16A16Sfloat, vk::ImageAspectFlagBits::eColor);
 
-    scheduler.EndRendering();
+    scheduler.EndRendering(Vulkan::GpuSavings::PassBreak::Upscaler);
     runtime.Transit(&depth, vk::ImageLayout::eGeneral, vk::PipelineStageFlagBits2::eComputeShader,
                     vk::AccessFlagBits2::eShaderRead);
     runtime.Transit(&color, vk::ImageLayout::eGeneral, vk::PipelineStageFlagBits2::eComputeShader,
@@ -1850,7 +1850,7 @@ void TemporalUpscaler::CaptureFrameGenHudless(VideoCore::ImageId id) {
     if (!frame_gen || !id || !frame_gen->WantsHudless()) {
         return;
     }
-    scheduler.EndRendering();
+    scheduler.EndRendering(Vulkan::GpuSavings::PassBreak::Upscaler);
     auto& image = texture_cache.GetImage(id);
     runtime.Transit(&image, vk::ImageLayout::eGeneral, vk::PipelineStageFlagBits2::eTransfer,
                     vk::AccessFlagBits2::eTransferRead);
@@ -1864,7 +1864,7 @@ void TemporalUpscaler::CaptureFrameGenUiImage() {
         return;
     }
     // General layout: written by the upscale (or the background copy), no UI drawn yet.
-    scheduler.EndRendering();
+    scheduler.EndRendering(Vulkan::GpuSavings::PassBreak::Upscaler);
     frame_gen->CaptureHudless(scheduler, vk::Image(ui_image), ui_format, ui_width, ui_height);
 }
 
@@ -1926,7 +1926,7 @@ void TemporalUpscaler::EnsureUiResources(u32 w, u32 h, vk::Format color, vk::For
 }
 
 void TemporalUpscaler::PrepareUiDepth(VideoCore::ImageId depth_id) {
-    scheduler.EndRendering();
+    scheduler.EndRendering(Vulkan::GpuSavings::PassBreak::Upscaler);
     const auto aspect = vk::ImageAspectFlagBits::eDepth |
         (ui_depth_format == vk::Format::eD32SfloatS8Uint ? vk::ImageAspectFlagBits::eStencil
                                                       : vk::ImageAspectFlags{});
@@ -2141,7 +2141,7 @@ void TemporalUpscaler::RunScaled() {
         runtime.FlushBarriers();
     }
 
-    scheduler.EndRendering();
+    scheduler.EndRendering(Vulkan::GpuSavings::PassBreak::Upscaler);
     // bbport: the motion pass and FSR 3 are recorded through the scheduler, on a recording
     // thread (recording them here cost the draw recording thread ~5% of its time, plus a wait
     // for the recording thread every frame). FSR 4 and TAA keep their frame bookkeeping on
@@ -2517,7 +2517,7 @@ bool TemporalUpscaler::RedirectColor(VideoCore::ImageId color,
         });
         display.views.clear();
     }
-    scheduler.EndRendering();
+    scheduler.EndRendering(Vulkan::GpuSavings::PassBreak::Upscaler);
     const vk::ImageMemoryBarrier2 b{
         .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
         .srcAccessMask = vk::AccessFlagBits2::eNone,
@@ -2553,7 +2553,7 @@ bool TemporalUpscaler::RedirectSampled(VideoCore::ImageId image,
     }
     if (!ui_read_barrier) {
         ui_read_barrier = true;
-        scheduler.EndRendering();
+        scheduler.EndRendering(Vulkan::GpuSavings::PassBreak::Upscaler);
         const vk::ImageMemoryBarrier2 b{
             .srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
             .srcAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite,
@@ -2594,7 +2594,7 @@ bool TemporalUpscaler::DisplayOverride(VAddr address, Display& display) {
     }
     if (dump_remaining > 0) {
         --dump_remaining;
-        scheduler.EndRendering();
+        scheduler.EndRendering(Vulkan::GpuSavings::PassBreak::Upscaler);
         const bool bgra = display.format == vk::Format::eB8G8R8A8Unorm ||
                           display.format == vk::Format::eB8G8R8A8Srgb;
         DumpImages(instance, scheduler, scheduler.CommandBuffer(), dump_index++,
@@ -2623,7 +2623,7 @@ bool TemporalUpscaler::PresentDumpDue() {
 }
 
 void TemporalUpscaler::DumpPresented(vk::Image image, u32 width, u32 height, vk::Format format) {
-    scheduler.EndRendering();
+    scheduler.EndRendering(Vulkan::GpuSavings::PassBreak::Upscaler);
     const bool bgra = format == vk::Format::eB8G8R8A8Unorm || format == vk::Format::eB8G8R8A8Srgb;
     DumpImages(instance, scheduler, scheduler.CommandBuffer(), present_dump_index++,
                {{image, width, height, 4, "present", bgra ? "bgra" : "rgba"}});

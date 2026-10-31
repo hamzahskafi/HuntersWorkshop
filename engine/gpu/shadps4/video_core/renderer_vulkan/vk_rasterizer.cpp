@@ -2635,7 +2635,6 @@ void Rasterizer::DispatchRecord(const ComputePipeline* pipeline) {
     if (hle) {
         return;
     }
-    scheduler.NotePassBreak(GpuSavings::PassBreak::Dispatch); // 0.4.4 beta 18: frame statistics
 
     if (!BindResources(pipeline)) {
         return;
@@ -2645,7 +2644,7 @@ void Rasterizer::DispatchRecord(const ComputePipeline* pipeline) {
         runtime.FlushBarriers();
     }
 
-    scheduler.EndRendering();
+    scheduler.EndRendering(GpuSavings::PassBreak::Dispatch);
     mark();
     pipeline->BindResources(set_writes, push_data, {image_infos.data(), image_infos.size()},
                             {buffer_infos.data(), buffer_infos.size()});
@@ -2801,7 +2800,6 @@ void Rasterizer::DispatchIndirectRecord(const ComputePipeline* pipeline, VAddr a
     scheduler.PopPendingOperations();
     const u32 offset = 0;
     DisasmCompute(pipeline->GetStage(Shader::SwStage::Compute).pgm_hash, CsRegs(), true);
-    scheduler.NotePassBreak(GpuSavings::PassBreak::Dispatch); // 0.4.4 beta 18: frame statistics
 
     if (!BindResources(pipeline)) {
         return;
@@ -2814,7 +2812,7 @@ void Rasterizer::DispatchIndirectRecord(const ComputePipeline* pipeline, VAddr a
         runtime.FlushBarriers();
     }
 
-    scheduler.EndRendering();
+    scheduler.EndRendering(GpuSavings::PassBreak::Dispatch);
     // bbport: the counts clamped before the game's pipeline and descriptors are bound (the clamp
     // binds its own); the crash report keeps reading the game's counts (CopyArgs). Off unless
     // BB_INDIRECT_CLAMP=1 (the launcher's "Particle work safety cap"): the clamp's dispatch and the
@@ -3680,6 +3678,7 @@ bool Rasterizer::IsComputeImageCopy(const Pipeline* pipeline) {
             "the images differ",
             "the copy reaches past the image",
             "source and destination overlap",
+            "the images are tiled differently",
         };
         const VAddr from = desc0.is_written ? buf1.base_address : buf0.base_address;
         const VAddr to = desc0.is_written ? buf0.base_address : buf1.base_address;
@@ -3720,8 +3719,7 @@ bool Rasterizer::IsComputeImageCopy(const Pipeline* pipeline) {
         // Perform image copy
         VideoCore::Image& src_image = desc0.is_written ? image1 : image0;
         VideoCore::Image& dst_image = desc0.is_written ? image0 : image1;
-        scheduler.NotePassBreak(GpuSavings::PassBreak::ImageCopy); // 0.4.4 beta 18
-        scheduler.EndRendering();
+        scheduler.EndRendering(GpuSavings::PassBreak::ImageCopy); // 0.4.4 beta 18
         // 0.4.4 beta 14: its GPU time labelled in BB_GPU_PROFILE.
         const Runtime::TransferMark mark{runtime, "image copy", dst_image};
         runtime.CopyColorAndDepth(&src_image, &dst_image);
@@ -3786,6 +3784,17 @@ bool Rasterizer::IsComputeImageCopy(const Pipeline* pipeline) {
         (dst.info.props.has_stencil && size - image_size > 64_KB)) {
         return reject(4, &source, &dst);
     }
+    // 0.4.4 beta 19: the game copies bytes; between images tiled differently those bytes are
+    // another picture than a copy texel by texel: run through memory, as the game asked.
+    // BB_COPY_SHADER_TILING=any: copied as images whatever their tiling (before beta 19).
+    static const bool any_tiling = [] {
+        const char* env = std::getenv("BB_COPY_SHADER_TILING");
+        return env && std::strcmp(env, "any") == 0;
+    }();
+    if (!any_tiling && (source.info.tile_mode != dst.info.tile_mode ||
+                        source.info.array_mode != dst.info.array_mode)) {
+        return reject(7, &source, &dst);
+    }
     const u64 tail = size - image_size;
     auto outcome = made ? &ImageCopyStats::made : &ImageCopyStats::exact;
     if (tail && !made) {
@@ -3793,8 +3802,7 @@ bool Rasterizer::IsComputeImageCopy(const Pipeline* pipeline) {
                                                 : &ImageCopyStats::padding;
     }
     runtime.BeforeImageAccess();
-    scheduler.NotePassBreak(GpuSavings::PassBreak::ImageCopy); // 0.4.4 beta 18: frame statistics
-    scheduler.EndRendering();
+    scheduler.EndRendering(GpuSavings::PassBreak::ImageCopy); // 0.4.4 beta 18
     // 0.4.4 beta 14: its GPU time labelled in BB_GPU_PROFILE, the bytes past the image included.
     const Runtime::TransferMark mark{runtime, "image copy", dst};
     // bbport 0.7 (deadinside28): with a reduced scene size, a source whose proxy holds its current

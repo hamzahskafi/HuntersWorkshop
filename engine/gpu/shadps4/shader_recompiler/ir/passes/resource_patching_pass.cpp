@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <limits>
+#include "shader_recompiler/gds_append.h"
 #include "shader_recompiler/info.h"
 #include "shader_recompiler/ir/basic_block.h"
 #include "shader_recompiler/ir/breadth_first_search.h"
@@ -452,10 +453,14 @@ void PatchGlobalDataShareAccess(IR::Inst& inst, Info& info, Descriptors& descrip
 
     if (inst.GetOpcode() == IR::Opcode::DataAppend || inst.GetOpcode() == IR::Opcode::DataConsume) {
         RemoveAppendBufferLaneOffset(inst);
+        // 0.4.4 beta 19: one atomic for the subgroup where the backend can (gds_append.h); each
+        // lane still gets its own value, as the per-lane atomics give it.
+        IR::BufferInstInfo append_info{};
+        append_info.subgroup_append.Assign(GdsAppendPerSubgroup() ? 1 : 0);
         const IR::Value replacement =
             inst.GetOpcode() == IR::Opcode::DataAppend
-                ? ir.BufferAtomicIAdd(ir.Imm32(binding), inst.Arg(0), ir.Imm32(1u), {})
-                : ir.BufferAtomicISub(ir.Imm32(binding), inst.Arg(0), ir.Imm32(1u), {});
+                ? ir.BufferAtomicIAdd(ir.Imm32(binding), inst.Arg(0), ir.Imm32(1u), append_info)
+                : ir.BufferAtomicISub(ir.Imm32(binding), inst.Arg(0), ir.Imm32(1u), append_info);
         inst.ReplaceUsesWithAndRemove(replacement);
         return;
     }

@@ -253,7 +253,7 @@ std::pair<const Buffer*, u64> TileManager::DetileImage(const VideoCore::Buffer* 
 
     const auto staging = runtime.GetStagingPool().Request(info.guest_size, MemoryType::DeviceLocal);
 
-    scheduler.EndRendering();
+    scheduler.EndRendering(Vulkan::GpuSavings::PassBreak::TextureCache);
     runtime.FlushBarriers();
 
     const vk::DescriptorBufferInfo tiled_buffer_info{

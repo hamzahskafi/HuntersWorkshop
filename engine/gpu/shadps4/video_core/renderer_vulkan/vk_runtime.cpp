@@ -20,8 +20,14 @@
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/texture_cache/blit_helper.h"
 #include "video_core/texture_cache/image.h"
+#include "video_core/host_shaders/color_to_depth_bits_frag.h"
+#include "video_core/host_shaders/color_to_depth_frag.h"
+#include "video_core/host_shaders/color_to_depth_u16_frag.h"
 #include "video_core/host_shaders/depth_to_color_comp.h"
+#include "video_core/host_shaders/depth_to_color_r16_comp.h"
+#include "video_core/host_shaders/depth_to_color_r16_uint_comp.h"
 #include "video_core/host_shaders/depth_to_color_uint_comp.h"
+#include "video_core/host_shaders/fs_tri_vert.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
 
 #include <vulkan/vulkan_format_traits.hpp>
@@ -125,7 +131,7 @@ void Runtime::TickFrame() {
 
 void Runtime::CopyBuffer(const VideoCore::Buffer* src, const VideoCore::Buffer* dst,
                          std::span<const vk::BufferCopy> copies) {
-    scheduler.EndRendering();
+    scheduler.EndRendering(GpuSavings::PassBreak::Transfer);
 
     // bbport: many regions (HLE copy shaders) are tracked as one bounding range per buffer:
     // conservative for barriers, and two tree lookups instead of two per region.
@@ -175,7 +181,7 @@ void Runtime::CopyBuffer(const VideoCore::Buffer* src, const VideoCore::Buffer* 
 }
 
 void Runtime::FillBuffer(const VideoCore::Buffer* dst, u64 offset, u64 size, u32 value) {
-    scheduler.EndRendering();
+    scheduler.EndRendering(GpuSavings::PassBreak::Transfer);
 
     if (IsBufferAccessed(dst, offset, size, true)) {
         FlushBarriers();
@@ -194,7 +200,7 @@ void Runtime::CopyFromGuestChunk(vk::Buffer src, const VideoCore::Buffer* dst,
     if (copies.empty()) {
         return;
     }
-    scheduler.EndRendering();
+    scheduler.EndRendering(GpuSavings::PassBreak::Transfer);
     bool needs_flush = false;
     for (const auto& copy : copies) {
         needs_flush |= IsBufferAccessed(dst, copy.dstOffset, copy.size, true);
@@ -216,7 +222,7 @@ void Runtime::UpdateBuffer(const VideoCore::Buffer* dst, u64 offset, std::span<c
     if (data.empty()) {
         return;
     }
-    scheduler.EndRendering();
+    scheduler.EndRendering(GpuSavings::PassBreak::Transfer);
     if (IsBufferAccessed(dst, offset, data.size(), true)) {
         FlushBarriers();
     }
@@ -233,7 +239,7 @@ void Runtime::UpdateBuffer(const VideoCore::Buffer* dst, u64 offset, std::span<c
 }
 
 void Runtime::InlineData(VideoCore::Buffer* dst, u64 offset, u32 value) {
-    scheduler.EndRendering();
+    scheduler.EndRendering(GpuSavings::PassBreak::Transfer);
 
     if (IsBufferAccessed(dst, offset, sizeof(value), true)) {
         FlushBarriers();
@@ -292,7 +298,7 @@ Runtime::TransferMark::~TransferMark() {
 void Runtime::UploadImage(VideoCore::Image* dst, const VideoCore::Buffer* src,
                           std::span<const vk::BufferImageCopy> upload_copies) {
     SetBackingSamples(dst, dst->info.num_samples, false);
-    scheduler.EndRendering();
+    scheduler.EndRendering(GpuSavings::PassBreak::Transfer);
     const TransferMark mark{*this, "image upload", *dst};
 
     bool needs_flush =
@@ -333,7 +339,7 @@ void Runtime::UploadImage(VideoCore::Image* dst, const VideoCore::Buffer* src,
 void Runtime::DownloadImage(VideoCore::Image* src, const VideoCore::Buffer* dst,
                             std::span<const vk::BufferImageCopy> download_copies) {
     SetBackingSamples(src, src->info.num_samples);
-    scheduler.EndRendering();
+    scheduler.EndRendering(GpuSavings::PassBreak::Transfer);
     const TransferMark mark{*this, "image download", *src};
 
     bool needs_flush =
@@ -397,7 +403,7 @@ void Runtime::CopyImage(VideoCore::Image* src, VideoCore::Image* dst) {
         return;
     }
 
-    scheduler.EndRendering();
+    scheduler.EndRendering(GpuSavings::PassBreak::Transfer);
 
     bool needs_flush =
         Transit(src, vk::ImageLayout::eTransferSrcOptimal, vk::PipelineStageFlagBits2::eCopy,
@@ -452,10 +458,19 @@ void Runtime::CopyImageWithBuffer(VideoCore::Image* src, VideoCore::Image* dst,
     if (regions.empty()) {
         return;
     }
+    // 0.4.4 beta 19: no buffer given: a staging range of what the copy needs. CopyColorAndDepth
+    // asked for 128 MB a call, and the pool keeps another 128 MB whenever the last is still in
+    // use (several hundred MB on drivers without maintenance8 while a copy ran every frame).
+    if (!buffer) {
+        const auto staging =
+            staging_pool.Request(copy_size, VideoCore::MemoryType::DeviceLocal, 256);
+        buffer = staging.buffer;
+        offset = staging.offset;
+    }
     ASSERT(copy_size <= 128_MB && offset <= buffer->SizeBytes() &&
            copy_size <= buffer->SizeBytes() - offset);
 
-    scheduler.EndRendering();
+    scheduler.EndRendering(GpuSavings::PassBreak::Transfer);
 
     bool needs_flush =
         Transit(src, vk::ImageLayout::eTransferSrcOptimal, vk::PipelineStageFlagBits2::eCopy,
@@ -528,7 +543,7 @@ void Runtime::CopyMip(VideoCore::Image* src, VideoCore::Image* dst, u32 mip, u32
     SetBackingSamples(dst, dst->info.num_samples);
     SetBackingSamples(src, src->info.num_samples);
 
-    scheduler.EndRendering();
+    scheduler.EndRendering(GpuSavings::PassBreak::Transfer);
 
     bool needs_flush =
         Transit(src, vk::ImageLayout::eTransferSrcOptimal, vk::PipelineStageFlagBits2::eCopy,
@@ -584,9 +599,14 @@ void Runtime::CopyColorAndDepth(VideoCore::Image* src, VideoCore::Image* dst) {
     const bool src_depth = src->info.props.is_depth;
     const bool dst_depth = dst->info.props.is_depth;
     if (src->info.num_samples == 1 && dst->info.num_samples == 1) {
-        // 0.4.4 beta 17: depth into colour read by a shader where it applies (CopyDepthToColor).
+        // 0.4.4 beta 17: depth into colour read by a shader where it applies (CopyDepthToColor);
+        // beta 19: colour into depth by a draw (CopyColorToDepth).
         if (src_depth && !dst_depth && CopyDepthToColor(src, dst)) {
             count(ColorDepthCopy::DepthToColorShader);
+            return;
+        }
+        if (!src_depth && dst_depth && CopyColorToDepth(src, dst)) {
+            count(ColorDepthCopy::ColorToDepthShader);
             return;
         }
         if (src_depth == dst_depth) {
@@ -604,14 +624,14 @@ void Runtime::CopyColorAndDepth(VideoCore::Image* src, VideoCore::Image* dst) {
             src->info.props.is_depth == dst->info.props.is_depth) {
             CopyImage(src, dst);
         } else {
-            // Perform depth from/to color copy using the intermediate copy buffer.
-            static constexpr size_t COPY_BUFFER_SIZE = 128_MB;
-            const auto copy_ref =
-                staging_pool.Request(COPY_BUFFER_SIZE, VideoCore::MemoryType::DeviceLocal);
-            CopyImageWithBuffer(src, dst, copy_ref.buffer, copy_ref.offset);
+            // Perform depth from/to color copy using the intermediate copy buffer (0.4.4 beta 19:
+            // of the size the copy needs).
+            CopyImageWithBuffer(src, dst, nullptr, 0);
         }
     } else if (src->info.num_samples == 1 && dst->info.num_samples > 1 &&
-               dst->info.props.is_depth) {
+               dst->info.num_samples <= 4 && dst->info.props.is_depth) {
+        // 0.4.4 beta 19: up to 4 samples: the helper hands sample i the colour's channel i, and a
+        // colour has four (with 8 it read past them).
         // Perform a rendering pass to transfer the channels of source as samples in dest.
         bool needs_flush =
             Transit(src, vk::ImageLayout::eShaderReadOnlyOptimal,
@@ -644,6 +664,31 @@ bool Runtime::DepthCopyShaderOn() {
     return on;
 }
 
+// 0.4.4 beta 19: the subresources both images have, for the copies between depth and colour by
+// shaders: one size (levels follow it), single-sample, not volumes.
+static std::optional<GpuSavings::DepthCopyRefusal> CheckDepthColorPair(
+    const VideoCore::Image& src, const VideoCore::Image& dst) {
+    using GpuSavings::DepthCopyRefusal;
+    const auto& from = src.info;
+    const auto& to = dst.info;
+    if (!Runtime::DepthCopyShaderOn()) {
+        return DepthCopyRefusal::SwitchedOff;
+    }
+    if (from.num_samples != 1 || to.num_samples != 1) {
+        return DepthCopyRefusal::Samples;
+    }
+    if (from.props.is_volume || to.props.is_volume) {
+        return DepthCopyRefusal::LevelsOrLayers;
+    }
+    if (from.size.width != to.size.width || from.size.height != to.size.height) {
+        return DepthCopyRefusal::Size;
+    }
+    if (!src.backing || !dst.backing) {
+        return DepthCopyRefusal::NoImage;
+    }
+    return std::nullopt;
+}
+
 bool Runtime::CopyDepthToColor(VideoCore::Image* src, VideoCore::Image* dst) {
     // 0.4.4 beta 18: why not, in the frame statistics.
     const auto refuse = [](GpuSavings::DepthCopyRefusal why) {
@@ -656,37 +701,36 @@ bool Runtime::CopyDepthToColor(VideoCore::Image* src, VideoCore::Image* dst) {
     if (!from.props.is_depth || to.props.is_depth) {
         return false; // not a depth->colour copy: nothing to count
     }
-    if (!DepthCopyShaderOn()) {
-        return refuse(DepthCopyRefusal::SwitchedOff);
-    }
-    // One subresource of one size, both single-sample; the images' own (host) formats.
-    if (from.num_samples != 1 || to.num_samples != 1) {
-        return refuse(DepthCopyRefusal::Samples);
-    }
-    if (from.resources.levels != 1 || from.resources.layers != 1 || to.resources.levels != 1 ||
-        to.resources.layers != 1) {
-        return refuse(DepthCopyRefusal::LevelsOrLayers);
-    }
-    if (from.size.width != to.size.width || from.size.height != to.size.height) {
-        return refuse(DepthCopyRefusal::Size);
-    }
-    if (!src->backing || !dst->backing) {
-        return refuse(DepthCopyRefusal::NoImage);
+    if (const auto why = CheckDepthColorPair(*src, *dst)) {
+        return refuse(*why);
     }
     if (!(dst->usage_flags & vk::ImageUsageFlagBits::eStorage)) {
         return refuse(DepthCopyRefusal::NoStorage);
     }
+    CreateDepthCopyPipelines();
+    // The images' own (host) formats: 32-bit float depth into R32F or its bits into R32_UINT;
+    // 0.4.4 beta 19: 16-bit depth into R16 unorm or its bits into R16_UINT.
     const vk::Format depth_format = src->backing->image.image_ci.format;
     const vk::Format color_format = dst->backing->image.image_ci.format;
-    const bool float_depth = depth_format == vk::Format::eD32Sfloat ||
-                             depth_format == vk::Format::eD32SfloatS8Uint;
-    const bool uint_output = color_format == vk::Format::eR32Uint;
-    if (!float_depth || (color_format != vk::Format::eR32Sfloat && !uint_output)) {
+    const bool depth32 = depth_format == vk::Format::eD32Sfloat ||
+                         depth_format == vk::Format::eD32SfloatS8Uint;
+    const bool depth16 = depth_format == vk::Format::eD16Unorm ||
+                         depth_format == vk::Format::eD16UnormS8Uint;
+    DepthCopyOutput output;
+    if (depth32 && color_format == vk::Format::eR32Sfloat) {
+        output = DepthCopyOutput::R32Float;
+    } else if (depth32 && color_format == vk::Format::eR32Uint) {
+        output = DepthCopyOutput::R32Bits;
+    } else if (depth16 && depth_copy_r16 && color_format == vk::Format::eR16Unorm) {
+        output = DepthCopyOutput::R16Unorm;
+    } else if (depth16 && depth_copy_r16 && color_format == vk::Format::eR16Uint) {
+        output = DepthCopyOutput::R16Bits;
+    } else {
         return refuse(DepthCopyRefusal::Formats);
     }
     SetBackingSamples(dst, 1, false);
     SetBackingSamples(src, 1);
-    scheduler.EndRendering();
+    scheduler.EndRendering(GpuSavings::PassBreak::Transfer);
     // The layout the game's passes sample depth in (Rasterizer::BindTextures): nothing more to
     // change for its next read of it.
     constexpr auto depth_layout = vk::ImageLayout::eDepthStencilReadOnlyOptimal;
@@ -698,22 +742,215 @@ bool Runtime::CopyDepthToColor(VideoCore::Image* src, VideoCore::Image* dst) {
     if (needs_flush) {
         FlushBarriers();
     }
-    const vk::ImageView depth_view =
-        DepthCopyView(*src, depth_format, vk::ImageAspectFlagBits::eDepth);
-    const vk::ImageView color_view =
-        DepthCopyView(*dst, color_format, vk::ImageAspectFlagBits::eColor);
-    RecordDepthToColor(depth_view, depth_layout, color_view, uint_output, to.size.width,
-                       to.size.height);
+    // Every level and layer both images have, each its own dispatch (as CopyImage's regions).
+    const u32 levels = std::min(from.resources.levels, to.resources.levels);
+    const u32 layers = std::min(from.resources.layers, to.resources.layers);
+    for (u32 level = 0; level < levels; ++level) {
+        const u32 width = std::max(to.size.width >> level, 1u);
+        const u32 height = std::max(to.size.height >> level, 1u);
+        for (u32 layer = 0; layer < layers; ++layer) {
+            const vk::ImageView depth_view =
+                DepthCopyView(*src, depth_format, vk::ImageAspectFlagBits::eDepth, level, layer);
+            const vk::ImageView color_view =
+                DepthCopyView(*dst, color_format, vk::ImageAspectFlagBits::eColor, level, layer);
+            RecordDepthToColor(depth_view, depth_layout, color_view, output, width, height);
+        }
+    }
     // As CopyImage: the GPU's data, nothing to upload.
     dst->flags |= (src->flags & VideoCore::ImageFlagBits::GpuModified);
     dst->flags &= ~VideoCore::ImageFlagBits::Dirty;
     return true;
 }
 
+bool Runtime::CopyColorToDepth(VideoCore::Image* src, VideoCore::Image* dst) {
+    const auto refuse = [](GpuSavings::DepthCopyRefusal why) {
+        GpuSavings::Count(GpuSavings::Get().color_copy_refusals[static_cast<u32>(why)]);
+        return false;
+    };
+    using GpuSavings::DepthCopyRefusal;
+    const auto& from = src->info;
+    const auto& to = dst->info;
+    if (from.props.is_depth || !to.props.is_depth) {
+        return false; // not a colour->depth copy: nothing to count
+    }
+    if (const auto why = CheckDepthColorPair(*src, *dst)) {
+        return refuse(*why);
+    }
+    if (!(dst->usage_flags & vk::ImageUsageFlagBits::eDepthStencilAttachment) ||
+        !(src->usage_flags & vk::ImageUsageFlagBits::eSampled)) {
+        return refuse(DepthCopyRefusal::NoStorage);
+    }
+    // FLOAT (0): R32F into 32-bit depth, R16 unorm into 16-bit depth; BITS32 (1): R32_UINT holding
+    // a float's bits; U16 (2): R16_UINT holding 16-bit depth's bits.
+    const vk::Format color_format = src->backing->image.image_ci.format;
+    const vk::Format depth_format = dst->backing->image.image_ci.format;
+    const bool depth32 = depth_format == vk::Format::eD32Sfloat ||
+                         depth_format == vk::Format::eD32SfloatS8Uint;
+    const bool depth16 = depth_format == vk::Format::eD16Unorm ||
+                         depth_format == vk::Format::eD16UnormS8Uint;
+    u32 variant;
+    if ((depth32 && color_format == vk::Format::eR32Sfloat) ||
+        (depth16 && color_format == vk::Format::eR16Unorm)) {
+        variant = 0;
+    } else if (depth32 && color_format == vk::Format::eR32Uint) {
+        variant = 1;
+    } else if (depth16 && color_format == vk::Format::eR16Uint) {
+        variant = 2;
+    } else {
+        return refuse(DepthCopyRefusal::Formats);
+    }
+    const vk::Pipeline pipeline = ColorToDepthPipeline(depth_format, variant);
+    SetBackingSamples(dst, 1, false);
+    SetBackingSamples(src, 1);
+    scheduler.EndRendering(GpuSavings::PassBreak::Transfer);
+    bool needs_flush =
+        Transit(src, vk::ImageLayout::eShaderReadOnlyOptimal,
+                vk::PipelineStageFlagBits2::eFragmentShader, vk::AccessFlagBits2::eShaderRead);
+    needs_flush |= Transit(dst, vk::ImageLayout::eDepthStencilAttachmentOptimal,
+                           vk::PipelineStageFlagBits2::eEarlyFragmentTests |
+                               vk::PipelineStageFlagBits2::eLateFragmentTests,
+                           vk::AccessFlagBits2::eDepthStencilAttachmentWrite);
+    if (needs_flush) {
+        FlushBarriers();
+    }
+    const u32 levels = std::min(from.resources.levels, to.resources.levels);
+    const u32 layers = std::min(from.resources.layers, to.resources.layers);
+    for (u32 level = 0; level < levels; ++level) {
+        const vk::Extent2D extent{std::max(to.size.width >> level, 1u),
+                                  std::max(to.size.height >> level, 1u)};
+        for (u32 layer = 0; layer < layers; ++layer) {
+            const vk::ImageView color_view =
+                DepthCopyView(*src, color_format, vk::ImageAspectFlagBits::eColor, level, layer);
+            // The depth aspect only: the stencil plane is not an attachment, left as it is.
+            const vk::ImageView depth_view =
+                DepthCopyView(*dst, depth_format, vk::ImageAspectFlagBits::eDepth, level, layer);
+            scheduler.Record([pipeline, layout = *color_copy_layout, color_view, depth_view,
+                              extent](vk::CommandBuffer cmdbuf) {
+                const vk::RenderingAttachmentInfo depth{
+                    .imageView = depth_view,
+                    .imageLayout = vk::ImageLayout::eDepthStencilAttachmentOptimal,
+                    .loadOp = vk::AttachmentLoadOp::eDontCare, // every texel written
+                    .storeOp = vk::AttachmentStoreOp::eStore,
+                };
+                cmdbuf.beginRendering({
+                    .renderArea = {{0, 0}, extent},
+                    .layerCount = 1,
+                    .pDepthAttachment = &depth,
+                });
+                const vk::DescriptorImageInfo in{
+                    .imageView = color_view,
+                    .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+                };
+                const vk::WriteDescriptorSet write{
+                    .dstBinding = 0,
+                    .descriptorCount = 1,
+                    .descriptorType = vk::DescriptorType::eSampledImage,
+                    .pImageInfo = &in,
+                };
+                cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eGraphics, layout, 0, write);
+                cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
+                cmdbuf.setViewportWithCount(vk::Viewport{0.f, 0.f, float(extent.width),
+                                                         float(extent.height), 0.f, 1.f});
+                cmdbuf.setScissorWithCount(vk::Rect2D{{0, 0}, extent});
+                cmdbuf.draw(3, 1, 0, 0);
+                cmdbuf.endRendering();
+            });
+        }
+    }
+    // The game's pipelines' dynamic state must be emitted again after this pipeline.
+    scheduler.GetDynamicState().Invalidate();
+    // As CopyImage: the GPU's data, nothing to upload.
+    dst->flags |= (src->flags & VideoCore::ImageFlagBits::GpuModified);
+    dst->flags &= ~VideoCore::ImageFlagBits::Dirty;
+    return true;
+}
+
+vk::Pipeline Runtime::ColorToDepthPipeline(vk::Format depth_format, u32 variant) {
+    const std::pair key{depth_format, variant};
+    for (const auto& [k, pipeline] : color_copy_pipelines) {
+        if (k == key) {
+            return *pipeline;
+        }
+    }
+    const auto device = instance.GetDevice();
+    if (!color_copy_layout) {
+        const vk::DescriptorSetLayoutBinding binding{
+            .binding = 0,
+            .descriptorType = vk::DescriptorType::eSampledImage,
+            .descriptorCount = 1,
+            .stageFlags = vk::ShaderStageFlagBits::eFragment,
+        };
+        color_copy_set_layout = Check(device.createDescriptorSetLayoutUnique({
+            .flags = vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptorKHR,
+            .bindingCount = 1,
+            .pBindings = &binding,
+        }));
+        color_copy_layout = Check(device.createPipelineLayoutUnique({
+            .setLayoutCount = 1,
+            .pSetLayouts = &*color_copy_set_layout,
+        }));
+    }
+    const std::array<std::span<const u32>, 3> fragments{COLOR_TO_DEPTH_FRAG,
+                                                        COLOR_TO_DEPTH_BITS_FRAG,
+                                                        COLOR_TO_DEPTH_U16_FRAG};
+    const vk::ShaderModule vertex = CompileSPV(FS_TRI_VERT, device);
+    const vk::ShaderModule fragment = CompileSPV(fragments[variant], device);
+    const std::array stages{
+        vk::PipelineShaderStageCreateInfo{.stage = vk::ShaderStageFlagBits::eVertex,
+                                          .module = vertex, .pName = "main"},
+        vk::PipelineShaderStageCreateInfo{.stage = vk::ShaderStageFlagBits::eFragment,
+                                          .module = fragment, .pName = "main"},
+    };
+    const vk::PipelineVertexInputStateCreateInfo vertex_input{};
+    const vk::PipelineInputAssemblyStateCreateInfo input_assembly{
+        .topology = vk::PrimitiveTopology::eTriangleList,
+    };
+    const vk::PipelineViewportStateCreateInfo viewport_info{};
+    const vk::PipelineRasterizationStateCreateInfo raster{.lineWidth = 1.f};
+    const vk::PipelineMultisampleStateCreateInfo multisampling{
+        .rasterizationSamples = vk::SampleCountFlagBits::e1,
+    };
+    const vk::PipelineDepthStencilStateCreateInfo depth_state{
+        .depthTestEnable = true,
+        .depthWriteEnable = true,
+        .depthCompareOp = vk::CompareOp::eAlways,
+    };
+    const vk::PipelineColorBlendStateCreateInfo color_blending{};
+    const std::array dynamic_states{vk::DynamicState::eViewportWithCount,
+                                    vk::DynamicState::eScissorWithCount};
+    const vk::PipelineDynamicStateCreateInfo dynamic_info{
+        .dynamicStateCount = static_cast<u32>(dynamic_states.size()),
+        .pDynamicStates = dynamic_states.data(),
+    };
+    // The depth aspect is the only attachment (no stencil attachment: stencil left as it is).
+    const vk::PipelineRenderingCreateInfo rendering{.depthAttachmentFormat = depth_format};
+    auto pipeline = Check(device.createGraphicsPipelineUnique(
+        {}, vk::GraphicsPipelineCreateInfo{
+                .pNext = &rendering,
+                .stageCount = static_cast<u32>(stages.size()),
+                .pStages = stages.data(),
+                .pVertexInputState = &vertex_input,
+                .pInputAssemblyState = &input_assembly,
+                .pViewportState = &viewport_info,
+                .pRasterizationState = &raster,
+                .pMultisampleState = &multisampling,
+                .pDepthStencilState = &depth_state,
+                .pColorBlendState = &color_blending,
+                .pDynamicState = &dynamic_info,
+                .layout = *color_copy_layout,
+            }));
+    device.destroyShaderModule(vertex);
+    device.destroyShaderModule(fragment);
+    const vk::Pipeline result = *pipeline;
+    color_copy_pipelines.emplace_back(key, std::move(pipeline));
+    return result;
+}
+
 void Runtime::RecordDepthToColor(vk::ImageView depth, vk::ImageLayout depth_layout,
-                                 vk::ImageView color, bool uint_output, u32 width, u32 height) {
+                                 vk::ImageView color, DepthCopyOutput output, u32 width,
+                                 u32 height) {
     CreateDepthCopyPipelines();
-    scheduler.Record([pipeline = *depth_copy_pipelines[uint_output ? 1 : 0],
+    scheduler.Record([pipeline = *depth_copy_pipelines[static_cast<u32>(output)],
                       layout = *depth_copy_layout, depth, depth_layout, color, width,
                       height](vk::CommandBuffer cmdbuf) {
         const vk::DescriptorImageInfo in{.imageView = depth, .imageLayout = depth_layout};
@@ -771,15 +1008,22 @@ void Runtime::CreateDepthCopyPipelines() {
     };
     depth_copy_pipelines[0] = make(DEPTH_TO_COLOR_COMP);
     depth_copy_pipelines[1] = make(DEPTH_TO_COLOR_UINT_COMP);
+    // R16 storage images need shaderStorageImageExtendedFormats (enabled where the device has it).
+    depth_copy_r16 = instance.GetPhysicalDevice().getFeatures().shaderStorageImageExtendedFormats;
+    if (depth_copy_r16) {
+        depth_copy_pipelines[2] = make(DEPTH_TO_COLOR_R16_COMP);
+        depth_copy_pipelines[3] = make(DEPTH_TO_COLOR_R16_UINT_COMP);
+    }
 }
 
 vk::ImageView Runtime::DepthCopyView(const VideoCore::Image& image, vk::Format format,
-                                     vk::ImageAspectFlags aspect) {
+                                     vk::ImageAspectFlags aspect, u32 level, u32 layer) {
     const vk::Image handle = image.GetImage();
     DepthCopyViewEntry* oldest = &depth_copy_views[0];
     for (auto& entry : depth_copy_views) {
         if (entry.view && entry.image == handle && entry.uid == image.image_uid &&
-            entry.format == format && entry.aspect == aspect) {
+            entry.format == format && entry.aspect == aspect && entry.level == level &&
+            entry.layer == layer) {
             entry.last_use = ++depth_copy_uses;
             return entry.view;
         }
@@ -796,11 +1040,13 @@ vk::ImageView Runtime::DepthCopyView(const VideoCore::Image& image, vk::Format f
         .uid = image.image_uid,
         .format = format,
         .aspect = aspect,
+        .level = level,
+        .layer = layer,
         .view = Check(device.createImageView({
             .image = handle,
             .viewType = vk::ImageViewType::e2D,
             .format = format,
-            .subresourceRange = {aspect, 0, 1, 0, 1},
+            .subresourceRange = {aspect, level, 1, layer, 1},
         })),
         .last_use = ++depth_copy_uses,
     };
@@ -809,7 +1055,7 @@ vk::ImageView Runtime::DepthCopyView(const VideoCore::Image& image, vk::Format f
 
 void Runtime::CopyDepthStencil(VideoCore::Image* src, VideoCore::Image* dst,
                                const VideoCore::SubresourceRange& sub_range) {
-    scheduler.EndRendering();
+    scheduler.EndRendering(GpuSavings::PassBreak::Transfer);
 
     bool needs_flush =
         Transit(src, vk::ImageLayout::eTransferSrcOptimal, vk::PipelineStageFlagBits2::eCopy,
@@ -854,7 +1100,7 @@ void Runtime::ResolveImage(VideoCore::Image* src, VideoCore::Image* dst,
                            const VideoCore::SubresourceRange& src_range,
                            const VideoCore::SubresourceRange& dst_range) {
     SetBackingSamples(dst, 1, false);
-    scheduler.EndRendering();
+    scheduler.EndRendering(GpuSavings::PassBreak::Transfer);
 
     const bool needs_resolve = src->backing->num_samples != 1;
     const auto dst_stage =
@@ -931,7 +1177,7 @@ void Runtime::ResolveImage(VideoCore::Image* src, VideoCore::Image* dst,
 
 void Runtime::ClearImage(VideoCore::Image* dst, const VideoCore::SubresourceRange& range,
                          const vk::ClearValue& clear_value) {
-    scheduler.EndRendering();
+    scheduler.EndRendering(GpuSavings::PassBreak::Transfer);
 
     const bool needs_flush =
         Transit(dst, vk::ImageLayout::eTransferDstOptimal, vk::PipelineStageFlagBits2::eClear,
@@ -988,7 +1234,7 @@ void Runtime::SetBackingSamples(VideoCore::Image* image, u32 num_samples, bool c
     }
 
     if (copy_backing) {
-        scheduler.EndRendering();
+        scheduler.EndRendering(GpuSavings::PassBreak::Transfer);
         ASSERT(image->info.resources.levels == 1 && image->info.resources.layers == 1);
 
         // Transition current backing to shader read layout
@@ -1169,7 +1415,36 @@ void Runtime::FlushBarriers() {
         return;
     }
 
-    scheduler.EndRendering();
+    // 0.4.4 beta 19: a barrier that ends an open pass, and what it waits for (frame statistics).
+    if (scheduler.IsRendering()) {
+        using GpuSavings::BarrierWait;
+        using Stage = vk::PipelineStageFlagBits2;
+        vk::PipelineStageFlags2 stages = memory_barrier.srcStageMask;
+        for (const auto& barrier : image_barriers) {
+            stages |= barrier.srcStageMask;
+        }
+        const auto count = [&](BarrierWait wait, vk::PipelineStageFlags2 mask) {
+            if (stages & mask) {
+                GpuSavings::Count(GpuSavings::Get().pass_barrier_waits[static_cast<u32>(wait)]);
+                stages &= ~mask;
+            }
+        };
+        count(BarrierWait::GraphicsShaders,
+              Stage::eVertexShader | Stage::eFragmentShader | Stage::eGeometryShader |
+                  Stage::eTessellationControlShader | Stage::eTessellationEvaluationShader |
+                  Stage::ePreRasterizationShaders | Stage::eVertexInput | Stage::eIndexInput |
+                  Stage::eVertexAttributeInput | Stage::eDrawIndirect);
+        count(BarrierWait::Attachments, Stage::eColorAttachmentOutput |
+                                            Stage::eEarlyFragmentTests |
+                                            Stage::eLateFragmentTests);
+        count(BarrierWait::Compute, Stage::eComputeShader);
+        count(BarrierWait::Transfer, Stage::eTransfer | Stage::eCopy | Stage::eBlit |
+                                         Stage::eClear | Stage::eResolve);
+        count(BarrierWait::Host, Stage::eHost);
+        count(BarrierWait::Other, ~vk::PipelineStageFlags2{});
+    }
+    scheduler.EndRendering(dep_info.imageMemoryBarrierCount ? GpuSavings::PassBreak::ImageBarrier
+                                                            : GpuSavings::PassBreak::BufferBarrier);
 
     // Repeated area transitions exposed a crash inside the NVIDIA driver while an image
     // pipelineBarrier2 was being emitted by the deferred VkRecorder thread. Upstream shadPS4

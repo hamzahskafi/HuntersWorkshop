@@ -275,9 +275,14 @@ void Scheduler::BeginRendering(const RenderState& new_state) {
 }
 
 void Scheduler::EndRendering() {
+    EndRendering(GpuSavings::PassBreak::Other);
+}
+
+void Scheduler::EndRendering(GpuSavings::PassBreak why) {
     if (!is_rendering) {
         return;
     }
+    pass_break = why;
     is_rendering = false;
     Record([](vk::CommandBuffer cmdbuf) { cmdbuf.endRendering(); });
 }
@@ -1032,7 +1037,7 @@ void Scheduler::SubmitExecution(SubmitInfo& info) {
         on_submit(info);
     }
 
-    EndRendering();
+    EndRendering(GpuSavings::PassBreak::Submission);
     if (auto* profiler = GpuProfiler::Get(); profiler && profiler->Records(this)) {
         // Until the next submission's first timestamp: mostly the GPU waiting for it.
         profiler->Mark(0x5B317ull, [] { return std::string{"(between submissions: GPU idle)"}; });
@@ -1128,7 +1133,7 @@ void Scheduler::SubmitAsync(SubmitInfo& info) {
     if (on_submit) {
         on_submit(info);
     }
-    EndRendering();
+    EndRendering(GpuSavings::PassBreak::Submission);
     if (auto* profiler = GpuProfiler::Get(); profiler && profiler->Records(this)) {
         profiler->Mark(0x5B317ull, [] { return std::string{"(between submissions: GPU idle)"}; });
     }

@@ -158,7 +158,7 @@ void SceneTargets::NativeAccess(VideoCore::Image& image, vk::AccessFlags2 access
 }
 void SceneTargets::Transition(Entry& e, vk::ImageAspectFlags aspect, vk::ImageLayout layout,
                                vk::PipelineStageFlags2 stages, vk::AccessFlags2 access) {
-    scheduler.EndRendering();
+    scheduler.EndRendering(Vulkan::GpuSavings::PassBreak::SceneProxy);
     const vk::ImageMemoryBarrier2 barrier{
         .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
         .srcAccessMask = vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite,
@@ -173,7 +173,7 @@ void SceneTargets::Transition(Entry& e, vk::ImageAspectFlags aspect, vk::ImageLa
 }
 void SceneTargets::Copy(Entry& e, VideoCore::Image& original, bool to_native) {
     copying = true;
-    scheduler.EndRendering();
+    scheduler.EndRendering(Vulkan::GpuSavings::PassBreak::SceneProxy);
     const Runtime::TransferMark mark{runtime, to_native ? "scene proxy resolve" : "scene proxy fill",
                                      original};
     if (debug) {
@@ -489,7 +489,7 @@ bool SceneTargets::CopyProxy(VideoCore::ImageId src_id, VideoCore::ImageId dst_i
     const bool shader_copy = depth_to_color && Runtime::DepthCopyShaderOn() &&
                              (from.image.image_ci.usage & vk::ImageUsageFlagBits::eSampled) &&
                              (to_usage & vk::ImageUsageFlagBits::eStorage);
-    scheduler.EndRendering();
+    scheduler.EndRendering(Vulkan::GpuSavings::PassBreak::SceneProxy);
     const Runtime::TransferMark mark{runtime, "scene proxy copy", dst};
     if (!to) {
         auto& slot = entries[Key(dst.image_uid, 0)];
@@ -530,7 +530,8 @@ bool SceneTargets::CopyProxy(VideoCore::ImageId src_id, VideoCore::ImageId dst_i
             view(from.image, from_format, vk::ImageAspectFlagBits::eDepth);
         const vk::ImageView color_view =
             view(to->image, to_format, vk::ImageAspectFlagBits::eColor);
-        runtime.RecordDepthToColor(depth_view, depth_layout, color_view, false, extent.width,
+        runtime.RecordDepthToColor(depth_view, depth_layout, color_view,
+                                   Runtime::DepthCopyOutput::R32Float, extent.width,
                                    extent.height);
         scheduler.DeferOperation([device, depth_view, color_view] {
             device.destroyImageView(depth_view);

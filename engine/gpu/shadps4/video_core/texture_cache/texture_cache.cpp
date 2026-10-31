@@ -481,7 +481,7 @@ bool TextureCache::StoreTiledImage(ImageId image_id) {
                             std::min(mip.height, std::max(info.size.height >> level, 1u)), 1},
         });
     }
-    scheduler.EndRendering();
+    scheduler.EndRendering(Vulkan::GpuSavings::PassBreak::TextureCache);
     tile_manager.TileImage(image, copies, host.buffer, host.offset, /*extent_only=*/true);
     runtime.FlushBarriers();
     // Waited for here: the image still watches its pages until the store has landed (a store
@@ -1369,7 +1369,7 @@ void TextureCache::RefreshImage(Image& image) {
                           : keep_hashes ? "uploaded from the buffer cache, hashes kept"
                                         : "uploaded from the buffer cache");
 
-    scheduler.EndRendering();
+    scheduler.EndRendering(Vulkan::GpuSavings::PassBreak::TextureCache);
 
     std::optional<BbStats::Timer> part_timer{std::in_place, BbStats::t_refresh_obtain};
     BbSections::Scope obtain_scope{BbSections::RefreshObtain};
