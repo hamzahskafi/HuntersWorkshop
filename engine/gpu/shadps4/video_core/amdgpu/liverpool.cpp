@@ -517,10 +517,17 @@ bool PipelinedOpcode(PM4ItOpcode opcode) {
 
 // 0.4.4 beta 20: BB_HONEST_LABELS fences queued with the bytes they write and whether their value
 // is known (PendingFenceValue; the engine map's fence-1). BB_FENCE_HALF_CHECK=0: as before.
+// 0.4.4 beta 21: said once when off, the first time it is asked (a static's initializer runs on
+// one thread; the others wait for it).
 static bool FenceSizes() {
     static const bool on = [] {
         const char* env = std::getenv("BB_FENCE_HALF_CHECK");
-        return !(env && env[0] == '0');
+        const bool enabled = !(env && env[0] == '0');
+        if (!enabled) {
+            std::printf("GPU: pending fences queued without their size and whether their value "
+                        "is known, as before 0.4.4 beta 20 (BB_FENCE_HALF_CHECK=0)\n");
+        }
+        return enabled;
     }();
     return on;
 }
