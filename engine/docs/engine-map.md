@@ -12,11 +12,11 @@ What became of each idea and bug below; the measurements and reasons are in `com
 | `seg-1` | dropped | beta 14: a pass ended and begun again without a barrier costs a few microseconds on the tester's GPU (GPU busy unchanged with half the cuts); Vulkan also wants the suspending flag when the pass begins, before a cut is known |
 | `renderer-7` | done, beta 21 | one breadcrumb per command; both cost 0.10 ms a frame (beta 20); `BB_BREADCRUMBS=both` |
 | `renderer-3` | dropped | beta 20: 55 depth-view changes a frame on colour passes, none with a barrier (no image moved to a depth layout); restarts are cheap (`seg-1`) |
-| `renderer-6` | open | the toggle test (no code) not run yet |
+| `renderer-6` | closed, beta 22 test | toggle bit 2048 live at the lamp spot: the same barriers and stage B load either way, FPS within the spread; the rounding stays |
 | `mem-4` | open | at most about 0.1 ms; the GX region's reads in place over PCIe unmeasured |
 | `renderer-4` | dropped | 3 a frame (beta 20), a few microseconds each |
 | `idle-1` | open | CPU only |
-| `upscale-2`, `upscale-3` | open | reduced presets only |
+| `upscale-2`, `upscale-3` | open, measured | a 1080p output always takes the live path; at Quality the proxy resolves and fills cost 0.29 ms a frame (beta 22 test runs) |
 | `pipe-1`, `asc-2`, `rt-1` | open | CPU-bound systems only |
 | `shader-2` | open | AMD and Linux Intel only |
 | `renderer-5`, `shader-5`, `shader-6`, `mem-3`, `upscale-4` | open | small or near zero |
