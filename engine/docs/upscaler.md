@@ -21,8 +21,9 @@ The sections after this one are the record of the work from the first frame anal
   Ultra Performance x3 and Custom (`render_scale`, 1.0-3.0). TAA always renders at the output.
 - **Render size:** outputs other than 1920x1080 (TAA aside) get the game's render size patched at
   the start (`live_resolution=0`, the default; a preset or output change then needs a restart), as
-  in "Startup patch is the default again" below; `live_resolution=1`, or `auto` by a GPU check,
-  takes the live path.
+  in "Startup patch is the default again" below; `live_resolution=1` takes the live path. Off is the
+  default and the recommended choice; `auto` (a GPU check) is no longer offered from 0.4.4 beta 25c
+  and reads as off.
 - **Fallbacks:** before the first frame, `dlss` without an RTX GPU, the driver's NGX or
   `nvngx_dlss` becomes FSR 3.1; `fsr411` that cannot run here becomes FSR 4, and FSR 4 on a GPU
   that cannot run it FSR 3.1. A fatal failure in play falls back the same way (FSR 4.1.1 to FSR 4

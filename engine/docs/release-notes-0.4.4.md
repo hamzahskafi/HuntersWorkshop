@@ -121,6 +121,11 @@ What changed since 0.4.3, for the release page. The engine work behind each line
   older CNN models (DLSS 310.6.0; F "should not be used"). A saved E or F runs Auto, NVIDIA's model
   for each quality mode (K for DLAA, Quality and Balanced, M for Performance, L for Ultra
   Performance).
+- **Live resolution change: Off or On, Off recommended.** The "Auto (by GPU)" choice is gone from the
+  launcher and the in-game menu: it turned the live path on for strong GPUs, which then ran the
+  game's post-processing at 1080p at every preset, and only helps someone who changes resolution in
+  the game. Off (the default) renders everything at the preset's size; a saved Auto runs Off and the
+  log says so.
 - **Co-op: no freeze when a session ends.** Leaving a room (or the game closing its online session)
   asked the server to take the player out on the game's own thread and waited for the answer, up to
   8 seconds on a slow or unreachable connection, with the game stopped meanwhile. The request now

@@ -356,9 +356,10 @@ def main():
         live = '0'
         if scaled_output:
             live = os.environ.get('BB_LIVE_RES') or settings_value(config, 'live_resolution') or '0'
+            # 0.4.4 beta 25c: Off or On; "auto" (a GPU check) is no longer offered and reads as off.
             if live == 'auto':
-                caps = out / 'bb-gpu-capabilities.exe'
-                live = run([caps, '--live-resolution'], capture=True, check=False) or '0'
+                print('Settings: live_resolution=auto is no longer offered; off (recommended)', flush=True)
+                live = '0'
             live = '1' if live == '1' else '0'
         if live == '1':
             print(f'Output {scaled_output}: live resolution changes (live_resolution=0: startup patch)')

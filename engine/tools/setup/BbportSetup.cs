@@ -78,7 +78,7 @@ class SetupForm : Form {
         new Choice("Balanced (x1.7)", "2"), new Choice("Performance (x2.0)", "3"),
         new Choice("Ultra Performance (x3.0)", "4") };
     static readonly Choice[] LiveModes = {
-        new Choice("Off (faster)", "0"), new Choice("Auto (by GPU)", "auto"), new Choice("On", "1") };
+        new Choice("Off (recommended)", "0"), new Choice("On", "1") };
     static readonly Choice[] ModelDetail = {
         new Choice("Highest (-2)", "-2"), new Choice("As in the game", "0"),
         new Choice("Lower (1)", "1"), new Choice("Lowest (2)", "2") };

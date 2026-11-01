@@ -123,23 +123,14 @@ constexpr Entry kSpanish[] = {
      "preajuste fija el tamaño de la escena respecto a la salida: 4K Performance = "
      "1920x1080. Cambiar el tamaño reinicia el historial de FSR y puede causar una breve "
      "pausa."},
-    {"Auto (based on GPU)",
-     "Automático (según la GPU)"},
-    {"Off (faster)",
-     "Desactivado (más rápido)"},
+    {"Off (recommended)",
+     "Desactivado (recomendado)"},
     {"On",
      "Activado"},
     {"Live resolution changes",
      "Cambio de resolución en vivo"},
-    {"On: output resolution and preset change without restarting, but game post-processing "
-     "stays at 1080p, which is noticeably slower on Steam Deck and older GPUs. Off: "
-     "everything renders at the preset resolution, and changes require a restart. Auto "
-     "enables this on powerful discrete GPUs. Applies after restarting the game.",
-     "Activado: la resolución de salida y el preajuste cambian sin reiniciar, pero el "
-     "posprocesado del juego se queda en 1080p, lo que es notablemente más lento en Steam "
-     "Deck y GPU antiguas. Desactivado: todo se renderiza a la resolución del preajuste y "
-     "los cambios requieren reiniciar. Automático lo activa en GPU dedicadas potentes. Se "
-     "aplica tras reiniciar el juego."},
+    {"On: output resolution and preset change without restarting, but game post-processing stays at 1080p, which is noticeably slower on Steam Deck and older GPUs. Off (recommended): everything renders at the preset resolution, and changes require a restart. Applies after restarting the game.",
+     "Activado: la resolución de salida y el preajuste cambian sin reiniciar, pero el posprocesado del juego se queda en 1080p, lo que es notablemente más lento en Steam Deck y GPU antiguas. Desactivado (recomendado): todo se renderiza a la resolución del preajuste y los cambios requieren reiniciar. Se aplica tras reiniciar el juego."},
     {"Game effects (restart required)",
      "Efectos del juego (requiere reinicio)"},
     {"Highest (-2)",
@@ -390,23 +381,14 @@ constexpr Entry kPortugueseBrazil[] = {
      "O tamanho do quadro final e da interface muda no próximo quadro. A predefinição define "
      "o tamanho da cena em relação à saída: 4K Performance = 1920x1080. Mudar o tamanho "
      "redefine o histórico do FSR e pode causar uma breve pausa."},
-    {"Auto (based on GPU)",
-     "Automático (conforme a GPU)"},
-    {"Off (faster)",
-     "Desligada (mais rápido)"},
+    {"Off (recommended)",
+     "Desligada (recomendado)"},
     {"On",
      "Ligada"},
     {"Live resolution changes",
      "Mudança de resolução em tempo real"},
-    {"On: output resolution and preset change without restarting, but game post-processing "
-     "stays at 1080p, which is noticeably slower on Steam Deck and older GPUs. Off: "
-     "everything renders at the preset resolution, and changes require a restart. Auto "
-     "enables this on powerful discrete GPUs. Applies after restarting the game.",
-     "Ligada: a resolução de saída e a predefinição mudam sem reiniciar, mas o "
-     "pós-processamento do jogo fica em 1080p, o que é bem mais lento no Steam Deck e em "
-     "GPUs antigas. Desligada: tudo é renderizado na resolução da predefinição, e as "
-     "mudanças exigem reinício. Automático a liga em GPUs dedicadas potentes. Aplica-se após "
-     "reiniciar o jogo."},
+    {"On: output resolution and preset change without restarting, but game post-processing stays at 1080p, which is noticeably slower on Steam Deck and older GPUs. Off (recommended): everything renders at the preset resolution, and changes require a restart. Applies after restarting the game.",
+     "Ligada: a resolução de saída e a predefinição mudam sem reiniciar, mas o pós-processamento do jogo fica em 1080p, o que é bem mais lento no Steam Deck e em GPUs antigas. Desligada (recomendado): tudo é renderizado na resolução da predefinição, e as mudanças exigem reinício. Aplica-se após reiniciar o jogo."},
     {"Game effects (restart required)",
      "Efeitos do jogo (requer reinício)"},
     {"Highest (-2)",
@@ -659,23 +641,14 @@ constexpr Entry kFrench[] = {
      "La taille de l'image finale et de l'interface change à l'image suivante. Le préréglage "
      "fixe la taille de la scène par rapport à la sortie : 4K Performance = 1920x1080. "
      "Changer de taille réinitialise l'historique FSR et peut provoquer une brève pause."},
-    {"Auto (based on GPU)",
-     "Auto (selon le GPU)"},
-    {"Off (faster)",
-     "Désactivé (plus rapide)"},
+    {"Off (recommended)",
+     "Désactivé (recommandé)"},
     {"On",
      "Activé"},
     {"Live resolution changes",
      "Changement de résolution à la volée"},
-    {"On: output resolution and preset change without restarting, but game post-processing "
-     "stays at 1080p, which is noticeably slower on Steam Deck and older GPUs. Off: "
-     "everything renders at the preset resolution, and changes require a restart. Auto "
-     "enables this on powerful discrete GPUs. Applies after restarting the game.",
-     "Activé : la résolution de sortie et le préréglage changent sans redémarrage, mais le "
-     "post-traitement du jeu reste en 1080p, ce qui est nettement plus lent sur Steam Deck "
-     "et les GPU anciens. Désactivé : tout est rendu à la résolution du préréglage, et les "
-     "changements nécessitent un redémarrage. Auto l'active sur les GPU dédiés puissants. "
-     "S'applique après le redémarrage du jeu."},
+    {"On: output resolution and preset change without restarting, but game post-processing stays at 1080p, which is noticeably slower on Steam Deck and older GPUs. Off (recommended): everything renders at the preset resolution, and changes require a restart. Applies after restarting the game.",
+     "Activé : la résolution de sortie et le préréglage changent sans redémarrage, mais le post-traitement du jeu reste en 1080p, ce qui est nettement plus lent sur Steam Deck et les GPU anciens. Désactivé (recommandé) : tout est rendu à la résolution du préréglage, et les changements nécessitent un redémarrage. S'applique après le redémarrage du jeu."},
     {"Game effects (restart required)",
      "Effets du jeu (redémarrage requis)"},
     {"Highest (-2)",
@@ -928,23 +901,14 @@ constexpr Entry kGerman[] = {
      "Die Voreinstellung legt die Szenengröße relativ zur Ausgabe fest: 4K Performance = "
      "1920x1080. Eine Größenänderung setzt den FSR-Verlauf zurück und kann eine kurze Pause "
      "verursachen."},
-    {"Auto (based on GPU)",
-     "Auto (je nach GPU)"},
-    {"Off (faster)",
-     "Aus (schneller)"},
+    {"Off (recommended)",
+     "Aus (empfohlen)"},
     {"On",
      "An"},
     {"Live resolution changes",
      "Auflösung live ändern"},
-    {"On: output resolution and preset change without restarting, but game post-processing "
-     "stays at 1080p, which is noticeably slower on Steam Deck and older GPUs. Off: "
-     "everything renders at the preset resolution, and changes require a restart. Auto "
-     "enables this on powerful discrete GPUs. Applies after restarting the game.",
-     "An: Ausgabeauflösung und Voreinstellung ändern sich ohne Neustart, aber die "
-     "Nachbearbeitung des Spiels bleibt bei 1080p, was auf dem Steam Deck und älteren GPUs "
-     "spürbar langsamer ist. Aus: Alles wird in der Auflösung der Voreinstellung gerendert, "
-     "Änderungen erfordern einen Neustart. Auto aktiviert dies auf leistungsstarken "
-     "dedizierten GPUs. Gilt nach einem Neustart des Spiels."},
+    {"On: output resolution and preset change without restarting, but game post-processing stays at 1080p, which is noticeably slower on Steam Deck and older GPUs. Off (recommended): everything renders at the preset resolution, and changes require a restart. Applies after restarting the game.",
+     "An: Ausgabeauflösung und Voreinstellung ändern sich ohne Neustart, aber die Nachbearbeitung des Spiels bleibt bei 1080p, was auf dem Steam Deck und älteren GPUs spürbar langsamer ist. Aus (empfohlen): Alles wird in der Auflösung der Voreinstellung gerendert, Änderungen erfordern einen Neustart. Gilt nach einem Neustart des Spiels."},
     {"Game effects (restart required)",
      "Spieleffekte (Neustart erforderlich)"},
     {"Highest (-2)",
@@ -1197,23 +1161,14 @@ constexpr Entry kItalian[] = {
      "successivo. Il preset imposta la dimensione della scena rispetto all'uscita: 4K "
      "Performance = 1920x1080. Cambiare dimensione azzera la cronologia di FSR e può causare "
      "una breve pausa."},
-    {"Auto (based on GPU)",
-     "Auto (in base alla GPU)"},
-    {"Off (faster)",
-     "Disattivato (più veloce)"},
+    {"Off (recommended)",
+     "Disattivato (consigliato)"},
     {"On",
      "Attivato"},
     {"Live resolution changes",
      "Cambio di risoluzione al volo"},
-    {"On: output resolution and preset change without restarting, but game post-processing "
-     "stays at 1080p, which is noticeably slower on Steam Deck and older GPUs. Off: "
-     "everything renders at the preset resolution, and changes require a restart. Auto "
-     "enables this on powerful discrete GPUs. Applies after restarting the game.",
-     "Attivato: risoluzione di uscita e preset cambiano senza riavvio, ma la "
-     "post-elaborazione del gioco resta a 1080p, cosa nettamente più lenta su Steam Deck e "
-     "GPU meno recenti. Disattivato: tutto viene renderizzato alla risoluzione del preset e "
-     "le modifiche richiedono un riavvio. Auto lo attiva sulle GPU dedicate potenti. Si "
-     "applica dopo il riavvio del gioco."},
+    {"On: output resolution and preset change without restarting, but game post-processing stays at 1080p, which is noticeably slower on Steam Deck and older GPUs. Off (recommended): everything renders at the preset resolution, and changes require a restart. Applies after restarting the game.",
+     "Attivato: risoluzione di uscita e preset cambiano senza riavvio, ma la post-elaborazione del gioco resta a 1080p, cosa nettamente più lenta su Steam Deck e GPU meno recenti. Disattivato (consigliato): tutto viene renderizzato alla risoluzione del preset e le modifiche richiedono un riavvio. Si applica dopo il riavvio del gioco."},
     {"Game effects (restart required)",
      "Effetti di gioco (richiede riavvio)"},
     {"Highest (-2)",
@@ -1463,23 +1418,14 @@ constexpr Entry kPolish[] = {
      "Rozmiar gotowej klatki i interfejsu zmienia się od następnej klatki. Profil ustala "
      "rozmiar sceny względem wyjścia: 4K Performance = 1920x1080. Zmiana rozmiaru resetuje "
      "historię FSR i może spowodować krótką pauzę."},
-    {"Auto (based on GPU)",
-     "Auto (zależnie od GPU)"},
-    {"Off (faster)",
-     "Wyłączona (szybciej)"},
+    {"Off (recommended)",
+     "Wyłączona (zalecane)"},
     {"On",
      "Włączona"},
     {"Live resolution changes",
      "Zmiana rozdzielczości na żywo"},
-    {"On: output resolution and preset change without restarting, but game post-processing "
-     "stays at 1080p, which is noticeably slower on Steam Deck and older GPUs. Off: "
-     "everything renders at the preset resolution, and changes require a restart. Auto "
-     "enables this on powerful discrete GPUs. Applies after restarting the game.",
-     "Włączona: rozdzielczość wyjściowa i profil zmieniają się bez restartu, ale "
-     "postprocessing gry zostaje w 1080p, co na Steam Decku i starszych GPU jest wyraźnie "
-     "wolniejsze. Wyłączona: wszystko jest renderowane w rozdzielczości profilu, a zmiany "
-     "wymagają restartu. Auto włącza ją na mocnych dedykowanych GPU. Działa po ponownym "
-     "uruchomieniu gry."},
+    {"On: output resolution and preset change without restarting, but game post-processing stays at 1080p, which is noticeably slower on Steam Deck and older GPUs. Off (recommended): everything renders at the preset resolution, and changes require a restart. Applies after restarting the game.",
+     "Włączona: rozdzielczość wyjściowa i profil zmieniają się bez restartu, ale postprocessing gry zostaje w 1080p, co na Steam Decku i starszych GPU jest wyraźnie wolniejsze. Wyłączona (zalecane): wszystko jest renderowane w rozdzielczości profilu, a zmiany wymagają restartu. Działa po ponownym uruchomieniu gry."},
     {"Game effects (restart required)",
      "Efekty gry (wymagany restart)"},
     {"Highest (-2)",
@@ -1730,23 +1676,14 @@ constexpr Entry kTurkish[] = {
      "Son karenin ve arayüzün boyutu bir sonraki karede değişir. Ön ayar, sahne boyutunu "
      "çıkışa göre belirler: 4K Performance = 1920x1080. Boyutu değiştirmek FSR geçmişini "
      "sıfırlar ve kısa bir duraklamaya neden olabilir."},
-    {"Auto (based on GPU)",
-     "Otomatik (GPU'ya göre)"},
-    {"Off (faster)",
-     "Kapalı (daha hızlı)"},
+    {"Off (recommended)",
+     "Kapalı (önerilen)"},
     {"On",
      "Açık"},
     {"Live resolution changes",
      "Anlık çözünürlük değişimi"},
-    {"On: output resolution and preset change without restarting, but game post-processing "
-     "stays at 1080p, which is noticeably slower on Steam Deck and older GPUs. Off: "
-     "everything renders at the preset resolution, and changes require a restart. Auto "
-     "enables this on powerful discrete GPUs. Applies after restarting the game.",
-     "Açık: çıkış çözünürlüğü ve ön ayar yeniden başlatmadan değişir, ancak oyunun son "
-     "işlemesi 1080p'de kalır; bu, Steam Deck'te ve eski GPU'larda belirgin şekilde daha "
-     "yavaştır. Kapalı: her şey ön ayarın çözünürlüğünde işlenir ve değişiklikler yeniden "
-     "başlatma gerektirir. Otomatik, bunu güçlü harici GPU'larda açar. Oyun yeniden "
-     "başlatıldıktan sonra uygulanır."},
+    {"On: output resolution and preset change without restarting, but game post-processing stays at 1080p, which is noticeably slower on Steam Deck and older GPUs. Off (recommended): everything renders at the preset resolution, and changes require a restart. Applies after restarting the game.",
+     "Açık: çıkış çözünürlüğü ve ön ayar yeniden başlatmadan değişir, ancak oyunun son işlemesi 1080p'de kalır; bu, Steam Deck'te ve eski GPU'larda belirgin şekilde daha yavaştır. Kapalı (önerilen): her şey ön ayarın çözünürlüğünde işlenir ve değişiklikler yeniden başlatma gerektirir. Oyun yeniden başlatıldıktan sonra uygulanır."},
     {"Game effects (restart required)",
      "Oyun efektleri (yeniden başlatma gerekir)"},
     {"Highest (-2)",
@@ -1957,11 +1894,11 @@ constexpr Entry kChinese[] = {
     {"Output resolution", "输出分辨率"},
     {"Size of the final frame and UI. The preset sets the scene size relative to the output: 4K Performance = 1920x1080. Applies after restarting the game.", "最终画面及界面的尺寸。质量档位决定场景相对输出的渲染分辨率，例如 4K 输出的性能档为 1920x1080。需重启游戏后生效。"},
     {"The final frame and UI size changes at the next frame boundary. The preset sets the scene size relative to the output: 4K Performance = 1920x1080. Changing the size resets FSR history and may cause a brief pause.", "最终画面和界面尺寸会在下一帧边界切换。质量档位决定场景相对输出的渲染分辨率，例如 4K 输出的性能档为 1920x1080。切换尺寸会重置 FSR 历史数据，可能短暂停顿。"},
-    {"Auto (based on GPU)", "自动（根据显卡）"},
-    {"Off (faster)", "关闭（速度更快）"},
+    {"Off (recommended)", "关闭（首选）"},
     {"On", "开启"},
     {"Live resolution changes", "实时切换分辨率"},
-    {"On: output resolution and preset change without restarting, but game post-processing stays at 1080p, which is noticeably slower on Steam Deck and older GPUs. Off: everything renders at the preset resolution, and changes require a restart. Auto enables this on powerful discrete GPUs. Applies after restarting the game.", "开启：可直接切换输出分辨率和质量档位，但游戏后处理固定在 1080p，在 Steam Deck 和较旧显卡上明显更慢。关闭：全部按档位分辨率渲染，修改后需重启。自动：在性能较强的独立显卡上开启。此开关需重启游戏后生效。"},
+    {"On: output resolution and preset change without restarting, but game post-processing stays at 1080p, which is noticeably slower on Steam Deck and older GPUs. Off (recommended): everything renders at the preset resolution, and changes require a restart. Applies after restarting the game.",
+     "开启：可直接切换输出分辨率和质量档位，但游戏后处理固定在 1080p，在 Steam Deck 和较旧显卡上明显更慢。关闭（首选）：全部按档位分辨率渲染，修改后需重启。此开关需重启游戏后生效。"},
     {"Game effects (restart required)", "游戏特效（需重启游戏）"},
     {"Highest (-2)", "最高（-2）"},
     {"Game default", "游戏默认"},

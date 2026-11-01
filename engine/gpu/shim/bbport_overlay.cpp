@@ -1366,14 +1366,14 @@ void OutputSection() {
         }
     }
     if (const char* label = Item("Live resolution changes", "Смена разрешения на лету")) {
-        const char* live_modes[] = {BbSettings::MenuText("Auto (based on GPU)", "Авто (по видеокарте)"),
-                                    BbSettings::MenuText("Off (faster)", "Выключена (быстрее)"),
+        // 0.4.4 beta 25c: Off (recommended) or On; no "Auto".
+        const char* live_modes[] = {BbSettings::MenuText("Off (recommended)", "Выключена (рекомендуется)"),
                                     BbSettings::MenuText("On", "Включена")};
-        const int live = s.live_resolution + 1;
+        const int live = std::clamp(s.live_resolution.load(), 0, 1);
         if (ImGui::BeginCombo(label, live_modes[live])) {
-            for (int i = 0; i < 3; ++i) {
+            for (int i = 0; i < 2; ++i) {
                 if (ImGui::Selectable(live_modes[i], i == live)) {
-                    Store(s.live_resolution, i - 1, true);
+                    Store(s.live_resolution, i, true);
                 }
             }
             ImGui::EndCombo();
@@ -1381,12 +1381,12 @@ void OutputSection() {
         Hint(BbSettings::MenuText(
             "On: output resolution and preset change without restarting, but game post-processing "
             "stays at 1080p, which is noticeably slower on Steam Deck and older GPUs. "
-            "Off: everything renders at the preset resolution, and changes require a restart. Auto "
-            "enables this on powerful discrete GPUs. Applies after restarting the game.",
+            "Off (recommended): everything renders at the preset resolution, and changes require a "
+            "restart. Applies after restarting the game.",
             "Включена: разрешение вывода и пресет меняются без перезапуска, но постобработка игры "
             "остаётся в 1080p — на Steam Deck и старых видеокартах это заметно медленнее. "
-            "Выключена: всё рисуется в разрешении пресета, смена — через перезапуск. Авто включает "
-            "её на мощных дискретных видеокартах. Применяется после перезапуска игры."));
+            "Выключена (рекомендуется): всё рисуется в разрешении пресета, смена — через "
+            "перезапуск. Применяется после перезапуска игры."));
     }
 }
 

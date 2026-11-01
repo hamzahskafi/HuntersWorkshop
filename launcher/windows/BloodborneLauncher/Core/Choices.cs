@@ -294,8 +294,8 @@
 
         public static readonly Choice[] LiveResolution =
         {
-            new(L.T("Auto (by GPU)"), "auto"),
-            new(L.T("Off (faster)"), "0"),
+            // 0.4.4 beta 25c: Off (recommended) or On; a saved "auto" shows as Off, as the engine reads it.
+            new(L.T("Off (recommended)"), "0"),
             new(L.T("On"), "1"),
         };
 

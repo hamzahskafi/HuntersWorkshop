@@ -114,8 +114,7 @@ EN = {
     "Смена разрешения на лету": "Live resolution changes",
     "Без перезапуска, но медленнее на Steam Deck и старых GPU":
         "No restart needed, but slower on the Steam Deck and older GPUs",
-    "Авто (по видеокарте)": "Auto (by GPU)",
-    "Выключена (быстрее)": "Off (faster)",
+    "Выключена (рекомендуется)": "Off (recommended)",
     "Включена": "On",
     "Режим показа кадров": "Present mode",
     "Разрешить HDR": "Allow HDR",
@@ -326,8 +325,7 @@ PT_BR = {
     "Смена разрешения на лету": "Alteração de resolução em tempo real",
     "Без перезапуска, но медленнее на Steam Deck и старых GPU":
         "Não exige reinicialização, mas é mais lento no Steam Deck e em GPUs mais antigas",
-    "Авто (по видеокарте)": "Automático (pela GPU)",
-    "Выключена (быстрее)": "Desativado (mais rápido)",
+    "Выключена (рекомендуется)": "Desativado (recomendado)",
     "Включена": "Ativado",
     "Режим показа кадров": "Modo de apresentação",
     "Разрешить HDR": "Permitir HDR",

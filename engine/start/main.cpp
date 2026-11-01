@@ -533,13 +533,10 @@ int Main(std::vector<std::wstring> arguments) {
         live = Env("BB_LIVE_RES", "");
         if (live.empty()) live = SettingValue(config, "live_resolution").value_or("0");
         if (live.empty()) live = "0";
+        // 0.4.4 beta 25c: Off or On; "auto" (a GPU check) is no longer offered and reads as off.
         if (live == "auto") {
-            std::string answer;
-            try {
-                RunProgram(out / "bb-gpu-capabilities.exe", {L"--live-resolution"}, &answer);
-            } catch (const Error&) {
-            }
-            live = Trim(answer).empty() ? "0" : Trim(answer);
+            Log("Settings: live_resolution=auto is no longer offered; off (recommended)");
+            live = "0";
         }
         live = live == "1" ? "1" : "0";
     }

@@ -266,8 +266,8 @@ struct Values {
     std::atomic<int> hdr_mode{HdrModeNative};
     /// Set by the renderer: the HDR output in use (HdrOutput).
     std::atomic<int> hdr_output{HdrOutputOff};
-    /// Live resolution and preset changes (run.sh): 0 off by default (startup patch, fastest
-    /// on the Steam Deck and older GPUs), -1 auto (strong discrete GPUs), 1 on. On restart.
+    /// Live resolution and preset changes (run.sh): 0 off, the default and recommended (startup patch,
+    /// fastest), 1 on. On restart. "auto" (a GPU check) is read as off from 0.4.4 beta 25c.
     std::atomic<int> live_resolution{0};
     /// Why FSR 4 cannot run (assets, device features), or null. Set by the renderer.
     std::atomic<const char*> fsr4_problem{nullptr};

@@ -323,7 +323,13 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         }
         v.hdr_mode = mode < 0 ? HdrModeNative : mode;
     } else if (key == "live_resolution") {
-        v.live_resolution = value == "auto" ? -1 : std::clamp(i, 0, 1);
+        // 0.4.4 beta 25c: Off or On; "auto" (a GPU check that chose On for strong GPUs) is no longer offered.
+        if (value == "auto") {
+            std::printf("Settings: live_resolution=auto is no longer offered; off (recommended)\n");
+            v.live_resolution = 0;
+        } else {
+            v.live_resolution = std::clamp(i, 0, 1);
+        }
     } else if (key == "cheat_vials") {
         v.cheat_vials = CheatValue(key, value);
     } else if (key == "cheat_bullets") {
@@ -677,7 +683,7 @@ void Save() {
                                                   : std::to_string(OutputWidth(v.output_res)) + "x" +
                                                         std::to_string(OutputHeight(v.output_res)));
     // Read by run.sh at start.
-    put("live_resolution", v.live_resolution < 0 ? "auto" : flag(v.live_resolution != 0));
+    put("live_resolution", flag(v.live_resolution != 0));
     if (v.menu_x >= 0.0f && v.menu_y >= 0.0f) {
         put("menu_pos", fixed(v.menu_x, 4) + "," + fixed(v.menu_y, 4));
     }

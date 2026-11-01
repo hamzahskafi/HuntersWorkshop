@@ -235,6 +235,23 @@ int main() {
     assert(Read(path).find("hdr_compare") == std::string::npos);
     s.hdr_compare = false;
     s.hdr_display_peak = 0.0f;
+    // Live resolution: off or on; "auto" (no longer offered, 0.4.4 beta 25c) reads as off and saves as 0.
+    {
+        std::ofstream file(path);
+        file << "live_resolution=auto\n";
+    }
+    BbSettings::Load();
+    assert(s.live_resolution == 0 && s.startup_live_resolution == 0);
+    BbSettings::Save();
+    assert(Read(path).find("live_resolution=0") != std::string::npos);
+    assert(Read(path).find("live_resolution=auto") == std::string::npos);
+    {
+        std::ofstream file(path);
+        file << "live_resolution=1\n";
+    }
+    BbSettings::Load();
+    assert(s.live_resolution == 1);
+    s.live_resolution = 0;
     // The DLSS model and its mip bias (live in the menu), the OptiScaler switches (read at start).
     {
         std::ofstream file(path);

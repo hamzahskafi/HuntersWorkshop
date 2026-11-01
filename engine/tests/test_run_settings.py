@@ -85,14 +85,16 @@ class RestartResolutionTests(unittest.TestCase):
         self.assertTrue(all(row['BB_OUTPUT_RES'] is None for row in rows))
         self.assertTrue(all(row['BB_AUTO_RENDER_RES'] is None for row in rows))
 
-    def test_live_resolution_setting_and_gpu_check(self):
+    def test_live_resolution_setting(self):
         # Only the first launch matters here: the probe rewrites config.ini for the restarts.
         self.assertIsNone(self.run_restarts(ini_extra='live_resolution=1\n')[0]['BB_RENDER_RES'])
         self.assertEqual(self.run_restarts(ini_extra='live_resolution=0\n', caps=1)[0]['BB_RENDER_RES'],
                          '852x480')
-        # Unset: off (the startup patch), whatever the GPU; auto asks the GPU check.
+        # Unset: off (the startup patch), whatever the GPU. "auto" (0.4.4 beta 25c: no longer
+        # offered) reads as off too, whatever the GPU check would have said.
         self.assertEqual(self.run_restarts(caps=1)[0]['BB_RENDER_RES'], '852x480')
-        self.assertIsNone(self.run_restarts(ini_extra='live_resolution=auto\n', caps=1)[0]['BB_RENDER_RES'])
+        self.assertEqual(self.run_restarts(ini_extra='live_resolution=auto\n', caps=1)[0]['BB_RENDER_RES'],
+                         '852x480')
         self.assertEqual(self.run_restarts(ini_extra='live_resolution=auto\n', caps=0)[0]['BB_RENDER_RES'],
                          '852x480')
 
@@ -100,8 +102,8 @@ class RestartResolutionTests(unittest.TestCase):
         # A missing sed ended run.sh (exit 127) before the game in the AppImage on NixOS.
         self.assertEqual(self.run_restarts(ini_extra='live_resolution=0\n', caps=1,
                                            bare_path=True)[0]['BB_RENDER_RES'], '852x480')
-        self.assertIsNone(self.run_restarts(ini_extra='live_resolution=auto\n', caps=1,
-                                            bare_path=True)[0]['BB_RENDER_RES'])
+        self.assertEqual(self.run_restarts(ini_extra='live_resolution=auto\n', caps=1,
+                                           bare_path=True)[0]['BB_RENDER_RES'], '852x480')
 
     def test_explicit_render_override_survives_restart(self):
         rows = self.run_restarts(explicit=True)
