@@ -662,6 +662,10 @@ void EffectsSection() {
         }
     }
     for (int e = 0; e < BbSettings::EffectCount; ++e) {
+        // 0.4.4 beta 27b: the game's own anti-aliasing is in Upscaling › Anti-aliasing.
+        if (e == BbSettings::EffectGameAa) {
+            continue;
+        }
         const auto& effect = BbSettings::Effects[e];
         const char* label = Item(effect.label, effect.label_ru);
         if (!label) {
@@ -692,26 +696,29 @@ void UpscalerSection() {
     Section("Temporal upscaler", "Временной апскейлер");
     if (const char* label = Item("Upscaler", "Апскейлер")) {
         // 0.4.4 beta 27: one FSR, AMD's (AMD's FSR SDK picks the version); FSR 3.1 (FireBurn's), FSR 4
-        // and FSR 4.1.1 went.
-        const char* upscalers[] = {
-            BbSettings::MenuText("Off", "Выкл"), "AMD FSR",
-            BbSettings::MenuText("TAA (native anti-aliasing)", "TAA (нативное сглаживание)"), "DLSS (NVIDIA)"};
-        static_assert(std::size(upscalers) == BbSettings::UpscalerCount);
+        // and FSR 4.1.1 went. 27b: the upscalers or None, as the launcher's Graphics page; with None,
+        // Anti-aliasing below decides (TAA, the game's own pass or none).
+        const char* upscalers[] = {"AMD FSR", "DLSS (NVIDIA)", BbSettings::MenuText("None", "Нет")};
+        const int kinds[] = {BbSettings::UpscalerFsr, BbSettings::UpscalerDlss, BbSettings::UpscalerOff};
         static const char* later[] = {"XeSS"};
         const int upscaler = s.upscaler;
-        if (ImGui::BeginCombo(label, upscalers[upscaler])) {
-            for (int i = 0; i < BbSettings::UpscalerCount; ++i) {
-                const bool supported = i == BbSettings::UpscalerFsr    ? s.fsr_supported.load()
-                                       : i == BbSettings::UpscalerDlss ? s.dlss_supported.load()
-                                                                       : true;
+        const int shown = upscaler == BbSettings::UpscalerFsr ? 0 : upscaler == BbSettings::UpscalerDlss ? 1 : 2;
+        if (ImGui::BeginCombo(label, upscalers[shown])) {
+            for (int i = 0; i < int(std::size(upscalers)); ++i) {
+                const bool supported = kinds[i] == BbSettings::UpscalerFsr    ? s.fsr_supported.load()
+                                       : kinds[i] == BbSettings::UpscalerDlss ? s.dlss_supported.load()
+                                                                              : true;
                 ImGui::BeginDisabled(!supported);
-                if (ImGui::Selectable(upscalers[i], i == upscaler)) {
-                    Store(s.upscaler, i, true);
+                if (ImGui::Selectable(upscalers[i], i == shown) && i != shown) {
+                    // None: TAA, or no upscaler with the game's own anti-aliasing on.
+                    Store(s.upscaler, kinds[i] != BbSettings::UpscalerOff ? kinds[i]
+                                      : BbSettings::NoUpscaling(s.effects[BbSettings::EffectGameAa]),
+                          true);
                 }
                 ImGui::EndDisabled();
                 if (!supported) {
                     ImGui::SameLine();
-                    ImGui::TextDisabled("%s", i == BbSettings::UpscalerFsr
+                    ImGui::TextDisabled("%s", kinds[i] == BbSettings::UpscalerFsr
                                                   ? BbSettings::MenuText("— not available here (AMD's files, or not Windows)",
                                                                          "— недоступен (нет файлов AMD или не Windows)")
                                                   : BbSettings::MenuText("— not supported by this GPU",
@@ -742,11 +749,14 @@ void UpscalerSection() {
             ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), BbSettings::MenuText("Upscaler unavailable: %s"),
                                BbSettings::MenuText(problem));
             if (!BbSettings::IsFrameUpscaler(s.upscaler))
-                ImGui::TextUnformatted(
-                    BbSettings::MenuText("The mode selected above is active. You can select it again to retry."));
+                ImGui::TextUnformatted(BbSettings::MenuText(
+                    "Anti-aliasing below runs instead. Select the upscaler again to retry.",
+                    "Вместо него работает сглаживание ниже. Выберите апскейлер снова, чтобы повторить."));
             ImGui::PopTextWrapPos();
         }
     }
+    // 0.4.4 beta 27b: the chosen upscaler's own rows, under it.
+    ImGui::Indent();
     if (s.upscaler == BbSettings::UpscalerFsr) {
         // 0.4.4 beta 27: AMD's choice of version or FSR 3.1 (AMD: the version is left to AMD or to the
         // player in the options); live, the context made again.
@@ -782,6 +792,35 @@ void UpscalerSection() {
                 "Проверка при гостинге: FSR нормирует цвет по экспозиции и по ней решает, когда отбросить "
                 "прошлые кадры. Меняются сразу, без перезапуска."));
         }
+    }
+    ImGui::Unindent();
+    const bool upscaling = BbSettings::IsFrameUpscaler(s.upscaler);
+    // 0.4.4 beta 27b: the anti-aliasing without an upscaler, as the launcher's: TAA (live), the game's
+    // own pass (a patch at start) or none. An upscaler anti-aliases itself; the game's pass is left out
+    // under it (patches.cpp NoUpscaler).
+    if (const char* label = Item("Anti-aliasing", "Сглаживание")) {
+        const char* modes[] = {"TAA", BbSettings::MenuText("The game's own", "Собственное игры"),
+                               BbSettings::MenuText("Off", "Выкл")};
+        const bool game_aa = s.effects[BbSettings::EffectGameAa];
+        const int mode = s.upscaler == BbSettings::UpscalerOff ? (game_aa ? 1 : 2)
+                         : s.upscaler == BbSettings::UpscalerTaa ? 0
+                                                                 : (game_aa ? 1 : 0); // what None goes back to
+        int picked = mode;
+        ImGui::BeginDisabled(upscaling);
+        if (ImGui::Combo(label, &picked, modes, int(std::size(modes))) && picked != mode) {
+            Store(s.upscaler, picked == 0 ? int(BbSettings::UpscalerTaa) : int(BbSettings::UpscalerOff), true);
+            Store(s.effects[BbSettings::EffectGameAa], picked == 1, true);
+        }
+        ImGui::EndDisabled();
+        Hint(upscaling ? BbSettings::MenuText("The upscaler anti-aliases: this applies with Upscaler None.",
+                                              "Апскейлер сглаживает сам: это действует при апскейлере «Нет».")
+                       : BbSettings::MenuText(
+                             "TAA: smooth edges at the output resolution, live (sharpening helps). The game's "
+                             "own: its anti-aliasing pass, as on the PS4, after a restart. Off: the sharpest "
+                             "picture, with jagged edges.",
+                             "TAA: гладкие края в разрешении вывода, сразу (поможет резкость). Собственное "
+                             "игры: её проход сглаживания, как на PS4, после перезапуска. Выкл: самая резкая "
+                             "картинка, с лесенками."));
     }
     // bbport: frame generation (vk_frame_generation.h, vk_streamline.h); live, DLSS loaded at start.
     const char* frame_gens[] = {BbSettings::MenuText("Off", "Выкл"), "FSR 3.1", "DLSS (NVIDIA)"};
@@ -926,50 +965,57 @@ void UpscalerSection() {
                 "Generation загружена."));
         }
     }
-    const bool upscaler_on = s.upscaler != BbSettings::UpscalerOff;
-    const bool taa = s.upscaler == BbSettings::UpscalerTaa;
-    ImGui::BeginDisabled(!upscaler_on);
-    if (const char* label = Item("Preset", "Пресет")) {
-        ImGui::BeginDisabled(taa);
-        const int preset = taa ? BbSettings::NativeAA : s.preset.load();
-        char preset_label[64];
-        std::snprintf(preset_label, sizeof(preset_label), "%s (x%.1f)",
-                      BbSettings::MenuText(BbSettings::PresetName(preset)), BbSettings::PresetScale(preset));
-        if (ImGui::BeginCombo(label, preset_label)) {
+    const bool temporal = s.upscaler != BbSettings::UpscalerOff; // an upscaler or TAA
+    // 0.4.4 beta 27b: was "Preset". Each entry with the size the scene renders at for the output it
+    // applies to (BbSettings::PresetRenderSize, as the launcher's list); with an upscaler only.
+    ImGui::BeginDisabled(!upscaling);
+    if (const char* label = Item("Render resolution", "Разрешение рендера")) {
+        const int preset = upscaling ? s.preset.load() : BbSettings::NativeAA;
+        const auto describe = [&](int i, char* out, std::size_t size) {
+            const auto scene = BbSettings::PresetRenderSize(i);
+            const char* name = i == BbSettings::NativeAA && s.upscaler == BbSettings::UpscalerDlss
+                                   ? "DLAA"
+                                   : BbSettings::MenuText(BbSettings::PresetName(i));
+            if (i == BbSettings::PresetCustom) {
+                std::snprintf(out, size, "%s (x%.2f) — %d x %d", name,
+                              std::clamp(double(s.render_scale.load()), double(BbSettings::RenderScaleMin),
+                                         double(BbSettings::RenderScaleMax)),
+                              scene.width, scene.height);
+            } else {
+                std::snprintf(out, size, "%s (x%.1f) — %d x %d", name, BbSettings::PresetScale(i), scene.width,
+                              scene.height);
+            }
+        };
+        char shown[96];
+        describe(preset, shown, sizeof(shown));
+        if (ImGui::BeginCombo(label, shown)) {
             for (int i = 0; i < BbSettings::PresetCount; ++i) {
-                char choice[64];
-                const float scale = BbSettings::PresetScale(i);
-                const int output = s.output_res;
-                std::snprintf(
-                    choice, sizeof(choice),
-                    BbSettings::MenuText("%s (x%.1f, render %dx%d)", "%s (x%.1f, рендер %dx%d)"),
-                    BbSettings::MenuText(BbSettings::PresetName(i)), scale,
-                    int(std::lround(BbSettings::OutputWidth(output) / scale / 4) * 4),
-                    int(std::lround(BbSettings::OutputHeight(output) / scale / 4) * 4));
+                char choice[96];
+                describe(i, choice, sizeof(choice));
                 if (ImGui::Selectable(choice, i == preset)) {
                     Store(s.preset, i, true);
                 }
             }
             ImGui::EndCombo();
         }
-        ImGui::EndDisabled();
-        if (taa) {
-            ImGui::TextWrapped("%s", BbSettings::MenuText(
-                                         "TAA anti-aliases the scene at the output resolution, without an FSR "
-                                         "model or upscaling. The saved preset returns when an upscaler is selected."));
+        if (!upscaling) {
+            Hint(BbSettings::MenuText("With an upscaler only: without one the game renders at the output resolution.",
+                                      "Только с апскейлером: без него игра рендерит в разрешении вывода."));
         }
-        // bbport: the Custom preset's ratio (render_scale), like OptiScaler's ratio override.
-        if (!taa && s.preset == BbSettings::PresetCustom) {
+        // bbport: the Custom preset's ratio (render_scale), like OptiScaler's ratio override; under it.
+        if (upscaling && s.preset == BbSettings::PresetCustom) {
+            ImGui::Indent();
             if (const char* scale_label = Item("Render scale (Custom)", "Масштаб рендера (Custom)")) {
                 Slider(scale_label, s.render_scale, BbSettings::RenderScaleMin, BbSettings::RenderScaleMax, "x%.2f");
                 Hint(BbSettings::MenuText(
                     "Output / render size for the Custom preset: 1.00 renders at the output (DLAA, Native "
-                    "AA), 1.30 is between Native and Quality, 3.00 is Ultra Performance. FSR 4 and DLSS run "
-                    "the model of the nearest preset. Ctrl+click to type a value.",
+                    "AA), 1.30 is between Native and Quality, 3.00 is Ultra Performance. DLSS runs the "
+                    "model of the nearest preset. Ctrl+click to type a value.",
                     "Отношение вывода к рендеру для пресета Custom: 1.00 — рендер в разрешении вывода "
-                    "(DLAA, Native AA), 1.30 — между Native и Quality, 3.00 — Ultra Performance. FSR 4 и "
-                    "DLSS берут модель ближайшего пресета. Ctrl+клик — ввести значение."));
+                    "(DLAA, Native AA), 1.30 — между Native и Quality, 3.00 — Ultra Performance. DLSS "
+                    "берёт модель ближайшего пресета. Ctrl+клик — ввести значение."));
             }
+            ImGui::Unindent();
         }
         ImGui::Text(BbSettings::MenuText("Active scene render: %d x %d"), s.active_render_width.load(),
                     s.active_render_height.load());
@@ -990,14 +1036,18 @@ void UpscalerSection() {
             }
         } else {
             Hint(BbSettings::MenuText(
-                "Native AA: the upscaler works as anti-aliasing. The other presets lower the scene "
-                "render resolution relative to the output. The UI is drawn at the output resolution. "
-                "The preset applies from the next frame without restarting the game."));
+                "Native AA: the upscaler works as anti-aliasing (DLAA with DLSS). The others render the "
+                "scene below the output; the UI is drawn at the output resolution. Applies from the next "
+                "frame, without a restart."));
         }
     }
+    ImGui::EndDisabled(); // no upscaler
+    // Sharpening after an upscaler or TAA, its strength under it.
+    ImGui::BeginDisabled(!temporal);
     if (const char* label = Item("Sharpening (RCAS)")) {
         Checkbox(label, s.sharpen);
     }
+    ImGui::Indent();
     if (const char* label = Item("Sharpness")) {
         ImGui::BeginDisabled(!s.sharpen);
         Slider(label, s.sharpness, 0.0f, 2.0f);
@@ -1007,6 +1057,26 @@ void UpscalerSection() {
             "DLSS has no sharpening of its own: an RCAS pass does all of it. "
             "Ctrl+click the slider to type an exact value."));
     }
+    ImGui::Unindent();
+    ImGui::EndDisabled(); // no upscaler or TAA
+
+    // 0.4.4 beta 27b: the fine settings most players leave alone, as the launcher's Advanced (character
+    // motion vectors were in Motion vectors, with the debug view).
+    Section("Advanced", "Дополнительно");
+    if (const char* label = Item("Character motion vectors", "Векторы движения персонажей")) {
+        ImGui::BeginDisabled(!temporal);
+        Checkbox(label, s.object_motion);
+        ImGui::EndDisabled();
+        Hint(BbSettings::MenuText(
+            "Accurate vectors for animated objects: clothing and weapons break up less "
+            "during movement, at about 10% of the frame rate. The static scene does not get an "
+            "additional pass. With an upscaler or TAA. Changes apply after restarting the game.",
+            "Точные векторы для анимированных объектов: одежда и оружие меньше рассыпаются "
+            "при движении, ценой около 10% частоты кадров. Статичная сцена не получает "
+            "дополнительный проход. С апскейлером или TAA. Изменение применяется после "
+            "перезапуска игры."));
+    }
+    ImGui::BeginDisabled(!temporal);
     if (const char* label = Item("Texture mip bias", "Mip bias текстур")) {
         Slider(label, s.mip_bias, BbSettings::MipBiasMin, BbSettings::MipBiasMax, "%+.2f");
         Hint(BbSettings::MenuText(
@@ -1023,7 +1093,7 @@ void UpscalerSection() {
             "Each frame the scene shifts by a fraction of a pixel, and the upscaler gathers more "
             "detail from several frames. Without it you only get history-based anti-aliasing."));
     }
-    ImGui::EndDisabled(); // upscaler off
+    ImGui::EndDisabled(); // no upscaler or TAA
 }
 
 // bbport: DLSS's own options (vk_dlss.cpp), live; shown with DLSS selected (and to a search).
@@ -1235,16 +1305,6 @@ void MaskSection() {
     ImGui::EndDisabled();
 
     Section("Motion vectors", "Векторы движения");
-    if (const char* label = Item("Character motion vectors", "Векторы движения персонажей")) {
-        Checkbox(label, s.object_motion);
-        Hint(BbSettings::MenuText(
-            "Accurate vectors for animated objects: clothing and weapons break up less "
-            "during movement. The static scene does not get an additional pass. "
-            "Changes apply after restarting the game.",
-            "Точные векторы для анимированных объектов: одежда и оружие меньше рассыпаются "
-            "при движении. Статичная сцена не получает дополнительный проход. "
-            "Изменение применяется после перезапуска игры."));
-    }
     if (const char* label = Item("Show motion vectors (debug)", "Показать векторы движения (отладка)")) {
         bool show_motion = s.debug_view == BbSettings::DebugMotion;
         if (ImGui::Checkbox(label, &show_motion)) {
@@ -1792,8 +1852,11 @@ void Menu() {
         s.live_resolution != s.startup_live_resolution || s.hdr != s.startup_hdr ||
         BbSettings::ResolutionNeedsRestart();
     for (int e = 0; e < BbSettings::EffectCount; ++e) {
-        restart |= s.effects[e] != s.startup_effects[e];
+        restart |= e != BbSettings::EffectGameAa && s.effects[e] != s.startup_effects[e];
     }
+    // 0.4.4 beta 27b: the game's own anti-aliasing, patched at start, applies only without an upscaler.
+    restart |= BbSettings::GameAaApplies(s.effects[BbSettings::EffectGameAa], s.upscaler) !=
+               BbSettings::GameAaApplies(s.startup_effects[BbSettings::EffectGameAa], s.startup_upscaler);
     // OptiScaler's switches matter only with it loaded.
     restart |= Vulkan::OptiScaler::Detect().loaded &&
                (s.optiscaler_compat != s.startup_optiscaler.compat ||

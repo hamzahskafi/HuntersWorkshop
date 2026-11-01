@@ -1521,5 +1521,20 @@
   "FSR version": "Versione di FSR",
   "NVIDIA DLSS {0}. Needs an NVIDIA GeForce RTX GPU; others use AMD FSR": "NVIDIA DLSS {0}. Richiede una GPU NVIDIA GeForce RTX; le altre usano AMD FSR",
   "The newest version AMD's FSR SDK runs on this GPU: FSR 4.1 on Radeon RX 6000 and newer, FSR 3.1 on other GPUs": "La versione più recente che l'FSR SDK di AMD esegue su questa GPU: FSR 4.1 su Radeon RX 6000 e successive, FSR 3.1 sulle altre",
-  "Through AMD's FSR SDK, which picks the version this GPU runs: FSR 4.1 on Radeon RX 6000 and newer, FSR 3.1 on other GPUs": "Tramite l'FSR SDK di AMD, che sceglie la versione per questa GPU: FSR 4.1 su Radeon RX 6000 e successive, FSR 3.1 sulle altre"
+  "Through AMD's FSR SDK, which picks the version this GPU runs: FSR 4.1 on Radeon RX 6000 and newer, FSR 3.1 on other GPUs": "Tramite l'FSR SDK di AMD, che sceglie la versione per questa GPU: FSR 4.1 su Radeon RX 6000 e successive, FSR 3.1 sulle altre",
+  "Anti-aliasing": "Anti-aliasing",
+  "How edges are smoothed when no upscaler runs": "Come vengono smussati i bordi quando non è attivo un upscaler",
+  "Native AA": "Native AA",
+  "No anti-aliasing: the sharpest picture, with jagged edges and shimmer": "Nessun anti-aliasing: l'immagine più nitida, con bordi seghettati e sfarfallio",
+  "Output size divided by this is the render size: 1.00 renders at the output, 1.30 a little below, 3.00 like Ultra Performance. DLSS uses the nearest preset's model": "La dimensione di output divisa per questo valore è quella di rendering: 1,00 renderizza all'output, 1,30 poco sotto, 3,00 come Ultra Performance. DLSS usa il modello del preset più vicino",
+  "Render resolution": "Risoluzione di rendering",
+  "Renders the game below the output resolution and fills it in, anti-aliasing as it goes. None: the game renders at the output, with the anti-aliasing below": "Esegue il rendering sotto la risoluzione di output e la completa, con anti-aliasing. Nessuno: il gioco esegue il rendering all'output, con l'anti-aliasing qui sotto",
+  "Temporal anti-aliasing at the output resolution: smooth edges, a little soft (sharpening helps)": "Anti-aliasing temporale alla risoluzione di output: bordi morbidi, un po' sfocato (la nitidezza aiuta)",
+  "The game's own": "Quello del gioco",
+  "The game's own anti-aliasing pass, as on the PS4. Applied when the game starts": "Il passaggio di anti-aliasing del gioco, come su PS4. Applicato all'avvio del gioco",
+  "The output resolution, frame rate, upscaler and render resolution that suit this PC; you see each change before it is applied": "La risoluzione di output, il frame rate, l'upscaler e la risoluzione di rendering adatti a questo PC; vedi ogni modifica prima che venga applicata",
+  "The size the game renders at before the upscaler fills the output: lower is faster and softer. Native AA renders at the output (DLAA with DLSS)": "La dimensione a cui il gioco esegue il rendering prima che l'upscaler completi l'output: più bassa è più veloce e più morbida. Native AA renderizza all'output (DLAA con DLSS)",
+  "The upscaler anti-aliases: this applies with Upscaler None": "L'upscaler fa già l'anti-aliasing: questo vale con upscaler «Nessuno»",
+  "With an upscaler only: without one the game renders at the output resolution": "Solo con un upscaler: senza, il gioco esegue il rendering alla risoluzione di output",
+  "With an upscaler or TAA: turn it up if the picture looks soft": "Con un upscaler o il TAA: alzala se l'immagine sembra morbida"
 }

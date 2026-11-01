@@ -537,9 +537,24 @@ Size UiSize(const std::map<std::string, std::string>& settings, Size out) {
 
 // --- selection --------------------------------------------------------------------------------
 
+// 0.4.4 beta 27b: the game's own anti-aliasing is one of the anti-aliasing choices without an upscaler
+// (upscaler=off, as the launcher's Anti-aliasing). AMD FSR, DLSS and TAA anti-alias themselves, and the
+// game's pass under them only softened the frame they work from: left out then, whatever
+// effect_game_aa says. BB_UPSCALER (scripts, A/B tests) decides as it does in the engine (bbport_settings.cpp).
+bool NoUpscaler(const std::map<std::string, std::string>& settings) {
+    if (const auto env = Env("BB_UPSCALER"); env && !env->empty())
+        return !(*env == "fsr" || *env == "fsr3" || *env == "fsr4" || *env == "fsr411" || *env == "dlss" || *env == "taa");
+    return Setting(settings, "upscaler").value_or("fsr") == "off";
+}
+
 std::vector<std::string> EffectPatches(const std::map<std::string, std::string>& settings) {
     std::vector<std::string> names;
+    const bool no_upscaler = NoUpscaler(settings);
     for (const auto& [key, off, on] : Effects()) {
+        if (key == "effect_game_aa" && !no_upscaler) {
+            names.push_back(off);
+            continue;
+        }
         const auto value = Setting(settings, key);
         if (!value) {
             if (kDefaultOff.count(key) && off) names.push_back(off);

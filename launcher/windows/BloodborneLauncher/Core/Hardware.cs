@@ -6,7 +6,7 @@ namespace BloodborneLauncher.Core
 {
     /// <summary>
     /// What this PC has (GPU and its memory, CPU, RAM, the main display) and the settings that
-    /// suit it: upscaler, quality preset, output resolution, frame rate cap and motion vectors.
+    /// suit it: upscaler, render resolution, output resolution, frame rate cap and motion vectors.
     /// The GPU comes from the display adapters' registry keys (the one with the most memory, so
     /// the discrete card on a laptop), the display from its current mode.
     /// </summary>
@@ -270,7 +270,7 @@ namespace BloodborneLauncher.Core
                 StyleFps => Math.Min(4, Math.Max(3, preset + 2)),
                 _ => preset,
             };
-            Ini(L.T("Quality preset"), "preset", preset.ToString(), Choices.Presets, "0");
+            Ini(L.T("Render resolution"), "preset", preset.ToString(), Choices.Presets, "0");
 
             // 120 needs a fast display, a mid or better GPU and a CPU with 12+ threads (the game's
             // render thread is the limit); 60 otherwise.

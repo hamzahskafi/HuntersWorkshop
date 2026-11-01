@@ -1521,5 +1521,20 @@
   "FSR version": "FSR sürümü",
   "NVIDIA DLSS {0}. Needs an NVIDIA GeForce RTX GPU; others use AMD FSR": "NVIDIA DLSS {0}. NVIDIA GeForce RTX GPU gerektirir; diğerleri AMD FSR kullanır",
   "The newest version AMD's FSR SDK runs on this GPU: FSR 4.1 on Radeon RX 6000 and newer, FSR 3.1 on other GPUs": "AMD'nin FSR SDK'sının bu GPU'da çalıştırdığı en yeni sürüm: Radeon RX 6000 ve sonrasında FSR 4.1, diğer GPU'larda FSR 3.1",
-  "Through AMD's FSR SDK, which picks the version this GPU runs: FSR 4.1 on Radeon RX 6000 and newer, FSR 3.1 on other GPUs": "AMD'nin FSR SDK'sı üzerinden; sürümü bu GPU için o seçer: Radeon RX 6000 ve sonrasında FSR 4.1, diğer GPU'larda FSR 3.1"
+  "Through AMD's FSR SDK, which picks the version this GPU runs: FSR 4.1 on Radeon RX 6000 and newer, FSR 3.1 on other GPUs": "AMD'nin FSR SDK'sı üzerinden; sürümü bu GPU için o seçer: Radeon RX 6000 ve sonrasında FSR 4.1, diğer GPU'larda FSR 3.1",
+  "Anti-aliasing": "Kenar yumuşatma",
+  "How edges are smoothed when no upscaler runs": "Ölçekleyici çalışmadığında kenarların nasıl yumuşatıldığı",
+  "Native AA": "Native AA",
+  "No anti-aliasing: the sharpest picture, with jagged edges and shimmer": "Kenar yumuşatma yok: en keskin görüntü, tırtıklı kenarlar ve titreşimle",
+  "Output size divided by this is the render size: 1.00 renders at the output, 1.30 a little below, 3.00 like Ultra Performance. DLSS uses the nearest preset's model": "Çıkış boyutu bu değere bölününce işleme boyutu çıkar: 1,00 çıkış boyutunda işler, 1,30 biraz altında, 3,00 Ultra Performance gibi. DLSS en yakın ön ayarın modelini kullanır",
+  "Render resolution": "İşleme çözünürlüğü",
+  "Renders the game below the output resolution and fills it in, anti-aliasing as it goes. None: the game renders at the output, with the anti-aliasing below": "Oyunu çıkış çözünürlüğünün altında işler ve kenarları yumuşatarak tamamlar. Yok: oyun çıkış çözünürlüğünde işlenir, aşağıdaki kenar yumuşatmayla",
+  "Temporal anti-aliasing at the output resolution: smooth edges, a little soft (sharpening helps)": "Çıkış çözünürlüğünde zamansal kenar yumuşatma: düzgün kenarlar, biraz yumuşak (keskinleştirme yardımcı olur)",
+  "The game's own": "Oyunun kendi",
+  "The game's own anti-aliasing pass, as on the PS4. Applied when the game starts": "Oyunun kendi kenar yumuşatma geçişi, PS4'teki gibi. Oyun başlarken uygulanır",
+  "The output resolution, frame rate, upscaler and render resolution that suit this PC; you see each change before it is applied": "Bu PC’ye uyan çıkış çözünürlüğü, kare hızı, ölçekleyici ve işleme çözünürlüğü; her değişikliği uygulanmadan önce görürsünüz",
+  "The size the game renders at before the upscaler fills the output: lower is faster and softer. Native AA renders at the output (DLAA with DLSS)": "Ölçekleyici çıkışı tamamlamadan önce oyunun işlendiği boyut: düşük olan daha hızlı ve daha yumuşaktır. Native AA çıkış boyutunda işler (DLSS ile DLAA)",
+  "The upscaler anti-aliases: this applies with Upscaler None": "Ölçekleyici kenarları kendisi yumuşatır: bu, ölçekleyici \"Yok\" iken geçerlidir",
+  "With an upscaler only: without one the game renders at the output resolution": "Yalnızca ölçekleyiciyle: ölçekleyici yoksa oyun çıkış çözünürlüğünde işlenir",
+  "With an upscaler or TAA: turn it up if the picture looks soft": "Ölçekleyici veya TAA ile: görüntü yumuşak görünüyorsa artırın"
 }

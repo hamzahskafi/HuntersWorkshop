@@ -53,7 +53,7 @@
 116035	Unlimited		不限帧率
 117000	Ambient Occlusion	Screen-space ambient occlusion.	环境光遮蔽	屏幕空间环境光遮蔽。
 117005	Motion Blur	The blur on fast camera and character movement. Requires a restart in this renderer.	运动模糊	镜头和角色快速移动时的模糊效果。当前渲染器需要重启游戏。
-117001	Anti-Aliasing	The game's own anti-aliasing pass.	抗锯齿	游戏自带的抗锯齿处理。
+117001	Anti-Aliasing	The game's own anti-aliasing pass, used only without an upscaler or TAA. Requires a restart in this renderer.	抗锯齿	游戏自带的抗锯齿处理，仅在不使用超分辨率或 TAA 时生效。当前渲染器需要重启游戏。
 117002	Depth of Field	Blurs distant scenery. Off keeps far views sharp. Requires a restart in this renderer.	景深	模糊远处景物。关闭后远景保持清晰。当前渲染器需要重启游戏。
 117020	Graphics		画质
 117003	Chromatic Aberration	The colour fringing at the edges of the frame. Requires a restart in this renderer.	色差	画面边缘的彩色偏移效果。当前渲染器需要重启游戏。

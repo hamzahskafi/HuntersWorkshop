@@ -359,6 +359,51 @@ int main() {
         s.output_res = BbSettings::OutputDefault == 2 ? 3 : 2;
         assert(!BbSettings::ResolutionNeedsRestart());
     }
+    // 0.4.4 beta 27b: the Render resolution list's sizes, as the engine makes them (the launcher's
+    // Choices.RenderSize works them out the same): live at a 1920x1080 start; in a startup-patched
+    // session the next start's, never below 640x360 and never exactly 1920x1080.
+    {
+        const auto size = [](int preset) {
+            const auto scene = BbSettings::PresetRenderSize(preset);
+            return std::pair{scene.width, scene.height};
+        };
+        const auto render_res = [](const char* value) {
+#ifdef _WIN32
+            _putenv_s("BB_RENDER_RES", value);
+#else
+            if (value[0]) setenv("BB_RENDER_RES", value, 1); else unsetenv("BB_RENDER_RES");
+#endif
+        };
+        render_res("");
+        { std::ofstream file(path); file << "output_res=1920x1080\nlive_resolution=0\nrender_scale=1.3\n"; }
+        BbSettings::Load();
+        assert(size(BbSettings::NativeAA) == std::pair(1920, 1080));
+        assert(size(BbSettings::Quality) == std::pair(1280, 720));
+        assert(size(BbSettings::Balanced) == std::pair(1128, 636));
+        assert(size(BbSettings::Performance) == std::pair(960, 540));
+        assert(size(BbSettings::UltraPerformance) == std::pair(640, 360));
+        assert(size(BbSettings::PresetCustom) == std::pair(1476, 832));
+        render_res("852x532");
+        { std::ofstream file(path); file << "output_res=1280x800\nlive_resolution=0\n"; }
+        BbSettings::Load();
+        assert(BbSettings::FixedRenderSession());
+        assert(size(BbSettings::NativeAA) == std::pair(1280, 800));
+        assert(size(BbSettings::Quality) == std::pair(852, 532));
+        assert(size(BbSettings::UltraPerformance) == std::pair(640, 400)); // the Steam Deck: x2, not x3
+        { std::ofstream file(path); file << "output_res=2880x1620\nlive_resolution=0\n"; }
+        BbSettings::Load();
+        assert(size(BbSettings::Quality) == std::pair(1916, 1076)); // the game's 1080p patch site is left alone
+        { std::ofstream file(path); file << "output_res=2560x1440\nlive_resolution=1\n"; }
+        BbSettings::Load();
+        assert(size(BbSettings::Quality) == std::pair(1708, 960)); // the next start is live
+        render_res("");
+    }
+    // Upscaler None is TAA, or no upscaler with the game's own anti-aliasing, which applies only then.
+    assert(BbSettings::NoUpscaling(true) == BbSettings::UpscalerOff);
+    assert(BbSettings::NoUpscaling(false) == BbSettings::UpscalerTaa);
+    assert(BbSettings::GameAaApplies(true, BbSettings::UpscalerOff));
+    assert(!BbSettings::GameAaApplies(true, BbSettings::UpscalerFsr) && !BbSettings::GameAaApplies(true, BbSettings::UpscalerTaa));
+    assert(!BbSettings::GameAaApplies(false, BbSettings::UpscalerOff));
     std::filesystem::remove(temporary);
     std::puts("PASS: settings save keeps other keys, menu position");
 }

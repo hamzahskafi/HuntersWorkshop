@@ -768,6 +768,34 @@ const char* PresetName(int preset) {
     return names[std::clamp(preset, 0, PresetCount - 1)];
 }
 
+SceneSize PresetRenderSize(int preset) {
+    const auto& v = Get();
+    double scale = PresetScale(std::min(preset, PresetCustom - 1));
+    if (preset >= PresetCustom) {
+        const float custom = v.render_scale;
+        scale = std::clamp(std::isfinite(custom) ? double(custom) : 1.0, double(RenderScaleMin), double(RenderScaleMax));
+    }
+    const auto live = [&](int output) {
+        const double s = std::clamp(scale, 1.0, 3.0);
+        return SceneSize{int(std::max(1l, std::lround(OutputWidth(output) / s / 4)) * 4),
+                         int(std::max(1l, std::lround(OutputHeight(output) / s / 4)) * 4)};
+    };
+    if (!FixedRenderSession()) {
+        return live(ResolutionNeedsRestart() ? v.startup_output_res : v.output_res.load());
+    }
+    const int output = v.output_res;
+    const int w = OutputWidth(output), h = OutputHeight(output);
+    if ((w == 1920 && h == 1080) || v.live_resolution == 1) {
+        return live(output);
+    }
+    const double s = std::max(1.0, std::min({scale, w / 640.0, h / 360.0}));
+    SceneSize size{std::max(4, int(std::nearbyint(w / s / 4)) * 4), std::max(4, int(std::nearbyint(h / s / 4)) * 4)};
+    if (size.width == 1920 && size.height == 1080) {
+        size = {1916, 1076};
+    }
+    return size;
+}
+
 int ModelPreset(int preset) {
     if (preset != PresetCustom) {
         return std::clamp(preset, 0, PresetCustom - 1);

@@ -9,7 +9,12 @@ The sections after this one are the record of the work from the first frame anal
   in-game menu): `fsr` (AMD FSR through AMD's FSR SDK 2.4, `vk_amd_fsr.cpp`; from 0.4.4 beta 27),
   `dlss` (DLSS Super Resolution, NVIDIA RTX), `taa` (below) and `off`. A `config.ini` without the key
   gets `fsr`; the older `fsr3`, `fsr4` and `fsr411` read as `fsr`. `BB_UPSCALER=none` leaves the
-  whole path out.
+  whole path out. From 0.4.4 beta 27b the menus offer AMD FSR, DLSS or None as the upscaler and, for
+  None, Anti-aliasing: TAA (`taa`), the game's own (`off` with `effect_game_aa=1`) or Off (`off`).
+- **The game's own anti-aliasing** (`effect_game_aa`, a patch at start, off by default) applies only
+  with `upscaler=off` from 0.4.4 beta 27b: under AMD FSR, DLSS or TAA bb-start and `patches.py` apply
+  "Disable AA" whatever the key says (`NoUpscaler`; `BB_UPSCALER` decides when set). It ran after the
+  tonemap, on the frame an upscaler at other outputs takes, softening it.
 - **AMD FSR** (0.4.4 beta 27): AMD's signed `amd_fidelityfx_loader_vk.dll` and
   `amd_fidelityfx_upscaler_vk.dll` in the package's `engine/amd-fsr` (`tools/fetch_amd_fsr.sh`, with
   AMD's licence; `BB_AMD_FSR_DIR` overrides the folder, `BB_AMD_FSR=0` hides it), loaded at run time
@@ -29,8 +34,12 @@ The sections after this one are the record of the work from the first frame anal
   tonemap and UI run on it; at other outputs on the game's tonemapped frame before its UI, which
   is then drawn at the output size. Inputs: the scene depth, camera motion vectors, object motion
   vectors (`object_motion`, on by default) and sub-pixel jitter (`jitter`, on).
-- **Presets** (`preset`): Native AA (DLAA with DLSS), Quality x1.5, Balanced x1.7, Performance x2,
-  Ultra Performance x3 and Custom (`render_scale`, 1.0-3.0). TAA always renders at the output.
+- **Presets** (`preset`; the menus' Render resolution from 0.4.4 beta 27b): Native AA (DLAA with
+  DLSS), Quality x1.5, Balanced x1.7, Performance x2, Ultra Performance x3 and Custom (`render_scale`,
+  1.0-3.0). TAA always renders at the output. The menus show each one's scene size for the output
+  (`BbSettings::PresetRenderSize`, the launcher's `Choices.RenderSize`): live, `ForScale` of the
+  output (multiples of 4); patched at start, `ScaledSizes` (at least 640x360, never exactly 1920x1080:
+  1916x1076).
 - **Render size:** outputs other than 1920x1080 (TAA aside) get the game's render size patched at
   the start (`live_resolution=0`, the default; a preset or output change then needs a restart), as
   in "Startup patch is the default again" below; `live_resolution=1` takes the live path. Off is the

@@ -18,6 +18,12 @@ enum Upscaler : int { UpscalerOff = 0, UpscalerFsr = 1, UpscalerTaa = 2, Upscale
 inline bool IsFrameUpscaler(int upscaler) {
     return upscaler == UpscalerFsr || upscaler == UpscalerDlss;
 }
+/// 0.4.4 beta 27b: Upscaler None in the menus (the launcher's too): TAA, or no upscaler when the game's
+/// own anti-aliasing is on (Anti-aliasing: TAA, the game's own, or off).
+inline int NoUpscaling(bool game_aa) { return game_aa ? UpscalerOff : UpscalerTaa; }
+/// The game's own anti-aliasing pass applies (a patch at start) only without an upscaler or TAA:
+/// patches.cpp NoUpscaler leaves it out under them.
+inline bool GameAaApplies(bool game_aa, int upscaler) { return game_aa && upscaler == UpscalerOff; }
 /// fsr_version in config.ini: AMD's choice (no version override: the newest this GPU runs, FSR 4.1 on
 /// RX 6000 and newer, FSR 3.1 elsewhere), or FSR 3.1 (AMD's FSR 3.1.6). Live.
 enum FsrVersion : int { FsrVersionAuto = 0, FsrVersion31 = 1, FsrVersionCount };
@@ -82,6 +88,16 @@ inline constexpr Effect Effects[] = {
     {"debug_menu", "Debug menu (requires font files)", "Debug menu (нужны файлы шрифтов)", false},
 };
 inline constexpr int EffectCount = int(sizeof(Effects) / sizeof(Effects[0]));
+/// effects[] index of the game's own anti-aliasing (the launcher's and menus' Anti-aliasing choice).
+inline constexpr int EffectGameAa = 4;
+constexpr bool SameKey(const char* a, const char* b) {
+    while (*a && *a == *b) {
+        ++a;
+        ++b;
+    }
+    return *a == *b;
+}
+static_assert(SameKey(Effects[EffectGameAa].key, "effect_game_aa"));
 /// Live output resolutions: the upscaler's output and the UI host targets. OutputAuto is the
 /// display's own size (output_res = auto): BB_DISPLAY_SIZE, which bb-start reads from Windows at
 /// start, else 1920x1080. OutputCustom is any other WxH the player wrote (output_res = 1280x1024, a
@@ -362,6 +378,16 @@ const char* PresetName(int preset);
 /// The fixed preset nearest a preset's scale (Custom: its render_scale): the DLSS quality mode it
 /// runs with.
 int ModelPreset(int preset);
+struct SceneSize {
+    int width, height;
+};
+/// 0.4.4 beta 27b: the scene size a preset renders at, for the menus' Render resolution list (the
+/// launcher's Choices.RenderSize works it out the same). Live: SceneResolution::ForScale of the output
+/// it applies to (the ratio 1 to 3, multiples of 4). In a startup-patched session, the size the next
+/// start makes for the output chosen: patched (patches.cpp ScaledSizes: never below 640x360, never
+/// exactly 1920x1080) unless that start is live (1920x1080, or Live resolution changes on). Custom:
+/// render_scale as set now.
+SceneSize PresetRenderSize(int preset);
 /// dlss_preset letters offered: J, K, L, M (the transformers). NVIDIA removed A-D and deprecated E
 /// and F (the CNN models; read as auto from 0.4.4 beta 25b); G-I, N, O fall back to its default.
 bool DlssPresetValid(int preset);

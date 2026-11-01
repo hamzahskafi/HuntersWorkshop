@@ -1521,5 +1521,20 @@
   "FSR version": "FSR 版本",
   "NVIDIA DLSS {0}. Needs an NVIDIA GeForce RTX GPU; others use AMD FSR": "NVIDIA DLSS {0}。需要 NVIDIA GeForce RTX GPU；其他 GPU 使用 AMD FSR",
   "The newest version AMD's FSR SDK runs on this GPU: FSR 4.1 on Radeon RX 6000 and newer, FSR 3.1 on other GPUs": "AMD FSR SDK 在此 GPU 上能執行的最新版本：Radeon RX 6000 及更新型號為 FSR 4.1，其他 GPU 為 FSR 3.1",
-  "Through AMD's FSR SDK, which picks the version this GPU runs: FSR 4.1 on Radeon RX 6000 and newer, FSR 3.1 on other GPUs": "透過 AMD FSR SDK，由其為此 GPU 選擇版本：Radeon RX 6000 及更新型號為 FSR 4.1，其他 GPU 為 FSR 3.1"
+  "Through AMD's FSR SDK, which picks the version this GPU runs: FSR 4.1 on Radeon RX 6000 and newer, FSR 3.1 on other GPUs": "透過 AMD FSR SDK，由其為此 GPU 選擇版本：Radeon RX 6000 及更新型號為 FSR 4.1，其他 GPU 為 FSR 3.1",
+  "Anti-aliasing": "反鋸齒",
+  "How edges are smoothed when no upscaler runs": "未使用超解析度技術時如何平滑邊緣",
+  "Native AA": "Native AA",
+  "No anti-aliasing: the sharpest picture, with jagged edges and shimmer": "不反鋸齒：畫面最銳利，但邊緣有鋸齒和閃爍",
+  "Output size divided by this is the render size: 1.00 renders at the output, 1.30 a little below, 3.00 like Ultra Performance. DLSS uses the nearest preset's model": "輸出尺寸除以此值即為渲染尺寸：1.00 以輸出解析度渲染，1.30 略低，3.00 相當於 Ultra Performance。DLSS 使用最接近預設的模型",
+  "Render resolution": "渲染解析度",
+  "Renders the game below the output resolution and fills it in, anti-aliasing as it goes. None: the game renders at the output, with the anti-aliasing below": "以低於輸出解析度渲染遊戲並補足畫面，同時反鋸齒。無：以輸出解析度渲染，使用下方的反鋸齒",
+  "Temporal anti-aliasing at the output resolution: smooth edges, a little soft (sharpening helps)": "以輸出解析度進行時間性反鋸齒：邊緣平滑，畫面稍軟（可搭配銳利化）",
+  "The game's own": "遊戲內建",
+  "The game's own anti-aliasing pass, as on the PS4. Applied when the game starts": "遊戲本身的反鋸齒處理，與 PS4 相同。於遊戲啟動時套用",
+  "The output resolution, frame rate, upscaler and render resolution that suit this PC; you see each change before it is applied": "適合此電腦的輸出解析度、影格率、超解析度技術與渲染解析度；每項變更在套用前都會顯示",
+  "The size the game renders at before the upscaler fills the output: lower is faster and softer. Native AA renders at the output (DLAA with DLSS)": "在超解析度技術補足輸出前遊戲渲染的尺寸：越低越快、越柔和。Native AA 以輸出解析度渲染（DLSS 下即 DLAA）",
+  "The upscaler anti-aliases: this applies with Upscaler None": "超解析度技術自帶反鋸齒：此項在超解析度技術為「無」時生效",
+  "With an upscaler only: without one the game renders at the output resolution": "僅在使用超解析度技術時有效：不使用時遊戲以輸出解析度渲染",
+  "With an upscaler or TAA: turn it up if the picture looks soft": "使用超解析度技術或 TAA 時：畫面偏軟時可調高"
 }

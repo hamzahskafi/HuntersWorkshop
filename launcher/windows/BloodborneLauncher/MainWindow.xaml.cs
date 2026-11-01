@@ -585,7 +585,7 @@ namespace BloodborneLauncher
             (item.Content as Panel)?.Children.OfType<System.Windows.Controls.TextBlock>().FirstOrDefault()?.Text;
 
         /// <summary>Shows a page by its key: a tab or sidebar entry ("online", "controls", "gameplay",
-        /// "advanced": Settings), or a section of Visuals' ("display", "graphics", "look", "interface")
+        /// "advanced": Settings), or a section of Visuals' ("display", "graphics", "interface")
         /// or More's ("mods", "cheats", "engine", "output"), which the sidebar lists as entries.</summary>
         public void Show(string page)
         {
@@ -602,7 +602,6 @@ namespace BloodborneLauncher
                     "gameplay" => ClassicGameplay,
                     "display" => ClassicDisplay,
                     "graphics" => ClassicGraphics,
-                    "look" => ClassicLook,
                     "interface" => ClassicInterface,
                     _ => ClassicPlay,
                 }
@@ -612,7 +611,7 @@ namespace BloodborneLauncher
                     "advanced" => SettingsItem,
                     "output" or "mods" or "engine" => MoreItem,
                     "cheats" when CheatsPage.Supported => MoreItem,
-                    "display" or "graphics" or "look" or "interface" => VisualsItem,
+                    "display" or "graphics" or "interface" => VisualsItem,
                     "controls" => ControlsItem,
                     "gameplay" => GameplayItem,
                     _ => PlayItem,

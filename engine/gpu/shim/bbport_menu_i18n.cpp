@@ -60,47 +60,16 @@ constexpr Entry kSpanish[] = {
      "Escalado temporal"},
     {"Off",
      "Desactivado"},
-    {"TAA (native anti-aliasing)",
-     "TAA (antialiasing nativo)"},
     {"Upscaler",
      "Escalador"},
     {"— not supported by this GPU",
      "— no compatible con esta GPU"},
     {"— in development",
      "— en desarrollo"},
-    {"FSR 4.1.1 in INT8 mode: the model from AMD's 4.1.1 DLL, reproduced in Vulkan (output "
-     "matches the DLL). One model for Native through Performance and another for Ultra "
-     "Performance. Assets: tools/fsr4cap/build_assets.sh (requires the DLL and Proton).",
-     "FSR 4.1.1 en modo INT8: el modelo de la DLL 4.1.1 de AMD, reproducido en Vulkan (el "
-     "resultado coincide con la DLL). Un modelo de Native a Performance y otro para Ultra "
-     "Performance. Recursos: tools/fsr4cap/build_assets.sh (requiere la DLL y Proton)."},
-    {"FSR 4 in INT8 mode (v07 model from AMD FidelityFX SDK sources). Higher quality than "
-     "FSR 3.1, but the pass is more demanding. Changing the preset rebuilds the model (a "
-     "brief pause). Assets: tools/fetch_fsr4_assets.sh.",
-     "FSR 4 en modo INT8 (modelo v07 del código fuente de AMD FidelityFX SDK). Mayor calidad "
-     "que FSR 3.1, pero el pase es más exigente. Cambiar el preajuste reconstruye el modelo "
-     "(una breve pausa). Recursos: tools/fetch_fsr4_assets.sh."},
-    {"FSR 4: auto exposure",
-     "FSR 4: exposición automática"},
-    {"FSR 4: invert jitter sign",
-     "FSR 4: invertir signo del jitter"},
-    {"For diagnosing ghosting: the FSR 4 network normalizes color by exposure and uses it to "
-     "decide when to discard previous frames. Changes apply immediately, without a restart.",
-     "Para diagnosticar ghosting: la red de FSR 4 normaliza el color según la exposición y "
-     "la usa para decidir cuándo descartar fotogramas anteriores. Los cambios se aplican al "
-     "instante, sin reiniciar."},
     {"Preset",
      "Preajuste"},
-    {"%s (x%.1f, render %dx%d)",
-     "%s (x%.1f, renderizado %dx%d)"},
     {"Character motion vectors",
      "Vectores de movimiento de personajes"},
-    {"Accurate vectors for animated objects: clothing and weapons break up less during "
-     "movement. The static scene does not get an additional pass. Changes apply after "
-     "restarting the game.",
-     "Vectores precisos para objetos animados: la ropa y las armas se deshacen menos en "
-     "movimiento. La escena estática no recibe un pase adicional. Se aplica tras reiniciar "
-     "el juego."},
     {"Show motion vectors (debug)",
      "Mostrar vectores de movimiento (depuración)"},
     {"Red/green: horizontal/vertical motion (8 pixels = full brightness). Blue: the pixel "
@@ -239,12 +208,8 @@ constexpr Entry kSpanish[] = {
      "DLSS: texturas más nítidas (mip bias -1)"},
     {"Textures one mip level sharper than the render resolution alone gives, as NVIDIA's DLSS guide asks. Off: only the render-to-output ratio. Live.",
      "Texturas un nivel de mip más nítidas de lo que da la resolución de renderizado, como pide la guía de DLSS de NVIDIA. Desactivado: solo la proporción entre renderizado y salida. Se aplica al momento."},
-    {"FSR 3.1 uses it as its reactive mask.",
-     "FSR 3.1 la usa como su máscara reactiva."},
     {"DLSS does not use it.",
      "DLSS no la usa."},
-    {"FSR 4 has no mask input: the marked pixels are blended with this frame after it.",
-     "FSR 4 no tiene entrada de máscara: los píxeles marcados se mezclan con este fotograma después de él."},
     {"TAA does not use it.",
      "TAA no la usa."},
     {"Red: how far each pixel stops relying on past frames (Maximum = full red); the rest of the picture is darkened. Scale makes changes count more, Threshold drops faint ones (thin mist). Not saved.",
@@ -284,6 +249,47 @@ constexpr Entry kSpanish[] = {
      "Activa el ajuste de cámara en el launcher (Jugabilidad) antes de empezar; los cambios aquí se aplican al momento."},
     {"HDR source",
      "Fuente HDR"},
+    // 0.4.4 beta 27b: AMD FSR through AMD's SDK, Anti-aliasing, Render resolution, Advanced.
+    {"None",
+     "Ninguno"},
+    {"— not available here (AMD's files, or not Windows)",
+     "— no disponible aquí (archivos de AMD, o no es Windows)"},
+    {"AMD FSR through AMD's FSR SDK, which picks the version this GPU runs: FSR 4.1 on Radeon RX 6000 and newer, FSR 3.1 on other GPUs.",
+     "AMD FSR mediante el FSR SDK de AMD, que elige la versión que ejecuta esta GPU: FSR 4.1 en Radeon RX 6000 y posteriores, FSR 3.1 en las demás GPU."},
+    {"Running: %s",
+     "En uso: %s"},
+    {"Upscaler unavailable: %s",
+     "Escalador no disponible: %s"},
+    {"Anti-aliasing below runs instead. Select the upscaler again to retry.",
+     "En su lugar se usa el antialiasing de abajo. Vuelve a elegir el escalador para reintentarlo."},
+    {"FSR version",
+     "Versión de FSR"},
+    {"Automatic (AMD's choice)",
+     "Automática (elección de AMD)"},
+    {"Automatic: the newest version AMD's SDK runs on this GPU. FSR 3.1: AMD's FSR 3.1.6 on any GPU, to compare, or if FSR 4 looks wrong. A change builds the upscaler again (a few seconds at full size, without it).",
+     "Automática: la versión más reciente que el SDK de AMD ejecuta en esta GPU. FSR 3.1: el FSR 3.1.6 de AMD en cualquier GPU, para comparar o si FSR 4 se ve mal. Un cambio vuelve a crear el escalador (unos segundos a tamaño completo, sin él)."},
+    {"FSR: auto exposure",
+     "FSR: exposición automática"},
+    {"FSR: invert jitter sign",
+     "FSR: invertir signo del jitter"},
+    {"For diagnosing ghosting: FSR normalizes color by exposure and uses it to decide when to discard previous frames. Changes apply immediately, without a restart.",
+     "Para diagnosticar ghosting: FSR normaliza el color según la exposición y la usa para decidir cuándo descartar fotogramas anteriores. Los cambios se aplican al instante, sin reiniciar."},
+    {"Anti-aliasing",
+     "Antialiasing"},
+    {"The game's own",
+     "El del juego"},
+    {"The upscaler anti-aliases: this applies with Upscaler None.",
+     "El escalador ya suaviza los bordes: esto se aplica con el escalador «Ninguno»."},
+    {"TAA: smooth edges at the output resolution, live (sharpening helps). The game's own: its anti-aliasing pass, as on the PS4, after a restart. Off: the sharpest picture, with jagged edges.",
+     "TAA: bordes suaves a la resolución de salida, al instante (el enfoque ayuda). El del juego: su propio pase de antialiasing, como en PS4, tras reiniciar. Desactivado: la imagen más nítida, con bordes dentados."},
+    {"Render resolution",
+     "Resolución de renderizado"},
+    {"With an upscaler only: without one the game renders at the output resolution.",
+     "Solo con un escalador: sin él, el juego renderiza a la resolución de salida."},
+    {"Advanced",
+     "Avanzado"},
+    {"Accurate vectors for animated objects: clothing and weapons break up less during movement, at about 10% of the frame rate. The static scene does not get an additional pass. With an upscaler or TAA. Changes apply after restarting the game.",
+     "Vectores precisos para objetos animados: la ropa y las armas se deshacen menos en movimiento, a cambio de cerca del 10% de los FPS. La escena estática no recibe un pase adicional. Con un escalador o TAA. Se aplica tras reiniciar el juego."},
 };
 
 // Portuguese, Brazil (pt_BR)
@@ -324,47 +330,16 @@ constexpr Entry kPortugueseBrazil[] = {
      "Upscaler temporal"},
     {"Off",
      "Desligado"},
-    {"TAA (native anti-aliasing)",
-     "TAA (anti-aliasing nativo)"},
     {"Upscaler",
      "Upscaler"},
     {"— not supported by this GPU",
      "— não suportado por esta GPU"},
     {"— in development",
      "— em desenvolvimento"},
-    {"FSR 4.1.1 in INT8 mode: the model from AMD's 4.1.1 DLL, reproduced in Vulkan (output "
-     "matches the DLL). One model for Native through Performance and another for Ultra "
-     "Performance. Assets: tools/fsr4cap/build_assets.sh (requires the DLL and Proton).",
-     "FSR 4.1.1 no modo INT8: o modelo da DLL 4.1.1 da AMD, reproduzido em Vulkan (o "
-     "resultado é igual ao da DLL). Um modelo de Native a Performance e outro para Ultra "
-     "Performance. Assets: tools/fsr4cap/build_assets.sh (requer a DLL e o Proton)."},
-    {"FSR 4 in INT8 mode (v07 model from AMD FidelityFX SDK sources). Higher quality than "
-     "FSR 3.1, but the pass is more demanding. Changing the preset rebuilds the model (a "
-     "brief pause). Assets: tools/fetch_fsr4_assets.sh.",
-     "FSR 4 no modo INT8 (modelo v07 do código-fonte do AMD FidelityFX SDK). Qualidade maior "
-     "que a do FSR 3.1, mas a passada é mais pesada. Trocar a predefinição reconstrói o "
-     "modelo (uma breve pausa). Assets: tools/fetch_fsr4_assets.sh."},
-    {"FSR 4: auto exposure",
-     "FSR 4: exposição automática"},
-    {"FSR 4: invert jitter sign",
-     "FSR 4: inverter sinal do jitter"},
-    {"For diagnosing ghosting: the FSR 4 network normalizes color by exposure and uses it to "
-     "decide when to discard previous frames. Changes apply immediately, without a restart.",
-     "Para diagnosticar ghosting: a rede do FSR 4 normaliza a cor pela exposição e a usa "
-     "para decidir quando descartar quadros anteriores. As alterações valem na hora, sem "
-     "reiniciar."},
     {"Preset",
      "Predefinição"},
-    {"%s (x%.1f, render %dx%d)",
-     "%s (x%.1f, renderização %dx%d)"},
     {"Character motion vectors",
      "Vetores de movimento dos personagens"},
-    {"Accurate vectors for animated objects: clothing and weapons break up less during "
-     "movement. The static scene does not get an additional pass. Changes apply after "
-     "restarting the game.",
-     "Vetores precisos para objetos animados: roupas e armas se desfazem menos durante o "
-     "movimento. A cena estática não recebe uma passada extra. Aplica-se após reiniciar o "
-     "jogo."},
     {"Show motion vectors (debug)",
      "Mostrar vetores de movimento (depuração)"},
     {"Red/green: horizontal/vertical motion (8 pixels = full brightness). Blue: the pixel "
@@ -502,12 +477,8 @@ constexpr Entry kPortugueseBrazil[] = {
      "DLSS: texturas mais nítidas (mip bias -1)"},
     {"Textures one mip level sharper than the render resolution alone gives, as NVIDIA's DLSS guide asks. Off: only the render-to-output ratio. Live.",
      "Texturas um nível de mip mais nítidas do que a resolução de renderização sozinha daria, como pede o guia do DLSS da NVIDIA. Desligado: só a proporção entre renderização e saída. Aplica na hora."},
-    {"FSR 3.1 uses it as its reactive mask.",
-     "O FSR 3.1 a usa como sua máscara reativa."},
     {"DLSS does not use it.",
      "O DLSS não a usa."},
-    {"FSR 4 has no mask input: the marked pixels are blended with this frame after it.",
-     "O FSR 4 não tem entrada de máscara: os pixels marcados são misturados com este quadro depois dele."},
     {"TAA does not use it.",
      "O TAA não a usa."},
     {"Red: how far each pixel stops relying on past frames (Maximum = full red); the rest of the picture is darkened. Scale makes changes count more, Threshold drops faint ones (thin mist). Not saved.",
@@ -547,6 +518,47 @@ constexpr Entry kPortugueseBrazil[] = {
      "Ative o ajuste de câmera no launcher (Jogabilidade) antes de iniciar; as mudanças aqui valem na hora."},
     {"HDR source",
      "Fonte HDR"},
+    // 0.4.4 beta 27b: AMD FSR through AMD's SDK, Anti-aliasing, Render resolution, Advanced.
+    {"None",
+     "Nenhum"},
+    {"— not available here (AMD's files, or not Windows)",
+     "— indisponível aqui (arquivos da AMD, ou não é Windows)"},
+    {"AMD FSR through AMD's FSR SDK, which picks the version this GPU runs: FSR 4.1 on Radeon RX 6000 and newer, FSR 3.1 on other GPUs.",
+     "AMD FSR pelo FSR SDK da AMD, que escolhe a versão que esta GPU executa: FSR 4.1 nas Radeon RX 6000 e mais novas, FSR 3.1 nas demais GPUs."},
+    {"Running: %s",
+     "Em uso: %s"},
+    {"Upscaler unavailable: %s",
+     "Upscaler indisponível: %s"},
+    {"Anti-aliasing below runs instead. Select the upscaler again to retry.",
+     "No lugar dele roda o anti-aliasing abaixo. Selecione o upscaler de novo para tentar outra vez."},
+    {"FSR version",
+     "Versão do FSR"},
+    {"Automatic (AMD's choice)",
+     "Automática (escolha da AMD)"},
+    {"Automatic: the newest version AMD's SDK runs on this GPU. FSR 3.1: AMD's FSR 3.1.6 on any GPU, to compare, or if FSR 4 looks wrong. A change builds the upscaler again (a few seconds at full size, without it).",
+     "Automática: a versão mais nova que o SDK da AMD executa nesta GPU. FSR 3.1: o FSR 3.1.6 da AMD em qualquer GPU, para comparar ou se o FSR 4 parecer errado. Uma mudança recria o upscaler (alguns segundos em tamanho total, sem ele)."},
+    {"FSR: auto exposure",
+     "FSR: exposição automática"},
+    {"FSR: invert jitter sign",
+     "FSR: inverter sinal do jitter"},
+    {"For diagnosing ghosting: FSR normalizes color by exposure and uses it to decide when to discard previous frames. Changes apply immediately, without a restart.",
+     "Para diagnosticar ghosting: o FSR normaliza a cor pela exposição e a usa para decidir quando descartar quadros anteriores. As alterações valem na hora, sem reiniciar."},
+    {"Anti-aliasing",
+     "Anti-aliasing"},
+    {"The game's own",
+     "O do jogo"},
+    {"The upscaler anti-aliases: this applies with Upscaler None.",
+     "O upscaler já faz o anti-aliasing: isto vale com o upscaler \"Nenhum\"."},
+    {"TAA: smooth edges at the output resolution, live (sharpening helps). The game's own: its anti-aliasing pass, as on the PS4, after a restart. Off: the sharpest picture, with jagged edges.",
+     "TAA: bordas suaves na resolução de saída, na hora (a nitidez ajuda). O do jogo: a passada de anti-aliasing dele, como no PS4, após reiniciar. Desligado: a imagem mais nítida, com bordas serrilhadas."},
+    {"Render resolution",
+     "Resolução de renderização"},
+    {"With an upscaler only: without one the game renders at the output resolution.",
+     "Só com um upscaler: sem ele, o jogo renderiza na resolução de saída."},
+    {"Advanced",
+     "Avançado"},
+    {"Accurate vectors for animated objects: clothing and weapons break up less during movement, at about 10% of the frame rate. The static scene does not get an additional pass. With an upscaler or TAA. Changes apply after restarting the game.",
+     "Vetores precisos para objetos animados: roupas e armas se desfazem menos durante o movimento, ao custo de cerca de 10% dos FPS. A cena estática não recebe uma passada extra. Com um upscaler ou TAA. Aplica-se após reiniciar o jogo."},
 };
 
 // French (fr)
@@ -587,48 +599,16 @@ constexpr Entry kFrench[] = {
      "Mise à l'échelle temporelle"},
     {"Off",
      "Désactivé"},
-    {"TAA (native anti-aliasing)",
-     "TAA (anticrénelage natif)"},
     {"Upscaler",
      "Upscaler"},
     {"— not supported by this GPU",
      "— non pris en charge par ce GPU"},
     {"— in development",
      "— en développement"},
-    {"FSR 4.1.1 in INT8 mode: the model from AMD's 4.1.1 DLL, reproduced in Vulkan (output "
-     "matches the DLL). One model for Native through Performance and another for Ultra "
-     "Performance. Assets: tools/fsr4cap/build_assets.sh (requires the DLL and Proton).",
-     "FSR 4.1.1 en mode INT8 : le modèle de la DLL 4.1.1 d'AMD, reproduit en Vulkan "
-     "(résultat identique à la DLL). Un modèle de Native à Performance et un autre pour "
-     "Ultra Performance. Ressources : tools/fsr4cap/build_assets.sh (nécessite la DLL et "
-     "Proton)."},
-    {"FSR 4 in INT8 mode (v07 model from AMD FidelityFX SDK sources). Higher quality than "
-     "FSR 3.1, but the pass is more demanding. Changing the preset rebuilds the model (a "
-     "brief pause). Assets: tools/fetch_fsr4_assets.sh.",
-     "FSR 4 en mode INT8 (modèle v07 issu des sources du AMD FidelityFX SDK). Meilleure "
-     "qualité que FSR 3.1, mais la passe est plus exigeante. Changer de préréglage "
-     "reconstruit le modèle (brève pause). Ressources : tools/fetch_fsr4_assets.sh."},
-    {"FSR 4: auto exposure",
-     "FSR 4 : exposition automatique"},
-    {"FSR 4: invert jitter sign",
-     "FSR 4 : inverser le signe du jitter"},
-    {"For diagnosing ghosting: the FSR 4 network normalizes color by exposure and uses it to "
-     "decide when to discard previous frames. Changes apply immediately, without a restart.",
-     "Pour diagnostiquer le ghosting : le réseau FSR 4 normalise la couleur selon "
-     "l'exposition et s'en sert pour décider quand rejeter les images précédentes. Les "
-     "changements s'appliquent immédiatement, sans redémarrage."},
     {"Preset",
      "Préréglage"},
-    {"%s (x%.1f, render %dx%d)",
-     "%s (x%.1f, rendu %dx%d)"},
     {"Character motion vectors",
      "Vecteurs de mouvement des personnages"},
-    {"Accurate vectors for animated objects: clothing and weapons break up less during "
-     "movement. The static scene does not get an additional pass. Changes apply after "
-     "restarting the game.",
-     "Vecteurs précis pour les objets animés : les vêtements et les armes se désagrègent "
-     "moins en mouvement. La scène statique ne reçoit pas de passe supplémentaire. "
-     "S'applique après le redémarrage du jeu."},
     {"Show motion vectors (debug)",
      "Afficher les vecteurs de mouvement (débogage)"},
     {"Red/green: horizontal/vertical motion (8 pixels = full brightness). Blue: the pixel "
@@ -767,12 +747,8 @@ constexpr Entry kFrench[] = {
      "DLSS : textures plus nettes (mip bias -1)"},
     {"Textures one mip level sharper than the render resolution alone gives, as NVIDIA's DLSS guide asks. Off: only the render-to-output ratio. Live.",
      "Des textures d'un niveau de mip plus nettes que ce que donne la seule résolution de rendu, comme le demande le guide DLSS de NVIDIA. Désactivé : seulement le rapport rendu/sortie. Immédiat."},
-    {"FSR 3.1 uses it as its reactive mask.",
-     "FSR 3.1 l'utilise comme masque réactif."},
     {"DLSS does not use it.",
      "DLSS ne l'utilise pas."},
-    {"FSR 4 has no mask input: the marked pixels are blended with this frame after it.",
-     "FSR 4 n'a pas d'entrée de masque : les pixels marqués sont mélangés avec cette image après lui."},
     {"TAA does not use it.",
      "TAA ne l'utilise pas."},
     {"Red: how far each pixel stops relying on past frames (Maximum = full red); the rest of the picture is darkened. Scale makes changes count more, Threshold drops faint ones (thin mist). Not saved.",
@@ -812,6 +788,47 @@ constexpr Entry kFrench[] = {
      "Activez le réglage de la caméra dans le launcher (Jouabilité) avant de lancer ; les changements ici s'appliquent aussitôt."},
     {"HDR source",
      "Source HDR"},
+    // 0.4.4 beta 27b: AMD FSR through AMD's SDK, Anti-aliasing, Render resolution, Advanced.
+    {"None",
+     "Aucun"},
+    {"— not available here (AMD's files, or not Windows)",
+     "— indisponible ici (fichiers d'AMD, ou pas sous Windows)"},
+    {"AMD FSR through AMD's FSR SDK, which picks the version this GPU runs: FSR 4.1 on Radeon RX 6000 and newer, FSR 3.1 on other GPUs.",
+     "AMD FSR via le FSR SDK d'AMD, qui choisit la version que ce GPU exécute : FSR 4.1 sur Radeon RX 6000 et plus récentes, FSR 3.1 sur les autres GPU."},
+    {"Running: %s",
+     "En cours : %s"},
+    {"Upscaler unavailable: %s",
+     "Upscaler indisponible : %s"},
+    {"Anti-aliasing below runs instead. Select the upscaler again to retry.",
+     "L'anticrénelage ci-dessous est utilisé à la place. Choisissez à nouveau l'upscaler pour réessayer."},
+    {"FSR version",
+     "Version de FSR"},
+    {"Automatic (AMD's choice)",
+     "Automatique (choix d'AMD)"},
+    {"Automatic: the newest version AMD's SDK runs on this GPU. FSR 3.1: AMD's FSR 3.1.6 on any GPU, to compare, or if FSR 4 looks wrong. A change builds the upscaler again (a few seconds at full size, without it).",
+     "Automatique : la version la plus récente que le SDK d'AMD exécute sur ce GPU. FSR 3.1 : le FSR 3.1.6 d'AMD sur tout GPU, pour comparer ou si FSR 4 semble incorrect. Un changement recrée l'upscaler (quelques secondes en taille réelle, sans lui)."},
+    {"FSR: auto exposure",
+     "FSR : exposition automatique"},
+    {"FSR: invert jitter sign",
+     "FSR : inverser le signe du jitter"},
+    {"For diagnosing ghosting: FSR normalizes color by exposure and uses it to decide when to discard previous frames. Changes apply immediately, without a restart.",
+     "Pour diagnostiquer le ghosting : FSR normalise la couleur selon l'exposition et s'en sert pour décider quand rejeter les images précédentes. Les changements s'appliquent immédiatement, sans redémarrage."},
+    {"Anti-aliasing",
+     "Anticrénelage"},
+    {"The game's own",
+     "Celui du jeu"},
+    {"The upscaler anti-aliases: this applies with Upscaler None.",
+     "L'upscaler anticrénèle déjà : ceci s'applique avec l'upscaler « Aucun »."},
+    {"TAA: smooth edges at the output resolution, live (sharpening helps). The game's own: its anti-aliasing pass, as on the PS4, after a restart. Off: the sharpest picture, with jagged edges.",
+     "TAA : bords lisses à la résolution de sortie, immédiatement (la netteté aide). Celui du jeu : sa propre passe d'anticrénelage, comme sur PS4, après un redémarrage. Désactivé : l'image la plus nette, avec des bords crénelés."},
+    {"Render resolution",
+     "Résolution de rendu"},
+    {"With an upscaler only: without one the game renders at the output resolution.",
+     "Avec un upscaler uniquement : sans lui, le jeu effectue le rendu à la résolution de sortie."},
+    {"Advanced",
+     "Avancé"},
+    {"Accurate vectors for animated objects: clothing and weapons break up less during movement, at about 10% of the frame rate. The static scene does not get an additional pass. With an upscaler or TAA. Changes apply after restarting the game.",
+     "Vecteurs précis pour les objets animés : les vêtements et les armes se désagrègent moins en mouvement, pour environ 10 % des FPS. La scène statique ne reçoit pas de passe supplémentaire. Avec un upscaler ou le TAA. S'applique après le redémarrage du jeu."},
 };
 
 // German (de)
@@ -852,48 +869,16 @@ constexpr Entry kGerman[] = {
      "Temporales Upscaling"},
     {"Off",
      "Aus"},
-    {"TAA (native anti-aliasing)",
-     "TAA (native Kantenglättung)"},
     {"Upscaler",
      "Upscaler"},
     {"— not supported by this GPU",
      "— von dieser GPU nicht unterstützt"},
     {"— in development",
      "— in Entwicklung"},
-    {"FSR 4.1.1 in INT8 mode: the model from AMD's 4.1.1 DLL, reproduced in Vulkan (output "
-     "matches the DLL). One model for Native through Performance and another for Ultra "
-     "Performance. Assets: tools/fsr4cap/build_assets.sh (requires the DLL and Proton).",
-     "FSR 4.1.1 im INT8-Modus: das Modell aus AMDs 4.1.1-DLL, in Vulkan nachgebildet "
-     "(Ausgabe identisch mit der DLL). Ein Modell für Native bis Performance und ein "
-     "weiteres für Ultra Performance. Assets: tools/fsr4cap/build_assets.sh (benötigt die "
-     "DLL und Proton)."},
-    {"FSR 4 in INT8 mode (v07 model from AMD FidelityFX SDK sources). Higher quality than "
-     "FSR 3.1, but the pass is more demanding. Changing the preset rebuilds the model (a "
-     "brief pause). Assets: tools/fetch_fsr4_assets.sh.",
-     "FSR 4 im INT8-Modus (v07-Modell aus den Quellen des AMD FidelityFX SDK). Höhere "
-     "Qualität als FSR 3.1, aber der Pass ist aufwendiger. Ein Wechsel der Voreinstellung "
-     "baut das Modell neu auf (kurze Pause). Assets: tools/fetch_fsr4_assets.sh."},
-    {"FSR 4: auto exposure",
-     "FSR 4: Automatische Belichtung"},
-    {"FSR 4: invert jitter sign",
-     "FSR 4: Jitter-Vorzeichen umkehren"},
-    {"For diagnosing ghosting: the FSR 4 network normalizes color by exposure and uses it to "
-     "decide when to discard previous frames. Changes apply immediately, without a restart.",
-     "Zur Diagnose von Ghosting: Das FSR-4-Netz normalisiert die Farbe anhand der Belichtung "
-     "und entscheidet damit, wann frühere Frames verworfen werden. Änderungen gelten sofort, "
-     "ohne Neustart."},
     {"Preset",
      "Voreinstellung"},
-    {"%s (x%.1f, render %dx%d)",
-     "%s (x%.1f, Rendering %dx%d)"},
     {"Character motion vectors",
      "Bewegungsvektoren für Figuren"},
-    {"Accurate vectors for animated objects: clothing and weapons break up less during "
-     "movement. The static scene does not get an additional pass. Changes apply after "
-     "restarting the game.",
-     "Genaue Vektoren für animierte Objekte: Kleidung und Waffen zerfallen bei Bewegung "
-     "weniger. Die statische Szene erhält keinen zusätzlichen Pass. Gilt nach einem Neustart "
-     "des Spiels."},
     {"Show motion vectors (debug)",
      "Bewegungsvektoren anzeigen (Debug)"},
     {"Red/green: horizontal/vertical motion (8 pixels = full brightness). Blue: the pixel "
@@ -1032,12 +1017,8 @@ constexpr Entry kGerman[] = {
      "DLSS: schärfere Texturen (Mip-Bias -1)"},
     {"Textures one mip level sharper than the render resolution alone gives, as NVIDIA's DLSS guide asks. Off: only the render-to-output ratio. Live.",
      "Texturen eine Mip-Stufe schärfer, als die Renderauflösung allein ergibt, wie NVIDIAs DLSS-Leitfaden es verlangt. Aus: nur das Verhältnis von Render- zu Ausgabeauflösung. Sofort wirksam."},
-    {"FSR 3.1 uses it as its reactive mask.",
-     "FSR 3.1 nutzt sie als seine Reaktivmaske."},
     {"DLSS does not use it.",
      "DLSS nutzt sie nicht."},
-    {"FSR 4 has no mask input: the marked pixels are blended with this frame after it.",
-     "FSR 4 hat keinen Maskeneingang: die markierten Pixel werden danach mit diesem Bild gemischt."},
     {"TAA does not use it.",
      "TAA nutzt sie nicht."},
     {"Red: how far each pixel stops relying on past frames (Maximum = full red); the rest of the picture is darkened. Scale makes changes count more, Threshold drops faint ones (thin mist). Not saved.",
@@ -1077,6 +1058,47 @@ constexpr Entry kGerman[] = {
      "Schalte die Kameraanpassung vor dem Start im Launcher ein (Spielablauf); Änderungen hier gelten sofort."},
     {"HDR source",
      "HDR-Quelle"},
+    // 0.4.4 beta 27b: AMD FSR through AMD's SDK, Anti-aliasing, Render resolution, Advanced.
+    {"None",
+     "Keiner"},
+    {"— not available here (AMD's files, or not Windows)",
+     "— hier nicht verfügbar (AMDs Dateien, oder nicht Windows)"},
+    {"AMD FSR through AMD's FSR SDK, which picks the version this GPU runs: FSR 4.1 on Radeon RX 6000 and newer, FSR 3.1 on other GPUs.",
+     "AMD FSR über AMDs FSR SDK, das die Version wählt, die diese GPU ausführt: FSR 4.1 auf Radeon RX 6000 und neuer, FSR 3.1 auf anderen GPUs."},
+    {"Running: %s",
+     "Läuft: %s"},
+    {"Upscaler unavailable: %s",
+     "Upscaler nicht verfügbar: %s"},
+    {"Anti-aliasing below runs instead. Select the upscaler again to retry.",
+     "Stattdessen läuft die Kantenglättung unten. Den Upscaler erneut wählen, um es noch einmal zu versuchen."},
+    {"FSR version",
+     "FSR-Version"},
+    {"Automatic (AMD's choice)",
+     "Automatisch (AMDs Wahl)"},
+    {"Automatic: the newest version AMD's SDK runs on this GPU. FSR 3.1: AMD's FSR 3.1.6 on any GPU, to compare, or if FSR 4 looks wrong. A change builds the upscaler again (a few seconds at full size, without it).",
+     "Automatisch: die neueste Version, die AMDs SDK auf dieser GPU ausführt. FSR 3.1: AMDs FSR 3.1.6 auf jeder GPU, zum Vergleich oder wenn FSR 4 falsch aussieht. Eine Änderung baut den Upscaler neu auf (einige Sekunden in voller Größe, ohne ihn)."},
+    {"FSR: auto exposure",
+     "FSR: Automatische Belichtung"},
+    {"FSR: invert jitter sign",
+     "FSR: Jitter-Vorzeichen umkehren"},
+    {"For diagnosing ghosting: FSR normalizes color by exposure and uses it to decide when to discard previous frames. Changes apply immediately, without a restart.",
+     "Zur Diagnose von Ghosting: FSR normalisiert die Farbe anhand der Belichtung und entscheidet damit, wann frühere Frames verworfen werden. Änderungen gelten sofort, ohne Neustart."},
+    {"Anti-aliasing",
+     "Kantenglättung"},
+    {"The game's own",
+     "Spieleigene"},
+    {"The upscaler anti-aliases: this applies with Upscaler None.",
+     "Der Upscaler glättet selbst: dies gilt mit Upscaler „Keiner“."},
+    {"TAA: smooth edges at the output resolution, live (sharpening helps). The game's own: its anti-aliasing pass, as on the PS4, after a restart. Off: the sharpest picture, with jagged edges.",
+     "TAA: glatte Kanten in der Ausgabeauflösung, sofort (Schärfen hilft). Spieleigene: der Kantenglättungs-Pass des Spiels, wie auf der PS4, nach einem Neustart. Aus: das schärfste Bild, mit Treppenkanten."},
+    {"Render resolution",
+     "Renderauflösung"},
+    {"With an upscaler only: without one the game renders at the output resolution.",
+     "Nur mit einem Upscaler: ohne ihn rendert das Spiel in der Ausgabeauflösung."},
+    {"Advanced",
+     "Erweitert"},
+    {"Accurate vectors for animated objects: clothing and weapons break up less during movement, at about 10% of the frame rate. The static scene does not get an additional pass. With an upscaler or TAA. Changes apply after restarting the game.",
+     "Genaue Vektoren für animierte Objekte: Kleidung und Waffen zerfallen bei Bewegung weniger, für etwa 10 % der Bildrate. Die statische Szene erhält keinen zusätzlichen Pass. Mit einem Upscaler oder TAA. Gilt nach einem Neustart des Spiels."},
 };
 
 // Italian (it)
@@ -1117,47 +1139,16 @@ constexpr Entry kItalian[] = {
      "Upscaler temporale"},
     {"Off",
      "Disattivato"},
-    {"TAA (native anti-aliasing)",
-     "TAA (anti-aliasing nativo)"},
     {"Upscaler",
      "Upscaler"},
     {"— not supported by this GPU",
      "— non supportato da questa GPU"},
     {"— in development",
      "— in sviluppo"},
-    {"FSR 4.1.1 in INT8 mode: the model from AMD's 4.1.1 DLL, reproduced in Vulkan (output "
-     "matches the DLL). One model for Native through Performance and another for Ultra "
-     "Performance. Assets: tools/fsr4cap/build_assets.sh (requires the DLL and Proton).",
-     "FSR 4.1.1 in modalità INT8: il modello della DLL 4.1.1 di AMD, riprodotto in Vulkan "
-     "(il risultato coincide con la DLL). Un modello da Native a Performance e un altro per "
-     "Ultra Performance. Risorse: tools/fsr4cap/build_assets.sh (richiede la DLL e Proton)."},
-    {"FSR 4 in INT8 mode (v07 model from AMD FidelityFX SDK sources). Higher quality than "
-     "FSR 3.1, but the pass is more demanding. Changing the preset rebuilds the model (a "
-     "brief pause). Assets: tools/fetch_fsr4_assets.sh.",
-     "FSR 4 in modalità INT8 (modello v07 dai sorgenti di AMD FidelityFX SDK). Qualità "
-     "superiore a FSR 3.1, ma il passaggio è più pesante. Cambiare preset ricostruisce il "
-     "modello (breve pausa). Risorse: tools/fetch_fsr4_assets.sh."},
-    {"FSR 4: auto exposure",
-     "FSR 4: esposizione automatica"},
-    {"FSR 4: invert jitter sign",
-     "FSR 4: inverti segno del jitter"},
-    {"For diagnosing ghosting: the FSR 4 network normalizes color by exposure and uses it to "
-     "decide when to discard previous frames. Changes apply immediately, without a restart.",
-     "Per diagnosticare il ghosting: la rete di FSR 4 normalizza il colore in base "
-     "all'esposizione e la usa per decidere quando scartare i fotogrammi precedenti. Le "
-     "modifiche si applicano subito, senza riavvio."},
     {"Preset",
      "Preset"},
-    {"%s (x%.1f, render %dx%d)",
-     "%s (x%.1f, rendering %dx%d)"},
     {"Character motion vectors",
      "Vettori di movimento dei personaggi"},
-    {"Accurate vectors for animated objects: clothing and weapons break up less during "
-     "movement. The static scene does not get an additional pass. Changes apply after "
-     "restarting the game.",
-     "Vettori precisi per gli oggetti animati: vestiti e armi si sfaldano meno durante il "
-     "movimento. La scena statica non riceve un passaggio aggiuntivo. Si applica dopo il "
-     "riavvio del gioco."},
     {"Show motion vectors (debug)",
      "Mostra vettori di movimento (debug)"},
     {"Red/green: horizontal/vertical motion (8 pixels = full brightness). Blue: the pixel "
@@ -1297,12 +1288,8 @@ constexpr Entry kItalian[] = {
      "DLSS: texture più nitide (mip bias -1)"},
     {"Textures one mip level sharper than the render resolution alone gives, as NVIDIA's DLSS guide asks. Off: only the render-to-output ratio. Live.",
      "Texture di un livello di mip più nitide di quanto dia la sola risoluzione di rendering, come chiede la guida DLSS di NVIDIA. Disattivato: solo il rapporto tra rendering e uscita. Immediato."},
-    {"FSR 3.1 uses it as its reactive mask.",
-     "FSR 3.1 la usa come sua maschera reattiva."},
     {"DLSS does not use it.",
      "DLSS non la usa."},
-    {"FSR 4 has no mask input: the marked pixels are blended with this frame after it.",
-     "FSR 4 non ha un ingresso per la maschera: i pixel marcati vengono miscelati con questo fotogramma dopo di esso."},
     {"TAA does not use it.",
      "TAA non la usa."},
     {"Red: how far each pixel stops relying on past frames (Maximum = full red); the rest of the picture is darkened. Scale makes changes count more, Threshold drops faint ones (thin mist). Not saved.",
@@ -1342,6 +1329,47 @@ constexpr Entry kItalian[] = {
      "Attiva la regolazione della telecamera nel launcher (Gameplay) prima di avviare; le modifiche qui valgono subito."},
     {"HDR source",
      "Sorgente HDR"},
+    // 0.4.4 beta 27b: AMD FSR through AMD's SDK, Anti-aliasing, Render resolution, Advanced.
+    {"None",
+     "Nessuno"},
+    {"— not available here (AMD's files, or not Windows)",
+     "— non disponibile qui (file di AMD, o non è Windows)"},
+    {"AMD FSR through AMD's FSR SDK, which picks the version this GPU runs: FSR 4.1 on Radeon RX 6000 and newer, FSR 3.1 on other GPUs.",
+     "AMD FSR tramite l'FSR SDK di AMD, che sceglie la versione eseguita da questa GPU: FSR 4.1 su Radeon RX 6000 e successive, FSR 3.1 sulle altre GPU."},
+    {"Running: %s",
+     "In uso: %s"},
+    {"Upscaler unavailable: %s",
+     "Upscaler non disponibile: %s"},
+    {"Anti-aliasing below runs instead. Select the upscaler again to retry.",
+     "Al suo posto funziona l'anti-aliasing qui sotto. Seleziona di nuovo l'upscaler per riprovare."},
+    {"FSR version",
+     "Versione FSR"},
+    {"Automatic (AMD's choice)",
+     "Automatica (scelta di AMD)"},
+    {"Automatic: the newest version AMD's SDK runs on this GPU. FSR 3.1: AMD's FSR 3.1.6 on any GPU, to compare, or if FSR 4 looks wrong. A change builds the upscaler again (a few seconds at full size, without it).",
+     "Automatica: la versione più recente che l'SDK di AMD esegue su questa GPU. FSR 3.1: l'FSR 3.1.6 di AMD su qualsiasi GPU, per confrontare o se FSR 4 sembra sbagliato. Una modifica ricrea l'upscaler (qualche secondo a piena risoluzione, senza di esso)."},
+    {"FSR: auto exposure",
+     "FSR: esposizione automatica"},
+    {"FSR: invert jitter sign",
+     "FSR: inverti segno del jitter"},
+    {"For diagnosing ghosting: FSR normalizes color by exposure and uses it to decide when to discard previous frames. Changes apply immediately, without a restart.",
+     "Per diagnosticare il ghosting: FSR normalizza il colore in base all'esposizione e la usa per decidere quando scartare i fotogrammi precedenti. Le modifiche si applicano subito, senza riavvio."},
+    {"Anti-aliasing",
+     "Anti-aliasing"},
+    {"The game's own",
+     "Quello del gioco"},
+    {"The upscaler anti-aliases: this applies with Upscaler None.",
+     "L'upscaler fa già l'anti-aliasing: questo vale con upscaler \"Nessuno\"."},
+    {"TAA: smooth edges at the output resolution, live (sharpening helps). The game's own: its anti-aliasing pass, as on the PS4, after a restart. Off: the sharpest picture, with jagged edges.",
+     "TAA: bordi morbidi alla risoluzione di uscita, subito (la nitidezza aiuta). Quello del gioco: il suo passaggio di anti-aliasing, come su PS4, dopo il riavvio. Disattivato: l'immagine più nitida, con bordi seghettati."},
+    {"Render resolution",
+     "Risoluzione di rendering"},
+    {"With an upscaler only: without one the game renders at the output resolution.",
+     "Solo con un upscaler: senza, il gioco esegue il rendering alla risoluzione di uscita."},
+    {"Advanced",
+     "Avanzate"},
+    {"Accurate vectors for animated objects: clothing and weapons break up less during movement, at about 10% of the frame rate. The static scene does not get an additional pass. With an upscaler or TAA. Changes apply after restarting the game.",
+     "Vettori precisi per gli oggetti animati: vestiti e armi si sfaldano meno durante il movimento, al costo di circa il 10% degli FPS. La scena statica non riceve un passaggio aggiuntivo. Con un upscaler o il TAA. Si applica dopo il riavvio del gioco."},
 };
 
 // Polish (pl)
@@ -1382,46 +1410,16 @@ constexpr Entry kPolish[] = {
      "Skalowanie czasowe"},
     {"Off",
      "Wyłączone"},
-    {"TAA (native anti-aliasing)",
-     "TAA (natywny antyaliasing)"},
     {"Upscaler",
      "Upscaler"},
     {"— not supported by this GPU",
      "— nieobsługiwane przez ten GPU"},
     {"— in development",
      "— w przygotowaniu"},
-    {"FSR 4.1.1 in INT8 mode: the model from AMD's 4.1.1 DLL, reproduced in Vulkan (output "
-     "matches the DLL). One model for Native through Performance and another for Ultra "
-     "Performance. Assets: tools/fsr4cap/build_assets.sh (requires the DLL and Proton).",
-     "FSR 4.1.1 w trybie INT8: model z biblioteki DLL AMD 4.1.1 odtworzony w Vulkanie (wynik "
-     "zgodny z DLL). Jeden model od Native do Performance i osobny dla Ultra Performance. "
-     "Zasoby: tools/fsr4cap/build_assets.sh (wymaga DLL i Protona)."},
-    {"FSR 4 in INT8 mode (v07 model from AMD FidelityFX SDK sources). Higher quality than "
-     "FSR 3.1, but the pass is more demanding. Changing the preset rebuilds the model (a "
-     "brief pause). Assets: tools/fetch_fsr4_assets.sh.",
-     "FSR 4 w trybie INT8 (model v07 ze źródeł AMD FidelityFX SDK). Wyższa jakość niż FSR "
-     "3.1, ale przebieg jest bardziej wymagający. Zmiana profilu przebudowuje model (krótka "
-     "pauza). Zasoby: tools/fetch_fsr4_assets.sh."},
-    {"FSR 4: auto exposure",
-     "FSR 4: automatyczna ekspozycja"},
-    {"FSR 4: invert jitter sign",
-     "FSR 4: odwróć znak jittera"},
-    {"For diagnosing ghosting: the FSR 4 network normalizes color by exposure and uses it to "
-     "decide when to discard previous frames. Changes apply immediately, without a restart.",
-     "Do diagnozowania smużenia (ghosting): sieć FSR 4 normalizuje kolor według ekspozycji i "
-     "na tej podstawie decyduje, kiedy odrzucić poprzednie klatki. Zmiany działają od razu, "
-     "bez restartu."},
     {"Preset",
      "Profil"},
-    {"%s (x%.1f, render %dx%d)",
-     "%s (x%.1f, renderowanie %dx%d)"},
     {"Character motion vectors",
      "Wektory ruchu postaci"},
-    {"Accurate vectors for animated objects: clothing and weapons break up less during "
-     "movement. The static scene does not get an additional pass. Changes apply after "
-     "restarting the game.",
-     "Dokładne wektory dla animowanych obiektów: ubrania i broń mniej się rozpadają w ruchu. "
-     "Statyczna scena nie dostaje dodatkowego przebiegu. Działa po ponownym uruchomieniu gry."},
     {"Show motion vectors (debug)",
      "Pokaż wektory ruchu (debug)"},
     {"Red/green: horizontal/vertical motion (8 pixels = full brightness). Blue: the pixel "
@@ -1559,12 +1557,8 @@ constexpr Entry kPolish[] = {
      "DLSS: ostrzejsze tekstury (mip bias -1)"},
     {"Textures one mip level sharper than the render resolution alone gives, as NVIDIA's DLSS guide asks. Off: only the render-to-output ratio. Live.",
      "Tekstury o jeden poziom mip ostrzejsze, niż daje sama rozdzielczość renderowania, jak zaleca poradnik DLSS od NVIDIA. Wyłączone: tylko stosunek renderowania do wyjścia. Od razu."},
-    {"FSR 3.1 uses it as its reactive mask.",
-     "FSR 3.1 używa jej jako swojej maski reaktywnej."},
     {"DLSS does not use it.",
      "DLSS jej nie używa."},
-    {"FSR 4 has no mask input: the marked pixels are blended with this frame after it.",
-     "FSR 4 nie ma wejścia na maskę: zaznaczone piksele są mieszane z tą klatką po nim."},
     {"TAA does not use it.",
      "TAA jej nie używa."},
     {"Red: how far each pixel stops relying on past frames (Maximum = full red); the rest of the picture is darkened. Scale makes changes count more, Threshold drops faint ones (thin mist). Not saved.",
@@ -1604,6 +1598,47 @@ constexpr Entry kPolish[] = {
      "Włącz strojenie kamery w launcherze (Rozgrywka) przed uruchomieniem; zmiany tutaj działają od razu."},
     {"HDR source",
      "Źródło HDR"},
+    // 0.4.4 beta 27b: AMD FSR through AMD's SDK, Anti-aliasing, Render resolution, Advanced.
+    {"None",
+     "Brak"},
+    {"— not available here (AMD's files, or not Windows)",
+     "— niedostępne tutaj (pliki AMD lub nie Windows)"},
+    {"AMD FSR through AMD's FSR SDK, which picks the version this GPU runs: FSR 4.1 on Radeon RX 6000 and newer, FSR 3.1 on other GPUs.",
+     "AMD FSR przez FSR SDK firmy AMD, które wybiera wersję uruchamianą na tym GPU: FSR 4.1 na Radeon RX 6000 i nowszych, FSR 3.1 na pozostałych GPU."},
+    {"Running: %s",
+     "Działa: %s"},
+    {"Upscaler unavailable: %s",
+     "Upscaler niedostępny: %s"},
+    {"Anti-aliasing below runs instead. Select the upscaler again to retry.",
+     "Zamiast niego działa antyaliasing poniżej. Wybierz upscaler ponownie, aby spróbować jeszcze raz."},
+    {"FSR version",
+     "Wersja FSR"},
+    {"Automatic (AMD's choice)",
+     "Automatycznie (wybór AMD)"},
+    {"Automatic: the newest version AMD's SDK runs on this GPU. FSR 3.1: AMD's FSR 3.1.6 on any GPU, to compare, or if FSR 4 looks wrong. A change builds the upscaler again (a few seconds at full size, without it).",
+     "Automatycznie: najnowsza wersja, którą SDK AMD uruchamia na tym GPU. FSR 3.1: FSR 3.1.6 od AMD na każdym GPU, do porównania lub gdy FSR 4 wygląda źle. Zmiana tworzy upscaler od nowa (kilka sekund w pełnym rozmiarze, bez niego)."},
+    {"FSR: auto exposure",
+     "FSR: automatyczna ekspozycja"},
+    {"FSR: invert jitter sign",
+     "FSR: odwróć znak jittera"},
+    {"For diagnosing ghosting: FSR normalizes color by exposure and uses it to decide when to discard previous frames. Changes apply immediately, without a restart.",
+     "Do diagnozowania smużenia (ghosting): FSR normalizuje kolor według ekspozycji i na tej podstawie decyduje, kiedy odrzucić poprzednie klatki. Zmiany działają od razu, bez restartu."},
+    {"Anti-aliasing",
+     "Antyaliasing"},
+    {"The game's own",
+     "Własny gry"},
+    {"The upscaler anti-aliases: this applies with Upscaler None.",
+     "Upscaler wygładza krawędzie sam: to działa przy upscalerze „Brak”."},
+    {"TAA: smooth edges at the output resolution, live (sharpening helps). The game's own: its anti-aliasing pass, as on the PS4, after a restart. Off: the sharpest picture, with jagged edges.",
+     "TAA: gładkie krawędzie w rozdzielczości wyjściowej, od razu (wyostrzanie pomaga). Własny gry: jej przebieg antyaliasingu, jak na PS4, po restarcie. Wyłączone: najostrzejszy obraz, z ząbkowanymi krawędziami."},
+    {"Render resolution",
+     "Rozdzielczość renderowania"},
+    {"With an upscaler only: without one the game renders at the output resolution.",
+     "Tylko z upscalerem: bez niego gra renderuje w rozdzielczości wyjściowej."},
+    {"Advanced",
+     "Zaawansowane"},
+    {"Accurate vectors for animated objects: clothing and weapons break up less during movement, at about 10% of the frame rate. The static scene does not get an additional pass. With an upscaler or TAA. Changes apply after restarting the game.",
+     "Dokładne wektory dla animowanych obiektów: ubrania i broń mniej się rozpadają w ruchu, kosztem około 10% klatek na sekundę. Statyczna scena nie dostaje dodatkowego przebiegu. Z upscalerem lub TAA. Działa po ponownym uruchomieniu gry."},
 };
 
 // Turkish (tr)
@@ -1644,47 +1679,16 @@ constexpr Entry kTurkish[] = {
      "Zamansal ölçekleyici"},
     {"Off",
      "Kapalı"},
-    {"TAA (native anti-aliasing)",
-     "TAA (yerel kenar yumuşatma)"},
     {"Upscaler",
      "Ölçekleyici"},
     {"— not supported by this GPU",
      "— bu GPU tarafından desteklenmiyor"},
     {"— in development",
      "— geliştiriliyor"},
-    {"FSR 4.1.1 in INT8 mode: the model from AMD's 4.1.1 DLL, reproduced in Vulkan (output "
-     "matches the DLL). One model for Native through Performance and another for Ultra "
-     "Performance. Assets: tools/fsr4cap/build_assets.sh (requires the DLL and Proton).",
-     "INT8 modunda FSR 4.1.1: AMD'nin 4.1.1 DLL'indeki model, Vulkan'da yeniden üretildi "
-     "(çıktı DLL ile aynı). Native'den Performance'a kadar bir model, Ultra Performance için "
-     "ayrı bir model. Dosyalar: tools/fsr4cap/build_assets.sh (DLL ve Proton gerekir)."},
-    {"FSR 4 in INT8 mode (v07 model from AMD FidelityFX SDK sources). Higher quality than "
-     "FSR 3.1, but the pass is more demanding. Changing the preset rebuilds the model (a "
-     "brief pause). Assets: tools/fetch_fsr4_assets.sh.",
-     "INT8 modunda FSR 4 (AMD FidelityFX SDK kaynaklarından v07 modeli). FSR 3.1'den daha "
-     "yüksek kalite, ancak geçiş daha ağır. Ön ayarı değiştirmek modeli yeniden oluşturur "
-     "(kısa bir duraklama). Dosyalar: tools/fetch_fsr4_assets.sh."},
-    {"FSR 4: auto exposure",
-     "FSR 4: otomatik pozlama"},
-    {"FSR 4: invert jitter sign",
-     "FSR 4: jitter işaretini ters çevir"},
-    {"For diagnosing ghosting: the FSR 4 network normalizes color by exposure and uses it to "
-     "decide when to discard previous frames. Changes apply immediately, without a restart.",
-     "Hayalet görüntü (ghosting) teşhisi için: FSR 4 ağı rengi pozlamaya göre normalleştirir "
-     "ve önceki kareleri ne zaman atacağına buna göre karar verir. Değişiklikler yeniden "
-     "başlatmadan hemen uygulanır."},
     {"Preset",
      "Ön ayar"},
-    {"%s (x%.1f, render %dx%d)",
-     "%s (x%.1f, işleme %dx%d)"},
     {"Character motion vectors",
      "Karakter hareket vektörleri"},
-    {"Accurate vectors for animated objects: clothing and weapons break up less during "
-     "movement. The static scene does not get an additional pass. Changes apply after "
-     "restarting the game.",
-     "Animasyonlu nesneler için hassas vektörler: kıyafetler ve silahlar hareket sırasında "
-     "daha az dağılır. Statik sahne ek bir geçiş almaz. Oyun yeniden başlatıldıktan sonra "
-     "uygulanır."},
     {"Show motion vectors (debug)",
      "Hareket vektörlerini göster (hata ayıklama)"},
     {"Red/green: horizontal/vertical motion (8 pixels = full brightness). Blue: the pixel "
@@ -1821,12 +1825,8 @@ constexpr Entry kTurkish[] = {
      "DLSS: daha keskin dokular (mip bias -1)"},
     {"Textures one mip level sharper than the render resolution alone gives, as NVIDIA's DLSS guide asks. Off: only the render-to-output ratio. Live.",
      "Dokular, yalnızca işleme çözünürlüğünün vereceğinden bir mip seviyesi daha keskin; NVIDIA'nın DLSS kılavuzunun istediği gibi. Kapalı: yalnızca işleme ve çıkış oranı. Anında uygulanır."},
-    {"FSR 3.1 uses it as its reactive mask.",
-     "FSR 3.1 bunu kendi reaktif maskesi olarak kullanır."},
     {"DLSS does not use it.",
      "DLSS bunu kullanmaz."},
-    {"FSR 4 has no mask input: the marked pixels are blended with this frame after it.",
-     "FSR 4'ün maske girişi yok: işaretli pikseller ondan sonra bu kareyle karıştırılır."},
     {"TAA does not use it.",
      "TAA bunu kullanmaz."},
     {"Red: how far each pixel stops relying on past frames (Maximum = full red); the rest of the picture is darkened. Scale makes changes count more, Threshold drops faint ones (thin mist). Not saved.",
@@ -1866,6 +1866,47 @@ constexpr Entry kTurkish[] = {
      "Başlatmadan önce launcher'da kamera ayarını açın (Oynanış); buradaki değişiklikler hemen uygulanır."},
     {"HDR source",
      "HDR kaynağı"},
+    // 0.4.4 beta 27b: AMD FSR through AMD's SDK, Anti-aliasing, Render resolution, Advanced.
+    {"None",
+     "Yok"},
+    {"— not available here (AMD's files, or not Windows)",
+     "— burada kullanılamaz (AMD dosyaları yok veya Windows değil)"},
+    {"AMD FSR through AMD's FSR SDK, which picks the version this GPU runs: FSR 4.1 on Radeon RX 6000 and newer, FSR 3.1 on other GPUs.",
+     "AMD'nin FSR SDK'si üzerinden AMD FSR; bu GPU'da çalışacak sürümü SDK seçer: Radeon RX 6000 ve sonrasında FSR 4.1, diğer GPU'larda FSR 3.1."},
+    {"Running: %s",
+     "Çalışan: %s"},
+    {"Upscaler unavailable: %s",
+     "Ölçekleyici kullanılamıyor: %s"},
+    {"Anti-aliasing below runs instead. Select the upscaler again to retry.",
+     "Bunun yerine aşağıdaki kenar yumuşatma çalışıyor. Yeniden denemek için ölçekleyiciyi tekrar seçin."},
+    {"FSR version",
+     "FSR sürümü"},
+    {"Automatic (AMD's choice)",
+     "Otomatik (AMD'nin seçimi)"},
+    {"Automatic: the newest version AMD's SDK runs on this GPU. FSR 3.1: AMD's FSR 3.1.6 on any GPU, to compare, or if FSR 4 looks wrong. A change builds the upscaler again (a few seconds at full size, without it).",
+     "Otomatik: AMD SDK'sinin bu GPU'da çalıştırdığı en yeni sürüm. FSR 3.1: herhangi bir GPU'da AMD'nin FSR 3.1.6'sı; karşılaştırmak için ya da FSR 4 yanlış görünüyorsa. Değişiklik ölçekleyiciyi yeniden kurar (birkaç saniye tam boyutta, ölçekleyicisiz)."},
+    {"FSR: auto exposure",
+     "FSR: otomatik pozlama"},
+    {"FSR: invert jitter sign",
+     "FSR: jitter işaretini ters çevir"},
+    {"For diagnosing ghosting: FSR normalizes color by exposure and uses it to decide when to discard previous frames. Changes apply immediately, without a restart.",
+     "Hayalet görüntü (ghosting) teşhisi için: FSR rengi pozlamaya göre normalleştirir ve önceki kareleri ne zaman atacağına buna göre karar verir. Değişiklikler yeniden başlatmadan hemen uygulanır."},
+    {"Anti-aliasing",
+     "Kenar yumuşatma"},
+    {"The game's own",
+     "Oyunun kendi"},
+    {"The upscaler anti-aliases: this applies with Upscaler None.",
+     "Ölçekleyici kenarları kendisi yumuşatır: bu, ölçekleyici \"Yok\" iken geçerlidir."},
+    {"TAA: smooth edges at the output resolution, live (sharpening helps). The game's own: its anti-aliasing pass, as on the PS4, after a restart. Off: the sharpest picture, with jagged edges.",
+     "TAA: çıkış çözünürlüğünde yumuşak kenarlar, anında (keskinleştirme yardımcı olur). Oyunun kendi: PS4'teki gibi kendi kenar yumuşatma geçişi, yeniden başlatmadan sonra. Kapalı: en keskin görüntü, tırtıklı kenarlarla."},
+    {"Render resolution",
+     "İşleme çözünürlüğü"},
+    {"With an upscaler only: without one the game renders at the output resolution.",
+     "Yalnızca ölçekleyiciyle: ölçekleyici yoksa oyun çıkış çözünürlüğünde işlenir."},
+    {"Advanced",
+     "Gelişmiş"},
+    {"Accurate vectors for animated objects: clothing and weapons break up less during movement, at about 10% of the frame rate. The static scene does not get an additional pass. With an upscaler or TAA. Changes apply after restarting the game.",
+     "Animasyonlu nesneler için hassas vektörler: kıyafetler ve silahlar hareket sırasında daha az dağılır, kare hızının yaklaşık %10'u karşılığında. Statik sahne ek bir geçiş almaz. Ölçekleyici veya TAA ile. Oyun yeniden başlatıldıktan sonra uygulanır."},
 };
 
 // Simplified Chinese (zh_CN). Lantern Menu SC (Noto Sans SC subset) supplies CJK glyphs.
@@ -1911,19 +1952,11 @@ constexpr Entry kChinese[] = {
     {"Bloodborne - Graphics  (Insert / L3+R3)###bbport_settings", "血源诅咒 — 图形设置（Insert / L3+R3）###bbport_settings"},
     {"%.0f FPS  (%.1f ms)", "%.0f FPS  (%.1f ms)"},
     {"Temporal upscaler", "时域超分辨率"},
-    {"TAA (native anti-aliasing)", "TAA（原生分辨率抗锯齿）"},
     {"Upscaler", "超分辨率算法"},
     {"— not supported by this GPU", "— 当前显卡不支持"},
     {"— in development", "— 开发中"},
-    {"FSR 4.1.1 in INT8 mode: the model from AMD's 4.1.1 DLL, reproduced in Vulkan (output matches the DLL). One model for Native through Performance and another for Ultra Performance. Assets: tools/fsr4cap/build_assets.sh (requires the DLL and Proton).", "FSR 4.1.1（INT8）：在 Vulkan 中复现 AMD 4.1.1 DLL 的模型，输出结果与 DLL 一致。原生抗锯齿到性能档共用一个模型，超高性能档使用另一个模型。资源生成脚本：tools/fsr4cap/build_assets.sh，需要 DLL 和 Proton。"},
-    {"FSR 4 in INT8 mode (v07 model from AMD FidelityFX SDK sources). Higher quality than FSR 3.1, but the pass is more demanding. Changing the preset rebuilds the model (a brief pause). Assets: tools/fetch_fsr4_assets.sh.", "FSR 4（INT8）：使用 AMD FidelityFX SDK 源码中的 v07 模型。画质优于 FSR 3.1，但 GPU 开销更高。切换档位会重建模型，可能短暂停顿。资源脚本：tools/fetch_fsr4_assets.sh。"},
-    {"FSR 4: auto exposure", "FSR 4：自动曝光"},
-    {"FSR 4: invert jitter sign", "FSR 4：反转抖动方向"},
-    {"For diagnosing ghosting: the FSR 4 network normalizes color by exposure and uses it to decide when to discard previous frames. Changes apply immediately, without a restart.", "用于排查拖影：FSR 4 网络按曝光归一化颜色，并据此决定何时丢弃历史帧。修改即时生效，无需重启。"},
     {"Preset", "质量档位"},
-    {"%s (x%.1f, render %dx%d)", "%s（x%.1f，渲染 %dx%d）"},
     {"Character motion vectors", "角色运动矢量"},
-    {"Accurate vectors for animated objects: clothing and weapons break up less during movement. The static scene does not get an additional pass. Changes apply after restarting the game.", "为动画物体生成准确的运动矢量，减少移动时衣物和武器的画面破碎。静态场景不会增加额外绘制通道。需重启游戏后生效。"},
     {"Show motion vectors (debug)", "显示运动矢量（调试）"},
     {"Red/green: horizontal/vertical motion (8 pixels = full brightness). Blue: the pixel received an accurate object vector, not just camera motion. The upscaler treats a moving object with no blue or red/green as stationary, causing trails.", "红色、绿色分别表示水平、垂直运动，8 像素对应最高亮度。蓝色表示该像素具有准确的物体运动矢量，而非只有镜头运动矢量。移动物体若既没有蓝色也没有红绿色信息，会被超分辨率算法视为静止，产生拖影。"},
     {"Output resolution", "输出分辨率"},
@@ -2002,7 +2035,6 @@ constexpr Entry kChinese[] = {
     {"Language", "菜单语言"},
     {"Bloom", "泛光"},
     {"Upscaler unavailable: %s", "超分辨率不可用：%s"},
-    {"The mode selected above is active. You can select it again to retry.", "上方所选模式已启用，可再次选择以重试。"},
     {"Display (auto)", "显示器分辨率（自动）"},
     {"Camera tuning", "镜头调校"},
     {"Turn on Camera tuning in the launcher (Gameplay) before starting; changes here are live.", "请在启动前于启动器“游戏玩法”中开启镜头调校；此处调整即时生效。"},
@@ -2043,15 +2075,10 @@ constexpr Entry kChinese[] = {
     {"a byte changed outside the cheat", "数据被其他功能改写"},
     {"EquipParamWeapon not found or its rows are not 0x13c bytes", "未找到武器参数表，或记录长度不是 0x13c 字节"},
     {"equipment not readable", "无法读取装备数据"},
-    {"DLSS needs an NVIDIA RTX GPU, its driver's NGX and nvngx_dlss; using FSR 3.1", "DLSS 需要 NVIDIA RTX 显卡、驱动中的 NGX 和 nvngx_dlss，现已回退至 FSR 3.1"},
-    {"FSR 4.1.1 needs its fsr4_411 files and a GPU that runs its shaders; using FSR 4", "FSR 4.1.1 需要 fsr4_411 资源及兼容其着色器的显卡，现已回退至 FSR 4"},
-    {"GPU does not support the selected FSR 4 shaders; using FSR 3.1", "显卡不支持所选 FSR 4 着色器，现已回退至 FSR 3.1"},
-    {"TAA anti-aliases the scene at the output resolution, without an FSR model or upscaling. The saved preset returns when an upscaler is selected.", "TAA 在输出分辨率下进行场景抗锯齿，不使用 FSR 模型或超分辨率。重新选择超分辨率算法后，会恢复已保存的质量档位。"},
     {"Active scene render: %d x %d", "当前场景渲染：%d x %d"},
     {"Preset at startup: %s", "启动时质量档位：%s"},
     {"With an output other than 1080p the whole game renders at the preset resolution (patched at startup): fastest on the Steam Deck and weaker GPUs. Preset or output changes apply after a restart. \"Live resolution changes\" below allows changing without a restart (post-processing then stays at 1080p, slower).", "输出不是 1080p 时，整个游戏按质量档位对应的分辨率渲染，在启动时应用补丁；这在 Steam Deck 和性能较弱的显卡上最快。修改质量档位或输出分辨率需重启游戏。开启下方“实时切换分辨率”可免重启切换，但后处理会固定在 1080p，速度较慢。"},
     {"BB_RENDER_RES fixes the scene size at startup. Remove this explicit variable to change resolution and presets without restarting the game.", "BB_RENDER_RES 会在启动时固定场景分辨率。移除此环境变量后，才可免重启切换分辨率和质量档位。"},
-    {"Native AA: the upscaler works as anti-aliasing. The other presets lower the scene render resolution relative to the output. The UI is drawn at the output resolution. The preset applies from the next frame without restarting the game.", "原生抗锯齿：以超分辨率算法进行抗锯齿。其他质量档位会降低场景渲染分辨率，界面始终按输出分辨率绘制。切换档位从下一帧起生效，无需重启游戏。"},
     {"Sharpening (RCAS)", "锐化（RCAS）"},
     {"Sharpness", "锐化强度"},
     {"Up to 1: the upscaler's own sharpening (RCAS). Above 1 another RCAS pass is added. DLSS has no sharpening of its own: an RCAS pass does all of it. Ctrl+click the slider to type an exact value.", "不超过 1 时使用超分辨率算法自带的 RCAS 锐化；超过 1 会额外增加一次 RCAS 处理。DLSS 不自带锐化，全部由 RCAS 处理。按住 Ctrl 单击滑块可输入精确数值。"},
@@ -2091,9 +2118,7 @@ constexpr Entry kChinese[] = {
     {"This DLSS version refuses preset %c: its default runs", "此 DLSS 版本不接受档位 %c：改用其默认档位"},
     {"DLSS: sharper textures (mip bias -1)", "DLSS：材质细节更高（mip bias -1）"},
     {"Textures one mip level sharper than the render resolution alone gives, as NVIDIA's DLSS guide asks. Off: only the render-to-output ratio. Live.", "按 NVIDIA DLSS 的规定，材质比仅按渲染分辨率提高一个 mip 细节。关闭：只按渲染与输出的比例。立即生效。"},
-    {"FSR 3.1 uses it as its reactive mask.", "FSR 3.1 将其用作响应遮罩。"},
     {"DLSS does not use it.", "DLSS 不使用它。"},
-    {"FSR 4 has no mask input: the marked pixels are blended with this frame after it.", "FSR 4 没有遮罩输入：标记的像素在其后与当前帧叠加。"},
     {"TAA does not use it.", "TAA 不使用它。"},
     {"Red: how far each pixel stops relying on past frames (Maximum = full red); the rest of the picture is darkened. Scale makes changes count more, Threshold drops faint ones (thin mist). Not saved.", "红色：每个像素不再依赖历史帧的程度（最大值 = 全红）；画面其他部分变暗。缩放系数让变化更明显，阈值会去除较弱的变化（薄雾）。不会保存。"},
     {"Not loaded. OptiScaler is a DLL put next to the engine (often as winmm.dll or dxgi.dll) with its OptiScaler.ini; it takes over DLSS. The switches below apply when it is there.", "未加载。OptiScaler 是放在引擎边上的 DLL（通常为 winmm.dll 或 dxgi.dll），带有 OptiScaler.ini；它会取代 DLSS 的调用。下方设置在它存在时生效。"},
@@ -2134,7 +2159,6 @@ constexpr Entry kChinese[] = {
     {"NVIDIA DLSS Frame Generation: generated frames from the game's depth, motion vectors and the frame without its UI, paced by the driver, with NVIDIA Reflex. RTX 40 (one frame) or RTX 50 (up to five); Hardware-accelerated GPU scheduling on. Loads when the game starts with it selected. Off in menus, movies and with HDR output.", "NVIDIA DLSS 帧生成：使用游戏深度、运动矢量和不含界面的画面生成帧，由驱动安排显示节奏，并配合 NVIDIA Reflex。需要 RTX 40（生成一帧）或 RTX 50（最多五帧），并开启硬件加速 GPU 计划。启动游戏时选中此项才会加载。菜单、影片及 HDR 输出时关闭。"},
     {"Needs an RTX 50 GPU, a recent driver and DLSS Frame Generation loaded.", "需要 RTX 50 显卡、较新的驱动，并已加载 DLSS 帧生成。"},
     {"On + Boost", "开启 + 增强"},
-    {"Output / render size for the Custom preset: 1.00 renders at the output (DLAA, Native AA), 1.30 is between Native and Quality, 3.00 is Ultra Performance. FSR 4 and DLSS run the model of the nearest preset. Ctrl+click to type a value.", "自定义档位的输出与渲染分辨率之比：1.00 为原生分辨率（DLAA、原生抗锯齿），1.30 介于原生与质量档之间，3.00 为超高性能档。FSR 4 和 DLSS 使用最接近档位的模型。按住 Ctrl 单击可输入数值。"},
     {"Paper white: how bright the game's white (and this menu) is; about 200 suits a dim room. Peak: your display's peak brightness. From the display: the value Windows reports for it (the Windows HDR Calibration app's once it has run); turn it off to set it yourself. Highlight boost: 0 shows the SDR picture as it is; higher values let the brightest parts (lamps, fire, the moon) rise towards the peak. In Native mode it is how much of the scene's own highlight range is shown: 0.25 about half, 1 all of it (up to the peak). Changes apply live. Ctrl+click a slider to type an exact value.", "纸白亮度决定游戏白色和此菜单的亮度，较暗房间可从 200 尼特开始。峰值亮度为显示器的最高亮度。“从显示器读取”使用 Windows 报告的数值（运行 Windows HDR 校准后会使用校准结果）；关闭后可手动设置。高光增强为 0 时保留 SDR 画面；提高后，灯光、火焰、月亮等高光会接近峰值。在原生模式下，它控制显示多少原始场景高光范围：0.25 约显示一半，1 显示全部，且不超过峰值。即时生效。按住 Ctrl 单击滑块可输入精确数值。"},
     {"Peak brightness from the display", "从显示器读取峰值亮度"},
     {"Reactiveness", "响应强度"},
@@ -2149,6 +2173,29 @@ constexpr Entry kChinese[] = {
     {"The driver picks 2x, 3x or 4x moment by moment to reach the target (up to the generated frames above): fewer generated frames when the game is fast, less lag and fewer artifacts. Live.", "驱动实时选择 2、3 或 4 倍帧数以达到目标（不超过上方设置的生成帧数）：游戏运行较快时减少生成帧，降低延迟和画面瑕疵。即时生效。"},
     {"The left half of the screen as an SDR display shows the game (at paper white), the right half in HDR, to judge the settings above. Not saved.", "屏幕左半边按 SDR 显示游戏（以纸白亮度为基准），右半边显示 HDR，便于比较上方设置。不会保存。"},
     {"Velocity factor", "速度因子"},
+    // 0.4.4 beta 27b: AMD FSR through AMD's SDK, Anti-aliasing, Render resolution, Advanced.
+    {"None", "无"},
+    {"— not available here (AMD's files, or not Windows)", "— 此处不可用（缺少 AMD 的文件，或不是 Windows）"},
+    {"AMD FSR through AMD's FSR SDK, which picks the version this GPU runs: FSR 4.1 on Radeon RX 6000 and newer, FSR 3.1 on other GPUs.", "通过 AMD 的 FSR SDK 运行 AMD FSR，由它选择此 GPU 运行的版本：Radeon RX 6000 及更新的显卡上为 FSR 4.1，其他 GPU 上为 FSR 3.1。"},
+    {"Running: %s", "正在运行：%s"},
+    {"Anti-aliasing below runs instead. Select the upscaler again to retry.", "改为使用下方的抗锯齿。再次选择该超分辨率算法即可重试。"},
+    {"FSR version", "FSR 版本"},
+    {"Automatic (AMD's choice)", "自动（由 AMD 选择）"},
+    {"Automatic: the newest version AMD's SDK runs on this GPU. FSR 3.1: AMD's FSR 3.1.6 on any GPU, to compare, or if FSR 4 looks wrong. A change builds the upscaler again (a few seconds at full size, without it).", "自动：AMD 的 SDK 在此 GPU 上能运行的最新版本。FSR 3.1：在任何 GPU 上使用 AMD 的 FSR 3.1.6，用于对比，或在 FSR 4 画面异常时使用。更改后会重新生成超分辨率算法（数秒内以全分辨率显示，不经超分）。"},
+    {"FSR: auto exposure", "FSR：自动曝光"},
+    {"FSR: invert jitter sign", "FSR：反转抖动方向"},
+    {"For diagnosing ghosting: FSR normalizes color by exposure and uses it to decide when to discard previous frames. Changes apply immediately, without a restart.", "用于排查拖影：FSR 按曝光归一化颜色，并据此决定何时丢弃历史帧。修改即时生效，无需重启。"},
+    {"Anti-aliasing", "抗锯齿"},
+    {"The game's own", "游戏自带"},
+    {"The upscaler anti-aliases: this applies with Upscaler None.", "超分辨率算法自带抗锯齿：此项在超分辨率算法为“无”时生效。"},
+    {"TAA: smooth edges at the output resolution, live (sharpening helps). The game's own: its anti-aliasing pass, as on the PS4, after a restart. Off: the sharpest picture, with jagged edges.", "TAA：以输出分辨率平滑锯齿，即时生效（可配合锐化）。游戏自带：游戏自身的抗锯齿处理，与 PS4 相同，需重启游戏后生效。关闭：画面最清晰，但有锯齿。"},
+    {"Render resolution", "渲染分辨率"},
+    {"With an upscaler only: without one the game renders at the output resolution.", "仅在使用超分辨率算法时有效：不使用时游戏以输出分辨率渲染。"},
+    {"Output / render size for the Custom preset: 1.00 renders at the output (DLAA, Native AA), 1.30 is between Native and Quality, 3.00 is Ultra Performance. DLSS runs the model of the nearest preset. Ctrl+click to type a value.", "自定义档位的输出 / 渲染尺寸之比：1.00 以输出分辨率渲染（DLAA、Native AA），1.30 介于 Native 和 Quality 之间，3.00 即 Ultra Performance。DLSS 使用最接近档位的模型。Ctrl+单击可输入数值。"},
+    {"Native AA: the upscaler works as anti-aliasing (DLAA with DLSS). The others render the scene below the output; the UI is drawn at the output resolution. Applies from the next frame, without a restart.", "Native AA：超分辨率算法作为抗锯齿使用（DLSS 下即 DLAA）。其他档位以低于输出的分辨率渲染场景；界面以输出分辨率绘制。下一帧即生效，无需重启。"},
+    {"Advanced", "高级"},
+    {"Accurate vectors for animated objects: clothing and weapons break up less during movement, at about 10% of the frame rate. The static scene does not get an additional pass. With an upscaler or TAA. Changes apply after restarting the game.", "为动画物体生成准确的运动矢量，减少移动时衣物和武器的画面破碎，约占 10% 帧率。静态场景不会增加额外绘制通道。需使用超分辨率算法或 TAA。需重启游戏后生效。"},
+    {"AMD FSR takes it as its reactive mask (FSR 3.1 uses it; FSR 4 may).", "AMD FSR 将其作为反应遮罩（FSR 3.1 会使用；FSR 4 可能使用）。"},
 };
 
 using Table = std::unordered_map<std::string_view, const char*>;

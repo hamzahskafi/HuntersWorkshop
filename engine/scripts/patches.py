@@ -360,9 +360,19 @@ def validate_patch_requirements(names, game):
 # the intro videos are skipped (0.4.4).
 DEFAULT_OFF=('effect_chromatic_aberration','effect_motion_blur','effect_game_aa')
 DEFAULT_ON=('skip_intro',)
+def no_upscaler(settings):
+    """0.4.4 beta 27b: the game's own anti-aliasing applies only without an upscaler (upscaler=off): AMD FSR,
+    DLSS and TAA anti-alias themselves (patches.cpp NoUpscaler). BB_UPSCALER decides as in the engine."""
+    env=os.environ.get('BB_UPSCALER')
+    if env: return env not in FSR_NAMES+('dlss','taa')
+    return settings.get('upscaler','fsr')=='off'
 def effect_patches(settings):
     names=[]
+    upscaled=not no_upscaler(settings)
     for key,(off,on) in EFFECTS.items():
+        if key=='effect_game_aa' and upscaled:
+            names.append(off)
+            continue
         if key not in settings:
             if key in DEFAULT_OFF and off: names.append(off)
             if key in DEFAULT_ON and on: names.append(on)

@@ -21,20 +21,29 @@ The Windows launcher's pages, reorganised (the Classic layout; the Modern layout
 behind its tabs, Visuals holding Display to Interface; the Linux launchers are unchanged for now):
 
 - **The sidebar:** HUNT (Play, Gameplay, Controls, Trophies, Online), VISUALS (Display, Graphics,
-  Look, Interface; was SIGHT: Display and Graphics), WORKSHOP (Mods & patches, Cheats) and ENGINE
+  Interface; was SIGHT: Display and Graphics), WORKSHOP (Mods & patches, Cheats) and ENGINE
   (Engine switches, Log), with Settings once, at the bottom.
 - **Display:** what the screen gets: the monitor, the window, the output resolution, the frame rate
-  and V-Sync, and HDR. **Window mode** (Windowed, Borderless fullscreen, Fullscreen) replaces the two
-  fullscreen switches; it keeps the same settings. **HDR** is checked on the monitor the game opens
-  on: its switch greys out when that monitor shows no HDR, and says so when Windows' Use HDR is off.
-  The **Steam Deck** output is its screen's 1280 × 800 (the list had 1280 × 720 under its name).
-- **Graphics:** Best settings for this PC at the top, then **Upscaling and anti-aliasing** (the
-  upscaler; the DLSS model with DLSS only; quality, render scale and sharpening; the game's own
-  anti-aliasing; character motion vectors; texture mip bias and DLSS's two finer settings under
-  Advanced) and **Detail** (model detail, texture filtering, shadows from dynamic lights, ambient
-  occlusion, screen-space reflections): what costs frames, in one place.
-- **Look:** the game's lens effects (depth of field, motion blur with its switch for upscalers,
-  chromatic aberration) and picture tuning, with a Game's own picture button, as in game.
+  and V-Sync, HDR, and picture tuning below it (with a Game's own picture button, as in game).
+  **Window mode** (Windowed, Borderless fullscreen, Fullscreen) replaces the two fullscreen
+  switches; it keeps the same settings. **HDR** is checked on the monitor the game opens on: its
+  switch greys out when that monitor shows no HDR, and says so when Windows' Use HDR is off. The
+  **Steam Deck** output is its screen's 1280 × 800 (the list had 1280 × 720 under its name).
+- **Graphics:** everything about how the game is drawn, in one place. Best settings for this PC at
+  the top, then **Upscaling and anti-aliasing:**
+  - **Upscaler:** AMD FSR, DLSS or None, with the FSR version (AMD FSR) or the DLSS model (DLSS)
+    under it.
+  - **Render resolution** (was Quality preset): each choice shows the size the game renders at for
+    the output you chose (Quality at 1920 × 1080 is 1280 × 720; on the Steam Deck, Ultra Performance
+    is 640 × 400), the render scale under Custom. With an upscaler only.
+  - **Anti-aliasing:** TAA, the game's own or Off, for Upscaler None (greyed with an upscaler, which
+    anti-aliases itself).
+  - **Sharpening**, its strength under it.
+  - **Advanced:** character motion vectors, texture mip bias and DLSS's two finer settings.
+
+  Then **Detail** (model detail, texture filtering, shadows from dynamic lights, ambient occlusion,
+  screen-space reflections) and **Effects** (depth of field, motion blur with its switch for
+  upscalers under it, chromatic aberration).
 - **Interface:** the in-game menu's shortcut and language, Sharp UI, the shader note and the FPS
   counter.
 - **Gameplay:** the camera (Follow camera, Camera tuning) and the extras (Skip intro videos, Free
@@ -50,12 +59,18 @@ behind its tabs, Visuals holding Display to Interface; the Linux launchers are u
   shared settings and updates. The Background rows show in the Modern layout only, where they do
   something.
 - A setting's own switch greys out what depends on it (the FPS counter, HDR, picture tuning, the
-  camera, trophy notifications and their sound, sharpening strength, peak brightness), and rows for a
-  choice not made are hidden (the DLSS settings, the HDR UI settings with Expanded).
+  camera, trophy notifications and their sound, sharpening strength, peak brightness), rows for a
+  choice not made are hidden (the DLSS settings, the HDR UI settings with Expanded), and a setting
+  that belongs to another sits under it, indented (sharpening strength, the render scale, the FSR
+  version, the DLSS model, peak brightness, the HDR UI settings).
 - Every setting is in one place (the in-game menu's language was on two pages), labels match the
   in-game menu's (Character motion vectors, FPS counter, HDR source, Blood Echo multiplier, Camera
-  tuning), and every hint names the page as both layouts call it. Nothing about the settings
-  themselves changed: settings files and shared codes from earlier versions work as before.
+  tuning, Render resolution, Anti-aliasing), and every hint names the page as both layouts call it.
+  Settings files and shared codes from earlier versions work as before (shared codes now carry the
+  FSR version and the render scale too).
+- **The game's own anti-aliasing applies only without an upscaler** (Upscaler None, Anti-aliasing
+  The game's own). Under AMD FSR, DLSS or TAA it only softened the picture they work from; a
+  settings file that has it on keeps it for when the upscaler is None.
 - **The launcher and the game no longer overwrite each other's settings.** The game reads its
   settings when it starts and writes its own when you change them in game, so a change made in the
   launcher while the game ran was lost. The launcher now keeps those changes until the game exits
@@ -64,6 +79,10 @@ behind its tabs, Visuals holding Display to Interface; the Linux launchers are u
 - **Save backups while playing every 10 minutes** (was 15), when the saves changed.
 - **Frame generation and NVIDIA Reflex are not offered** (the launcher's rows and the in-game items
   are gone; a saved frame generation choice runs off and the log says so). The code stays.
+- **The in-game menu (Insert or L3 + R3) matches Graphics:** Upscaler (AMD FSR, DLSS, None) with its
+  own rows under it, Anti-aliasing, Render resolution with each choice's size, Sharpening with its
+  strength under it, and Advanced (character motion vectors, texture mip bias, sub-pixel jitter). The
+  game's own anti-aliasing moved from the game effects to Anti-aliasing.
 
 ## AMD FSR
 
@@ -71,8 +90,8 @@ behind its tabs, Visuals holding Display to Interface; the Linux launchers are u
   graphics card runs: **FSR 4.1** on Radeon RX 9000, RX 7000 and RX 6000 (and Ryzen AI Max, Ryzen AI
   300/400 and the Z2 handhelds), **FSR 3.1** on other cards (NVIDIA, Intel, older Radeon). One "AMD
   FSR" choice replaces FSR 3, FSR 4 and FSR 4.1.1; settings files that chose any of them get AMD FSR.
-- **FSR version:** Automatic (AMD's choice) or FSR 3.1, in the launcher (Graphics) and the in-game
-  menu, where the menu also names the version that runs. FSR 4.1 on AMD cards has not been tested by
+- **FSR version:** Automatic (AMD's choice) or FSR 3.1, in the launcher (Graphics, under the
+  upscaler) and the in-game menu, where the menu also names the version that runs. FSR 4.1 on AMD cards has not been tested by
   the project yet (no AMD testers): FSR 3.1 is the way back should it look wrong.
 - When AMD FSR starts or its settings change, it builds its shaders for a few seconds; the game shows
   the picture at full size without it meanwhile.
@@ -238,6 +257,9 @@ behind its tabs, Visuals holding Display to Interface; the Linux launchers are u
 - **The screen's last row and column keep the game's own alpha** with DLAA and TAA at native
   resolution: the fix for the shimmering line at the right and bottom edges (GitHub issue 43) copied
   the neighbouring pixels whole, alpha included; it now copies their colour only.
+
+- **The System menu opened from the title screen no longer has Quit to Desktop:** it repeated the
+  title menu's own Quit Game. It stays in the System menu opened in game.
 
 ## For testers
 

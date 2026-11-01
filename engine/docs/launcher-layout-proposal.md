@@ -56,6 +56,34 @@ the wrong place. VISUALS became **Display, Graphics, Look, Interface**:
   (moving it would change the page's layout the game's menu was built with).
 - **Not built:** a Look preset (the effects and tuning as one choice), and Best settings suggesting HDR.
 
+## As built (beta 27b)
+
+The tester's third look (2026-11-01), built with beta 27's AMD FSR work since the upscaling rows changed
+anyway. VISUALS is **Display, Graphics, Interface** (Look went):
+
+| Page | Holds |
+|---|---|
+| Display | As in 26b, and **Picture tuning** (its fold and Game's own picture) in a Picture group right below HDR, not inside HDR's fold: it applies to SDR as well |
+| Graphics | Best settings; **Upscaling and anti-aliasing**: Upscaler (AMD FSR, DLSS, None) with FSR version or DLSS model under it; **Render resolution** (was Quality preset; each entry with the size the game renders at for the output, the engine's own rounding) with the render scale under Custom; **Anti-aliasing** (TAA, the game's own, Off; greyed with an upscaler, which anti-aliases itself); Sharpening with its strength under it; Advanced: character motion vectors, texture mip bias, DLSS's sharper textures and auto exposure. **Detail** as in 26b. **Effects** (from Look: depth of field, motion blur with its upscaler switch under it, chromatic aberration) |
+| Interface | As in 26b |
+
+- **Children:** a row that only matters for another's choice sits under it, indented one step
+  (`LauncherPage.Nest`): sharpening strength, the render scale, the FSR version, the DLSS model, peak
+  brightness under "from the display", the HDR UI rows under HDR source (now right under it), the motion
+  blur switch.
+- **Upscaler None and Anti-aliasing** write the same two keys as before: TAA is `upscaler=taa`, the game's
+  own `upscaler=off` with `effect_game_aa=1`, Off `upscaler=off`. With an upscaler the Anti-aliasing row
+  shows what None goes back to (the game's own if `effect_game_aa` is on, else TAA). The engine applies the
+  game's own pass only with `upscaler=off` (bb-start and `patches.py`), so a file that had it on under an
+  upscaler keeps it for None.
+- **Detail and Effects** are two groups, not one: Detail costs frames, Effects are a matter of taste.
+- **Only the chosen upscaler's rows show** (FSR version with AMD FSR, the DLSS rows with DLSS); the Advanced
+  texture settings stay apart from Render resolution.
+- **In game:** the Insert menu has the same order (Upscaler, Anti-aliasing, Render resolution with sizes,
+  Sharpening and its strength, Advanced); the System menu's Anti-Aliasing help says it applies only
+  without an upscaler or TAA; the System menu opened from the title no longer has Quit to Desktop (the
+  title's own Quit Game is there), kept in game.
+
 
 - **Classic:** the WPF launcher's Classic layout is the one designed here.
 - **Modern:** it follows the same pages (its tab mapping is near the end).

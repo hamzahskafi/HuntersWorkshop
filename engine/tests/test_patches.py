@@ -8,6 +8,7 @@ import os
 import struct
 import tempfile
 import unittest
+from unittest import mock
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -100,7 +101,7 @@ class DebugPatchTests(unittest.TestCase):
     def test_camera_patch_is_optional_and_compatible_with_fps_and_debug_menu(self):
         on = {key: '1' for key in DEFAULT_OFF}
         off = {key: '0' for key in DEFAULT_ON}
-        self.assertEqual(effect_patches({'debug_camera': '0', 'debug_menu': '0', **on, **off}), [])
+        self.assertEqual(effect_patches({'debug_camera': '0', 'debug_menu': '0', 'upscaler': 'off', **on, **off}), [])
         camera = effect_patches({'debug_camera': '1'})
         writes = compile_patches(XML, camera, '01.09', SEGMENTS)
         self.assertGreater(len(writes), 0)
@@ -116,6 +117,16 @@ class DebugPatchTests(unittest.TestCase):
                                               'Disable Motion Blur (perf increase)', 'Disable AA', 'Skip Intro'])
         self.assertIn('Disable DoF', effect_patches({'effect_dof': '0'}))
         self.assertNotIn('Skip Intro', effect_patches({'skip_intro': '0'}))
+
+    def test_game_anti_aliasing_only_without_an_upscaler(self):
+        # 0.4.4 beta 27b: AMD FSR, DLSS and TAA anti-alias themselves; the game's pass is left out under them.
+        for upscaler in ('fsr', 'fsr4', 'dlss', 'taa', None):
+            settings = {'effect_game_aa': '1', **({'upscaler': upscaler} if upscaler else {})}
+            self.assertIn('Disable AA', effect_patches(settings), upscaler)
+        self.assertNotIn('Disable AA', effect_patches({'effect_game_aa': '1', 'upscaler': 'off'}))
+        self.assertIn('Disable AA', effect_patches({'effect_game_aa': '0', 'upscaler': 'off'}))
+        with mock.patch.dict(os.environ, {'BB_UPSCALER': 'none'}):
+            self.assertNotIn('Disable AA', effect_patches({'effect_game_aa': '1', 'upscaler': 'fsr'}))
 
     def test_debug_menu_checks_both_fonts_but_camera_does_not_need_them(self):
         names = effect_patches({'debug_menu': '1'})

@@ -513,6 +513,21 @@ namespace BloodborneLauncher.Views
             return row;
         }
 
+        /// <summary>The row put on the page last (Add), wherever it went.</summary>
+        protected SettingRow LastRow => _searchRows[^1];
+
+        /// <summary>
+        /// Shows the row put on the page last as a setting of the row above it (0.4.4 beta 27b, the
+        /// tester's: sharpening strength under Sharpening, the render scale under Custom): indented one
+        /// step, the rest of its margins kept. Returns it.
+        /// </summary>
+        protected SettingRow Nest()
+        {
+            var row = LastRow;
+            row.Margin = new Thickness(row.Margin.Left + 28, row.Margin.Top, row.Margin.Right, row.Margin.Bottom);
+            return row;
+        }
+
         // ---------------------------------------------------------------- settings search
 
         /// <summary>Every row put in with Add, in page order: the settings search's index of this

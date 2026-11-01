@@ -1521,5 +1521,20 @@
   "FSR version": "FSR のバージョン",
   "NVIDIA DLSS {0}. Needs an NVIDIA GeForce RTX GPU; others use AMD FSR": "NVIDIA DLSS {0}。NVIDIA GeForce RTX GPU が必要です。それ以外では AMD FSR を使用します",
   "The newest version AMD's FSR SDK runs on this GPU: FSR 4.1 on Radeon RX 6000 and newer, FSR 3.1 on other GPUs": "AMD の FSR SDK がこの GPU で実行できる最新版: Radeon RX 6000 以降は FSR 4.1、その他の GPU は FSR 3.1",
-  "Through AMD's FSR SDK, which picks the version this GPU runs: FSR 4.1 on Radeon RX 6000 and newer, FSR 3.1 on other GPUs": "AMD の FSR SDK 経由で、この GPU 向けのバージョンを SDK が選びます: Radeon RX 6000 以降は FSR 4.1、その他の GPU は FSR 3.1"
+  "Through AMD's FSR SDK, which picks the version this GPU runs: FSR 4.1 on Radeon RX 6000 and newer, FSR 3.1 on other GPUs": "AMD の FSR SDK 経由で、この GPU 向けのバージョンを SDK が選びます: Radeon RX 6000 以降は FSR 4.1、その他の GPU は FSR 3.1",
+  "Anti-aliasing": "アンチエイリアス",
+  "How edges are smoothed when no upscaler runs": "アップスケーラーを使わないときのエッジの滑らかさ",
+  "Native AA": "Native AA",
+  "No anti-aliasing: the sharpest picture, with jagged edges and shimmer": "アンチエイリアスなし: 最もシャープな画質ですが、ジャギーとちらつきが出ます",
+  "Output size divided by this is the render size: 1.00 renders at the output, 1.30 a little below, 3.00 like Ultra Performance. DLSS uses the nearest preset's model": "出力サイズをこの値で割ったものがレンダリングサイズです: 1.00 は出力サイズ、1.30 は少し下、3.00 は Ultra Performance 相当。DLSS は最も近いプリセットのモデルを使います",
+  "Render resolution": "レンダリング解像度",
+  "Renders the game below the output resolution and fills it in, anti-aliasing as it goes. None: the game renders at the output, with the anti-aliasing below": "出力解像度より低い解像度で描画して補完し、アンチエイリアスも行います。なし: 出力解像度で描画し、下のアンチエイリアスを使います",
+  "Temporal anti-aliasing at the output resolution: smooth edges, a little soft (sharpening helps)": "出力解像度でのテンポラル アンチエイリアス: エッジは滑らかで少し柔らかめ (シャープニングが効きます)",
+  "The game's own": "ゲーム本来",
+  "The game's own anti-aliasing pass, as on the PS4. Applied when the game starts": "PS4 と同じ、ゲーム本来のアンチエイリアス処理。ゲーム起動時に適用されます",
+  "The output resolution, frame rate, upscaler and render resolution that suit this PC; you see each change before it is applied": "この PC に合う出力解像度、フレームレート、アップスケーラー、レンダリング解像度。適用前に各変更を確認できます",
+  "The size the game renders at before the upscaler fills the output: lower is faster and softer. Native AA renders at the output (DLAA with DLSS)": "アップスケーラーが出力を補完する前にゲームが描画するサイズ。低いほど速く柔らかくなります。Native AA は出力サイズで描画します (DLSS では DLAA)",
+  "The upscaler anti-aliases: this applies with Upscaler None": "アップスケーラーが自らアンチエイリアスします。これはアップスケーラー「なし」のときに適用されます",
+  "With an upscaler only: without one the game renders at the output resolution": "アップスケーラー使用時のみ。使わない場合は出力解像度で描画します",
+  "With an upscaler or TAA: turn it up if the picture looks soft": "アップスケーラーまたは TAA 使用時: 画像が柔らかく見えるときは上げてください"
 }

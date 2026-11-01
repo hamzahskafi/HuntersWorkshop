@@ -1521,5 +1521,20 @@
   "FSR version": "Версія FSR",
   "NVIDIA DLSS {0}. Needs an NVIDIA GeForce RTX GPU; others use AMD FSR": "NVIDIA DLSS {0}. Потрібен GPU NVIDIA GeForce RTX; інші використовують AMD FSR",
   "The newest version AMD's FSR SDK runs on this GPU: FSR 4.1 on Radeon RX 6000 and newer, FSR 3.1 on other GPUs": "Найновіша версія, яку FSR SDK від AMD запускає на цій відеокарті: FSR 4.1 на Radeon RX 6000 і новіших, FSR 3.1 на інших",
-  "Through AMD's FSR SDK, which picks the version this GPU runs: FSR 4.1 on Radeon RX 6000 and newer, FSR 3.1 on other GPUs": "Через FSR SDK від AMD, що сам обирає версію для цієї відеокарти: FSR 4.1 на Radeon RX 6000 і новіших, FSR 3.1 на інших"
+  "Through AMD's FSR SDK, which picks the version this GPU runs: FSR 4.1 on Radeon RX 6000 and newer, FSR 3.1 on other GPUs": "Через FSR SDK від AMD, що сам обирає версію для цієї відеокарти: FSR 4.1 на Radeon RX 6000 і новіших, FSR 3.1 на інших",
+  "Anti-aliasing": "Згладжування",
+  "How edges are smoothed when no upscaler runs": "Як згладжуються краї, коли апскейлер не використовується",
+  "Native AA": "Native AA",
+  "No anti-aliasing: the sharpest picture, with jagged edges and shimmer": "Без згладжування: найрізкіша картинка, зі сходинками та мерехтінням",
+  "Output size divided by this is the render size: 1.00 renders at the output, 1.30 a little below, 3.00 like Ultra Performance. DLSS uses the nearest preset's model": "Розмір виводу, поділений на це число, — розмір рендера: 1,00 — рендер у роздільній здатності виводу, 1,30 — трохи нижче, 3,00 — як Ultra Performance. DLSS бере модель найближчого пресета",
+  "Render resolution": "Роздільна здатність рендера",
+  "Renders the game below the output resolution and fills it in, anti-aliasing as it goes. None: the game renders at the output, with the anti-aliasing below": "Рендерить гру нижче роздільної здатності виводу й добудовує її, водночас згладжуючи. Немає: гра рендериться в роздільній здатності виводу, зі згладжуванням нижче",
+  "Temporal anti-aliasing at the output resolution: smooth edges, a little soft (sharpening helps)": "Часове згладжування в роздільній здатності виводу: гладкі краї, трохи м’яко (допоможе різкість)",
+  "The game's own": "Власне гри",
+  "The game's own anti-aliasing pass, as on the PS4. Applied when the game starts": "Власний прохід згладжування гри, як на PS4. Застосовується під час запуску гри",
+  "The output resolution, frame rate, upscaler and render resolution that suit this PC; you see each change before it is applied": "Роздільна здатність виводу, частота кадрів, апскейлер і роздільна здатність рендера, що пасують цьому ПК; кожну зміну видно до застосування",
+  "The size the game renders at before the upscaler fills the output: lower is faster and softer. Native AA renders at the output (DLAA with DLSS)": "Розмір, у якому гра рендерить, перш ніж апскейлер добудує вивід: нижче — швидше й м’якше. Native AA рендерить у роздільній здатності виводу (DLAA з DLSS)",
+  "The upscaler anti-aliases: this applies with Upscaler None": "Апскейлер згладжує сам: це діє з апскейлером «Немає»",
+  "With an upscaler only: without one the game renders at the output resolution": "Лише з апскейлером: без нього гра рендерить у роздільній здатності виводу",
+  "With an upscaler or TAA: turn it up if the picture looks soft": "З апскейлером або TAA: додайте, якщо картинка виглядає м’якою"
 }

@@ -18,6 +18,25 @@
             new(L.T("Off"), "off"),
         };
 
+        /// <summary>Graphics › Upscaler (0.4.4 beta 27b): the two upscalers, or None, where the game renders
+        /// at the output and Anti-aliasing (AntiAliasing) decides upscaler=taa or off.</summary>
+        public static readonly Choice[] FrameUpscalers =
+        {
+            new("AMD FSR", "fsr"),
+            new("DLSS (NVIDIA RTX)", "dlss"),
+            new(L.T("None"), "none"),
+        };
+
+        /// <summary>Graphics › Anti-aliasing (0.4.4 beta 27b), with Upscaler None: TAA (upscaler=taa), the
+        /// game's own pass (upscaler=off, effect_game_aa=1) or none (upscaler=off, effect_game_aa=0).
+        /// With an upscaler the upscaler anti-aliases, and the engine leaves the game's own pass out.</summary>
+        public static readonly Choice[] AntiAliasing =
+        {
+            new("TAA", "taa", L.T("Temporal anti-aliasing at the output resolution: smooth edges, a little soft (sharpening helps)")),
+            new(L.T("The game's own"), "game", L.T("The game's own anti-aliasing pass, as on the PS4. Applied when the game starts")),
+            new(L.T("Off"), "off", L.T("No anti-aliasing: the sharpest picture, with jagged edges and shimmer")),
+        };
+
         /// <summary>fsr_version in config.ini (0.4.4 beta 27): AMD's choice, or FSR 3.1.</summary>
         public static readonly Choice[] FsrVersions =
         {
@@ -107,6 +126,30 @@
 
         /// <summary>A size the engine takes as a custom output: 640 × 360 to 16384 × 8640, even.</summary>
         public static bool ValidCustomSize(int w, int h) => w >= 640 && h >= 360 && w <= 16384 && h <= 8640;
+
+        /// <summary>Each preset's ratio, output / render (the engine's BbSettings::PresetScale); Custom's is render_scale.</summary>
+        public static readonly double[] PresetScales = { 1.0, 1.5, 1.7, 2.0, 3.0 };
+
+        /// <summary>
+        /// The scene size the engine renders for an output and a ratio (output / render), as the game's
+        /// menus show it (BbSettings::PresetRenderSize). At 1920 × 1080, or with Live resolution change
+        /// on, the live size (scene_resolution.h ForScale: the ratio 1 to 3, multiples of 4); at other
+        /// outputs the size patched at startup (patches.cpp ScaledSizes: never below 640 × 360, never
+        /// exactly 1920 × 1080).
+        /// </summary>
+        public static (int W, int H) RenderSize(int outW, int outH, double scale, bool live)
+        {
+            if ((outW, outH) == (1920, 1080) || live)
+            {
+                scale = Math.Clamp(scale, 1.0, 3.0);
+                return (Math.Max(1, (int)Math.Round(outW / scale / 4, MidpointRounding.AwayFromZero)) * 4,
+                        Math.Max(1, (int)Math.Round(outH / scale / 4, MidpointRounding.AwayFromZero)) * 4);
+            }
+            scale = Math.Max(1.0, Math.Min(scale, Math.Min(outW / 640.0, outH / 360.0)));
+            var w = Math.Max(4, (int)Math.Round(outW / scale / 4, MidpointRounding.ToEven) * 4);
+            var h = Math.Max(4, (int)Math.Round(outH / scale / 4, MidpointRounding.ToEven) * 4);
+            return (w, h) == (1920, 1080) ? (1916, 1076) : (w, h);
+        }
 
         /// <summary>The size an output_res value names; "auto" is the display's own (1920 × 1080
         /// when it is unknown), as the engine reads it at start (scripts/run_windows.py).</summary>

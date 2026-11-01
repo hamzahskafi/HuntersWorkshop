@@ -1521,5 +1521,20 @@
   "FSR version": "FSR-Version",
   "NVIDIA DLSS {0}. Needs an NVIDIA GeForce RTX GPU; others use AMD FSR": "NVIDIA DLSS {0}. Benötigt eine NVIDIA-GeForce-RTX-GPU; andere nutzen AMD FSR",
   "The newest version AMD's FSR SDK runs on this GPU: FSR 4.1 on Radeon RX 6000 and newer, FSR 3.1 on other GPUs": "Die neueste Version, die AMDs FSR SDK auf dieser GPU ausführt: FSR 4.1 auf Radeon RX 6000 und neuer, FSR 3.1 auf anderen GPUs",
-  "Through AMD's FSR SDK, which picks the version this GPU runs: FSR 4.1 on Radeon RX 6000 and newer, FSR 3.1 on other GPUs": "Über AMDs FSR SDK, das die Version für diese GPU wählt: FSR 4.1 auf Radeon RX 6000 und neuer, FSR 3.1 auf anderen GPUs"
+  "Through AMD's FSR SDK, which picks the version this GPU runs: FSR 4.1 on Radeon RX 6000 and newer, FSR 3.1 on other GPUs": "Über AMDs FSR SDK, das die Version für diese GPU wählt: FSR 4.1 auf Radeon RX 6000 und neuer, FSR 3.1 auf anderen GPUs",
+  "Anti-aliasing": "Kantenglättung",
+  "How edges are smoothed when no upscaler runs": "Wie Kanten geglättet werden, wenn kein Upscaler läuft",
+  "Native AA": "Native AA",
+  "No anti-aliasing: the sharpest picture, with jagged edges and shimmer": "Keine Kantenglättung: das schärfste Bild, mit Treppenkanten und Flimmern",
+  "Output size divided by this is the render size: 1.00 renders at the output, 1.30 a little below, 3.00 like Ultra Performance. DLSS uses the nearest preset's model": "Ausgabegröße geteilt durch diesen Wert ist die Rendergröße: 1,00 rendert in der Ausgabegröße, 1,30 etwas darunter, 3,00 wie Ultra Performance. DLSS nutzt das Modell der nächstgelegenen Voreinstellung",
+  "Render resolution": "Renderauflösung",
+  "Renders the game below the output resolution and fills it in, anti-aliasing as it goes. None: the game renders at the output, with the anti-aliasing below": "Rendert das Spiel unter der Ausgabeauflösung und füllt sie auf, mit Kantenglättung. Keines: Das Spiel rendert in der Ausgabeauflösung, mit der Kantenglättung darunter",
+  "Temporal anti-aliasing at the output resolution: smooth edges, a little soft (sharpening helps)": "Temporale Kantenglättung in der Ausgabeauflösung: glatte Kanten, etwas weich (Schärfen hilft)",
+  "The game's own": "Spieleigene",
+  "The game's own anti-aliasing pass, as on the PS4. Applied when the game starts": "Der Kantenglättungs-Pass des Spiels selbst, wie auf der PS4. Wird beim Spielstart angewendet",
+  "The output resolution, frame rate, upscaler and render resolution that suit this PC; you see each change before it is applied": "Die Ausgabeauflösung, Bildrate, der Upscaler und die Renderauflösung, die zu diesem PC passen; jede Änderung wird vor dem Übernehmen gezeigt",
+  "The size the game renders at before the upscaler fills the output: lower is faster and softer. Native AA renders at the output (DLAA with DLSS)": "Die Größe, in der das Spiel rendert, bevor der Upscaler die Ausgabe auffüllt: niedriger ist schneller und weicher. Native AA rendert in der Ausgabegröße (DLAA mit DLSS)",
+  "The upscaler anti-aliases: this applies with Upscaler None": "Der Upscaler glättet selbst: dies gilt mit Upscaler „Keines“",
+  "With an upscaler only: without one the game renders at the output resolution": "Nur mit einem Upscaler: ohne ihn rendert das Spiel in der Ausgabeauflösung",
+  "With an upscaler or TAA: turn it up if the picture looks soft": "Mit einem Upscaler oder TAA: erhöhen, wenn das Bild weich wirkt"
 }

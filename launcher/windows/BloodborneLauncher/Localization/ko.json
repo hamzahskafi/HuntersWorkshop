@@ -1521,5 +1521,20 @@
   "FSR version": "FSR 버전",
   "NVIDIA DLSS {0}. Needs an NVIDIA GeForce RTX GPU; others use AMD FSR": "NVIDIA DLSS {0}. NVIDIA GeForce RTX GPU가 필요합니다. 그 외에는 AMD FSR을 사용합니다",
   "The newest version AMD's FSR SDK runs on this GPU: FSR 4.1 on Radeon RX 6000 and newer, FSR 3.1 on other GPUs": "AMD FSR SDK가 이 GPU에서 실행하는 최신 버전: Radeon RX 6000 이상은 FSR 4.1, 그 외 GPU는 FSR 3.1",
-  "Through AMD's FSR SDK, which picks the version this GPU runs: FSR 4.1 on Radeon RX 6000 and newer, FSR 3.1 on other GPUs": "AMD FSR SDK를 통해 이 GPU에 맞는 버전을 SDK가 고릅니다. Radeon RX 6000 이상은 FSR 4.1, 그 외 GPU는 FSR 3.1"
+  "Through AMD's FSR SDK, which picks the version this GPU runs: FSR 4.1 on Radeon RX 6000 and newer, FSR 3.1 on other GPUs": "AMD FSR SDK를 통해 이 GPU에 맞는 버전을 SDK가 고릅니다. Radeon RX 6000 이상은 FSR 4.1, 그 외 GPU는 FSR 3.1",
+  "Anti-aliasing": "안티에일리어싱",
+  "How edges are smoothed when no upscaler runs": "업스케일러를 쓰지 않을 때 가장자리를 다듬는 방식",
+  "Native AA": "Native AA",
+  "No anti-aliasing: the sharpest picture, with jagged edges and shimmer": "안티에일리어싱 없음: 가장 선명하지만 계단 현상과 깜빡임이 생깁니다",
+  "Output size divided by this is the render size: 1.00 renders at the output, 1.30 a little below, 3.00 like Ultra Performance. DLSS uses the nearest preset's model": "출력 크기를 이 값으로 나눈 것이 렌더링 크기입니다. 1.00은 출력 크기, 1.30은 약간 아래, 3.00은 Ultra Performance 수준입니다. DLSS는 가장 가까운 프리셋의 모델을 씁니다",
+  "Render resolution": "렌더링 해상도",
+  "Renders the game below the output resolution and fills it in, anti-aliasing as it goes. None: the game renders at the output, with the anti-aliasing below": "출력 해상도보다 낮게 렌더링한 뒤 채워 넣으며 안티에일리어싱도 합니다. 없음: 출력 해상도로 렌더링하고 아래 안티에일리어싱을 씁니다",
+  "Temporal anti-aliasing at the output resolution: smooth edges, a little soft (sharpening helps)": "출력 해상도의 시간적 안티에일리어싱: 가장자리가 매끄럽고 약간 부드럽습니다(샤프닝이 도움이 됩니다)",
+  "The game's own": "게임 자체",
+  "The game's own anti-aliasing pass, as on the PS4. Applied when the game starts": "PS4와 같은 게임 자체 안티에일리어싱 처리. 게임을 시작할 때 적용됩니다",
+  "The output resolution, frame rate, upscaler and render resolution that suit this PC; you see each change before it is applied": "이 PC에 맞는 출력 해상도, 프레임 레이트, 업스케일러, 렌더링 해상도. 적용 전에 각 변경 사항을 확인할 수 있습니다",
+  "The size the game renders at before the upscaler fills the output: lower is faster and softer. Native AA renders at the output (DLAA with DLSS)": "업스케일러가 출력을 채우기 전에 게임이 렌더링하는 크기입니다. 낮을수록 빠르고 부드러워집니다. Native AA는 출력 크기로 렌더링합니다(DLSS에서는 DLAA)",
+  "The upscaler anti-aliases: this applies with Upscaler None": "업스케일러가 직접 안티에일리어싱합니다. 이 설정은 업스케일러가 \"없음\"일 때 적용됩니다",
+  "With an upscaler only: without one the game renders at the output resolution": "업스케일러를 쓸 때만 해당합니다. 쓰지 않으면 출력 해상도로 렌더링합니다",
+  "With an upscaler or TAA: turn it up if the picture looks soft": "업스케일러 또는 TAA 사용 시: 화면이 흐려 보이면 높이세요"
 }

@@ -3,6 +3,7 @@
 // The existing renderer and config.ini remain authoritative.
 #include "option_menu.h"
 #include "engine_hooks.h"
+#include "engine_state.h"
 #include <SDL3/SDL.h>
 #include "menu_memory.h"
 #include "graphics.h"
@@ -772,6 +773,7 @@ GUEST_ABI void* OpenControlsRow(void* out,void* ctx) {GuestFunction f(kOpenerFun
 GUEST_ABI void* OpenKeysRow(void* out,void* ctx) {GuestFunction f(kOpenerFunctorVTable,reinterpret_cast<void*>(&OpenKeys));hle_call_guest<std::int64_t>(guest_fn(kOpenSectionFlow),out,ctx,f.buf);return out;}
 constexpr std::uint32_t kQuitRowId=122000,kSystemQuitRowId=110015,kQuitQuestion=920001;
 void AddQuitRow(void* builder,std::uint32_t caption);
+bool title_quit=false;  // the title menu has its own Quit Game (TitleFinalize routed)
 GUEST_ABI void* SystemFinalize(void* out,void* builder,void* arg3) {
     std::int64_t flag=0;
     // 0.4.4 beta 26b: Graphics, Effects and Colour first, then Camera Tuning, PC Controls and Key
@@ -792,14 +794,18 @@ GUEST_ABI void* SystemFinalize(void* out,void* builder,void* arg3) {
     }
     { Captions c(110013);GuestFunction f(kRowFunctorVTable,reinterpret_cast<void*>(&OpenEnhancementsRow));
       hle_call_guest<std::int64_t>(guest_fn(kAddCommandRow),builder,c.buf,f.buf,&flag); }
-    // Quit to Desktop, last: the game's own Exit Game only goes back to the title.
-    AddQuitRow(builder,kSystemQuitRowId);
+    // Quit to Desktop, last: the game's own Exit Game only goes back to the title. 0.4.4 beta 27b (the
+    // tester): in the world only. The System menu opened from the title had it twice over, beside the
+    // title's own Quit Game (TitleFinalize); kept there only when that one could not be added.
+    const bool quit=world_player_block(nullptr) || !title_quit;
+    if (quit) AddQuitRow(builder,kSystemQuitRowId);
     hle_call_guest<std::int64_t>(guest_fn(kSystemFinalize),out,builder,arg3);
     // Each time the System menu opens: logged when its rows differ from the last time's.
     static int logged=-1;
-    if (const int rows=(graphics_page?1:0)|(camera_page?2:0); rows!=logged) {
+    if (const int rows=(graphics_page?1:0)|(camera_page?2:0)|(quit?4:0); rows!=logged) {
         logged=rows;
-        host_log("pc-options: System list includes %s%sExtras, Quit to Desktop",graphics_page?"Graphics / Effects / Colour, ":"",camera_page?"Camera Tuning, ":"");
+        host_log("pc-options: System list includes %s%sExtras%s",graphics_page?"Graphics / Effects / Colour, ":"",
+                 camera_page?"Camera Tuning, ":"",quit?", Quit to Desktop":" (title: its own Quit Game)");
     }
     return out;
 }
@@ -944,7 +950,8 @@ bool Install(std::uint8_t* image,std::size_t size) {
     const auto target=reinterpret_cast<std::uint64_t>(&SystemFinalize);
     std::memcpy(p,&target,8); p+=8; *p++=0x41; *p++=0xff; *p=0xe3;
     const std::int32_t to_pad=pad-(call+5); std::memcpy(image+call+1,&to_pad,4);
-    if (!route_call(image,size,0x1b4adb3,kTitleFinalize,0x1b49ac0,reinterpret_cast<void*>(&TitleFinalize)))
+    title_quit=route_call(image,size,0x1b4adb3,kTitleFinalize,0x1b49ac0,reinterpret_cast<void*>(&TitleFinalize));
+    if (!title_quit)
         host_log("pc-options: the title menu's Quit Game left out (bytes differ from verified 1.09)");
     g_installed=true;
     host_log("pc-options: native System pages installed (%u local assets): Enhancements%s%s",installed,graphics_page?", Graphics / Effects / Colour":"",camera_page?", Camera":"");
