@@ -10,10 +10,10 @@ What changed since 0.4.3, for the release page. The engine work behind each line
   switches). The follow camera stays Original and model detail As in the game.
   Settings files from earlier versions get the unified frame time turned on once; everything else in
   them stays as it was.
-- **A new install starts on FSR 3.1 at Native AA**, the engine's own defaults, which run on any
+- **A new install starts on AMD FSR at Native AA**, the engine's own defaults, which run on any
   graphics card (the launcher used to start it on FSR 4 at Ultra Performance). The first start's
-  Best settings for this PC still offers DLSS on an RTX card, FSR 4 on an RX 9000 and a quality
-  preset for the card. A settings file that has an upscaler and preset keeps them.
+  Best settings for this PC still offers DLSS on an RTX card and a quality preset for the card. A
+  settings file that has an upscaler and preset keeps them.
 
 ## The launcher
 
@@ -64,6 +64,23 @@ behind its tabs, Visuals holding Display to Interface; the Linux launchers are u
 - **Save backups while playing every 10 minutes** (was 15), when the saves changed.
 - **Frame generation and NVIDIA Reflex are not offered** (the launcher's rows and the in-game items
   are gone; a saved frame generation choice runs off and the log says so). The code stays.
+
+## AMD FSR
+
+- **FSR is AMD's own now:** AMD's FSR SDK 2.4, with AMD's signed files, picks the version your
+  graphics card runs: **FSR 4.1** on Radeon RX 9000, RX 7000 and RX 6000 (and Ryzen AI Max, Ryzen AI
+  300/400 and the Z2 handhelds), **FSR 3.1** on other cards (NVIDIA, Intel, older Radeon). One "AMD
+  FSR" choice replaces FSR 3, FSR 4 and FSR 4.1.1; settings files that chose any of them get AMD FSR.
+- **FSR version:** Automatic (AMD's choice) or FSR 3.1, in the launcher (Graphics) and the in-game
+  menu, where the menu also names the version that runs. FSR 4.1 on AMD cards has not been tested by
+  the project yet (no AMD testers): FSR 3.1 is the way back should it look wrong.
+- When AMD FSR starts or its settings change, it builds its shaders for a few seconds; the game shows
+  the picture at full size without it meanwhile.
+- **Without AMD's files** (they come with the package, in `engine\amd-fsr`), the game runs TAA
+  instead, and says so. DLSS on a card without it runs AMD FSR.
+- **Removed:** FireBurn's FSR 3.1 and FSR 4, the built-in FSR 4 model, FSR 4.1.1 (fsr4vk and the
+  model built from AMD's DLL, which AMD's licence does not allow), and FSR 3.1 frame generation
+  (frame generation is not offered). The FSR 3.1 tuning sliders in game now tune AMD's FSR 3.1.
 
 ## Performance
 

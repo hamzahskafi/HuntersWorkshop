@@ -691,17 +691,19 @@ void UpscalerSection() {
     auto& s = BbSettings::Get();
     Section("Temporal upscaler", "Временной апскейлер");
     if (const char* label = Item("Upscaler", "Апскейлер")) {
+        // 0.4.4 beta 27: one FSR, AMD's (AMD's FSR SDK picks the version); FSR 3.1 (FireBurn's), FSR 4
+        // and FSR 4.1.1 went.
         const char* upscalers[] = {
-            BbSettings::MenuText("Off", "Выкл"), "FSR 3.1", "FSR 4 (INT8)", "FSR 4.1.1 (INT8)",
+            BbSettings::MenuText("Off", "Выкл"), "AMD FSR",
             BbSettings::MenuText("TAA (native anti-aliasing)", "TAA (нативное сглаживание)"), "DLSS (NVIDIA)"};
+        static_assert(std::size(upscalers) == BbSettings::UpscalerCount);
         static const char* later[] = {"XeSS"};
         const int upscaler = s.upscaler;
         if (ImGui::BeginCombo(label, upscalers[upscaler])) {
             for (int i = 0; i < BbSettings::UpscalerCount; ++i) {
-                const bool supported = i == BbSettings::UpscalerFsr4     ? s.fsr4_supported.load()
-                                       : i == BbSettings::UpscalerFsr411 ? s.fsr411_supported.load()
-                                       : i == BbSettings::UpscalerDlss   ? s.dlss_supported.load()
-                                                                         : true;
+                const bool supported = i == BbSettings::UpscalerFsr    ? s.fsr_supported.load()
+                                       : i == BbSettings::UpscalerDlss ? s.dlss_supported.load()
+                                                                       : true;
                 ImGui::BeginDisabled(!supported);
                 if (ImGui::Selectable(upscalers[i], i == upscaler)) {
                     Store(s.upscaler, i, true);
@@ -709,8 +711,11 @@ void UpscalerSection() {
                 ImGui::EndDisabled();
                 if (!supported) {
                     ImGui::SameLine();
-                    ImGui::TextDisabled("%s", BbSettings::MenuText("— not supported by this GPU",
-                                                                   "— не поддерживается видеокартой"));
+                    ImGui::TextDisabled("%s", i == BbSettings::UpscalerFsr
+                                                  ? BbSettings::MenuText("— not available here (AMD's files, or not Windows)",
+                                                                         "— недоступен (нет файлов AMD или не Windows)")
+                                                  : BbSettings::MenuText("— not supported by this GPU",
+                                                                         "— не поддерживается видеокартой"));
                 }
             }
             for (const char* name : later) {
@@ -722,47 +727,60 @@ void UpscalerSection() {
             }
             ImGui::EndCombo();
         }
-        if (s.upscaler == BbSettings::UpscalerFsr411) {
+        if (s.upscaler == BbSettings::UpscalerFsr) {
             Hint(BbSettings::MenuText(
-                "FSR 4.1.1 in INT8 mode: the model from AMD's 4.1.1 DLL, reproduced in Vulkan "
-                "(output matches the DLL). One model for Native through Performance and another "
-                "for Ultra Performance. Assets: tools/fsr4cap/build_assets.sh (requires the DLL "
-                "and Proton).",
-                "FSR 4.1.1 в режиме INT8: модель из DLL AMD 4.1.1, воспроизведённая в Vulkan "
-                "(результат совпадает с DLL). Одна модель для Native..Performance и отдельная "
-                "для Ultra Performance. Ассеты: tools/fsr4cap/build_assets.sh (нужны DLL и "
-                "Proton)."));
-        } else if (s.upscaler == BbSettings::UpscalerFsr4) {
-            Hint(BbSettings::MenuText(
-                "FSR 4 in INT8 mode (v07 model from AMD FidelityFX SDK sources). Higher quality "
-                "than FSR 3.1, but the pass is more demanding. Changing the preset rebuilds the "
-                "model (a brief pause). Assets: tools/fetch_fsr4_assets.sh.",
-                "FSR 4 в режиме INT8 (модель v07 из исходников AMD FidelityFX SDK). Качество выше, "
-                "чем у FSR 3.1, но проход тяжелее. Смена пресета пересобирает модель (короткая "
-                "пауза). Ассеты: tools/fetch_fsr4_assets.sh."));
+                "AMD FSR through AMD's FSR SDK, which picks the version this GPU runs: FSR 4.1 on Radeon "
+                "RX 6000 and newer, FSR 3.1 on other GPUs.",
+                "AMD FSR через FSR SDK от AMD, который сам выбирает версию для видеокарты: FSR 4.1 на Radeon "
+                "RX 6000 и новее, FSR 3.1 на остальных."));
+            if (const char* running = s.fsr_running.load()) {
+                ImGui::TextDisabled(BbSettings::MenuText("Running: %s", "Работает: %s"), running);
+            }
         }
         if (const char* problem = s.fsr4_problem.load()) {
             ImGui::PushTextWrapPos();
             ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), BbSettings::MenuText("Upscaler unavailable: %s"),
                                BbSettings::MenuText(problem));
-            if (!BbSettings::IsFsr4(s.upscaler))
+            if (!BbSettings::IsFrameUpscaler(s.upscaler))
                 ImGui::TextUnformatted(
                     BbSettings::MenuText("The mode selected above is active. You can select it again to retry."));
             ImGui::PopTextWrapPos();
         }
     }
-    if (BbSettings::IsFsr4(s.upscaler)) {
-        if (const char* label = Item("FSR 4: auto exposure", "FSR 4: авто-экспозиция")) {
+    if (s.upscaler == BbSettings::UpscalerFsr) {
+        // 0.4.4 beta 27: AMD's choice of version or FSR 3.1 (AMD: the version is left to AMD or to the
+        // player in the options); live, the context made again.
+        if (const char* label = Item("FSR version", "Версия FSR")) {
+            const char* versions[] = {BbSettings::MenuText("Automatic (AMD's choice)", "Автоматически (выбор AMD)"),
+                                      "FSR 3.1"};
+            static_assert(std::size(versions) == BbSettings::FsrVersionCount);
+            const int version = std::clamp(s.fsr_version.load(), 0, BbSettings::FsrVersionCount - 1);
+            if (ImGui::BeginCombo(label, versions[version])) {
+                for (int i = 0; i < BbSettings::FsrVersionCount; ++i) {
+                    if (ImGui::Selectable(versions[i], i == version)) {
+                        Store(s.fsr_version, i, true);
+                    }
+                }
+                ImGui::EndCombo();
+            }
+            Hint(BbSettings::MenuText(
+                "Automatic: the newest version AMD's SDK runs on this GPU. FSR 3.1: AMD's FSR 3.1.6 on any "
+                "GPU, to compare, or if FSR 4 looks wrong. A change builds the upscaler again (a few "
+                "seconds at full size, without it).",
+                "Автоматически: новейшая версия, которую SDK AMD запускает на этой видеокарте. FSR 3.1: FSR "
+                "3.1.6 от AMD на любой видеокарте, для сравнения или если FSR 4 выглядит неверно. Смена "
+                "пересобирает апскейлер (несколько секунд в полном разрешении без него)."));
+        }
+        if (const char* label = Item("FSR: auto exposure", "FSR: авто-экспозиция")) {
             Checkbox(label, s.fsr4_auto_exposure);
         }
-        if (const char* label = Item("FSR 4: invert jitter sign", "FSR 4: обратный знак jitter")) {
+        if (const char* label = Item("FSR: invert jitter sign", "FSR: обратный знак jitter")) {
             Checkbox(label, s.fsr4_invert_jitter);
             Hint(BbSettings::MenuText(
-                "For diagnosing ghosting: the FSR 4 network normalizes color by exposure and uses "
-                "it to decide when to discard previous frames. Changes apply immediately, without a "
-                "restart.",
-                "Проверка при гостинге: сеть FSR 4 нормирует цвет по экспозиции и по ней решает, "
-                "когда отбросить прошлые кадры. Меняются сразу, без перезапуска."));
+                "For diagnosing ghosting: FSR normalizes color by exposure and uses it to decide when to "
+                "discard previous frames. Changes apply immediately, without a restart.",
+                "Проверка при гостинге: FSR нормирует цвет по экспозиции и по ней решает, когда отбросить "
+                "прошлые кадры. Меняются сразу, без перезапуска."));
         }
     }
     // bbport: frame generation (vk_frame_generation.h, vk_streamline.h); live, DLSS loaded at start.
@@ -1091,11 +1109,11 @@ void DlssSection() {
     }
 }
 
-// bbport: FSR 3.1's tuning constants (vk_temporal_upscaler.cpp ApplyFsr3Tuning), as OptiScaler
-// offers them, with presets; live. Shown with FSR 3.1 selected (and to a search).
+// bbport: FSR 3.1's tuning constants (AMD's key-value configuration, AmdFsr::Tune), as OptiScaler
+// offers them, with presets; live. Shown while AMD FSR runs FSR 3.1 (and to a search).
 void Fsr3Section() {
     auto& s = BbSettings::Get();
-    if (s.upscaler != BbSettings::UpscalerFsr3 && !Searching()) {
+    if ((s.upscaler != BbSettings::UpscalerFsr || !s.fsr_runs_31.load()) && !Searching()) {
         return;
     }
     Section("FSR 3.1 tuning", "Настройка FSR 3.1");
@@ -1178,16 +1196,13 @@ void MaskSection() {
             "Marks transparent effects (particles, haze) so the upscaler relies less on past "
             "frames. Fewer trails behind effects, but shimmer returns underneath them."));
         // What the selected upscaler does with it.
-        const char* use = s.upscaler == BbSettings::UpscalerFsr3
-                              ? BbSettings::MenuText("FSR 3.1 uses it as its reactive mask.",
-                                                     "FSR 3.1 берёт её как свою реактивную маску.")
+        const char* use = s.upscaler == BbSettings::UpscalerFsr
+                              ? BbSettings::MenuText("AMD FSR takes it as its reactive mask (FSR 3.1 uses it; FSR 4 "
+                                                     "may).",
+                                                     "AMD FSR берёт её как реактивную маску (FSR 3.1 её использует; "
+                                                     "FSR 4 может).")
                           : dlss
                               ? BbSettings::MenuText("DLSS does not use it.", "DLSS её не использует.")
-                          : BbSettings::IsFsr4(s.upscaler)
-                              ? BbSettings::MenuText("FSR 4 has no mask input: the marked pixels are blended with "
-                                                     "this frame after it.",
-                                                     "У FSR 4 нет входа для маски: отмеченные пиксели смешиваются "
-                                                     "с текущим кадром после него.")
                               : BbSettings::MenuText("TAA does not use it.", "TAA её не использует.");
         ImGui::PushTextWrapPos();
         ImGui::TextDisabled("%s", use);

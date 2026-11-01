@@ -75,8 +75,9 @@ FSR411_BUILD_ERRORS = {
 
 # Choices: (label, value). The first entry is the default. Labels are translated when shown.
 UI_LANGUAGES = [("Как в системе", ""), ("Русский", "ru"), ("English", "en"), ("Português (Brasil)", "pt_BR")]
-UPSCALERS = [("FSR 4", "fsr4"), ("FSR 4.1.1", "fsr411"), ("FSR 3", "fsr3"),
-             ("TAA (нативное сглаживание)", "taa"), ("Выключен", "off")]
+# 0.4.4 beta 27: AMD's FSR SDK is Windows only: on Linux the engine runs TAA for "fsr" (and for the
+# older fsr3/fsr4/fsr411), so TAA comes first here.
+UPSCALERS = [("TAA (нативное сглаживание)", "taa"), ("AMD FSR (Windows)", "fsr"), ("Выключен", "off")]
 PRESETS = [("Native AA", 0), ("Quality (x1.5)", 1), ("Balanced (x1.7)", 2),
            ("Performance (x2)", 3), ("Ultra Performance (x3)", 4)]
 OUTPUT_RES = [("1280×720 (Steam Deck)", "1280x720"), ("1920×1080", "1920x1080"), ("2560×1440", "2560x1440"), ("3840×2160", "3840x2160")]
@@ -142,7 +143,7 @@ DEFAULTS = {
 
 # bbport.ini keys the launcher edits; the rest of the file is kept.
 INI_DEFAULTS = {
-    "upscaler": "fsr4",
+    "upscaler": "taa",
     "preset": "4",
     "sharpen": "1",
     "sharpness": "0.50",

@@ -44,7 +44,6 @@ namespace BloodborneLauncher.Views
             SettingToggle(SymbolRegular.XboxController24, L.T("Controller details in the log"),
                 L.T("BB_PAD_LOG: each controller's USB ids, connection and rumble support, disconnects, the game's first vibration request and sticks past their round gate. For controller problems"),
                 "pad_log", logs);
-            SettingToggle(SymbolRegular.DeveloperBoard24, L.T("FSR 4 profile in the log"), "BB_FSR4_PROFILE", "fsr_profile", logs);
             SettingToggle(SymbolRegular.DeveloperBoard24, L.T("GPU time in the log"),
                 L.T("BB_GPU_PROFILE: the GPU's time a frame by render pass, dispatch and upscaler, every 5 seconds. Costs a little GPU time"),
                 "gpu_profile", logs);

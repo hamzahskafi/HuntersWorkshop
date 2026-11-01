@@ -33,9 +33,10 @@ int main() {
 
     BbSettings::Load();
     auto& s = BbSettings::Get();
-    assert(s.upscaler == BbSettings::UpscalerFsr3 && !s.show_fps && s.menu_x < 0.0f);
+    // 0.4.4 beta 27: the older FSR names read as AMD's FSR.
+    assert(s.upscaler == BbSettings::UpscalerFsr && !s.show_fps && s.menu_x < 0.0f);
     s.show_fps = true;
-    s.upscaler = BbSettings::UpscalerFsr411;
+    s.upscaler = BbSettings::UpscalerTaa;
     s.menu_x = 0.625f;
     s.menu_y = 0.125f;
     s.fullscreen = true;
@@ -44,7 +45,7 @@ int main() {
     const std::string saved = Read(path);
     // The launcher's controls, its other keys and comments stay; the menu's keys are replaced
     // in place, new ones appended.
-    assert(saved.find("# launcher\nupscaler=fsr411\nkey.cross=X, Space\npad.circle=a\nshow_fps=1\n"
+    assert(saved.find("# launcher\nupscaler=taa\nkey.cross=X, Space\npad.circle=a\nshow_fps=1\n"
                       "fullscreen_hint=1\n") == 0);
     assert(saved.find("menu_pos=0.6250,0.1250\n") != std::string::npos);
     assert(saved.find("upscaler=fsr3") == std::string::npos);
@@ -53,24 +54,31 @@ int main() {
     s.menu_x = -1.0f;
     s.menu_y = -1.0f;
     BbSettings::Load();
-    assert(s.menu_x == 0.625f && s.menu_y == 0.125f && s.upscaler == BbSettings::UpscalerFsr411);
+    assert(s.menu_x == 0.625f && s.menu_y == 0.125f && s.upscaler == BbSettings::UpscalerTaa);
     // Replacing an existing file works on Windows too, and must not erase key bindings.
     s.upscaler = BbSettings::UpscalerDlss;
     BbSettings::Save();
     assert(Read(path).find("upscaler=dlss\n") != std::string::npos);
     assert(Read(path).find("key.cross=X, Space\n") != std::string::npos);
-    BbSettings::ConfigureUpscalerSupport(false, false, false);
-    assert(s.upscaler == BbSettings::UpscalerFsr3 && !s.dlss_supported);
+    // 0.4.4 beta 27: DLSS where it cannot run gives way to AMD FSR, AMD FSR to TAA.
+    BbSettings::ConfigureUpscalerSupport(true, false);
+    assert(s.upscaler == BbSettings::UpscalerFsr && !s.dlss_supported && s.fsr_supported);
     s.upscaler = BbSettings::UpscalerDlss;
-    BbSettings::ConfigureUpscalerSupport(false, false, true);
+    BbSettings::ConfigureUpscalerSupport(false, true);
     assert(s.upscaler == BbSettings::UpscalerDlss && s.dlss_supported);
-    // FSR 4.1.1 without its dot products, on a GPU with FSR 4: FSR 4, not 3.1.
-    s.upscaler = BbSettings::UpscalerFsr411;
-    BbSettings::ConfigureUpscalerSupport(true, false, false);
-    assert(s.upscaler == BbSettings::UpscalerFsr4);
-    s.upscaler = BbSettings::UpscalerFsr411;
-    BbSettings::ConfigureUpscalerSupport(false, false, false);
-    assert(s.upscaler == BbSettings::UpscalerFsr3);
+    BbSettings::ConfigureUpscalerSupport(false, false);
+    assert(s.upscaler == BbSettings::UpscalerTaa);
+    s.upscaler = BbSettings::UpscalerFsr;
+    BbSettings::ConfigureUpscalerSupport(false, true);
+    assert(s.upscaler == BbSettings::UpscalerTaa);
+    // fsr_version: AMD's choice by default, "3.1" kept.
+    assert(s.fsr_version == BbSettings::FsrVersionAuto);
+    s.fsr_version = BbSettings::FsrVersion31;
+    BbSettings::Save();
+    assert(Read(path).find("fsr_version=3.1\n") != std::string::npos);
+    s.fsr_version = BbSettings::FsrVersionAuto;
+    BbSettings::Load();
+    assert(s.fsr_version == BbSettings::FsrVersion31);
     s.camera_controls = true;
     s.camera_fov_scale = 1.25f;
     s.camera_distance_scale = 0.80f;

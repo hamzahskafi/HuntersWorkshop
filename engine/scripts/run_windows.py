@@ -265,12 +265,10 @@ def main():
         print('Online: configured server profile and automatic game redirect' if override else 'Online: offline mode')
     except (OSError, ValueError) as error:
         sys.exit(f'Online configuration: {error}')
-    if 'BB_FSR411_DIR' not in os.environ and not (ROOT / 'fsr4_411').is_dir() and (data / 'fsr4_411').is_dir():
-        os.environ['BB_FSR411_DIR'] = str(data / 'fsr4_411')
-    # FSR 4.1.1 on any GPU: the fsr4vk provider DLL the package ships (vk_fsr4vk.cpp). The engine
-    # looks beside bb-probe.exe without this; the package keeps it at its top.
-    if 'BB_FSR4VK_DIR' not in os.environ and (ROOT / 'fsr4vk' / 'amd_fidelityfx_upscaler_vk.dll').is_file():
-        os.environ['BB_FSR4VK_DIR'] = str(ROOT / 'fsr4vk')
+    # 0.4.4 beta 27: AMD's FSR SDK DLLs (tools/fetch_amd_fsr.sh) in the package's amd-fsr folder. The
+    # engine looks beside bb-probe.exe without this; the package keeps them at its top.
+    if 'BB_AMD_FSR_DIR' not in os.environ and (ROOT / 'amd-fsr' / 'amd_fidelityfx_loader_vk.dll').is_file():
+        os.environ['BB_AMD_FSR_DIR'] = str(ROOT / 'amd-fsr')
     # The last folder that worked is remembered, so run.bat alone starts the game afterwards.
     remembered = out / 'game_dir.txt'
     if not game and remembered.is_file():

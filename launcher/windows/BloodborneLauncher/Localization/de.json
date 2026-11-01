@@ -1513,6 +1513,13 @@
   "Pick what matters most to you. Each choice is sized to this PC (its graphics card, screen and processor), and only changes the launcher's settings, never the game files. You can change any of it later on the Display and Graphics pages.": "Wählen Sie, was Ihnen am wichtigsten ist. Jede Wahl ist auf diesen PC abgestimmt (Grafikkarte, Bildschirm und Prozessor) und ändert nur die Einstellungen des Launchers, nie die Spieldateien. Sie können alles später auf den Seiten Anzeige und Grafik ändern.",
   "The game's own anti-aliasing pass, applied when the game starts. Usually left off with an upscaler, which smooths edges itself": "Der eigene Anti-Aliasing-Durchgang des Spiels, beim Spielstart übernommen. Mit einem Upscaler meist aus, da er die Kanten selbst glättet",
   "1280 × 800 (Steam Deck)": "1280 × 800 (Steam Deck)",
-  "NVIDIA DLSS {0}. Needs an NVIDIA GeForce RTX GPU; others fall back to FSR 3.1": "NVIDIA DLSS {0}. Benötigt eine NVIDIA-GeForce-RTX-GPU; andere fallen auf FSR 3.1 zurück",
-  "Saved {0:HH:mm:ss} · game settings apply at its next start": "Gespeichert {0:HH:mm:ss} · Spieleinstellungen gelten beim nächsten Spielstart"
+  "Saved {0:HH:mm:ss} · game settings apply at its next start": "Gespeichert {0:HH:mm:ss} · Spieleinstellungen gelten beim nächsten Spielstart",
+  "AMD's FSR 3.1 on any GPU: to compare, or if FSR 4 looks wrong": "AMDs FSR 3.1 auf jeder GPU: zum Vergleich oder wenn FSR 4 falsch aussieht",
+  "AMD's FSR files are missing from the engine folder (engine\\amd-fsr): the game runs TAA instead": "AMDs FSR-Dateien fehlen im Engine-Ordner (engine\\amd-fsr): Das Spiel nutzt stattdessen TAA",
+  "Automatic (AMD's choice)": "Automatisch (Wahl von AMD)",
+  "DLSS files are missing: the game uses AMD FSR": "DLSS-Dateien fehlen: Das Spiel nutzt AMD FSR",
+  "FSR version": "FSR-Version",
+  "NVIDIA DLSS {0}. Needs an NVIDIA GeForce RTX GPU; others use AMD FSR": "NVIDIA DLSS {0}. Benötigt eine NVIDIA-GeForce-RTX-GPU; andere nutzen AMD FSR",
+  "The newest version AMD's FSR SDK runs on this GPU: FSR 4.1 on Radeon RX 6000 and newer, FSR 3.1 on other GPUs": "Die neueste Version, die AMDs FSR SDK auf dieser GPU ausführt: FSR 4.1 auf Radeon RX 6000 und neuer, FSR 3.1 auf anderen GPUs",
+  "Through AMD's FSR SDK, which picks the version this GPU runs: FSR 4.1 on Radeon RX 6000 and newer, FSR 3.1 on other GPUs": "Über AMDs FSR SDK, das die Version für diese GPU wählt: FSR 4.1 auf Radeon RX 6000 und neuer, FSR 3.1 auf anderen GPUs"
 }

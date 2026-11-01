@@ -16,7 +16,6 @@
 #include "common/thread.h"
 #include "precise_pacing.h"
 #include "core/emulator_settings.h"
-#include "ffx_vk_fsr3_3_1_5_bridge.h"
 #include "video_core/host_shaders/frame_gen_compose_comp.h"
 #include "video_core/host_shaders/frame_gen_depth_comp.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
@@ -54,12 +53,6 @@ void GlobalBarrier(vk::CommandBuffer cmdbuf) {
     cmdbuf.pipelineBarrier2({.memoryBarrierCount = 1, .pMemoryBarriers = &barrier});
 }
 
-FfxVkFsr3_3_1_6FrameGenerationImage FfxImage(vk::Image image, vk::Format format, u32 w, u32 h,
-                                             vk::ImageUsageFlags usage) {
-    return {static_cast<VkImage>(image), static_cast<VkFormat>(format), w, h,
-            VK_IMAGE_LAYOUT_GENERAL, static_cast<VkImageUsageFlags>(usage)};
-}
-
 constexpr vk::ImageUsageFlags ColorUsage = vk::ImageUsageFlagBits::eSampled |
                                            vk::ImageUsageFlagBits::eStorage |
                                            vk::ImageUsageFlagBits::eTransferDst |
@@ -76,14 +69,9 @@ FrameGenerator::~FrameGenerator() {
 }
 
 bool FrameGenerator::Enabled() const {
-    if (failed || BbSettings::Get().frame_gen.load(std::memory_order_relaxed) !=
-                      BbSettings::FrameGenFsr3) {
-        return false;
-    }
-    const s64 until = paused_until_ns.load(std::memory_order_relaxed);
-    return until == 0 ||
-           std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch())
-                   .count() >= until;
+    // 0.4.4 beta 27: FSR 3.1 frame interpolation (FireBurn's) went with FireBurn's FSR; AMD's own
+    // needs AMD's swapchain and comes after 0.4.4 (community-fixes-plan.md, Decisions).
+    return false;
 }
 
 bool FrameGenerator::DlssWanted() {
@@ -194,7 +182,7 @@ std::optional<FrameGenerator::Job> FrameGenerator::Prepare(vk::Extent2D display,
     if (setting != last_setting) {
         if (last_setting >= 0 || setting != BbSettings::FrameGenOff) {
             std::printf("Frame generation: %s\n",
-                        setting == BbSettings::FrameGenFsr3 ? "FSR 3.1 selected"
+                        setting == BbSettings::FrameGenFsr3 ? "FSR 3.1 is no longer offered: off"
                         : dlss                              ? "DLSS selected"
                                                             : "off");
         }
@@ -206,32 +194,22 @@ std::optional<FrameGenerator::Job> FrameGenerator::Prepare(vk::Extent2D display,
             BbSettings::Get().frame_gen_active.store(false, std::memory_order_relaxed);
         }
     }
-    if (record_failed.exchange(false) && !failed) {
-        failed = true;
-        std::printf("Frame generation: off for this session: FSR 3.1 frame interpolation "
-                    "failed to record\n");
-    }
     const auto now = Clock::now();
     const float ms = std::chrono::duration<float, std::milli>(now - last_prepare).count();
     frame_ms = ms > 0.0f && ms < 200.0f ? ms : 16.6f;
     last_prepare = now;
     const bool inputs = inputs_ready, hudless = hudless_ready;
     inputs_ready = hudless_ready = false;
-    if ((setting != BbSettings::FrameGenFsr3 && !dlss) || (!dlss && failed)) {
+    if (!dlss) {
         need_reset = true;
         return std::nullopt;
     }
     const char* why = nullptr;
-    if (dlss && !DlssWanted()) {
+    if (!DlssWanted()) {
         // bbport: Streamline not loaded at start, or DLSS-G not supported here (the menu says why).
         const char* problem = BbSettings::Get().dlss_fg_problem.load(std::memory_order_relaxed);
         why = problem ? problem : "DLSS Frame Generation is not loaded (restart with it selected)";
-    } else if (!dlss && !Enabled()) {
-        why = "paused (presenting could not keep up)";
-    } else if (hdr && dlss && !DlssFrameGenHdr()) {
-        // FSR 3.1 interpolates the 8-bit frame before the HDR encode, which then encodes the
-        // generated frame with the real one's gain map (Presenter::PresentHdr); a 10-bit frame
-        // is refused below.
+    } else if (hdr && !DlssFrameGenHdr()) {
         why = "HDR output is on (BB_DLSSG_HDR=0)";
     } else if (other_scaler) {
         why = "the presenter's FSR 1 scaling is on";
@@ -241,21 +219,15 @@ std::optional<FrameGenerator::Job> FrameGenerator::Prepare(vk::Extent2D display,
                view_format != vk::Format::eB8G8R8A8Srgb) {
         why = "the display buffer is not 8 bits per channel";
     } else if (input_width != 0 &&
-               ((dlss ? resources_fsr || render_width == 0 : !context) ||
-                display.width != width || display.height != height ||
-                input_width != render_width || input_height != render_height)) {
-        // New sizes (or the first upscaled frame, or the other kind of frame generation): made
-        // again once the GPU is idle; generation starts over from the next frame.
+               (resources_fsr || render_width == 0 || display.width != width ||
+                display.height != height || input_width != render_width ||
+                input_height != render_height)) {
+        // New sizes (or the first upscaled frame): made again once the GPU is idle; generation
+        // starts over from the next frame.
         const u32 rw = input_width, rh = input_height;
         input_width = input_height = 0;
         need_reset = true;
-        if (!EnsureResources(display.width, display.height, rw, rh, !dlss) && !dlss) {
-            failed = true;
-            std::printf("Frame generation: off for this session: FSR 3.1 frame interpolation "
-                        "could not be created (%ux%u from %ux%u)\n",
-                        display.width, display.height, rw, rh);
-            Idle("could not be created");
-        }
+        EnsureResources(display.width, display.height, rw, rh, false);
         return std::nullopt;
     } else if (!inputs) {
         why = "no upscaled game frame (menus, movies, loading screens, or no upscaler)";
@@ -296,7 +268,7 @@ std::optional<FrameGenerator::Job> FrameGenerator::Prepare(vk::Extent2D display,
             started_logged = true;
             std::printf("Frame generation: %s, %ux%u interpolated from %ux%u motion and "
                         "depth, UI from the real frame (HUD-less copy), present mode %s\n",
-                        dlss ? "DLSS (Streamline)" : "FSR 3.1, 2x", width, height, render_width,
+                        "DLSS (Streamline)", width, height, render_width,
                         render_height, std::string(EmulatorSettings.GetPresentMode()).c_str());
         } else {
             std::printf("Frame generation: running again\n");
@@ -304,163 +276,19 @@ std::optional<FrameGenerator::Job> FrameGenerator::Prepare(vk::Extent2D display,
         std::fflush(stdout);
     }
     // DLSS-G says itself when its frames are shown (DlssFrameGen::AfterPresent).
-    if (!dlss) {
-        BbSettings::Get().frame_gen_multiplier.store(2, std::memory_order_relaxed);
-        BbSettings::Get().frame_gen_active.store(true, std::memory_order_relaxed);
-    }
     return job;
 }
 
 void FrameGenerator::Retire(u64 completed_tick) {
-    u64 completed_id = 0;
     while (!in_flight.empty() && in_flight.front().second <= completed_tick) {
-        completed_id = in_flight.front().first;
         in_flight.pop_front();
-    }
-    if (completed_id && context) {
-        ffxVkFsr3_3_1_6FrameGenerationContextRetireFrame(context, completed_id);
     }
 }
 
-bool FrameGenerator::Record(vk::CommandBuffer cmdbuf, const Job& job, vk::ImageView real) {
-    if (job.dlss) {
-        return false; // the presenter hands DLSS-G its inputs (vk_streamline.h)
-    }
-    std::scoped_lock lock{record_mutex};
-    // Frames of different submissions may be recorded on two threads: one recorded after a
-    // later one is skipped (the interpolation keeps its history in call order).
-    if (!context || job.frame_id <= last_recorded_id || job.width != width ||
-        job.height != height) {
-        return false;
-    }
-    last_recorded_id = job.frame_id;
-    const auto device = instance.GetDevice();
-    const vk::Semaphore semaphore = draw_scheduler.GetWorkSemaphore()->Handle();
-    if (const auto [result, value] = device.getSemaphoreCounterValue(semaphore);
-        result == vk::Result::eSuccess) {
-        Retire(value);
-    }
-    in_flight.emplace_back(job.frame_id, job.tick);
-
-    GlobalBarrier(cmdbuf);
-    const auto color = FfxImage(vk::Image(hudless_image), vk::Format::eR8G8B8A8Unorm, width,
-                                height, ColorUsage);
-    FfxVkFsr3_3_1_6FrameGenerationPrepareInfo prepare{};
-    prepare.commandBuffer = cmdbuf;
-    prepare.color = color;
-    prepare.depth = FfxImage(vk::Image(depth_image), vk::Format::eR32Sfloat, render_width,
-                             render_height, vk::ImageUsageFlagBits::eSampled |
-                                                vk::ImageUsageFlagBits::eStorage);
-    prepare.motionVectors = FfxImage(vk::Image(motion_image), vk::Format::eR16G16Sfloat,
-                                     render_width, render_height,
-                                     vk::ImageUsageFlagBits::eSampled |
-                                         vk::ImageUsageFlagBits::eTransferDst);
-    prepare.renderWidth = render_width;
-    prepare.renderHeight = render_height;
-    prepare.jitterOffsetX = job.jitter[0];
-    prepare.jitterOffsetY = job.jitter[1];
-    // Pixels at render size, previous minus current: the upscaler's convention.
-    prepare.motionVectorScaleX = 1.0f;
-    prepare.motionVectorScaleY = 1.0f;
-    prepare.frameTimeMilliseconds = job.frame_ms;
-    prepare.minLuminance = 0.0f;
-    prepare.maxLuminance = 1.0f;
-    prepare.transferFunction = FFX_VK_FSR3_3_1_6_FRAMEGEN_TRANSFER_SRGB;
-    prepare.cameraNear = job.near_plane;
-    prepare.cameraFar = std::max(FarPlane, job.near_plane * 2.0f);
-    prepare.viewSpaceToMeters = 1.0f;
-    prepare.cameraVerticalFovRadians = job.vertical_fov;
-    prepare.frameId = job.frame_id;
-    prepare.reset = job.reset ? VK_TRUE : VK_FALSE;
-    auto result = ffxVkFsr3_3_1_6FrameGenerationContextRecordPrepare(context, &prepare);
-    if (result == FFX_VK_FSR3_3_1_6_FRAMEGEN_OK) {
-        FfxVkFsr3_3_1_6FrameGenerationDispatchInfo dispatch{};
-        dispatch.commandBuffer = cmdbuf;
-        dispatch.color = color;
-        dispatch.output = FfxImage(vk::Image(generated_image), vk::Format::eR8G8B8A8Unorm, width,
-                                   height, ColorUsage);
-        dispatch.displayWidth = width;
-        dispatch.displayHeight = height;
-        dispatch.frameTimeMilliseconds = job.frame_ms;
-        dispatch.cameraNear = prepare.cameraNear;
-        dispatch.cameraFar = prepare.cameraFar;
-        dispatch.viewSpaceToMeters = 1.0f;
-        dispatch.cameraVerticalFovRadians = job.vertical_fov;
-        dispatch.minLuminance = 0.0f;
-        dispatch.maxLuminance = 1.0f;
-        dispatch.transferFunction = FFX_VK_FSR3_3_1_6_FRAMEGEN_TRANSFER_SRGB;
-        dispatch.frameId = job.frame_id;
-        dispatch.reset = prepare.reset;
-        result = ffxVkFsr3_3_1_6FrameGenerationContextRecordDispatch(context, &dispatch);
-    }
-    if (result != FFX_VK_FSR3_3_1_6_FRAMEGEN_OK) {
-        std::printf("Frame generation: FSR 3.1 frame interpolation error %d (frame %llu)\n",
-                    int(result), static_cast<unsigned long long>(job.frame_id));
-        record_failed.store(true);
-        return false;
-    }
-    GlobalBarrier(cmdbuf);
-    if (!job.present) {
-        return false; // a reset: history only
-    }
-
-    // The UI from the real frame, the rest from the interpolated one.
-    // The real frame is sampled through its own view (BGRA or RGBA, the channels come out in
-    // order either way); the copies are read in the same encoding, sRGB-decoded or not.
-    const bool srgb = job.view_format == vk::Format::eR8G8B8A8Srgb ||
-                      job.view_format == vk::Format::eB8G8R8A8Srgb;
-    const vk::ImageMemoryBarrier2 to_write{
-        .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
-        .srcAccessMask = vk::AccessFlagBits2::eNone,
-        .dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-        .dstAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
-        .oldLayout = vk::ImageLayout::eUndefined,
-        .newLayout = vk::ImageLayout::eGeneral,
-        .image = vk::Image(composed_image),
-        .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
-    };
-    cmdbuf.pipelineBarrier2({.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &to_write});
-    const vk::DescriptorImageInfo real_info{.sampler = *sampler, .imageView = real,
-                                            .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal};
-    const vk::DescriptorImageInfo hudless_info{
-        .sampler = *sampler, .imageView = srgb ? *hudless_view_srgb : *hudless_view_unorm,
-        .imageLayout = vk::ImageLayout::eGeneral};
-    const vk::DescriptorImageInfo generated_info{
-        .sampler = *sampler, .imageView = srgb ? *generated_view_srgb : *generated_view_unorm,
-        .imageLayout = vk::ImageLayout::eGeneral};
-    const vk::DescriptorImageInfo out_info{.imageView = *composed_view,
-                                           .imageLayout = vk::ImageLayout::eGeneral};
-    const std::array<vk::WriteDescriptorSet, 4> writes{{
-        {.dstBinding = 0, .descriptorCount = 1,
-         .descriptorType = vk::DescriptorType::eCombinedImageSampler, .pImageInfo = &real_info},
-        {.dstBinding = 1, .descriptorCount = 1,
-         .descriptorType = vk::DescriptorType::eCombinedImageSampler, .pImageInfo = &hudless_info},
-        {.dstBinding = 2, .descriptorCount = 1,
-         .descriptorType = vk::DescriptorType::eCombinedImageSampler,
-         .pImageInfo = &generated_info},
-        {.dstBinding = 3, .descriptorCount = 1,
-         .descriptorType = vk::DescriptorType::eStorageImage, .pImageInfo = &out_info},
-    }};
-    // Compared in the view's space: decoded (linear) for an sRGB frame, a smaller step there.
-    const float threshold = srgb ? UiThreshold * 0.25f : UiThreshold;
-    cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, *compose_pipeline);
-    cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute, *compose_pipeline_layout, 0,
-                                writes);
-    cmdbuf.pushConstants(*compose_pipeline_layout, vk::ShaderStageFlagBits::eCompute, 0,
-                         sizeof(threshold), &threshold);
-    cmdbuf.dispatch((width + 7) / 8, (height + 7) / 8, 1);
-    const vk::ImageMemoryBarrier2 to_read{
-        .srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-        .srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
-        .dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader,
-        .dstAccessMask = vk::AccessFlagBits2::eShaderSampledRead,
-        .oldLayout = vk::ImageLayout::eGeneral,
-        .newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
-        .image = vk::Image(composed_image),
-        .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
-    };
-    cmdbuf.pipelineBarrier2({.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &to_read});
-    return true;
+bool FrameGenerator::Record(vk::CommandBuffer, const Job&, vk::ImageView) {
+    // The presenter hands DLSS-G its inputs (vk_streamline.h). 0.4.4 beta 27: the FSR 3.1 frame
+    // interpolation recorded here went with FireBurn's FSR.
+    return false;
 }
 
 void FrameGenerator::CreatePipelines() {
@@ -509,10 +337,6 @@ void FrameGenerator::CreatePipelines() {
 
 void FrameGenerator::DestroyResources() {
     std::scoped_lock lock{record_mutex};
-    if (context) {
-        ffxVkFsr3_3_1_6FrameGenerationContextDestroy(context);
-        context = nullptr;
-    }
     in_flight.clear();
     hudless_view_unorm.reset();
     hudless_view_srgb.reset();
@@ -575,48 +399,14 @@ bool FrameGenerator::EnsureResources(u32 w, u32 h, u32 rw, u32 rh, bool fsr) {
     composed_view = view(composed_image, vk::Format::eR16G16B16A16Sfloat, false);
     depth_view = view(depth_image, vk::Format::eR32Sfloat, false);
 
+    // bbport: DLSS Frame Generation: the captures only (0.4.4 beta 27: FSR 3.1's context went).
     resources_fsr = fsr;
-    if (!fsr) {
-        // bbport: DLSS Frame Generation: the captures only.
-        width = w;
-        height = h;
-        render_width = rw;
-        render_height = rh;
-        ToGeneral();
-        std::printf("Frame generation: DLSS inputs %ux%u (render %ux%u)\n", w, h, rw, rh);
-        return true;
-    }
-
-    FfxVkFsr3_3_1_6FrameGenerationCreateInfo create{};
-    create.physicalDevice = instance.GetPhysicalDevice();
-    create.device = device;
-    create.maxRenderWidth = std::max(rw, w);
-    create.maxRenderHeight = std::max(rh, h);
-    create.displayWidth = w;
-    create.displayHeight = h;
-    create.colorFormat = VK_FORMAT_R8G8B8A8_UNORM;
-    FfxVkFsr3_3_1_6FrameGenerationContext* created = nullptr;
-    const auto result = ffxVkFsr3_3_1_6FrameGenerationContextCreate(&create, &created);
-    if (result != FFX_VK_FSR3_3_1_6_FRAMEGEN_OK || !created) {
-        std::printf("Frame generation: FSR 3.1 context creation failed (%d)\n", int(result));
-        DestroyResources();
-        return false;
-    }
-    {
-        std::scoped_lock lock{record_mutex};
-        context = created;
-    }
     width = w;
     height = h;
     render_width = rw;
     render_height = rh;
     ToGeneral();
-    FfxVkFsr3_3_1_6FrameGenerationMemoryUsage usage{};
-    if (ffxVkFsr3_3_1_6FrameGenerationContextGetMemoryUsage(context, &usage) ==
-        FFX_VK_FSR3_3_1_6_FRAMEGEN_OK) {
-        std::printf("Frame generation: FSR 3.1 context %ux%u (render %ux%u), %llu MiB\n", w, h, rw,
-                    rh, static_cast<unsigned long long>(usage.totalUsageInBytes >> 20));
-    }
+    std::printf("Frame generation: DLSS inputs %ux%u (render %ux%u)\n", w, h, rw, rh);
     return true;
 }
 

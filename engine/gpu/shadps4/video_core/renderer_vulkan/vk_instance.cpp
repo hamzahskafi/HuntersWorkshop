@@ -22,7 +22,7 @@
 #include "video_core/renderer_vulkan/vk_breadcrumbs.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_streamline.h"
-#include "video_core/renderer_vulkan/vk_fsr4vk.h"
+#include "video_core/renderer_vulkan/vk_amd_fsr.h"
 #include "video_core/renderer_vulkan/vk_occlusion.h"
 #include "video_core/renderer_vulkan/vk_optiscaler.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
@@ -323,10 +323,8 @@ bool Instance::CreateDevice() {
         vk::PhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR,
         vk::PhysicalDeviceImage2DViewOf3DFeaturesEXT, vk::PhysicalDeviceShaderClockFeaturesKHR,
         vk::PhysicalDeviceComputeShaderDerivativesFeaturesKHR,
-        vk::PhysicalDeviceShaderMixedFloatDotProductFeaturesVALVE,
         vk::PhysicalDeviceCooperativeMatrixFeaturesKHR, vk::PhysicalDeviceShaderFloat8FeaturesEXT,
-        vk::PhysicalDeviceMutableDescriptorTypeFeaturesEXT,
-        vk::PhysicalDeviceDescriptorBufferFeaturesEXT, vk::PhysicalDeviceFaultFeaturesEXT,
+        vk::PhysicalDeviceFaultFeaturesEXT,
         vk::PhysicalDeviceAddressBindingReportFeaturesEXT>();
     features = feature_chain.get().features;
 
@@ -495,15 +493,10 @@ bool Instance::CreateDevice() {
     if ((in_place && in_place[0] == '1') || BbGxRing::InPlaceWanted()) {
         guest_memory_import = add_extension(VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME);
     }
-    // bbport: FSR 4 v07 INT8 (vk_temporal_upscaler): quad derivatives in compute shaders.
+    // bbport: derivatives in compute shaders. 0.4.4 beta 27: AMD's FSR SDK sample enables it (and the
+    // two below) for AMD FSR 4 on Vulkan; FSR 4's built-in model needed it before.
     compute_shader_derivatives = add_extension(VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME);
-    // bbport: FSR 4.1.1 passes (dot2 of halves accumulated in float, as vkd3d-proton translates them).
-    mixed_float_dot_product =
-        feature_chain.get<vk::PhysicalDeviceShaderMixedFloatDotProductFeaturesVALVE>()
-            .shaderMixedFloatDotProductFloat16AccFloat32 &&
-        add_extension(VK_VALVE_SHADER_MIXED_FLOAT_DOT_PRODUCT_EXTENSION_NAME);
-    // bbport: FSR 4.1.1's FP8 variant (RDNA4): FP8 cooperative matrices. Cooperative matrices
-    // alone (FP16) run it emulated, for testing (BB_FSR411_VARIANT=fp8emu).
+    // bbport: FP8 cooperative matrices: AMD FSR 4.1's FP8 model (RX 9000), as AMD's sample enables them.
     cooperative_matrix =
         feature_chain.get<vk::PhysicalDeviceCooperativeMatrixFeaturesKHR>().cooperativeMatrix &&
         add_extension(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME);
@@ -605,37 +598,12 @@ bool Instance::CreateDevice() {
     const auto vk11_features = feature_chain.get<vk::PhysicalDeviceVulkan11Features>();
     vk12_features = feature_chain.get<vk::PhysicalDeviceVulkan12Features>();
     vk13_features = feature_chain.get<vk::PhysicalDeviceVulkan13Features>();
-    // bbport: FSR 4.1.1 through the fsr4vk provider DLL (vk_fsr4vk.cpp). Its device requirements
-    // (provider/INTEGRATION-CONTRACT.md) are standard features and two extensions; they are
-    // requested only when the DLL is installed and the device has all of them, so nothing changes
-    // for other paths.
-    const auto extension_available = [&](std::string_view extension) {
-        return std::find(available_extensions.begin(), available_extensions.end(), extension) !=
-               available_extensions.end();
-    };
-    fsr4vk = Fsr4Vk::FilesPresent() && features.shaderInt16 &&
-             features.shaderStorageImageReadWithoutFormat &&
-             features.shaderStorageImageWriteWithoutFormat && vk12_features.shaderFloat16 &&
-             vk12_features.shaderInt8 && vk12_features.storageBuffer8BitAccess &&
-             vk12_features.runtimeDescriptorArray &&
-             vk12_features.descriptorBindingVariableDescriptorCount &&
-             vk12_features.bufferDeviceAddress && vk13_features.synchronization2 &&
-             vk13_features.shaderIntegerDotProduct && compute_shader_derivatives &&
-             compute_shader_derivatives_features.computeDerivativeGroupLinear &&
-             feature_chain.get<vk::PhysicalDeviceMutableDescriptorTypeFeaturesEXT>()
-                 .mutableDescriptorType &&
-             feature_chain.get<vk::PhysicalDeviceDescriptorBufferFeaturesEXT>().descriptorBuffer &&
-             extension_available(VK_EXT_MUTABLE_DESCRIPTOR_TYPE_EXTENSION_NAME) &&
-             extension_available(VK_EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME);
-    if (fsr4vk) {
-        add_extension(VK_EXT_MUTABLE_DESCRIPTOR_TYPE_EXTENSION_NAME);
-        add_extension(VK_EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME);
-        LOG_INFO(Render_Vulkan, "fsr4vk: {} found, its device features are enabled",
-                 Fsr4Vk::LibraryPathUtf8());
-        std::printf("Upscaler: fsr4vk found (%s): FSR 4.1.1 available\n", Fsr4Vk::LibraryPathUtf8().c_str());
-    } else if (Fsr4Vk::FilesPresent()) {
-        std::printf("Upscaler: fsr4vk found, but this GPU lacks a Vulkan feature it needs: no FSR 4.1.1\n");
-    }
+    // 0.4.4 beta 27: AMD FSR through AMD's FSR SDK (vk_amd_fsr.cpp). With its DLLs in the package, the
+    // features AMD's own Vulkan sample asks for are enabled where the GPU has them (partially bound
+    // descriptors, typed storage-image reads, descriptor arrays; FP16, 16-bit storage, int8 and its dot
+    // products, subgroup size control, FP8 matrices are enabled above or below for everyone);
+    // AMD's SDK then picks the FSR version the device runs. Nothing changes without the DLLs.
+    amd_fsr = AmdFsr::FilesPresent();
     vk::StructureChain device_chain = {
         vk::DeviceCreateInfo{
             .queueCreateInfoCount = queue_info_count,
@@ -668,9 +636,10 @@ bool Instance::CreateDevice() {
                 .shaderImageGatherExtended = features.shaderImageGatherExtended,
                 .shaderStorageImageExtendedFormats = features.shaderStorageImageExtendedFormats,
                 .shaderStorageImageMultisample = features.shaderStorageImageMultisample,
-                // bbport: fsr4vk (vk_fsr4vk.cpp) only.
-                .shaderStorageImageReadWithoutFormat = fsr4vk,
-                // bbport: required by the FSR 3 accumulate shaders (vk_temporal_upscaler).
+                // bbport: AMD FSR (vk_amd_fsr.cpp) only.
+                .shaderStorageImageReadWithoutFormat =
+                    amd_fsr && features.shaderStorageImageReadWithoutFormat,
+                // bbport: the upscaler's own passes (vk_temporal_upscaler) and AMD FSR.
                 .shaderStorageImageWriteWithoutFormat =
                     features.shaderStorageImageWriteWithoutFormat,
                 .shaderClipDistance = features.shaderClipDistance,
@@ -693,9 +662,11 @@ bool Instance::CreateDevice() {
             .shaderSharedInt64Atomics = vk12_features.shaderSharedInt64Atomics,
             .shaderFloat16 = vk12_features.shaderFloat16,
             .shaderInt8 = vk12_features.shaderInt8,
-            // bbport: fsr4vk (vk_fsr4vk.cpp) only.
-            .descriptorBindingVariableDescriptorCount = fsr4vk,
-            .runtimeDescriptorArray = fsr4vk,
+            // bbport: AMD FSR (vk_amd_fsr.cpp) only.
+            .descriptorBindingPartiallyBound = amd_fsr && vk12_features.descriptorBindingPartiallyBound,
+            .descriptorBindingVariableDescriptorCount =
+                amd_fsr && vk12_features.descriptorBindingVariableDescriptorCount,
+            .runtimeDescriptorArray = amd_fsr && vk12_features.runtimeDescriptorArray,
             .scalarBlockLayout = vk12_features.scalarBlockLayout,
             .uniformBufferStandardLayout = vk12_features.uniformBufferStandardLayout,
             .separateDepthStencilLayouts = vk12_features.separateDepthStencilLayouts,
@@ -796,21 +767,12 @@ bool Instance::CreateDevice() {
             .computeDerivativeGroupLinear =
                 compute_shader_derivatives_features.computeDerivativeGroupLinear,
         },
-        vk::PhysicalDeviceShaderMixedFloatDotProductFeaturesVALVE{
-            .shaderMixedFloatDotProductFloat16AccFloat32 = true,
-        },
         vk::PhysicalDeviceCooperativeMatrixFeaturesKHR{
             .cooperativeMatrix = true,
         },
         vk::PhysicalDeviceShaderFloat8FeaturesEXT{
             .shaderFloat8 = true,
             .shaderFloat8CooperativeMatrix = true,
-        },
-        vk::PhysicalDeviceMutableDescriptorTypeFeaturesEXT{
-            .mutableDescriptorType = true,
-        },
-        vk::PhysicalDeviceDescriptorBufferFeaturesEXT{
-            .descriptorBuffer = true,
         },
         vk::PhysicalDeviceFaultFeaturesEXT{
             .deviceFault = true,
@@ -878,18 +840,11 @@ bool Instance::CreateDevice() {
     if (!compute_shader_derivatives) {
         device_chain.unlink<vk::PhysicalDeviceComputeShaderDerivativesFeaturesKHR>();
     }
-    if (!mixed_float_dot_product) {
-        device_chain.unlink<vk::PhysicalDeviceShaderMixedFloatDotProductFeaturesVALVE>();
-    }
     if (!cooperative_matrix) {
         device_chain.unlink<vk::PhysicalDeviceCooperativeMatrixFeaturesKHR>();
     }
     if (!shader_float8) {
         device_chain.unlink<vk::PhysicalDeviceShaderFloat8FeaturesEXT>();
-    }
-    if (!fsr4vk) {
-        device_chain.unlink<vk::PhysicalDeviceMutableDescriptorTypeFeaturesEXT>();
-        device_chain.unlink<vk::PhysicalDeviceDescriptorBufferFeaturesEXT>();
     }
 
     // bbport: with OptiScaler loaded, on a thread of its own (OptiScaler::OnCleanThread).

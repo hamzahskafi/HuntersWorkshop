@@ -6,12 +6,24 @@ The sections after this one are the record of the work from the first frame anal
 2026-10-01) on, dated; what runs now:
 
 - **Upscalers** (`upscaler` in `config.ini`, `BB_UPSCALER`; the launcher's Graphics page and the
-  in-game menu): `fsr4` (FSR 4, the v07 INT8 model in `fsr4_shaders/`), `fsr411` (FSR 4.1.1: the
-  `fsr4_411` set built from one's own DLL, below, where it is present and the GPU runs its
-  shaders; otherwise, on Windows, fsr4vk: `amd_fidelityfx_upscaler_vk.dll` in the package's
-  `fsr4vk` folder or `BB_FSR4VK_DIR`), `fsr3` (FSR 3.1, FireBurn/FSR-Vulkan), `dlss` (DLSS Super
-  Resolution, NVIDIA RTX), `taa` (below) and `off`. A `config.ini` without the key gets `fsr3`.
-  `BB_UPSCALER=none` leaves the whole path out.
+  in-game menu): `fsr` (AMD FSR through AMD's FSR SDK 2.4, `vk_amd_fsr.cpp`; from 0.4.4 beta 27),
+  `dlss` (DLSS Super Resolution, NVIDIA RTX), `taa` (below) and `off`. A `config.ini` without the key
+  gets `fsr`; the older `fsr3`, `fsr4` and `fsr411` read as `fsr`. `BB_UPSCALER=none` leaves the
+  whole path out.
+- **AMD FSR** (0.4.4 beta 27): AMD's signed `amd_fidelityfx_loader_vk.dll` and
+  `amd_fidelityfx_upscaler_vk.dll` in the package's `engine/amd-fsr` (`tools/fetch_amd_fsr.sh`, with
+  AMD's licence; `BB_AMD_FSR_DIR` overrides the folder, `BB_AMD_FSR=0` hides it), loaded at run time
+  and driven through the AMD FSR API (`third_party/amd-fsr-sdk`, MIT headers). AMD's SDK lists the
+  versions for the GPU (the log names them) and picks one: FSR 4.1.2 on RX 9000 (FP8), RX 7000, RX 6000
+  and Ryzen AI Max (INT8), Ryzen AI 300/400 and Z2 (lightweight INT8); FSR 3.1.6 elsewhere (NVIDIA,
+  Intel, older Radeon). `fsr_version=3.1` asks for FSR 3.1 instead (AMD's version override; live, the
+  context made again). The context is made on a worker thread (it builds the upscaler's shaders): the
+  scene renders at full size without the upscaler meanwhile. Inputs as before: standard depth (AMD
+  supports it), render-size motion vectors without jitter, dynamic resolution within the output size;
+  HDR at a 1920x1080 output, the game's frame decoded to linear light elsewhere. Windows only: AMD's
+  SDK has no Linux build. FireBurn's FSR 3.1 and FSR 4, the built-in FSR 4 model, FSR 4.1.1's replay and
+  fsr4vk were removed with it (AMD's licence forbids reverse engineering its DLLs, which the 4.1.1
+  replay was built from).
 - **Where:** at a 1920x1080 output on the HDR scene colour right before the post-processing
   combine (compute shader `9a9cf8a9`), written back so that the game's own post-processing,
   tonemap and UI run on it; at other outputs on the game's tonemapped frame before its UI, which
@@ -24,17 +36,19 @@ The sections after this one are the record of the work from the first frame anal
   in "Startup patch is the default again" below; `live_resolution=1` takes the live path. Off is the
   default and the recommended choice; `auto` (a GPU check) is no longer offered from 0.4.4 beta 25c
   and reads as off.
-- **Fallbacks:** before the first frame, `dlss` without an RTX GPU, the driver's NGX or
-  `nvngx_dlss` becomes FSR 3.1; `fsr411` that cannot run here becomes FSR 4, and FSR 4 on a GPU
-  that cannot run it FSR 3.1. A fatal failure in play falls back the same way (FSR 4.1.1 to FSR 4
-  to FSR 3.1, DLSS to FSR 3.1); while FSR 4's model is being built, FSR 3.1 runs. The menu shows
-  the upscaler in use and why.
-- **Sharpening:** `sharpen` (on) and `sharpness` (0-2, default 0.20). FSR 3.1 and 4 apply their own
+- **Fallbacks** (0.4.4 beta 27): before the first frame, `dlss` without an RTX GPU, the driver's NGX
+  or `nvngx_dlss` becomes AMD FSR, and AMD FSR without AMD's files (or on Linux, or with no version
+  for the GPU) TAA; bb-start (and `scripts/patches.py`) choose the start's render size for TAA then,
+  so TAA runs at the output size. A fatal failure in play falls back the same way (DLSS to AMD FSR,
+  AMD FSR to TAA); in a session started at a reduced render size TAA cannot run, and the picture is
+  not upscaled until the game starts again. The menu shows the upscaler in use and why.
+- **Sharpening:** `sharpen` (on) and `sharpness` (0-2, default 0.20). AMD FSR applies its own
   RCAS up to 1 and an extra RCAS pass above it; DLSS, which has no sharpening of its own, gets the
   whole range from that pass; TAA has its own pass (docs/MODS.md, "TAA sharpening").
-- **Reactive mask** (`reactive`, off by default): FSR 3.1's reactive mask; FSR 4 takes none, so its
-  output is blended with the current frame where the mask marks blended effects
-  (`fsr4_reactive.comp`); TAA and DLSS do not use it, and it is not made for them. Up to 0.4.4 beta
+- **Reactive mask** (`reactive`, off by default): AMD FSR's reactive mask (FSR 3.1 uses it; FSR 4
+  may; up to 0.4.4 beta 26 FSR 4 got it blended over its output, `fsr4_reactive.comp`, removed); TAA
+  and DLSS do not use it, and it is not made for them. FSR 3.1's tuning (`fsr3_*`) goes to AMD's FSR
+  3.1 through its key-value configuration. Up to 0.4.4 beta
   25a DLSS was given it as its bias-current-colour mask, which NVIDIA's guide (310.4.0, §3.15) says
   should not be used.
 - **History reset on a camera cut** (0.4.4 beta 25b, every upscaler): the first frame after the

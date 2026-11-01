@@ -94,11 +94,14 @@ void Set(Values& v, const std::string& key, const std::string& value) {
                         value.c_str());
         }
     } else if (key == "upscaler") {
-        for (int u = 0; u < UpscalerCount; ++u) {
-            if (value == UpscalerName(u)) {
-                v.upscaler = u;
-            }
+        if (const int u = UpscalerFromName(value.c_str()); u >= 0) {
+            v.upscaler = u;
+        } else {
+            std::printf("Settings: unknown upscaler '%s' (expected fsr, dlss, taa or off)\n", value.c_str());
         }
+    } else if (key == "fsr_version") {
+        // 0.4.4 beta 27: AMD's choice ("auto") or FSR 3.1 ("3.1").
+        v.fsr_version = value == "3.1" || value == "31" ? FsrVersion31 : FsrVersionAuto;
     } else if (key == "frame_gen") {
         // bbport: "off" / "fsr3" / "dlss"; 0 and 1 too (BB_FRAME_GEN=0).
         v.frame_gen = value == "dlss"                     ? FrameGenDlss
@@ -481,10 +484,7 @@ void Load() {
     }
     // Environment overrides (scripts, A/B tests).
     if (const char* env = std::getenv("BB_UPSCALER")) {
-        v.upscaler = UpscalerOff;
-        for (int u = 0; u < UpscalerCount; ++u) {
-            if (std::strcmp(env, UpscalerName(u)) == 0) v.upscaler = u;
-        }
+        v.upscaler = std::max(UpscalerFromName(env), int(UpscalerOff)); // "none" (no upscaler path): off
     }
     const std::pair<const char*, const char*> env_keys[] = {
         {"BB_FSR_SHARPNESS", "sharpness"},        {"BB_JITTER", "jitter"},
@@ -523,28 +523,23 @@ void Load() {
                             v.optiscaler_sync_submit};
 }
 
-void ConfigureUpscalerSupport(bool fsr4, bool fsr411, bool dlss) {
+void ConfigureUpscalerSupport(bool fsr, bool dlss) {
     auto& v = Get();
-    v.fsr4_supported = fsr4;
-    v.fsr411_supported = fsr4 && fsr411;
+    v.fsr_supported = fsr;
     v.dlss_supported = dlss;
     const int requested = v.upscaler;
+    // 0.4.4 beta 27: TAA when neither runs (community-fixes-plan.md, Decisions: "When AMD's or NVIDIA's
+    // runtime can't start"); bb-start chose the start's render size for TAA already when AMD's files
+    // are missing (start/main.cpp), so TAA runs at the output size.
     if (requested == UpscalerDlss && !dlss) {
-        v.fsr4_problem = "DLSS needs an NVIDIA RTX GPU, its driver's NGX and nvngx_dlss; using FSR 3.1";
-        std::printf("Upscaler: dlss unavailable; falling back to FSR 3.1 before the first frame\n");
-        v.upscaler = UpscalerFsr3;
-    } else if (requested == UpscalerFsr411 && !v.fsr411_supported && v.fsr4_supported) {
-        // FSR 4.1.1 needs mixed-precision dot products (VK_VALVE_shader_mixed_float_dot_product)
-        // that FSR 4 does not, and its fsr4_411 files: the next best is FSR 4, not 3.1.
-        v.fsr4_problem = "FSR 4.1.1 needs its fsr4_411 files and a GPU that runs its shaders; using FSR 4";
-        std::printf("Upscaler: fsr411 unavailable (GPU or fsr4_411 files); falling back to FSR 4 before the first frame\n");
-        v.upscaler = UpscalerFsr4;
-    } else if ((requested == UpscalerFsr4 && !v.fsr4_supported) ||
-        (requested == UpscalerFsr411 && !v.fsr411_supported)) {
-        v.fsr4_problem = "GPU does not support the selected FSR 4 shaders; using FSR 3.1";
-        std::printf("Upscaler: %s unsupported on this GPU; falling back to FSR 3.1 before the first frame\n",
-                    UpscalerName(requested));
-        v.upscaler = UpscalerFsr3;
+        v.fsr4_problem = fsr ? "DLSS needs an NVIDIA RTX GPU, its driver's NGX and nvngx_dlss; using AMD FSR"
+                             : "DLSS needs an NVIDIA RTX GPU, its driver's NGX and nvngx_dlss; using TAA";
+        std::printf("Upscaler: dlss unavailable; %s before the first frame\n", fsr ? "AMD FSR" : "TAA");
+        v.upscaler = fsr ? UpscalerFsr : UpscalerTaa;
+    } else if (requested == UpscalerFsr && !fsr) {
+        v.fsr4_problem = "AMD FSR cannot run here (its files, this GPU, or not Windows); using TAA";
+        std::printf("Upscaler: AMD FSR unavailable; TAA before the first frame\n");
+        v.upscaler = UpscalerTaa;
     }
 }
 
@@ -594,6 +589,7 @@ void Save() {
     const auto flag = [](bool value) { return std::string(value ? "1" : "0"); };
     put("menu_language", MenuLanguageCodes[int(v.menu_language.load())]);
     put("upscaler", UpscalerName(v.upscaler));
+    put("fsr_version", FsrVersionNames[std::clamp(v.fsr_version.load(), 0, FsrVersionCount - 1)]);
     put("preset", std::to_string(v.preset.load()));
     put("frame_gen", FrameGenNames[std::clamp(v.frame_gen.load(), 0, FrameGenCount - 1)]);
     put("frame_gen_cap", flag(v.frame_gen_cap));
@@ -831,9 +827,32 @@ const char* DlssPresetText(int preset) {
 }
 
 const char* UpscalerName(int upscaler) {
-    static constexpr const char* names[UpscalerCount] = {"off", "fsr3", "fsr4", "fsr411", "taa",
-                                                                  "dlss"};
+    static constexpr const char* names[UpscalerCount] = {"off", "fsr", "taa", "dlss"};
     return names[std::clamp(upscaler, 0, UpscalerCount - 1)];
+}
+
+int UpscalerFromName(const char* name) {
+    if (!name) {
+        return -1;
+    }
+    for (int u = 0; u < UpscalerCount; ++u) {
+        if (std::strcmp(name, UpscalerName(u)) == 0) {
+            return u;
+        }
+    }
+    // 0.4.4 beta 27: FSR 3.1 (FireBurn's), FSR 4 and FSR 4.1.1 are AMD's FSR now, which picks the version.
+    for (const char* old : {"fsr3", "fsr4", "fsr411"}) {
+        if (std::strcmp(name, old) == 0) {
+            static bool told = false;
+            if (!told) {
+                told = true;
+                std::printf("Settings: upscaler=%s is AMD FSR from 0.4.4 beta 27 (AMD's FSR SDK picks the version)\n",
+                            name);
+            }
+            return UpscalerFsr;
+        }
+    }
+    return -1;
 }
 
 } // namespace BbSettings

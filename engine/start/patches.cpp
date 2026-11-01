@@ -503,7 +503,7 @@ std::optional<Size> RenderSize(const std::map<std::string, std::string>& setting
         if (!size) throw Error("invalid render resolution " + override_size);
         return size;
     }
-    if (Setting(settings, "upscaler").value_or("fsr3") == "off") return std::nullopt;
+    if (Setting(settings, "upscaler").value_or("fsr") == "off") return std::nullopt;
     const double scale = PresetScale(settings);
     if (scale == 1.0) return std::nullopt;
     // Multiples of 4, as ScaledSizes: the game pads its targets to them (undrawn edge columns).
@@ -802,7 +802,7 @@ std::optional<std::pair<Size, Size>> ScaledSizes(const std::map<std::string, std
     const Size out = OutputSize(settings);
     if (out == kOutput || Setting(settings, "upscaler") == "taa") return std::nullopt;
     double scale = 1.0;
-    if (Setting(settings, "upscaler").value_or("fsr3") != "off") scale = PresetScale(settings);
+    if (Setting(settings, "upscaler").value_or("fsr") != "off") scale = PresetScale(settings);
     // A scene of at least 640x360, a third of 1080p: Ultra Performance at a 720p output made 428x240,
     // where a ROG Ally showed the world in half the picture (0.9.37 beta 7), and the upscaler has
     // little to work from below it.

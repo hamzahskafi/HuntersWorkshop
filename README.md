@@ -49,14 +49,17 @@ Hunter's Workshop started from [Lantern Engine](https://github.com/Awakenchan/La
 | PC controls, camera, menus, cheats, online sign-in, occlusion culling, trophy research, the frame-rate corrections (with findings from Kyo's later FPS++ lists and yogesh1239), the work pools' lock and node cache, the FMOD sound-ring guard, the play recording's compression level, the wind's pace and the Bloodletter's L2 above 30 FPS, co-op's leave off the game's thread and dead connections not announced as live | [droogie/bbhost](https://github.com/droogie/bbhost) |
 | Linux online start and the bound on runaway particle work | [Lena Różalska](https://github.com/DecayingEagle) |
 | Online servers | [The Hunter's Dream](https://thehuntersdream.com) |
-| FSR 3.1 and FSR 4 on Vulkan | [FireBurn/FSR-Vulkan](https://github.com/FireBurn/FSR-Vulkan) and the AMD FidelityFX SDK |
-| FSR 4.1.1 | [fsr4vk](https://github.com/dvj5411/fsr4vk), with the AMD driver fix from [0xCydral](https://github.com/0xCydral/bloodborne_pc) |
+| AMD FSR | [AMD FSR SDK](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK) 2.4: AMD's signed DLLs, used as AMD ships them, and its API headers (MIT) |
 | DLSS | NVIDIA DLSS SDK and Streamline |
 | Sound | [LibAtrac9](https://github.com/Thealexbarney/LibAtrac9) |
 | In-game menu | [Dear ImGui](https://github.com/ocornut/imgui) |
 | Controller mappings | [SDL_GameControllerDB](https://github.com/mdqinc/SDL_GameControllerDB) |
 | Trophy list | [pyL1nx/bloodborne_pc](https://github.com/pyL1nx/bloodborne_pc) |
 | Launcher UI library | [WPF-UI](https://github.com/lepoco/wpfui) |
+
+Earlier versions used [FireBurn/FSR-Vulkan](https://github.com/FireBurn/FSR-Vulkan) for FSR 3.1 and FSR 4,
+and [fsr4vk](https://github.com/dvj5411/fsr4vk) by dvj5411, with the AMD driver fix from
+[0xCydral](https://github.com/0xCydral/bloodborne_pc), for FSR 4.1.1.
 
 ### Game patches
 

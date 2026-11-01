@@ -193,7 +193,7 @@ unsigned DlssPreset(int quality) {
     return unsigned(std::clamp(preset, BbSettings::DlssPresetDefault, BbSettings::DlssPresetMax));
 }
 
-ResourceVk Resource(const Fsr4Upscaler::Image& image, vk::ImageAspectFlags aspect, bool rw) {
+ResourceVk Resource(const UpscaleInput::Image& image, vk::ImageAspectFlags aspect, bool rw) {
     ResourceVk r{};
     r.resource.image_view_info = {
         .image_view = static_cast<VkImageView>(image.view),
@@ -435,7 +435,7 @@ struct DlssUpscaler::Impl {
         return text;
     }
 
-    bool Record(const Fsr4Upscaler::Frame& f) {
+    bool Record(const UpscaleInput::Frame& f) {
         if (!available) {
             return false;
         }
@@ -573,7 +573,7 @@ bool DlssUpscaler::Available() const noexcept {
     return impl->available;
 }
 
-bool DlssUpscaler::Record(const Fsr4Upscaler::Frame& frame) {
+bool DlssUpscaler::Record(const UpscaleInput::Frame& frame) {
     return impl->Record(frame);
 }
 

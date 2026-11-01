@@ -369,10 +369,13 @@ int Main(std::vector<std::wstring> arguments) {
         return 1;
     }
     std::error_code error;
-    if (!Env("BB_FSR411_DIR") && !fs::is_directory(folders.engine / "fsr4_411", error) && fs::is_directory(data / "fsr4_411", error))
-        SetEnv("BB_FSR411_DIR", Utf8(data / "fsr4_411"));
-    if (!Env("BB_FSR4VK_DIR") && fs::is_regular_file(folders.engine / "fsr4vk" / "amd_fidelityfx_upscaler_vk.dll", error))
-        SetEnv("BB_FSR4VK_DIR", Utf8(folders.engine / "fsr4vk"));
+    // 0.4.4 beta 27: AMD's FSR SDK DLLs (tools/fetch_amd_fsr.sh) in the package's engine\amd-fsr; the
+    // engine looks for an amd-fsr folder beside itself (out\) without this (vk_amd_fsr.cpp).
+    const fs::path amd_fsr_dir = Env("BB_AMD_FSR_DIR") ? Path(Env("BB_AMD_FSR_DIR", "")) : folders.engine / "amd-fsr";
+    const bool amd_fsr_files = Env("BB_AMD_FSR", "") != "0" &&
+                               fs::is_regular_file(amd_fsr_dir / "amd_fidelityfx_loader_vk.dll", error) &&
+                               fs::is_regular_file(amd_fsr_dir / "amd_fidelityfx_upscaler_vk.dll", error);
+    if (!Env("BB_AMD_FSR_DIR") && amd_fsr_files) SetEnv("BB_AMD_FSR_DIR", Utf8(amd_fsr_dir));
     const fs::path remembered = out / "game_dir.txt";
     if ((!game || game->empty()) && fs::is_regular_file(remembered, error)) game = Trim(ReadText(remembered));
     const fs::path game_dir = game && !game->empty() ? Path(*game) : folders.package.parent_path() / "CUSA03173";
@@ -524,7 +527,15 @@ int Main(std::vector<std::wstring> arguments) {
     std::optional<std::pair<Size, Size>> scaled;
     if (Env("BB_RENDER_RES", "").empty() && !other_edition) {
         try {
-            scaled = ScaledSizes(ReadSettings(config));
+            // 0.4.4 beta 27: without AMD's FSR files the engine runs TAA instead of AMD FSR
+            // (BbSettings::ConfigureUpscalerSupport), which renders at the output size: no patch.
+            auto start_settings = ReadSettings(config);
+            const std::string upscaler = Setting(start_settings, "upscaler").value_or("fsr");
+            if (!amd_fsr_files && (upscaler == "fsr" || upscaler == "fsr3" || upscaler == "fsr4" || upscaler == "fsr411")) {
+                Log("Upscaler: AMD FSR's files are not in %s: TAA, at the output size", Utf8(amd_fsr_dir).c_str());
+                start_settings["upscaler"] = "taa";
+            }
+            scaled = ScaledSizes(start_settings);
         } catch (const Error&) {
         }
     }

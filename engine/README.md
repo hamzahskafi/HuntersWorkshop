@@ -80,10 +80,10 @@ Ubuntu 24.04, `packaging/linux/setup-ubuntu.sh` builds the libraries it needs on
 A Windows package is the launcher at the top, `package.json` (its version and engine build), and an
 `engine` folder with `out/` (the programs and their DLLs), `patches/`, `data/`, `licenses/`, the
 default settings, the shader catalogs (`shader-catalog/`: pipelines compiled ahead, so fewer
-shaders compile during play) and the upscalers' files (`fsr4_shaders/`, `fsr4vk/`). The shader
-catalogs and the upscalers' files are not kept in this repository; `tools/fetch_dlss.sh`,
-`tools/fetch_fsr4_assets.sh` and `tools/fetch_streamline.sh` download DLSS, FSR 4's model files
-and Streamline.
+shaders compile during play) and AMD's FSR SDK runtime (`amd-fsr/`: AMD's signed DLLs and their
+licence). The shader catalogs and the upscalers' files are not kept in this repository;
+`tools/fetch_dlss.sh`, `tools/fetch_amd_fsr.sh` and `tools/fetch_streamline.sh` download DLSS, AMD's
+FSR SDK runtime and Streamline.
 
 ## Tests and checks
 
@@ -128,7 +128,8 @@ and widescreen plates). Copyright in each part stays with its authors.
 Also in the engine, under their own licenses: [shadPS4](https://github.com/shadps4-emu/shadPS4)'s
 video core and shader recompiler (GPL-2.0-or-later), shadNet's client (`licenses/SHADNET-PORT.md`),
 [sirit](https://github.com/shadps4-emu/sirit), [half](https://half.sourceforge.net/),
-[FSR-Vulkan](https://github.com/FireBurn/FSR-Vulkan) and the AMD FidelityFX SDK (MIT),
+the AMD FSR SDK's API headers (MIT; AMD's DLLs are loaded at run time under AMD's licence,
+`licenses/AMD-FSR-SDK.md`),
 [LibAtrac9](https://github.com/Thealexbarney/LibAtrac9) (MIT),
 [Dear ImGui](https://github.com/ocornut/imgui) (MIT), NVIDIA Streamline (headers; DLSS and Reflex),
 cpp-httplib (MIT), wepoll (BSD), and the DejaVu and Lantern Menu SC fonts (the latter a Noto Sans SC
@@ -137,5 +138,5 @@ crash and controller fixes from AwesomeObserver, Supermedo and deadinside28.
 
 The built-in game patches (`patches/Bloodborne.xml`) are the Bloodborne modding community's: Kyo,
 Lance McDonald, auser1337, illusion, Whitehawkx, emoose, Dasaav, bloo, Imedved, Foxy Hooligans,
-stagvant and yogesh1239, each credited on their patches. AMD's FSR 4 DLLs and NVIDIA's DLSS files
+stagvant and yogesh1239, each credited on their patches. AMD's FSR SDK DLLs and NVIDIA's DLSS files
 are not distributed in this repository.

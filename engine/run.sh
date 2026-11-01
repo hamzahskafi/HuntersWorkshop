@@ -20,10 +20,6 @@ data=${BB_DATA_DIR:-.}
 out=${BB_OUT_DIR:-$data/out}
 mkdir -p "$out"
 export BB_CONFIG=${BB_CONFIG:-$data/config.ini}
-# FSR 4.1.1 assets (tools/fsr4cap/build_assets.sh): next to run.sh or in the data directory.
-if [[ -z ${BB_FSR411_DIR:-} && ! -d fsr4_411 && -d $data/fsr4_411 ]]; then
-    export BB_FSR411_DIR=$data/fsr4_411
-fi
 if [[ -z ${BB_PREBUILT:-} && -z ${BB_IN_NIX_SHELL:-} ]] && ! { command -v pkg-config >/dev/null && pkg-config --exists vulkan sdl3; } && command -v nix-shell >/dev/null; then
     args=''; if (( $# )); then args=$(printf '%q ' "$@"); fi
     exec env BB_IN_NIX_SHELL=1 nix-shell shell.nix --run "bash run.sh $args"
@@ -206,10 +202,6 @@ if [[ -z ${BB_VBLANK_HZ:-} ]]; then
     # 0.4.4 beta 22: 120, 144 and 240 at their own rate, as on Windows (60 before: their frame limit
     # followed it, so they ran at 60).
     case $fps in uncap) export BB_VBLANK_HZ=480 ;; 90|120|144|240) export BB_VBLANK_HZ=$fps ;; *) export BB_VBLANK_HZ=60 ;; esac
-fi
-# FSR 4: faster post passes next to the downloaded ones (incremental; tools/fsr4_optimize.sh).
-if [[ -z ${BB_PREBUILT:-} && -d fsr4_shaders ]] && command -v spirv-cross >/dev/null; then
-    bash tools/fsr4_optimize.sh || echo 'FSR 4: optimized post passes not built' >&2
 fi
 if [[ -n ${BB_PREBUILT:-} ]]; then
     probe=${BB_PROBE:-bin/bb-probe}

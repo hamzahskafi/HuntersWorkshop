@@ -1513,6 +1513,13 @@
   "Pick what matters most to you. Each choice is sized to this PC (its graphics card, screen and processor), and only changes the launcher's settings, never the game files. You can change any of it later on the Display and Graphics pages.": "最も重視するものを選んでください。各選択肢はこの PC (グラフィックカード、画面、プロセッサー) に合わせて調整され、変更するのはランチャーの設定だけで、ゲームのファイルは変更しません。どれも後から「ディスプレイ」と「グラフィック」のページで変更できます。",
   "The game's own anti-aliasing pass, applied when the game starts. Usually left off with an upscaler, which smooths edges itself": "ゲーム本来のアンチエイリアス処理。ゲームの起動時に適用されます。アップスケーラー使用時は、それ自体がエッジを滑らかにするため通常はオフのままにします",
   "1280 × 800 (Steam Deck)": "1280 × 800 (Steam Deck)",
-  "NVIDIA DLSS {0}. Needs an NVIDIA GeForce RTX GPU; others fall back to FSR 3.1": "NVIDIA DLSS {0}。NVIDIA GeForce RTX GPU が必要です。それ以外では FSR 3.1 にフォールバックします",
-  "Saved {0:HH:mm:ss} · game settings apply at its next start": "{0:HH:mm:ss} に保存しました · ゲームの設定は次回の起動時に反映されます"
+  "Saved {0:HH:mm:ss} · game settings apply at its next start": "{0:HH:mm:ss} に保存しました · ゲームの設定は次回の起動時に反映されます",
+  "AMD's FSR 3.1 on any GPU: to compare, or if FSR 4 looks wrong": "どの GPU でも AMD の FSR 3.1: 比較用、または FSR 4 の表示がおかしい場合に",
+  "AMD's FSR files are missing from the engine folder (engine\\amd-fsr): the game runs TAA instead": "エンジンフォルダーに AMD の FSR ファイルがありません (engine\\amd-fsr): 代わりに TAA を使用します",
+  "Automatic (AMD's choice)": "自動 (AMD が選択)",
+  "DLSS files are missing: the game uses AMD FSR": "DLSS のファイルがありません: AMD FSR を使用します",
+  "FSR version": "FSR のバージョン",
+  "NVIDIA DLSS {0}. Needs an NVIDIA GeForce RTX GPU; others use AMD FSR": "NVIDIA DLSS {0}。NVIDIA GeForce RTX GPU が必要です。それ以外では AMD FSR を使用します",
+  "The newest version AMD's FSR SDK runs on this GPU: FSR 4.1 on Radeon RX 6000 and newer, FSR 3.1 on other GPUs": "AMD の FSR SDK がこの GPU で実行できる最新版: Radeon RX 6000 以降は FSR 4.1、その他の GPU は FSR 3.1",
+  "Through AMD's FSR SDK, which picks the version this GPU runs: FSR 4.1 on Radeon RX 6000 and newer, FSR 3.1 on other GPUs": "AMD の FSR SDK 経由で、この GPU 向けのバージョンを SDK が選びます: Radeon RX 6000 以降は FSR 4.1、その他の GPU は FSR 3.1"
 }

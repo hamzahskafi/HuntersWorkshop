@@ -1513,6 +1513,13 @@
   "Pick what matters most to you. Each choice is sized to this PC (its graphics card, screen and processor), and only changes the launcher's settings, never the game files. You can change any of it later on the Display and Graphics pages.": "가장 중요한 것을 고르세요. 각 선택은 이 PC(그래픽 카드, 화면, 프로세서)에 맞춰지며, 런처 설정만 바꾸고 게임 파일은 절대 바꾸지 않습니다. 나중에 디스플레이 및 그래픽 페이지에서 언제든 바꿀 수 있습니다.",
   "The game's own anti-aliasing pass, applied when the game starts. Usually left off with an upscaler, which smooths edges itself": "게임 자체 안티에일리어싱 패스로, 게임을 시작할 때 적용됩니다. 업스케일러가 가장자리를 직접 부드럽게 하므로 보통 끈 채로 둡니다",
   "1280 × 800 (Steam Deck)": "1280 × 800 (Steam Deck)",
-  "NVIDIA DLSS {0}. Needs an NVIDIA GeForce RTX GPU; others fall back to FSR 3.1": "NVIDIA DLSS {0}. NVIDIA GeForce RTX GPU가 필요합니다. 그 외에는 FSR 3.1로 대체됩니다",
-  "Saved {0:HH:mm:ss} · game settings apply at its next start": "{0:HH:mm:ss}에 저장됨 · 게임 설정은 다음 시작 시 적용됩니다"
+  "Saved {0:HH:mm:ss} · game settings apply at its next start": "{0:HH:mm:ss}에 저장됨 · 게임 설정은 다음 시작 시 적용됩니다",
+  "AMD's FSR 3.1 on any GPU: to compare, or if FSR 4 looks wrong": "모든 GPU에서 AMD의 FSR 3.1: 비교용이나 FSR 4가 이상하게 보일 때",
+  "AMD's FSR files are missing from the engine folder (engine\\amd-fsr): the game runs TAA instead": "엔진 폴더에 AMD FSR 파일이 없습니다(engine\\amd-fsr). 대신 TAA를 사용합니다",
+  "Automatic (AMD's choice)": "자동(AMD 선택)",
+  "DLSS files are missing: the game uses AMD FSR": "DLSS 파일이 없습니다. AMD FSR을 사용합니다",
+  "FSR version": "FSR 버전",
+  "NVIDIA DLSS {0}. Needs an NVIDIA GeForce RTX GPU; others use AMD FSR": "NVIDIA DLSS {0}. NVIDIA GeForce RTX GPU가 필요합니다. 그 외에는 AMD FSR을 사용합니다",
+  "The newest version AMD's FSR SDK runs on this GPU: FSR 4.1 on Radeon RX 6000 and newer, FSR 3.1 on other GPUs": "AMD FSR SDK가 이 GPU에서 실행하는 최신 버전: Radeon RX 6000 이상은 FSR 4.1, 그 외 GPU는 FSR 3.1",
+  "Through AMD's FSR SDK, which picks the version this GPU runs: FSR 4.1 on Radeon RX 6000 and newer, FSR 3.1 on other GPUs": "AMD FSR SDK를 통해 이 GPU에 맞는 버전을 SDK가 고릅니다. Radeon RX 6000 이상은 FSR 4.1, 그 외 GPU는 FSR 3.1"
 }

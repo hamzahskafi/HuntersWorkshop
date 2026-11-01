@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// bbport: frame generation (frame_gen in config.ini, BB_FRAME_GEN=fsr3). FSR 3.1 frame
-// interpolation (the vendored FireBurn/FSR-Vulkan 3.1.6 C API) makes one frame between two of the
-// game's own: 2x the frames shown, at the cost of holding each real frame back by half a frame.
+// bbport: frame generation (frame_gen in config.ini, BB_FRAME_GEN). Not offered (BbSettings::
+// FrameGenOffered). 0.4.4 beta 27: only DLSS Frame Generation (below) is left; the FSR 3.1 frame
+// interpolation that made one frame between two of the game's own (FireBurn/FSR-Vulkan's C API)
+// went with FireBurn's FSR. The captures and the presentation pieces below served both.
 //
 // Where the pieces come from:
 // - The upscaler (vk_temporal_upscaler.cpp), right after its camera motion pass: the scene depth
@@ -35,8 +36,6 @@
 #include "video_core/renderer_vulkan/vk_common.h"
 #include "video_core/texture_cache/image.h"
 
-struct FfxVkFsr3_3_1_6FrameGenerationContext;
-
 namespace Vulkan {
 
 class Instance;
@@ -49,7 +48,7 @@ public:
     FrameGenerator(const Instance& instance, Scheduler& draw_scheduler);
     ~FrameGenerator();
 
-    /// FSR 3.1 chosen in the menu or config.ini, not failed, and not paused by the overload guard.
+    /// FSR 3.1 frame interpolation running: never from 0.4.4 beta 27 (it went with FireBurn's FSR).
     [[nodiscard]] bool Enabled() const;
     /// bbport: DLSS Frame Generation chosen, and Streamline runs it on this GPU (vk_streamline.h).
     [[nodiscard]] static bool DlssWanted();
@@ -140,7 +139,7 @@ public:
     void OnRealPresented(Clock::time_point start, bool generated_shown, bool generated_made);
 
 private:
-    /// `fsr`: with the FSR 3.1 context (DLSS Frame Generation needs only the captures).
+    /// `fsr`: always false from 0.4.4 beta 27 (FSR 3.1's context went; DLSS needs only the captures).
     bool EnsureResources(u32 w, u32 h, u32 rw, u32 rh, bool fsr);
     void DestroyResources();
     /// Records the images' first barrier (Undefined to General).
@@ -172,7 +171,6 @@ private:
 
     // Resources (made on the draw thread after the GPU is idle).
     u32 width = 0, height = 0, render_width = 0, render_height = 0;
-    FfxVkFsr3_3_1_6FrameGenerationContext* context = nullptr;
     VideoCore::UniqueImage hudless_image;   ///< RGBA8 Unorm (mutable: Srgb view for the compose)
     VideoCore::UniqueImage generated_image; ///< FSR's output, RGBA8 Unorm
     VideoCore::UniqueImage composed_image;  ///< RGBA16F, the post process's input

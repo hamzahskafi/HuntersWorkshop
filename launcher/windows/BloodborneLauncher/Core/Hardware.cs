@@ -238,7 +238,8 @@ namespace BloodborneLauncher.Core
 
             var tier = GpuTier;
             var dlss = Paths.DlssRuntime != null;
-            Ini(L.T("Upscaler"), "upscaler", Rtx && dlss ? "dlss" : Rdna4 ? "fsr4" : "fsr3", Choices.Upscalers);
+            // 0.4.4 beta 27: AMD FSR (AMD's SDK picks FSR 4.1 or 3.1 by GPU), TAA without AMD's files.
+            Ini(L.T("Upscaler"), "upscaler", Rtx && dlss ? "dlss" : Paths.AmdFsrPresent ? "fsr" : "taa", Choices.Upscalers);
 
             // The output: the display's own size, by name where it is one of the choices, else
             // "Display (auto)"; 1920 x 1080 when the display is unknown.

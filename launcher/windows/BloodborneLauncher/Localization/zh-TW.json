@@ -1513,6 +1513,13 @@
   "Pick what matters most to you. Each choice is sized to this PC (its graphics card, screen and processor), and only changes the launcher's settings, never the game files. You can change any of it later on the Display and Graphics pages.": "選擇你最重視的項目。每個選項都會依這台電腦（顯示卡、螢幕與處理器）調整，只會變更啟動器的設定，絕不改動遊戲檔案。之後可隨時在「顯示」與「圖形」頁面中變更。",
   "The game's own anti-aliasing pass, applied when the game starts. Usually left off with an upscaler, which smooths edges itself": "遊戲內建的反鋸齒處理，於遊戲啟動時套用。使用超解析度時通常保持關閉，因為它本身就會讓邊緣平滑",
   "1280 × 800 (Steam Deck)": "1280 × 800（Steam Deck）",
-  "NVIDIA DLSS {0}. Needs an NVIDIA GeForce RTX GPU; others fall back to FSR 3.1": "NVIDIA DLSS {0}。需要 NVIDIA GeForce RTX GPU；其他 GPU 會退回使用 FSR 3.1",
-  "Saved {0:HH:mm:ss} · game settings apply at its next start": "已於 {0:HH:mm:ss} 儲存 · 遊戲設定將於下次啟動時套用"
+  "Saved {0:HH:mm:ss} · game settings apply at its next start": "已於 {0:HH:mm:ss} 儲存 · 遊戲設定將於下次啟動時套用",
+  "AMD's FSR 3.1 on any GPU: to compare, or if FSR 4 looks wrong": "任何 GPU 上的 AMD FSR 3.1：用於比較，或在 FSR 4 顯示異常時使用",
+  "AMD's FSR files are missing from the engine folder (engine\\amd-fsr): the game runs TAA instead": "引擎資料夾中缺少 AMD 的 FSR 檔案（engine\\amd-fsr）：遊戲將改用 TAA",
+  "Automatic (AMD's choice)": "自動（由 AMD 選擇）",
+  "DLSS files are missing: the game uses AMD FSR": "缺少 DLSS 檔案：遊戲將使用 AMD FSR",
+  "FSR version": "FSR 版本",
+  "NVIDIA DLSS {0}. Needs an NVIDIA GeForce RTX GPU; others use AMD FSR": "NVIDIA DLSS {0}。需要 NVIDIA GeForce RTX GPU；其他 GPU 使用 AMD FSR",
+  "The newest version AMD's FSR SDK runs on this GPU: FSR 4.1 on Radeon RX 6000 and newer, FSR 3.1 on other GPUs": "AMD FSR SDK 在此 GPU 上能執行的最新版本：Radeon RX 6000 及更新型號為 FSR 4.1，其他 GPU 為 FSR 3.1",
+  "Through AMD's FSR SDK, which picks the version this GPU runs: FSR 4.1 on Radeon RX 6000 and newer, FSR 3.1 on other GPUs": "透過 AMD FSR SDK，由其為此 GPU 選擇版本：Radeon RX 6000 及更新型號為 FSR 4.1，其他 GPU 為 FSR 3.1"
 }

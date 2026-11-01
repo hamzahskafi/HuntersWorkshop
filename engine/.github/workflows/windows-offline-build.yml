@@ -109,23 +109,14 @@ jobs:
           python -m unittest discover -s tests -p 'test_windows_frame_rate.py'
           python -m unittest discover -s tests -p 'test_engine_assets.py'
           python -m unittest discover -s tests -p 'test_online.py'
-          python -m unittest discover -s tests -p 'test_upscaler_assets.py'
-          python -m unittest discover -s tests -p 'test_fsr4cap_dll_info.py'
 
       - name: Fetch DLSS 310.9.1
         shell: msys2 {0}
         run: bash tools/fetch_dlss.sh out
 
-      - name: Fetch FSR 4 v07 assets
+      - name: Fetch AMD FSR SDK 2.4 (signed DLLs and licence)
         shell: msys2 {0}
-        run: |
-          set +e
-          bash tools/fetch_fsr4_assets.sh
-          fetch_status=$?
-          set -e
-          count=$(find fsr4_shaders -type f 2>/dev/null | wc -l)
-          echo "FSR4 asset files: $count (fetch/optimizer status: $fetch_status)"
-          test "$count" -ge 180
+        run: bash tools/fetch_amd_fsr.sh amd-fsr
 
       - name: Setup .NET 8
         uses: actions/setup-dotnet@v4
@@ -168,7 +159,7 @@ jobs:
           test ! -f out/nvngx_dlss.dll || cp -f out/nvngx_dlss.dll package/out/
           cp -rf scripts/* package/scripts/
           test ! -d patches || cp -rf patches/* package/patches/
-          test ! -d fsr4_shaders || cp -rf fsr4_shaders package/
+          test ! -d amd-fsr || cp -rf amd-fsr package/
           test ! -f LICENSE || cp -f LICENSE package/
           test ! -d licenses || cp -rf licenses package/
           mkdir -p package/licenses/msys2
@@ -192,8 +183,8 @@ jobs:
           The game host override is generated automatically. No server is configured by default.
           Multiplayer between two clients requires separate validation.
 
-          FSR 4.1.1 requires its separate asset set; this package includes FSR 4 v07,
-          FSR 3.1 and DLSS Super Resolution 310.9.1.
+          This package includes AMD FSR (AMD's FSR SDK 2.4: FSR 4.1 on Radeon RX 6000 and
+          newer, FSR 3.1 elsewhere) and DLSS Super Resolution 310.9.1.
           EOF
 
       - name: Upload Windows package

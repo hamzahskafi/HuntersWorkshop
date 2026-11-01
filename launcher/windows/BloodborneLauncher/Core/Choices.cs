@@ -8,14 +8,22 @@
     /// <summary>Every list the launcher offers, in English, with the values bbport expects.</summary>
     public static class Choices
     {
+        /// <summary>0.4.4 beta 27: one FSR, AMD's (AMD's FSR SDK picks the version; the engine reads the
+        /// older "fsr3", "fsr4" and "fsr411" as it).</summary>
         public static readonly Choice[] Upscalers =
         {
-            new("FSR 4", "fsr4"),
-            new("FSR 4.1.1", "fsr411"),
-            new("FSR 3", "fsr3"),
+            new("AMD FSR", "fsr"),
             new("DLSS (NVIDIA RTX)", "dlss"),
             new(L.T("TAA (native anti-aliasing)"), "taa"),
             new(L.T("Off"), "off"),
+        };
+
+        /// <summary>fsr_version in config.ini (0.4.4 beta 27): AMD's choice, or FSR 3.1.</summary>
+        public static readonly Choice[] FsrVersions =
+        {
+            new(L.T("Automatic (AMD's choice)"), "auto",
+                L.T("The newest version AMD's FSR SDK runs on this GPU: FSR 4.1 on Radeon RX 6000 and newer, FSR 3.1 on other GPUs")),
+            new("FSR 3.1", "3.1", L.T("AMD's FSR 3.1 on any GPU: to compare, or if FSR 4 looks wrong")),
         };
 
         /// <summary>frame_gen in config.ini: generated frames between the game's own (the engine's

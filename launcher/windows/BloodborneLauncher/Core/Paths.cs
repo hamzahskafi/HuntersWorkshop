@@ -96,6 +96,12 @@ namespace BloodborneLauncher.Core
             }
         }
 
+        /// <summary>0.4.4 beta 27: AMD's FSR SDK runtime in the engine's amd-fsr folder
+        /// (tools/fetch_amd_fsr.sh): its loader and upscaler DLLs. Windows only.</summary>
+        public static bool AmdFsrPresent => OperatingSystem.IsWindows() &&
+            File.Exists(Path.Combine(EngineDir, "amd-fsr", "amd_fidelityfx_loader_vk.dll")) &&
+            File.Exists(Path.Combine(EngineDir, "amd-fsr", "amd_fidelityfx_upscaler_vk.dll"));
+
         /// <summary>The DLSS runtime's version: the DLL's file version, or the end of the .so's name.</summary>
         public static string DlssVersion(string runtime) => OperatingSystem.IsWindows()
             ? System.Diagnostics.FileVersionInfo.GetVersionInfo(runtime).FileVersion ?? ""

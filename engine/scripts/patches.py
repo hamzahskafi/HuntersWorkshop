@@ -392,7 +392,7 @@ def render_size(settings,override=''):
     if override:
         w,h=(int(v) for v in override.lower().split('x'))
         return (w,h)
-    if settings.get('upscaler','fsr3')=='off': return None
+    if settings.get('upscaler','fsr')=='off': return None
     scale=preset_scale(settings)
     if scale==1.0: return None
     # Even sizes (the game has half-resolution buffers).
@@ -412,6 +412,27 @@ def output_size(settings):
     return OUTPUT_SIZE
 
 
+FSR_NAMES=('fsr','fsr3','fsr4','fsr411')
+
+
+def amd_fsr_files():
+    """AMD's FSR SDK DLLs for the engine (tools/fetch_amd_fsr.sh; vk_amd_fsr.cpp): Windows only, in
+    BB_AMD_FSR_DIR or the engine's amd-fsr folder. 0.4.4 beta 27."""
+    if os.name!='nt' or os.environ.get('BB_AMD_FSR')=='0': return False
+    folder=Path(os.environ.get('BB_AMD_FSR_DIR') or Path(__file__).resolve().parents[1]/'amd-fsr')
+    return all((folder/name).is_file() for name in
+               ('amd_fidelityfx_loader_vk.dll','amd_fidelityfx_upscaler_vk.dll'))
+
+
+def start_settings(settings):
+    """The settings the start's render size follows: without AMD's FSR files (or on Linux) the engine
+    runs TAA instead of AMD FSR (BbSettings::ConfigureUpscalerSupport), at the output size, as bb-start
+    decides (start/main.cpp)."""
+    if settings.get('upscaler','fsr') in FSR_NAMES and not amd_fsr_files():
+        return {**settings,'upscaler':'taa'}
+    return settings
+
+
 def scaled_sizes(settings):
     """(render, output) for an output other than 1080p (above it, or 720p for the Steam Deck):
     the game renders at output / preset scale (or at the output size without upscaler) and the
@@ -419,7 +440,7 @@ def scaled_sizes(settings):
     out=output_size(settings)
     if out==OUTPUT_SIZE or settings.get('upscaler')=='taa': return None
     scale=1.0
-    if settings.get('upscaler','fsr3')!='off':
+    if settings.get('upscaler','fsr')!='off':
         scale=preset_scale(settings)
     # A scene of at least 640x360 (start/patches.cpp ScaledSizes): 428x240 (Ultra Performance at a
     # 720p output) showed the world in half the picture on a ROG Ally.
@@ -823,13 +844,13 @@ def main():
         print(f'{len(write_site_table(a.xml,a.app_version,a.write_site_table))} patches in {site_table_path(a.xml)}')
         return
     if a.print_scaled:
-        sizes=scaled_sizes(read_settings(a.settings))
+        sizes=scaled_sizes(start_settings(read_settings(a.settings)))
         if sizes: print(f'{sizes[0][0]}x{sizes[0][1]} {sizes[1][0]}x{sizes[1][1]}')
         return
     if a.print_preset_size:
         settings=read_settings(a.settings)
         if 'BB_UPSCALER' in os.environ:
-            settings['upscaler']='fsr3' if os.environ['BB_UPSCALER']=='fsr3' else 'off'
+            settings['upscaler']='fsr' if os.environ['BB_UPSCALER'] in FSR_NAMES else 'off'
         if 'BB_UPSCALE_PRESET' in os.environ:
             settings['preset']=os.environ['BB_UPSCALE_PRESET']
         size=render_size(settings)

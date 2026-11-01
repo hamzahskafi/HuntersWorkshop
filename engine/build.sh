@@ -63,18 +63,10 @@ if [[ -z $pgo ]]; then
         pgo=off
     fi
 fi
-# Submodules (git clone --recursive, or: git submodule update --init) and this port's changes
-# to FSR-Vulkan (gpu/patches/fsr-vulkan), applied to its working tree once.
-if [[ ! -f gpu/third_party/fsr-vulkan/CMakeLists.txt || ! -f gpu/third_party/imgui/imgui.h ]]; then
+# Submodules (git clone --recursive, or: git submodule update --init). 0.4.4 beta 27: FSR-Vulkan
+# (FireBurn's FSR 3.1 and FSR 4) and its patches went for AMD's FSR SDK (tools/fetch_amd_fsr.sh).
+if [[ ! -f gpu/third_party/imgui/imgui.h ]]; then
     git submodule update --init --recursive
-fi
-# A plain source copy (no submodule checkout) already has them applied.
-if [[ -e gpu/third_party/fsr-vulkan/.git ]]; then
-    for patch in gpu/patches/fsr-vulkan/*.patch; do
-        if ! git -C gpu/third_party/fsr-vulkan apply --reverse --check "$PWD/$patch" 2>/dev/null; then
-            git -C gpu/third_party/fsr-vulkan apply "$PWD/$patch"
-        fi
-    done
 fi
 # Line tables only (not full debug info): crash offsets still resolve to function and
 # file:line with llvm-symbolizer, and compiling and linking take much less time.

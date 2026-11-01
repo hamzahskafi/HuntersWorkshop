@@ -113,9 +113,6 @@ namespace BloodborneLauncher.Views
             Tracked(SymbolRegular.ShieldCheckmark24, L.T("Effect trail crash fix"),
                 L.T("For crashes while drawing effect trails on newer Intel CPUs (Witch of Hemwick, for example): stops the crash, and that kind of trail is not drawn. Off by default"),
                 "exp_sfx_workaround", exp);
-            Tracked(SymbolRegular.Run24, L.T("Sharper motion (FSR 4)"),
-                L.T("Uses FSR 4's balanced model at Performance and Ultra Performance: fewer trails behind moving characters, a little more GPU time"),
-                "fsr4_balanced", exp);
 
             // The engine's own performance and sound settings in one place each (0.4.4 beta 26: the graphics
             // card from the Graphics group, whose other two rows went to Picture; two-stage pipeline, CPU

@@ -4,7 +4,7 @@
 //
 // One window: the game folder and the settings, then Install / Update, which installs MSYS2
 // (to C:\msys64, or BB_MSYS2) and the packages README "Windows" lists, gets the sources and their
-// submodules, optionally downloads the DLSS and FSR 4 models, builds out\bb-probe.exe, and writes
+// submodules, optionally downloads the DLSS model and AMD's FSR SDK runtime, builds out\bb-probe.exe, and writes
 // bbport.ini, out\game_dir.txt, Bloodborne.cmd (the launcher: frame rate, game language, present
 // mode) and the shortcuts. Run again to change settings: Save settings writes them without
 // building.
@@ -205,7 +205,8 @@ class SetupForm : Form {
 
         // Image quality.
         var image = Group("Image quality", 2);
-        var upscalers = new List<Choice> { new Choice("FSR 3.1", "fsr3"), new Choice("FSR 4 (INT8 model)", "fsr4"),
+        // 0.4.4 beta 27: one FSR, AMD's (AMD's FSR SDK picks the version; tools/fetch_amd_fsr.sh).
+        var upscalers = new List<Choice> { new Choice("AMD FSR", "fsr"),
                                            new Choice("TAA (native anti-aliasing)", "taa"), new Choice("Off", "off") };
         if (nvidia) upscalers.Insert(0, new Choice("DLSS (NVIDIA RTX)", "dlss"));
         upscaler = Combo(image, "Upscaler", upscalers.ToArray());
@@ -237,7 +238,7 @@ class SetupForm : Form {
         language = Combo(extras, "Game language", Languages);
         dlssModel = Check("Download NVIDIA's DLSS model (needed for DLSS)");
         dlssModel.Enabled = nvidia;
-        fsr4Models = Check("Download the FSR 4 models (needed for FSR 4, ~300 MB)");
+        fsr4Models = Check("Download AMD's FSR SDK runtime (needed for AMD FSR, ~36 MB)");
         desktopLink = Check("Desktop shortcut");
         startMenuLink = Check("Start menu shortcut");
         AddSpan(extras, dlssModel);
@@ -348,7 +349,7 @@ class SetupForm : Form {
         string u = Value(upscaler);
         preset.Enabled = u != "off" && u != "taa";
         if (u == "dlss" && !File.Exists(Path.Combine(rootBox.Text, @"out\nvngx_dlss.dll"))) dlssModel.Checked = true;
-        if (u == "fsr4" && !Directory.Exists(Path.Combine(rootBox.Text, "fsr4_shaders"))) fsr4Models.Checked = true;
+        if (u == "fsr" && !File.Exists(Path.Combine(rootBox.Text, @"amd-fsr\amd_fidelityfx_upscaler_vk.dll"))) fsr4Models.Checked = true;
     }
 
     // ---- the game folder ---------------------------------------------------------------------
@@ -439,8 +440,8 @@ class SetupForm : Form {
         SelectValue(presentMode, env_or("BB_PRESENT_MODE", ""));
         fullscreen.Checked = ini_or("fullscreen", "1") == "1";
         showFps.Checked = ini_or("show_fps", "0") == "1";
-        SelectValue(upscaler, ini_or("upscaler", "fsr3"));
-        if (upscaler.SelectedIndex < 0) SelectValue(upscaler, "fsr3");
+        SelectValue(upscaler, ini_or("upscaler", "fsr"));
+        if (upscaler.SelectedIndex < 0) SelectValue(upscaler, "fsr");
         SelectValue(preset, ini_or("preset", "0"));
         SelectValue(live, ini_or("live_resolution", "0"));
         SelectValue(modelLod, ini_or("model_lod", "0"));
@@ -624,7 +625,7 @@ class SetupForm : Form {
             EnsureSources(o);
             Step(++step, steps, "Models");
             if (o.DlssModel) Must(Bash(o, "bash tools/fetch_dlss.sh"), "downloading the DLSS model");
-            if (o.Fsr4Models) Must(Bash(o, "bash tools/fetch_fsr4_assets.sh"), "downloading the FSR 4 models");
+            if (o.Fsr4Models) Must(Bash(o, "bash tools/fetch_amd_fsr.sh"), "downloading AMD's FSR SDK runtime");
             if (!o.DlssModel && !o.Fsr4Models) Log("(none selected)");
             Step(++step, steps, "Building bbport (several minutes the first time)");
             Must(Bash(o, "bash build.sh"), "building bbport (log above; out/gpu-build.log has the GPU library's)");

@@ -9,20 +9,24 @@
 
 namespace BbSettings {
 
-enum Upscaler : int { UpscalerOff = 0, UpscalerFsr3 = 1, UpscalerFsr4 = 2, UpscalerFsr411 = 3,
-                      UpscalerTaa = 4, UpscalerDlss = 5, UpscalerCount };
-/// FSR 4 v07 or FSR 4.1.1: the same inputs, settings and placement in the frame.
-inline bool IsFsr4(int upscaler) {
-    return upscaler == UpscalerFsr4 || upscaler == UpscalerFsr411;
-}
-/// FSR 4, FSR 4.1.1 or DLSS: one frame's inputs to a separate upscaler, which writes the
-/// output image (TemporalUpscaler::RecordFsr4); FSR 3.1 and TAA are recorded in place.
+/// 0.4.4 beta 27: one FSR, AMD's (AMD FSR SDK 2.4, vk_amd_fsr.h), which picks the version this GPU
+/// runs; it replaced FSR 3.1 (FireBurn's), FSR 4 (the built-in v07 model) and FSR 4.1.1 (fsr4vk and
+/// the replay). "fsr3", "fsr4" and "fsr411" in config.ini read as "fsr".
+enum Upscaler : int { UpscalerOff = 0, UpscalerFsr = 1, UpscalerTaa = 2, UpscalerDlss = 3, UpscalerCount };
+/// AMD FSR or DLSS: one frame's inputs to a separate upscaler, which writes the output image
+/// (TemporalUpscaler::RecordFrameUpscaler); TAA is recorded in place.
 inline bool IsFrameUpscaler(int upscaler) {
-    return IsFsr4(upscaler) || upscaler == UpscalerDlss;
+    return upscaler == UpscalerFsr || upscaler == UpscalerDlss;
 }
+/// fsr_version in config.ini: AMD's choice (no version override: the newest this GPU runs, FSR 4.1 on
+/// RX 6000 and newer, FSR 3.1 elsewhere), or FSR 3.1 (AMD's FSR 3.1.6). Live.
+enum FsrVersion : int { FsrVersionAuto = 0, FsrVersion31 = 1, FsrVersionCount };
+inline constexpr const char* FsrVersionNames[] = {"auto", "3.1"};
+static_assert(sizeof(FsrVersionNames) / sizeof(FsrVersionNames[0]) == FsrVersionCount);
 /// bbport: frame_gen in config.ini (BB_FRAME_GEN): generated frames between the game's own
-/// (vk_frame_generation.h): FSR 3.1 frame interpolation (2x), or NVIDIA DLSS Frame Generation
-/// through Streamline (vk_streamline.h; RTX 40/50, loaded at start, frame_gen_frames per real one).
+/// (vk_frame_generation.h): NVIDIA DLSS Frame Generation through Streamline (vk_streamline.h; RTX
+/// 40/50, loaded at start, frame_gen_frames per real one). FSR 3.1 frame interpolation went with
+/// FireBurn's FSR in 0.4.4 beta 27: "fsr3" reads as off (AMD's own needs AMD's swapchain; after 0.4.4).
 enum FrameGen : int { FrameGenOff = 0, FrameGenFsr3 = 1, FrameGenDlss = 2, FrameGenCount };
 inline constexpr const char* FrameGenNames[] = {"off", "fsr3", "dlss"};
 static_assert(sizeof(FrameGenNames) / sizeof(FrameGenNames[0]) == FrameGenCount);
@@ -145,7 +149,9 @@ static_assert(sizeof(PadIconsNames) / sizeof(PadIconsNames[0]) == PadIconsCount)
 
 struct Values {
     std::atomic<MenuLanguage> menu_language{MenuLanguage::English};
-    std::atomic<int> upscaler{UpscalerFsr3};
+    std::atomic<int> upscaler{UpscalerFsr};
+    /// FsrVersion: AMD's choice or FSR 3.1; live (the context is made again).
+    std::atomic<int> fsr_version{FsrVersionAuto};
     std::atomic<int> preset{NativeAA};
     std::atomic<int> frame_gen{FrameGenOff}; ///< FrameGen; live
     /// While generated frames are shown, the game runs at half the refresh rate so every
@@ -274,9 +280,14 @@ struct Values {
     /// Live resolution and preset changes (run.sh): 0 off, the default and recommended (startup patch,
     /// fastest), 1 on. On restart. "auto" (a GPU check) is read as off from 0.4.4 beta 25c.
     std::atomic<int> live_resolution{0};
-    /// Why FSR 4 cannot run (assets, device features), or null. Set by the renderer.
+    /// Why the chosen upscaler cannot run (AMD's files, this GPU, a failure), or null. Set by the renderer.
     std::atomic<const char*> fsr4_problem{nullptr};
-    std::atomic<bool> fsr4_supported{false}, fsr411_supported{false}, dlss_supported{false};
+    /// Set by the renderer: AMD FSR and DLSS can run here.
+    std::atomic<bool> fsr_supported{false}, dlss_supported{false};
+    /// Set by the renderer: AMD's name of the FSR version running ("FSR 4.1.2", "FSR 3.1.6"), or null;
+    /// whether it is FSR 3.1 (it takes the fsr3_* tuning).
+    std::atomic<const char*> fsr_running{nullptr};
+    std::atomic<bool> fsr_runs_31{false};
     /// DLSS's render preset (DlssPreset*); live: its feature is created again (vk_dlss.cpp). Set by
     /// DLSS: the preset its feature runs (0 the DLL's default, a refused one included), -1 before.
     std::atomic<int> dlss_preset{DlssPresetK}, dlss_applied_preset{-1};
@@ -304,7 +315,7 @@ struct Values {
     float startup_render_scale = 1.3f;
     /// frame_gen at start: DLSS Frame Generation loads Streamline before the Vulkan instance.
     int startup_frame_gen = FrameGenOff;
-    int startup_upscaler = UpscalerFsr3;
+    int startup_upscaler = UpscalerFsr;
     bool startup_object_motion = true;
     bool startup_effects[EffectCount]{};
     int startup_model_lod = 0;
@@ -330,8 +341,9 @@ inline const char* MenuText(const char* english) { return MenuText(english, engl
 
 /// Reads the file, then the environment overrides. Called once at start.
 void Load();
-/// Checks the loaded choice before the first frame; unsupported FSR 4 or DLSS uses FSR 3.1.
-void ConfigureUpscalerSupport(bool fsr4, bool fsr411, bool dlss = false);
+/// Checks the loaded choice before the first frame: DLSS where it cannot run becomes AMD FSR, and AMD
+/// FSR where it cannot run (its files, this GPU, Linux) TAA.
+void ConfigureUpscalerSupport(bool fsr, bool dlss);
 /// Startup-patched scene dimensions cannot change until run.sh prepares a new image.
 bool FixedRenderSession();
 /// 0.4.4 beta 26b: whether an output resolution chosen in game (the Insert menu, the pause menu's
@@ -347,12 +359,15 @@ void Save();
 /// Render resolution divisor of a preset (1.0 native, 1.5 quality, ..., Custom: render_scale).
 float PresetScale(int preset);
 const char* PresetName(int preset);
-/// The fixed preset nearest a preset's scale (Custom: its render_scale): the FSR 4 model and
-/// DLSS quality mode it runs with.
+/// The fixed preset nearest a preset's scale (Custom: its render_scale): the DLSS quality mode it
+/// runs with.
 int ModelPreset(int preset);
 /// dlss_preset letters offered: J, K, L, M (the transformers). NVIDIA removed A-D and deprecated E
 /// and F (the CNN models; read as auto from 0.4.4 beta 25b); G-I, N, O fall back to its default.
 bool DlssPresetValid(int preset);
 const char* UpscalerName(int upscaler);
+/// An upscaler's name in config.ini or BB_UPSCALER, older names included ("fsr3", "fsr4", "fsr411":
+/// AMD FSR); -1 when unknown.
+int UpscalerFromName(const char* name);
 
 } // namespace BbSettings

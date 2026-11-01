@@ -11,12 +11,12 @@ namespace BloodborneLauncher.Core
     public sealed class IniFile
     {
         /// <summary>The keys a new config.ini gets, at the engine's own defaults (bbport_settings.h).
-        /// 0.4.4 beta 26: the upscaler and preset as the engine's, FSR 3.1 at Native AA, which run on any
-        /// GPU (were FSR 4 at Ultra Performance); the first start's Best settings for this PC still
-        /// offers DLSS, FSR 4 and a preset by GPU. A config.ini that has them keeps its own.</summary>
+        /// 0.4.4 beta 26: the upscaler and preset as the engine's, FSR at Native AA, which run on any GPU
+        /// (were FSR 4 at Ultra Performance); the first start's Best settings for this PC still offers DLSS
+        /// and a preset by GPU. A config.ini that has them keeps its own. 0.4.4 beta 27: "fsr", AMD's FSR.</summary>
         public static readonly (string Key, string Value)[] Defaults =
         {
-            ("upscaler", "fsr3"),
+            ("upscaler", "fsr"),
             ("preset", "0"),
             ("sharpen", "1"),
             ("sharpness", "0.20"),
@@ -81,6 +81,10 @@ namespace BloodborneLauncher.Core
                 var at = line.IndexOf('=');
                 _values[line[..at].Trim()] = line[(at + 1)..].Trim();
             }
+            // 0.4.4 beta 27: FSR 3.1, FSR 4 and FSR 4.1.1 are AMD's FSR ("fsr"), as the engine reads them;
+            // shown as it, the file left as it is until something is saved.
+            if (_values.TryGetValue("upscaler", out var upscaler) && upscaler is "fsr3" or "fsr4" or "fsr411")
+                _values["upscaler"] = "fsr";
         }
 
         public void Save()

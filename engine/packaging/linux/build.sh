@@ -49,7 +49,7 @@ install -m644 out/libnvidia-ngx-dlss.so.* out/LICENSE-DLSS-SDK.txt "$bin/"
 
 cp run.sh "$root/engine/"
 cp -r scripts patches data licenses "$root/engine/"
-for item in fsr4_shaders shader-catalog gamecontrollerdb.txt; do
+for item in shader-catalog gamecontrollerdb.txt; do
     [[ ! -e $template/engine/$item ]] || cp -r "$template/engine/$item" "$root/engine/"
 done
 cp "$template/config.ini" "$root/engine/config.default.ini"
