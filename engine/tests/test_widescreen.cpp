@@ -38,7 +38,15 @@ int main(){
     for(auto b:branches)std::memcpy(image.data()+b.at,b.bytes,b.n);
     const uint8_t pro[]={0x55,0x48,0x89,0xe5,0x41,0x57,0x41,0x56,0x41,0x55,0x41,0x54,0x53,0x48,0x83,0xec,0x48};
     std::memcpy(image.data()+0x14368b0,pro,sizeof pro);
-    auto& s=BbSettings::Get();s.widescreen=true;s.output_res=s.startup_output_res=5;
+    // The outputs by size (the list grows; its indices move): 3440x1440 (21:9), 3840x1080 (32:9), 1600x900 (16:9).
+    const auto output=[](int w,int h){
+        for(int i=0;i<BbSettings::OutputCount;++i){
+            if(BbSettings::OutputWidths[i]==w&&BbSettings::OutputHeights[i]==h)return i;
+        }
+        assert(false);
+        return 0;
+    };
+    auto& s=BbSettings::Get();s.widescreen=true;s.output_res=s.startup_output_res=output(3440,1440);
     // A foreign modification must leave every hook/site untouched.
     image[stages[12].at]=0xcc;assert(!BbEngine::Widescreen::Install(image.data(),image.size()));
     assert(!std::memcmp(image.data()+0x14368b0,pro,sizeof pro));image[stages[12].at]=0x48;
@@ -46,9 +54,9 @@ int main(){
     auto value=[&](size_t at){uint32_t v;std::memcpy(&v,image.data()+at,4);return v;};
     assert(value(0x1bfd491+1)==2250);assert(value(0x1bfd4d1+1)==1080);
     assert(image[0x1bfd473]==0x66 && image[0x1bfd4cf]==0x77);
-    s.output_res=s.startup_output_res=8;BbEngine::Widescreen::Tick();
+    s.output_res=s.startup_output_res=output(3840,1080);BbEngine::Widescreen::Tick();
     assert(value(0x1bfd491+1)==2880);
-    s.output_res=s.startup_output_res=1;BbEngine::Widescreen::Tick();
+    s.output_res=s.startup_output_res=output(1600,900);BbEngine::Widescreen::Tick();
     assert(value(0x1bfd491+1)==1920 && image[0x1bfd473]==0x77);
     std::puts("Widescreen: PASS (existing native pins, foreign-byte rejection, 21:9/32:9 and 16:9 restoration)");
 }

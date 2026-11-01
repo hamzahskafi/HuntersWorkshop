@@ -403,13 +403,22 @@ bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar, u32 version
         !sel.fetch_shader->attributes.empty() && sdata.vertex_attributes.empty()) {
         return false;
     }
-    // A fragment shader that reads the motion varyings needs a vertex shader that writes them
-    // (validation found keys pairing one with a vertex shader without them: undefined motion).
+    // Object motion is one choice per pipeline in play (PipelineCache's sel.motion): the key's
+    // motion attachment, the vertex shader's motion varyings and its address descriptor set, the
+    // fragment shader's motion output. A stage's hash is its program's with the permutation's
+    // index, which follows the order a run first compiled them in, so a record can find another
+    // run's permutation stored under its stage. A record whose stages and key disagree is left out
+    // and compiles again in play: a fragment shader reading motion varyings no vertex shader
+    // writes (undefined motion, found by validation), a vertex shader that reads the motion set
+    // with a key whose layout has none (invalid Vulkan, a crash on stricter drivers; found by
+    // Lantern 0.9.39 beta 26), or a motion attachment nothing writes.
     const auto& fs_runtime = sel.runtime_infos[u32(Shader::SwStage::Fragment)];
     const auto& vs_runtime = sel.runtime_infos[u32(Shader::SwStage::Vertex)];
-    if (sel.graphics_key.stage_hashes[u32(Shader::SwStage::Fragment)] && fs_runtime.hw.fs.motion_vectors &&
-        !(sel.graphics_key.stage_hashes[u32(Shader::SwStage::Vertex)] &&
-          vs_runtime.hw_stage == Shader::HwStage::Vertex && vs_runtime.hw.vs.motion_vectors)) {
+    const bool key_motion = sel.graphics_key.motion_vectors != 0;
+    const bool has_vs = sel.graphics_key.stage_hashes[u32(Shader::SwStage::Vertex)] != 0;
+    const bool has_fs = sel.graphics_key.stage_hashes[u32(Shader::SwStage::Fragment)] != 0;
+    const bool vs_motion = has_vs && vs_runtime.hw_stage == Shader::HwStage::Vertex && vs_runtime.hw.vs.motion_vectors;
+    if (vs_motion != key_motion || (has_fs && fs_runtime.hw.fs.motion_vectors != key_motion)) {
         return false;
     }
 

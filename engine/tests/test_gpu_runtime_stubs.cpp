@@ -65,5 +65,11 @@ void runtime_thread_census(uint64_t* made, uint64_t* finished, uint64_t* found, 
     *made = *finished = *found = *steps = 0;
 }
 uint64_t runtime_memory_regions() { return 0; }
+// The GPU library calls these from its freeze and hitch reports (bbport_freeze.cpp), the online glue
+// (bbnet_glue.cpp) and the key prompts (key_prompts.cpp); every test that links it needs them.
+void runtime_blocked_report(const char*) {}
+[[noreturn]] void runtime_thread_exit(void*) { std::abort(); }
+int runtime_pad_type(void) { return 0; }
+int runtime_pad_button(uint32_t, int) { return 0; }
 }
 

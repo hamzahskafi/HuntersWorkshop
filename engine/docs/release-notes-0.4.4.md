@@ -102,6 +102,20 @@ What changed since 0.4.3, for the release page. The engine work behind each line
   unconverted, as that share is the same at any rate. Without the frame timer (`BB_FRAME_TIMER=0`) the
   camera is as in earlier versions; should the engine fail to place its conversion, it converts the camera
   once for the chosen rate instead, as before.
+- **Co-op: no freeze when a session ends.** Leaving a room (or the game closing its online session)
+  asked the server to take the player out on the game's own thread and waited for the answer, up to
+  8 seconds on a slow or unreachable connection, with the game stopped meanwhile. The request now
+  goes from the online thread, as every other request to the server does, and still reaches the
+  server before anything the game asks for next (found by droogie in bbhost).
+- **Co-op: a connection that drops in its first moments stays dropped.** A connection is reported to
+  the game as made and then as active 0.2 and 0.4 seconds after it starts; one that failed in between
+  (its player gone, the room over) was reported as live after the game had been told it was gone. Those
+  reports now go only to a connection that is still there (found by droogie in bbhost).
+- **Saved GPU pipelines checked against their motion setting.** The GPU cache could pair a shader
+  that writes motion vectors with a pipeline that has none, or the reverse (each run numbers its shader
+  variants in the order it first meets them). Such a pipeline was built at start: invalid Vulkan, a
+  crash risk on stricter drivers. These are now left out and compiled as the game draws them (one case
+  found by Lantern 0.9.39 beta 26; HW checks every pairing).
 - **Uncapped frame rate:** the vblank is signalled on time even when frames keep coming (with
   precise pacing off).
 - **144 FPS is a fixed rate like the others:** it runs the console's vblank at 144 Hz, as 120 runs
@@ -141,6 +155,11 @@ What changed since 0.4.3, for the release page. The engine work behind each line
   weights every frame, 14 sites`), and `camera` among the corrections in `Frame rate fixes: on`.
   `BB_FRAME_FIXES_SKIP=camera` leaves it out (the camera as before). `BB_CAMERA_FIX` applies only
   without the frame timer.
+- The log says when leaving a co-op room fails at the server (`np: leave_room for room ... failed
+  after ... ms`); the server then drops the player when their connection's heartbeat stops.
+- The renderer's test programs build on Windows (`scene-resolution-test`, `taa-shader-test`,
+  `camera-motion-test`), and `upscaler-support-test` and `widescreen-test` run there and match the
+  current settings.
 - `BB_SHADER_DISASM=<hash>` writes a compute shader's game code into the log, decoded, at its first
   dispatch. `BB_BREADCRUMBS=both` puts back the hang marker before each draw.
 - Experiments removed: `BB_ASYNC_FENCES`, `BB_FENCE_DELAY_TEST`, `BB_SUBMIT_LOCK=ahead`,
@@ -150,4 +169,5 @@ What changed since 0.4.3, for the release page. The engine work behind each line
 
 - **The first start after updating rebuilds part of the GPU cache.** The motion vectors' shaders
   and a few compute shaders changed, so they compile again the first time something draws them:
-  some pop-in on first visits, once each.
+  some pop-in on first visits, once each. Saved pipelines whose shaders disagree with their motion
+  setting are compiled again the same way, once.

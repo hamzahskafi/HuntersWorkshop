@@ -47,6 +47,16 @@ void sig_fire(unsigned ctx, unsigned conn, std::uint16_t event, int error) {
         std::lock_guard lk(g_sig_mu);
         const auto it = g_sig_ctx.find(ctx);
         if (it == g_sig_ctx.end() || !it->second.cb) return;
+        // ESTABLISHED and ACTIVE come due 200 and 400 ms after the connection is announced: only
+        // for one still live then. One that died meanwhile (its peer gone, deactivated by the game,
+        // the room over) or went with its context must not be announced after its DEAD.
+        if (event != kEvDead) {
+            const auto conn_it = g_conn.find(conn);
+            if (conn_it == g_conn.end() || conn_it->second.ctx != ctx || conn_it->second.dead) {
+                if (Trace()) Log("np: NpSignaling event 0x%x conn %u not sent: the connection is gone", event, conn);
+                return;
+            }
+        }
         c = it->second;
     }
     if (Trace()) Log("np: NpSignaling event 0x%x conn %u", event, conn);

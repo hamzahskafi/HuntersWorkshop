@@ -315,14 +315,24 @@ void forget_room_locked() {
 }
 
 // Our LeaveRoom (or the context going away): out of the server's room, DEAD for every member,
-// then 0x103 at +300 ms.
+// then 0x103 at +300 ms. The game's own thread calls this, with g.mu held: the server's leave is
+// sent from the NP thread, as every other server request is (it waited up to NpPost's 8 s there,
+// the game and every other caller of g.mu stopped meanwhile), queued now, so it reaches the server
+// before anything the game asks for next (a new room, a join) and before the callbacks below.
 void end_session_locked(const char* why) {
     if (!g.in_room && !g.leave_pending) return;
     Log("np: session over (%s): room %llu", why, static_cast<unsigned long long>(g.room_id));
     if (!g.session_id.empty()) {
-        Json reply;
-        std::string err;
-        ServerLeaveRoom(g.session_id, g.member_id, reply, err);
+        DispatchAfter(0, Prio::Request, [sid = g.session_id, member = static_cast<int>(g.member_id), room = g.room_id] {
+            Json reply;
+            std::string err;
+            const std::int64_t start = NowMs();
+            if (!ServerLeaveRoom(sid, member, reply, err)) {
+                Log("np: leave_room for room %llu failed after %lld ms: %s (the server drops us when our "
+                    "heartbeat stops)",
+                    static_cast<unsigned long long>(room), static_cast<long long>(NowMs() - start), err.c_str());
+            }
+        });
     }
     std::vector<std::uint16_t> ids;
     for (const Peer& p : room_peers()) ids.push_back(p.member_id);

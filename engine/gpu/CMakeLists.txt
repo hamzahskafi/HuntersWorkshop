@@ -350,18 +350,27 @@ target_compile_options(scene-resolution-test PRIVATE -UNDEBUG -fPIC)
 set_source_files_properties(../tests/test_scene_resolution.cpp PROPERTIES
     COMPILE_OPTIONS "-fvisibility=hidden;-fvisibility-inlines-hidden")
 target_link_libraries(scene-resolution-test PRIVATE bbgpu)
+if (WIN32)
+    target_link_libraries(scene-resolution-test PRIVATE winmm ws2_32 psapi onecore)
+endif()
 add_executable(taa-shader-test EXCLUDE_FROM_ALL ../tests/test_taa_shader.cpp ../tests/test_gpu_runtime_stubs.cpp)
 target_include_directories(taa-shader-test PRIVATE shim shadps4 ${SHADER_INCLUDE} third_party/gcn/include)
 target_compile_options(taa-shader-test PRIVATE -UNDEBUG -fPIC)
 set_source_files_properties(../tests/test_taa_shader.cpp PROPERTIES
     COMPILE_OPTIONS "-fvisibility=hidden;-fvisibility-inlines-hidden")
 target_link_libraries(taa-shader-test PRIVATE bbgpu)
+if (WIN32)
+    target_link_libraries(taa-shader-test PRIVATE winmm ws2_32 psapi onecore)
+endif()
 add_dependencies(taa-shader-test host_shaders)
 
 add_executable(camera-motion-test EXCLUDE_FROM_ALL ../tests/test_camera_motion.cpp ../tests/test_gpu_runtime_stubs.cpp)
 target_include_directories(camera-motion-test PRIVATE shim shadps4 ${SHADER_INCLUDE} third_party/gcn/include)
 target_compile_options(camera-motion-test PRIVATE -UNDEBUG -fPIC)
 target_link_libraries(camera-motion-test PRIVATE bbgpu)
+if (WIN32)
+    target_link_libraries(camera-motion-test PRIVATE winmm ws2_32 psapi onecore)
+endif()
 add_dependencies(camera-motion-test host_shaders)
 
 # bbport: indirect_clamp.comp as Rasterizer::ClampDispatchArgs records it, then an indirect
