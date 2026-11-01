@@ -395,8 +395,8 @@ double CameraValue(std::optional<std::uint32_t> field, double value, double fram
 // 60 FPS frame's, converted from it once for the preset's rate (bbhost's camera_tuned_fps). BB_CAMERA_FIX=1
 // converts the eases from the game's 30 instead.
 constexpr std::uint64_t kCameraWallEscape = 0x183DCFE;
-// The jump the retune puts over 1.5 KiB of the game's follow camera (to 0x183E271), with the wall
-// escape inside the code it skips.
+// The older camera's jump (its path with Enable New Camera off; the game has it on) past the chase rates' update
+// to 0x183E2F2: the retune points it at 0x183E271, so that path updates them too.
 constexpr std::uint64_t kCameraSkip = 0x183DC96;
 
 bool KyoCameraSite(std::uint64_t a, std::size_t size) {

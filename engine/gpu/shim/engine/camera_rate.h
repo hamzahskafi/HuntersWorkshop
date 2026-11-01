@@ -54,6 +54,11 @@ std::vector<std::uint8_t> Cave(std::size_t index, const std::uint8_t* image, con
 bool Check(const std::uint8_t* image, std::size_t size, bool fpp, std::uint64_t* bad);
 /// After Check: every site's cave and, with FPS++, the constructor's values. All or none.
 bool Install(std::uint8_t* image, std::size_t size, bool fpp);
+/// When the start program left the camera to the engine (the frame timer on, camera not skipped) and Install did
+/// not happen: the camera converted once for `rate` FPS where its values are still as the game or the list has them
+/// (Original: the distance and chase-rate eases and the settings blend from 30; FPS++: Kyo's values from 60, the
+/// ease he left and the blend from 30), so it does not run at 30 FPS weights. The number of values written.
+int Fallback(std::uint8_t* image, std::size_t size, bool fpp, double rate);
 /// Each frame, before the frame's tasks: the frame's length (the frame timer's step).
 void Frame(double seconds);
 /// The frame in 30 FPS frames, as the caves read it (1 at 1/30 s and longer).

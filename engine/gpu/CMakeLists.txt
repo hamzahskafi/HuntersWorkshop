@@ -409,6 +409,12 @@ add_executable(camera-rate-test EXCLUDE_FROM_ALL ../tests/test_camera_rate.cpp s
     shim/engine/engine_hooks.cpp)
 target_compile_options(camera-rate-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(camera-rate-test PRIVATE shim shim/engine)
+# The follow camera's wall turn: the game's own code from out/eboot.elf (its path as the argument), with and without
+# the caves; skipped without the executable.
+add_executable(camera-wall-test EXCLUDE_FROM_ALL ../tests/test_camera_wall.cpp shim/engine/camera_rate.cpp
+    shim/engine/engine_hooks.cpp)
+target_compile_options(camera-wall-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(camera-wall-test PRIVATE shim shim/engine)
 # The work pools' lock and node cache against models of the game's lock and job list.
 add_executable(job-pool-test EXCLUDE_FROM_ALL ../tests/test_job_pool.cpp shim/engine/job_pool.cpp)
 target_compile_options(job-pool-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)

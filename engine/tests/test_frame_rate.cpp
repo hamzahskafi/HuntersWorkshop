@@ -677,6 +677,25 @@ void TestClothStep() {
     assert(ClothLasts(nullptr, 1.0 / 60, 60, 2, false) == 0 && !g_damped);  // without the list's one substep
 }
 
+// The frame timer on, the follow camera's caves left out (a site not as 1.09 has it): the camera converted once for
+// the rate instead (CameraRate::Fallback), where its values are the game's; with the timer off, never (the start
+// program converts it then).
+void TestCameraFallback() {
+    for (const char* timer : {"1", "0"}) {
+        const Image image = Build(kSize, true);
+        const float game = 0.1f; // the distance ease, as the start program leaves it for the engine with Original
+        std::memcpy(image.at(0x4d25e68), &game, 4);
+        image.at(0x183e964)[3] ^= 1;
+        SetEnv("BB_FPS", "120");
+        SetEnv("BB_FRAME_TIMER", timer);
+        assert(BbEngine::FrameRate::Install(image.base, image.size));
+        SetEnv("BB_FRAME_TIMER", "0");
+        const float now = image.get<float>(0x4d25e68);
+        assert(timer[0] == '1' ? Near(now, 1 - std::pow(0.9, 0.25)) : now == game);
+        Free(image.base, Pages(image.size));
+    }
+}
+
 int main() {
     SetEnv("BB_FRAME_TIMER", "0"); // the tests without the frame timer; TestTimer and TestCaveRuns turn it on
     TestRated();
@@ -689,6 +708,7 @@ int main() {
     TestNoRoom();
     TestTimer();
     TestCaveRuns();
+    TestCameraFallback();
     TestSelfHit();
     TestClothStep();
     std::puts("frame-rate-test: all ok");

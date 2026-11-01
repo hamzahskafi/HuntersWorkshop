@@ -13,9 +13,14 @@
 //   the pitch's return to its reference (+0x1a8)                                              a share kept: w^n
 //   the pull-in by the character's sideways move this frame (the move over +0x170: per frame, so the
 //     divisor times n)                                                                       an amount: w x n
-//   the wall turn (the new camera's probes): its build-up (the escape rate times the step, a turn a frame:
-//     times n), its fade (+0x2b4: kept, w^n) and its 1 degree cut-off (a turn a frame: times n); its limit is
-//     the step times +0x2b0 already, taken from the game's own copy of the step
+//   the wall turn (the new camera's probes; +0x294 is a turn applied each frame): its build-up (the escape rate
+//     times the step added each frame: times n), its fade (+0x2b4: kept, w^n) and its 1 degree cut-off, which
+//     zeroes and stores a smaller turn: times n while it fades, times n^2 on a frame that builds it up (at 30 a
+//     turn starts only if its first step, rate / 30, reaches 1 degree; above 60 the game's never started, its
+//     first step under the cut-off every frame); its limit is the step times +0x2b0 already, taken from the
+//     game's own copy of the step
+//   lock-on's play angle (+0x244): a turn whose step this frame stays inside it eases toward the play circle's
+//     edge instead of the target; the step is compared as at 30 (times w / w', the weight over its conversion)
 //   the camera point's chase of where it should be (+0x1ac/+0x1b8, under lock-on or an auto turn +0x1c8/
 //     +0x1cc, cut by the angle to it and raised toward 1 by the pitch return's weight +0x130): the
 //     resulting weight, per axis                                                                    a weight
@@ -27,13 +32,13 @@
 // share of the character's move this frame the aimed-for point takes at once: shares of every frame's move add up
 // to the same share of the whole move at any rate), the safe margin (+0x190, a placement each frame), the stick's
 // turns, the timers and the moving floor (the step already). Left as they are: lock-on's stick offsets (+0x288,
-// only with +0x276, which the constructor clears and the update never sets) and lock-on's play angle, against
-// which the turn's step a frame is compared (it eases toward the play angle's edge a little earlier above 30).
+// only with +0x276, which the constructor clears and the update never sets).
 //
 // Each site jumps to a cave of its own (engine_hooks Divert): it runs the displaced instructions, and around the
 // value's use keeps every register and the flags as they were: past the red zone, rax and the flags pushed, a
 // scratch on the stack, the conversion on the x87 stack (n log2 v, then 2^x as 2^fraction x 2^integer; empty
-// before and after), the value put back from the scratch. At n = 1 every value is the game's to the bit.
+// before and after) with its own control word (64-bit precision, round to nearest; the caller's put back), the
+// value put back from the scratch. At n = 1 every value is the game's to the bit.
 #include "camera_rate.h"
 #include "engine_hooks.h"
 #include <array>
@@ -49,7 +54,8 @@ enum class Special : std::uint8_t {
     None,
     BuildUp,   ///< the displaced je goes to its target in the image; the step's lane 0 times n
     FadeLimit, ///< the fade kept, the limit from the game's step, the -0 mask copied into the cave
-    Cutoff,    ///< the threshold (its rip-relative constant) times n into the scratch
+    Cutoff,    ///< the threshold (its rip-relative constant) times n into the scratch, n again on a build-up frame
+    PlayAngle, ///< the step's square times (w / w')^2, w the lock-on turn's weight (+0x240), w' its conversion
 };
 
 /// A site's cave: `before` displaced bytes run first; the value into the scratch (a field of the camera, r13, or
@@ -93,6 +99,9 @@ constexpr Site kSites[] = {
     {"fast turn pitch (up)", 0x183f97e, "c4c17a59853c020000c5da58d0c5fa1195c8fdffff"},
     // vmulss xmm1, xmm1, [r13 + 0x23c]; vaddss xmm1, xmm4, xmm1; vucomiss xmm0, xmm1
     {"fast turn pitch (down)", 0x183fa9f, "c4c172598d3c020000c5da58c9c5f82ec1"},
+    // vmulps xmm1, xmm1, xmm1; vpshufd xmm2, xmm1, 1; vaddss xmm1, xmm1, xmm2 (the step's square); vucomiss xmm0,
+    // xmm1 (against the play angle's)
+    {"lock-on play angle", 0x183c473, "c5f059c9c5f970d101c5f258cac5f82ec1"},
 };
 
 constexpr CaveDef kCaves[] = {
@@ -113,11 +122,15 @@ constexpr CaveDef kCaves[] = {
     {0, 0x1c4, nullptr, 1, Convert::Decay, "c5fa590424", 9, Special::None},          // vmulss xmm0, xmm0, [rsp]
     {0, 0x23c, nullptr, 1, Convert::Decay, "c5fa590424", 9, Special::None},          // vmulss xmm0, xmm0, [rsp]
     {0, 0x23c, nullptr, 1, Convert::Decay, "c5f2590c24", 9, Special::None},          // vmulss xmm1, xmm1, [rsp]
+    // vmovups [rsp], xmm1 / vmovups xmm1, [rsp]: lane 0 scaled (PlayAngle), then the compare
+    {13, -1, "c5f8110c24", 0, Convert::Decay, "c5f8100c24", 13, Special::PlayAngle},
 };
 static_assert(std::size(kSites) == std::size(kCaves));
 
 // The constructor's second set (patch 0x183a8bb on). Kyo's 60 FPS list: seven of them halved (his conversion to
-// 60, which the per-frame conversion now does exactly), seven retuned, the angle among them.
+// 60; the game's, converted every frame, replace them: at 60 up to 14.5% quicker than his halving on the larger
+// ones, as 1 - (1 - w)^(1/2) is more than w / 2), six retuned, the angle among them (his seventh retune is the
+// distance ease, frame_rate.cpp's).
 constexpr Field kFields[] = {
     {0x183a8c1, 0x19c, 0x3dcccccd, 0x3d4ccccd, Fpp::Game},  // ChrTransChaseRateForNormal 0.1 (halved)
     {0x183a8cb, 0x1a0, 0x3e800000, 0x3d4ccccd, Fpp::Decay}, // ChrTransChaseRateForEscapeWall 0.25, his 0.05
@@ -170,10 +183,16 @@ public:
     void U8(std::uint8_t v) { out.push_back(v); }
     void U32(std::uint32_t v) { Bytes(reinterpret_cast<const std::uint8_t*>(&v), 4); }
     void U64(std::uint64_t v) { Bytes(reinterpret_cast<const std::uint8_t*>(&v), 8); }
-    // lea rsp, [rsp - 0x80] (past the red zone); pushfq; push rax; sub rsp, 16 (the scratch at [rsp])
-    void Enter() { Hex("488d642480" "9c" "50" "4883ec10"); }
-    // add rsp, 16; pop rax; popfq; lea rsp, [rsp + 0x80]
-    void Leave() { Hex("4883c410" "58" "9d" "488da42480000000"); }
+    // lea rsp, [rsp - 0x80] (past the red zone); pushfq; push rax; sub rsp, 32 (the scratch at [rsp]: values at
+    // 0 to 23, the x87 control words at 24 and 26)
+    void Enter() { Hex("488d642480" "9c" "50" "4883ec20"); }
+    // add rsp, 32; pop rax; popfq; lea rsp, [rsp + 0x80]
+    void Leave() { Hex("4883c420" "58" "9d" "488da42480000000"); }
+    // fnstcw [rsp + 24]; mov word [rsp + 26], 0x37f (exceptions masked, 64-bit precision, to nearest); fldcw
+    // [rsp + 26]: the conversions do not depend on the caller's (24-bit precision would lose n = 1's bits)
+    void Precise() { Hex("d97c2418" "66c744241a7f03" "d96c241a"); }
+    // fldcw [rsp + 24]: the caller's back
+    void Restore() { Hex("d96c2418"); }
     // jmp [rip + 0]; the target
     void Jump(std::uint64_t target) {
         Hex("ff2500000000");
@@ -264,6 +283,12 @@ std::vector<std::uint8_t> Cave(std::size_t index, const std::uint8_t* image, con
     } else {
         code.Hex(cave.spill);
     }
+    if (cave.special == Special::PlayAngle) {
+        code.Hex("418b85"); // mov eax, [r13 + 0x240] (the lock-on turn's weight); mov [rsp + 16], eax; [rsp + 20]
+        code.U32(0x240);
+        code.Hex("89442410" "89442414");
+    }
+    code.Precise();
     for (std::uint8_t lane = 0; lane < 4; ++lane)
         if (cave.lanes & (1u << lane)) code.Convert(std::uint8_t(4 * lane), cave.kind, frames);
     if (cave.special == Special::FadeLimit) {
@@ -272,6 +297,21 @@ std::vector<std::uint8_t> Cave(std::size_t index, const std::uint8_t* image, con
         // fstp dword [rsp + 4]
         code.Hex("d985b0fdffff" "41d88db0020000" "d95c2404");
     }
+    if (cave.special == Special::Cutoff) {
+        // A frame that built the turn up (r14b, one probe hit) compares it against 1 degree times n^2: its step,
+        // the rate times the step times n, against the cut-off as at 30 (rate / 30 against 1 degree). rax is
+        // still `frames` (Convert's). test r14b, r14b; jz; fld dword [rax]; fmul dword [rsp]; fstp dword [rsp]
+        code.Hex("4584f6" "7408" "d900" "d80c24" "d91c24");
+    }
+    if (cave.special == Special::PlayAngle) {
+        // w' (the conversion the lock-on turn's cave makes) at [rsp + 20]; unless it is w (not converted: n = 1, or
+        // w outside (0, 1)), the step's square times (w / w')^2: compared with the play angle's as at 30.
+        // mov eax, [rsp + 20]; cmp eax, [rsp + 16]; je; test eax, eax; jle; fld [rsp + 16]; fdiv [rsp + 20];
+        // fmul st0, st0; fmul [rsp]; fstp [rsp]
+        code.Convert(20, Convert::Decay, frames);
+        code.Hex("8b442414" "3b442410" "7414" "85c0" "7e10" "d9442410" "d8742414" "d8c8" "d80c24" "d91c24");
+    }
+    code.Restore();
     code.Hex(cave.use);
     code.Leave();
     if (cave.special == Special::BuildUp) {
@@ -358,6 +398,35 @@ bool Install(std::uint8_t* image, std::size_t size, bool fpp) {
     }
     Commit(g_hooks);
     return true;
+}
+
+int Fallback(std::uint8_t* image, std::size_t size, bool fpp, double rate) {
+    if (!(rate > 30)) return 0;
+    const auto inside = [&](std::uint64_t address) {
+        return address >= kBase && address - kBase <= size && 4 <= size - (address - kBase);
+    };
+    int written = 0;
+    // A value as `was`, converted once: a weight a frame from a frame of `from` FPS to the rate's.
+    const auto convert = [&](std::uint64_t at, std::uint32_t was, double from, bool keep) {
+        std::uint32_t now = 0;
+        if (!inside(at)) return;
+        std::memcpy(&now, image + (at - kBase), 4);
+        const double w = FromBits(was);
+        if (now != was || !(0 < w && w < 1)) return;
+        const double frames = from / rate;
+        const std::uint32_t value = ToBits(float(keep ? std::pow(w, frames) : 1 - std::pow(1 - w, frames)));
+        if (WriteCode(image + (at - kBase), &value, sizeof value)) ++written;
+    };
+    if (fpp) {
+        for (const Field& field : kFields)
+            if (field.fpp != Fpp::Kyo) convert(field.at, field.kyo, 60, field.fpp == Fpp::Keep);
+    }
+    // The eases' constants (frame_rate.cpp's kEases read them per frame from slots instead): the distance ease
+    // (the game's 0.1, Kyo's 0.025) and the chase-rate ease (1/30 in both).
+    convert(0x4d25e68, fpp ? 0x3ccccccd : 0x3dcccccd, fpp ? 60 : 30, false);
+    convert(0x4d25e94, 0x3d088889, 30, false);
+    convert(0x183a7de, 0x3d4ccccd, 30, false); // the settings blend (+0x330), the constructor's 0.05
+    return written;
 }
 
 void Frame(double seconds) {

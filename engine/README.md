@@ -87,7 +87,7 @@ and Streamline.
 
 ## Tests and checks
 
-- `build.sh --test`, and the GPU library's tests (`ninja -C out/gpu pc-input-test frame-rate-test camera-rate-test ...`).
+- `build.sh --test`, and the GPU library's tests (`ninja -C out/gpu pc-input-test frame-rate-test camera-rate-test ...`; `camera-wall-test out/eboot.elf` runs the game's own wall-turn code when the prepared executable is there).
 - `tools/re/frame_rate_base.py eboot.elf [--check]`: our frame-rate table (start/frame_rate_base.inc) from the 60 FPS++
   list and a 1.09 executable.
 - `tools/re/frame_rate_check.py [eboot.elf]`: the frame-rate corrections' table against the 60 FPS++ list

@@ -329,7 +329,7 @@ std::array<std::uint8_t, 55> ClothCave(std::uint64_t slot, std::uint64_t resume)
     return cave;
 }
 constexpr std::uint64_t kCave = 0x2418e3d;           // the 60 FPS++ cave, kRequire's first
-constexpr std::uint64_t kCameraSkip = 0x183dc96;     // the FPS++ retune's jump over the game's follow camera
+constexpr std::uint64_t kCameraSkip = 0x183dc96;     // the FPS++ retune's target for the older camera's jump
 constexpr std::uint8_t kCameraSkipped[] = {0xe9, 0xd6, 0x05, 0x00, 0x00};
 constexpr double kShortest = 1.0 / 480;              // a step's floor without a target (a loading screen)
 constexpr double kLongest = 1.0 / 30;                // and its ceiling, as the cave's (the game slows below 30)
@@ -510,6 +510,10 @@ bool Install(std::uint8_t* image, std::size_t size) {
     if (const char* timer = std::getenv("BB_FRAME_TIMER"); timer && timer[0] == '0') {
         on[std::size_t(Group::Timer)] = on[std::size_t(Group::Camera)] = false;
     }
+    // The start program left the follow camera to us (patches.cpp CameraPerFrame: the same switches): if its
+    // conversion does not go in, CameraRate::Fallback converts it once for the rate instead.
+    const bool camera_wanted = on[std::size_t(Group::Timer)] && on[std::size_t(Group::Camera)];
+    bool camera_done = false;
     const auto fail = [&](Group g, std::uint64_t address) {
         if (!on[std::size_t(g)]) return;
         on[std::size_t(g)] = false;
@@ -592,7 +596,7 @@ bool Install(std::uint8_t* image, std::size_t size) {
         if (!holds(e.insn, Hex(e.bytes)) || !inside(e.constant, 4)) fail(Group::Camera, e.insn);
     }
     // The follow camera's weights every frame (camera_rate.cpp), with the eases: its sites, and the constructor's
-    // values as the tuning has them. FPS++: the retune's jump over the game's camera is in (Kyo's values there).
+    // values as the tuning has them. FPS++: the retune's jump target is in (Kyo's values there).
     const auto skipped = std::vector<std::uint8_t>(std::begin(kCameraSkipped), std::end(kCameraSkipped));
     const bool fpp = holds(kCameraSkip, skipped);
     if (on[std::size_t(Group::Camera)]) {
@@ -730,6 +734,10 @@ bool Install(std::uint8_t* image, std::size_t size) {
                 on[std::size_t(Group::Camera)] = false;
                 host_log("Frame rate fixes: camera left out: its caves could not be placed");
             }
+            // The caves read a frame at the rate until the first Step (and from then on, should the slots' page
+            // turn out not writable, which stops Step).
+            camera_done = on[std::size_t(Group::Camera)];
+            if (camera_done) CameraRate::Frame(step);
             for (const Ease& e : kEases) {
                 if (!on[std::size_t(Group::Camera)]) break;
                 const bool kyo = fpp && e.listed != e.game;
@@ -768,6 +776,10 @@ bool Install(std::uint8_t* image, std::size_t size) {
         }
     }
 
+    if (camera_wanted && !camera_done) {
+        if (const int n = CameraRate::Fallback(image, size, fpp, rate.values))
+            host_log("Frame rate fixes: the follow camera converted once for %.0f FPS instead (%d values)", rate.values, n);
+    }
     std::string list;
     for (std::size_t g = 0; g < applied.size(); ++g) {
         if (!applied[g]) continue;

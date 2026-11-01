@@ -139,7 +139,7 @@ CLOTH_LEFT_OUT=((0xB6FBD4,0xB6FBD8),(0xB73F84,0xB73F8D),(0xB73FA8,0xB73FC1),(0x4
 #
 # Original (camera_tuning in config.ini or BB_CAMERA_TUNING, the default) leaves Kyo's retune out: the
 # constructor's defaults, the stores (in place of two blocks of the camera's debug-menu sliders), the wall
-# escape and the jump over the game's follow camera (players saw the retune pull back, lag and widen while
+# escape and the older camera's jump target (players saw the retune pull back, lag and widen while
 # sprinting, GitHub issue 32).
 #
 # With the frame timer (camera_per_frame, 0.4.4 beta 24) the engine converts every per-frame weight of the
@@ -158,7 +158,7 @@ CAMERA_FIELDS={0x183a4c3:0x19c,0x183a4cd:0x1a0,0x183a4d7:0x1a4,0x183a4e1:0x1a8,0
                0x183aa5b:0x240}
 CAMERA_STORES=((0x183FF29,0x183FF70),(0x1840799,0x18407EB))  # the stores and the jump after each, ends exclusive
 CAMERA_WALL_ESCAPE=0x183DCFE
-CAMERA_SKIP=0x183DC96  # the jump the retune puts over 1.5 KiB of the game's follow camera
+CAMERA_SKIP=0x183DC96  # the older camera's jump past the chase rates' update, which the retune points at it
 CAMERA_ANGLE,CAMERA_KEPT=0x238,0x1a8
 CAMERA_EASES={0x4D25E68:0.1,0x4D25E94:1/30}
 CAMERA_PARAM_EASE=(0x183A7DE,bytes.fromhex('cdcc4c3d'))  # mov dword [rbx+0x330], 0.05

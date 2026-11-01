@@ -67,10 +67,10 @@ class GameCodeSites(unittest.TestCase):
         }
 
     def test_the_camera_sites_parse(self):
-        # camera_rate.cpp: 13 sites of at least 14 bytes, apart; the constructor's second set, each an immediate of
+        # camera_rate.cpp: 14 sites of at least 14 bytes, apart; the constructor's second set, each an immediate of
         # mov dword [rbx + field], imm32 (6 bytes in); the debug menu's two setup blocks.
         sites, fields, setup = camera_tables(CAMERA_RATE.read_text(encoding='utf-8'))
-        self.assertEqual(len(sites), 13)
+        self.assertEqual(len(sites), 14)
         self.assertEqual(len(fields), 13)
         self.assertEqual([at for at, _ in setup], [0x183ff29, 0x1840799])
         spans = sorted((at, at + len(code)) for _, at, code in sites)

@@ -31,7 +31,7 @@ and others). They are right at every rate.
 | --- | --- | --- |
 | 3 | the frame's step cave (0x2418e3d) | kept; the frame timer replaces it when on (the default since 0.4.4 beta 1; `BB_FRAME_TIMER=0` leaves it out) |
 | 33 | the frame pacer (sub_2434770) | kept; its four targets set for the rate (FRAME_TARGET) |
-| 45 | the follow camera's retune | left out with the Original camera (the default: the game's); kept with FPS++ tuning, without its debug-menu stores. With the frame timer the engine converts every per-frame weight of the camera each frame from the game's 30 FPS frame, at 13 sites in its update, and makes FPS++'s constructor values the game's plus Kyo's changes as a 30 FPS frame's (`camera_rate.cpp`, 0.4.4 beta 24); without it (`BB_FRAME_TIMER=0`) as before: Original's eases converted from 30, FPS++ converted once from 60 above 60 (`start/patches.cpp`) |
+| 45 | the follow camera's retune | left out with the Original camera (the default: the game's); kept with FPS++ tuning. With the frame timer the engine converts every per-frame value of the camera each frame from the game's 30 FPS frame, at 14 sites in its update, and makes FPS++'s constructor values the game's plus Kyo's changes as a 30 FPS frame's (`camera_rate.cpp`, 0.4.4 beta 24), the retune's debug-menu stores left out; without it (`BB_FRAME_TIMER=0`) as before: Original's eases converted from 30, FPS++ converted once from 60 above 60 (`start/patches.cpp`) |
 | 77 | a 1/30 s step made 1/60 | see below: 57 follow the frame or the rate, 8 the game's, 12 kept |
 | 27 | 30 a second made 60 | see below: 9 follow the rate, 17 the game's, 1 kept |
 | 28 | a value for a 60 FPS frame | see below: 24 follow the frame or the rate, 4 the game's |

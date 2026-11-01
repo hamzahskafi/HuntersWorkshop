@@ -86,18 +86,22 @@ What changed since 0.4.3, for the release page. The engine work behind each line
   rate, but only its two distance eases followed the frame's length: its other per-frame weights stayed
   the game's 30 FPS values every frame, so at 120 FPS the camera chased, turned and settled up to four
   times as fast as on the PS4 (lock-on's swing, the tilt back after letting go of the stick, the chase
-  while running, the turn around walls). Every per-frame weight in the camera's update is now converted
-  each frame from the game's 30 FPS frame: 13 places, found in the game's code, among them the chase of
-  the character, the camera point's chase, lock-on's and the auto turn's swing, the pitch's return, the
-  fast turn's pitch, the camera settings' blend (a boss arena's distance and field of view), the wall
-  turn, and a pull-in by the character's sideways move each frame (which shrank above 30). At 30 FPS every
-  value is the game's to the bit. The FPS++ retune is now the game's camera with only what Kyo changed,
-  stored as a 30 FPS frame's and converted the same way: exactly his 60 FPS camera at every rate (before,
-  it was converted once for the chosen rate, about 16% slow at 144 when the game ran near 121). His
-  values that only halved the game's for 60 now come from the game; the settings' blend and the chase
-  rates' change, which he left as the game's, move at the game's speed (the blend over 1.5 s instead of
-  0.75); the aimed-for point keeps his share of each frame's move unconverted, as that share is the same
-  at any rate. Without the frame timer (`BB_FRAME_TIMER=0`) the camera is as in earlier versions.
+  while running), and above 60 it no longer steered around walls at all (each frame's first step of that
+  turn fell under the game's 1 degree cut-off). Every per-frame value in the camera's update is now
+  converted each frame from the game's 30 FPS frame: 14 places, found in the game's code, among them the
+  chase of the character, the camera point's chase, lock-on's and the auto turn's swing and where lock-on's
+  swing eases off, the pitch's return, the fast turn's pitch, the camera settings' blend (a boss arena's
+  distance and field of view), the turn around walls, and a pull-in by the character's sideways move each
+  frame (which shrank above 30). At 30 FPS every value is the game's to the bit. The FPS++ retune is now
+  the game's camera with only what Kyo changed: his retuned values stored as a 30 FPS frame's and converted
+  the same way, so they act at every rate as his did at 60 (before, the camera was converted once for the
+  chosen rate, about 16% slow at 144 when the game ran near 121). Not exactly his 60 FPS camera: the values
+  he only halved for 60 now come from the game, converted (at 60 up to 14.5% quicker than his halving),
+  and the settings' blend and the chase rates' change, which he left as the game's, move at the game's
+  speed (the blend over 1.5 s instead of 0.75); the aimed-for point keeps his share of each frame's move
+  unconverted, as that share is the same at any rate. Without the frame timer (`BB_FRAME_TIMER=0`) the
+  camera is as in earlier versions; should the engine fail to place its conversion, it converts the camera
+  once for the chosen rate instead, as before.
 - **Uncapped frame rate:** the vblank is signalled on time even when frames keep coming (with
   precise pacing off).
 - **144 FPS is a fixed rate like the others:** it runs the console's vblank at 144 Hz, as 120 runs
@@ -134,7 +138,7 @@ What changed since 0.4.3, for the release page. The engine work behind each line
 - The log says when the frame rate is above the display's and what that costs (`VideoOut:` the
   share of frames drawn and never shown with Mailbox), or that FIFO holds the game to the display.
 - The log says the follow camera is converted every frame (`Frame rate fixes: the follow camera's
-  weights every frame, 13 sites`), and `camera` among the corrections in `Frame rate fixes: on`.
+  weights every frame, 14 sites`), and `camera` among the corrections in `Frame rate fixes: on`.
   `BB_FRAME_FIXES_SKIP=camera` leaves it out (the camera as before). `BB_CAMERA_FIX` applies only
   without the frame timer.
 - `BB_SHADER_DISASM=<hash>` writes a compute shader's game code into the log, decoded, at its first

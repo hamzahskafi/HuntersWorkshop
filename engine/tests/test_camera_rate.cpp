@@ -29,8 +29,9 @@ struct State {
     float xmm[16][4];
     std::uint64_t rbp, r14, rax, flags_before, flags_after;
     std::uint8_t fpu[28];
+    std::uint16_t control = 0x37f, saved = 0; // the x87 control word during the call; the test's own
 };
-static_assert(offsetof(State, rbp) == 256 && offsetof(State, fpu) == 296);
+static_assert(offsetof(State, rbp) == 256 && offsetof(State, fpu) == 296 && offsetof(State, control) == 324);
 } // namespace
 
 // rdi: the code to call, rsi: the camera (r13), rdx: the state. Every xmm register, rbp, r14 and rax from the
@@ -71,6 +72,8 @@ bb_run_cave:
     mov rbp, [rbx + 256]
     mov r14, [rbx + 264]
     mov rax, [rbx + 272]
+    fnstcw [rbx + 326]
+    fldcw [rbx + 324]
     mov ecx, 0
     cmp ecx, 1
     pushfq
@@ -82,6 +85,7 @@ bb_run_cave:
     mov [rbx + 264], r14
     fnstenv [rbx + 296]
     fldenv [rbx + 296]
+    fldcw [rbx + 326]
     vmovups [rbx], xmm0
     vmovups [rbx + 16], xmm1
     vmovups [rbx + 32], xmm2
@@ -239,7 +243,9 @@ constexpr Effect kEffects[] = {
     {1u << 0 | 1u << 12, false, false},          // point distance chase
     {1u << 0 | 1u << 2, false, false},           // fast turn pitch (up)
     {1u << 1, false, true},                      // fast turn pitch (down)
+    {1u << 1 | 1u << 2, false, true},            // lock-on play angle
 };
+static_assert(std::size(kEffects) == 14);
 
 struct Run {
     State in{}, out{};
@@ -274,6 +280,10 @@ void TestCaves(bool kyo) {
         if (!e.rax) assert(r.out.rax == r.in.rax);
         constexpr std::uint64_t kStatus = 0x8d5; // carry, parity, adjust, zero, sign, overflow
         if (!e.flags) assert((r.out.flags_after & kStatus) == (r.out.flags_before & kStatus));
+        // The caller's control word back.
+        std::uint16_t control;
+        std::memcpy(&control, r.out.fpu, 2);
+        assert(control == r.in.control);
     };
     const auto fill = [](Run& r) {
         for (unsigned x = 0; x < 16; ++x)
@@ -338,6 +348,26 @@ void TestCaves(bool kyo) {
             }
         }
         {
+            // Lock-on's play angle: the step's square (pitch^2 + yaw^2, from xmm1) times (w / w')^2 with w the
+            // lock-on turn's weight, w' its conversion; then vucomiss xmm0 (the play angle's square), xmm1.
+            for (const float w : {0.3f, 0.15f}) {
+                Run r;
+                fill(r), r.in.xmm[1][0] = 0.02f, r.in.xmm[1][1] = 0.03f, r.in.xmm[0][0] = 0.0004f;
+                field(0x240, w), run(13, r);
+                const float square = 0.02f * 0.02f + 0.03f * 0.03f;
+                const double ratio = n == 1.0 ? 1.0 : double(w) / double(Decay(w, frames));
+                assert(same(r.out.xmm[1][0], n == 1.0 ? square : float(square * ratio * ratio)));
+                assert(r.out.xmm[1][1] == 0.03f * 0.03f && r.out.xmm[2][0] == 0.03f * 0.03f);
+                // Below: play^2 above the scaled square (carry clear, not zero) or under it (carry set).
+                assert(bool(r.out.flags_after & 1) == !(0.0004f > r.out.xmm[1][0]));
+            }
+            // With 24-bit precision in the caller's control word, still the game's bits at n = 1 (the caves set
+            // their own) and its control word back.
+            Run r;
+            fill(r), r.in.control = 0x07f, field(0x198, 0.1f), run(1, r);
+            assert(same(r.out.xmm[3][0], decay(0.1f)));
+        }
+        {
             // Point chase: the weight per axis, x, y and z converted, w (0) as it is.
             Run r;
             fill(r);
@@ -370,14 +400,20 @@ void TestCaves(bool kyo) {
                 assert(same(r.out.xmm[1][0], keep(fade) * 0.02f));
                 assert(r.out.xmm[2][0] == step[0] * 4.18879f && r.out.xmm[0][0] == -r.out.xmm[2][0]);
             }
-            // Cut-off: |turn| below 1 degree times n.
-            const float degree = F(0x3c8efa35), threshold = n == 1.0 ? degree : float(degree * frames);
-            for (const float turn : {threshold * 0.99f, -threshold * 0.99f, threshold * 1.01f}) {
-                fill(r), r.in.xmm[0][0] = turn, run(8, r);
-                std::uint32_t mask;
-                std::memcpy(&mask, &r.out.xmm[1][0], 4);
-                assert(mask == (std::fabs(turn) < threshold ? 0xffffffffu : 0u));
-                assert(r.out.rax == (Bits(turn) & 0x7fffffffu));
+            // Cut-off: |turn| below 1 degree times n while it fades (r14b 0), times n^2 on a frame that built it up
+            // (r14b set: one probe hit).
+            const float degree = F(0x3c8efa35);
+            for (const bool built : {false, true}) {
+                const float threshold = n == 1.0 ? degree : float(float(degree * frames) * frames);
+                const float fading = n == 1.0 ? degree : float(degree * frames);
+                const float limit = built ? threshold : fading;
+                for (const float turn : {limit * 0.99f, -limit * 0.99f, limit * 1.01f}) {
+                    fill(r), r.in.xmm[0][0] = turn, r.in.r14 = built ? 0x101 : 0x100, run(8, r);
+                    std::uint32_t mask;
+                    std::memcpy(&mask, &r.out.xmm[1][0], 4);
+                    assert(mask == (std::fabs(turn) < limit ? 0xffffffffu : 0u));
+                    assert(r.out.rax == (Bits(turn) & 0x7fffffffu));
+                }
             }
         }
     }
@@ -385,9 +421,43 @@ void TestCaves(bool kyo) {
 }
 } // namespace
 
+// Without the caves (a site not as 1.09 has it), the camera converted once for the rate where its values are the
+// game's or the list's: the eases' constants, the settings blend and, with FPS++, Kyo's constructor values.
+void TestFallback() {
+    for (const bool kyo : {false, true}) {
+        const Image image = Build(kyo);
+        image.put(0x4d25e68, {0xcd, 0xcc, 0xcc, kyo ? std::uint8_t(0x3c) : std::uint8_t(0x3d)}); // 0.025 or 0.1
+        image.put(0x4d25e94, Hex("8988083d"));
+        image.put(0x183a7d8, Hex("c78330030000cdcc4c3d"));
+        image.at(0x183e964)[3] ^= 1;
+        assert(!BbEngine::CameraRate::Install(image.base, kSize, kyo));
+        const int written = BbEngine::CameraRate::Fallback(image.base, kSize, kyo, 120);
+        const auto value = [&](std::uint64_t at) {
+            float v;
+            std::memcpy(&v, image.at(at), 4);
+            return v;
+        };
+        assert(Near(value(0x4d25e68), kyo ? 1 - std::pow(0.975, 0.5) : 1 - std::pow(0.9, 0.25)));
+        assert(Near(value(0x4d25e94), 1 - std::pow(1 - 1 / 30.0, 0.25)));
+        assert(Near(value(0x183a7de), 1 - std::pow(0.95, 0.25)));
+        if (kyo) {
+            assert(written == 3 + 11);
+            assert(value(0x183a8d5) == F(0x3d4ccccd) && value(0x183aa47) == F(0x3f32b8c2)); // the share, the angle
+            assert(Near(value(0x183a8df), std::pow(0.05, 0.5)));                     // kept
+            assert(Near(value(0x183a925), 1 - std::pow(0.8, 0.5)));                  // his 0.2 from 60
+        } else {
+            assert(written == 3 && Near(value(0x183a925), 0.4)); // the game's constructor as it is
+        }
+        // Once only: the values are no longer the game's or the list's.
+        assert(BbEngine::CameraRate::Fallback(image.base, kSize, kyo, 120) == 0);
+        Free(image.base, kSize);
+    }
+}
+
 int main() {
     TestFppValues();
     TestCheck();
+    TestFallback();
     TestCaves(false);
     TestCaves(true);
     std::puts("camera-rate-test: ok");
