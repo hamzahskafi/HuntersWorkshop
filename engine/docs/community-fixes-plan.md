@@ -148,7 +148,7 @@ per-area setting is lost.
 No distance setting (CamDist, FulcrumDist...) is changed: the camera sits further back because it chases
 and eases its distance more slowly.
 
-**The approach (agreed in principle 2026-10-31; to be confirmed at the start of beta 24).** One base for both
+**The approach (agreed in principle 2026-10-31; confirmed by the tester 2026-11-01).** One base for both
 tunings: the game's values, converted every frame from 30 by the engine with the frame timer (Original).
 FPS++ is the base plus Kyo's seven retunes and his two code changes, his values stored as their exact 30 FPS
 equivalents (a weight w at 60 is 1 - (1 - w)^2 at 30: 0.05 → 0.0975, 0.04 → 0.0784, the distance ease
@@ -166,13 +166,12 @@ debug-menu stores are no longer needed: the game's slider setup stays as in Orig
 | Tests: the game's bits at 30, the maths (weights and kept shares), the checks at each use | M |
 | The claims above corrected: the launcher text, this doc, the comments in `patches.cpp` (also the per-area parameters), the frame-rate survey; the 0.4.4 notes say Original was incomplete before | S |
 
-**To ask the tester again at the start of beta 24** (the tester, 2026-10-31: "ask me again about those two
-things once we get to beta 24"):
+**Asked again at the start of beta 24 and answered** (the tester, 2026-11-01):
 
-1. The approach above. With it, +0x330 under FPS++ runs at the game's speed (90% of a change of camera
-   settings in 1.5 s, as on the PS4) instead of today's 0.75 s, since Kyo did not change it.
-2. +0x1a8 (TargetRotXChaseRate) under FPS++: Kyo's value (FPS++ tilts back as now, near at once;
-   recommended: he chose to change it) or the game's (its tilt back, at its speed).
+1. The approach above: **yes, as described.** So +0x330 under FPS++ runs at the game's speed (90% of a
+   change of camera settings in 1.5 s, as on the PS4) instead of today's 0.75 s, since Kyo did not change it.
+2. +0x1a8 (TargetRotXChaseRate) under FPS++: **Kyo's value** (FPS++ tilts back as now, near at once; he
+   chose to change it), stored as its 30 FPS equivalent like his other retunes.
 
 Test, at 30, 60, 120, 144 and Uncapped, Original and FPS++: lock-on's swing, the tilt back after letting go
 of the stick, the chase while sprinting, entering a boss arena: each should match 30 FPS.
@@ -267,18 +266,18 @@ with Match display (pinned); the AMD/Intel shader-3 and CPU-bound items.
 - No AMD testers: the tester tests FSR alone (beta 26's note above).
 - Beta 23 built and tested, then marked failed (2026-11-01, the tester's call): beta 24 from beta 22,
   beta 23 redone as 25, AMD 26, the PC memory model 27.
+- Beta 24's two questions (2026-11-01): the approach as described; +0x1a8 under FPS++ is Kyo's value.
 
 ### Open questions
 
-1. At the start of beta 24: the camera approach and +0x1a8 under FPS++ (beta 24's two questions).
-2. At the start of beta 25: Streamline's DLSS path (`StreamlineDlss`, kept in beta 23 only for the
+1. At the start of beta 25: Streamline's DLSS path (`StreamlineDlss`, kept in beta 23 only for the
    `BB_STREAMLINE=1` test) carried or left on the beta 23 branch (recommended: left, nothing offered uses
    it); beta 22's boost hint (`VK_NV_low_latency2`, boost only, `reflex` in config.ini), which beta 23
    removed with its Reflex (it did not hold the clocks in the tester's runs): removed again or kept until
    Reflex's own design.
-3. Where NVIDIA Reflex's own design goes (a beta before the release candidate, or after 0.4.4).
-4. Frame generation: deprecated before release, or kept as code that is not offered.
-5. In beta 26's settings discussion: upscaler "Off"; merging the mip-bias settings.
+2. Where NVIDIA Reflex's own design goes (a beta before the release candidate, or after 0.4.4).
+3. Frame generation: deprecated before release, or kept as code that is not offered.
+4. In beta 26's settings discussion: upscaler "Off"; merging the mip-bias settings.
 
 ## Done since the analysis
 
