@@ -62,13 +62,27 @@ int main() {
         assert(c.valid && Near(c.turn, expected, 1e-3f) && c.turn > b);
         assert(IsCut(c, 45.0f * kDegree) && !IsCut(c, fov));
     }
-    // A cutscene's next shot: turned 120 degrees, or moved 12 m: cuts. 3 m exactly is not one.
+    // A cutscene's next shot: turned 120 degrees, or moved 20 m: cuts. 15 m exactly is not one.
     assert(IsCut(Between(View(0.0f, 0.0f, origin), View(120.0f * kDegree, 0.0f, origin)), fov));
-    assert(IsCut(Between(View(0.0f, 0.0f, origin), View(0.0f, 0.0f, {22.0f, 2.0f, -4.0f})), fov));
+    assert(IsCut(Between(View(0.0f, 0.0f, origin), View(0.0f, 0.0f, {30.0f, 2.0f, -4.0f})), fov));
     {
-        const Change c = Between(View(0.0f, 0.0f, origin), View(0.0f, 0.0f, {13.0f, 2.0f, -4.0f}));
-        assert(Near(c.move, 3.0f, 1e-4f) && !IsCut(c, fov));
-        assert(IsCut(c, fov, 2.5f)); // a lower move limit
+        const Change c = Between(View(0.0f, 0.0f, origin), View(0.0f, 0.0f, {25.0f, 2.0f, -4.0f}));
+        assert(Near(c.move, 15.0f, 1e-3f) && !IsCut(c, fov));
+        assert(IsCut(c, fov, 12.0f)); // a lower move limit
+    }
+    // The follow camera's snap towards the hunter (a wall between them): 4 m straight along its view, no
+    // turn (the tester's run: 3.2 to 4.0 m). Not a cut; `along` says it was along the view.
+    {
+        const auto before = View(0.4f, 0.0f, origin);
+        // The camera's z axis in world space is the view's third row; moving 4 m along it.
+        const std::array<float, 3> ahead{origin[0] + 4.0f * before[8], origin[1] + 4.0f * before[9],
+                                         origin[2] + 4.0f * before[10]};
+        const Change c = Between(before, View(0.4f, 0.0f, ahead));
+        assert(c.valid && c.turn < 1e-3f && Near(c.move, 4.0f, 1e-3f) && Near(c.along, 4.0f, 1e-3f));
+        assert(!IsCut(c, fov));
+        // Sideways instead: the same distance, none of it along the view.
+        const Change side = Between(View(0.0f, 0.0f, origin), View(0.0f, 0.0f, {14.0f, 2.0f, -4.0f}));
+        assert(Near(side.move, 4.0f, 1e-3f) && side.along < 1e-3f);
     }
     // Turning around (180 degrees): the full angle, a cut.
     {

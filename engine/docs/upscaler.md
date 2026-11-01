@@ -37,8 +37,9 @@ The sections after this one are the record of the work from the first frame anal
   25a DLSS was given it as its bias-current-colour mask, which NVIDIA's guide (310.4.0, §3.15) says
   should not be used.
 - **History reset on a camera cut** (0.4.4 beta 25b, every upscaler): the first frame after the
-  camera turned more than the vertical field of view or moved more than 3 m starts the history again
-  (`camera_cut.h`; NVIDIA §3.13). Frames after a loading screen started again already (a frame
+  camera turned more than the vertical field of view or moved more than 15 m starts the history again
+  (`camera_cut.h`; NVIDIA §3.13). Not less: the follow camera snaps up to 4 m in one frame towards the
+  hunter when a wall comes between them, which the motion vectors handle. Frames after a loading screen started again already (a frame
   without the upscaler resets the next). The log names each cut (`Upscaler: camera cut ...`); with
   frame statistics, the resets by cause and the largest turn and move of the other frames.
   `BB_CAMERA_CUT_RESET=0`: logged and counted, the history kept.

@@ -19,12 +19,16 @@ namespace Vulkan::CameraCut {
 struct Change {
     float turn = 0.0f;
     float move = 0.0f;
+    float along = 0.0f; ///< the part of `move` along the previous frame's view direction (for the log)
     bool valid = false; ///< both matrices invertible and finite
 };
 
 /// The defaults: more than the vertical field of view turned (the two frames see almost nothing in
-/// common) or more than 3 m moved in one frame (90 m/s at 30 FPS).
-inline constexpr float kMaxMove = 3.0f;
+/// common) or more than 15 m moved in one frame. Not 3 m (25b's first build): the follow camera snaps
+/// towards the hunter when something comes between them, measured at 2.0 to 4.0 m in one frame with no
+/// turn (the tester's run, about 160 FPS), and a snap is no cut: the motion vectors reproject what stays
+/// in view, and a reset there threw that history away. 15 m is about four times the largest snap.
+inline constexpr float kMaxMove = 15.0f;
 /// When the projection gives no usable field of view: about 57 degrees.
 inline constexpr float kFallbackTurn = 1.0f;
 
@@ -73,7 +77,11 @@ inline Change Between(const std::array<float, 12>& previous, const std::array<fl
     change.turn = std::acos(cosine);
     const float dx = p1[0] - p0[0], dy = p1[1] - p0[1], dz = p1[2] - p0[2];
     change.move = std::sqrt(dx * dx + dy * dy + dz * dz);
-    change.valid = std::isfinite(change.turn) && std::isfinite(change.move);
+    // The previous view direction: the view matrix's third row (its z axis in world space).
+    const float* forward = &previous[8];
+    const float d = dx * forward[0] + dy * forward[1] + dz * forward[2];
+    change.along = std::min(std::abs(d) / std::sqrt(Detail::Dot3(forward, forward)), change.move);
+    change.valid = std::isfinite(change.turn) && std::isfinite(change.move) && std::isfinite(change.along);
     return change;
 }
 

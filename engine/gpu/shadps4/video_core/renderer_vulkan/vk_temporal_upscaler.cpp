@@ -441,9 +441,9 @@ void TemporalUpscaler::CheckCameraCut() {
     // last shot's "ghost images" carry over. A frame after one without the upscaler resets already
     // (loading screens: lamp travel, death, areas); this catches cuts while the scene keeps drawing
     // (a cutscene's shots). Every upscaler: DLSS's InReset, FSR's reset, TAA's history. The limits
-    // (camera_cut.h: the vertical field of view, 3 m) sit far above play; the largest turn and move
-    // of the other frames are in the stats line to confirm it. BB_CAMERA_CUT_RESET=0: cuts are
-    // logged and counted, the history kept.
+    // (camera_cut.h: the vertical field of view, 15 m) sit far above play, the follow camera's snaps
+    // included; the largest turn and move of the other frames are in the stats line to confirm it.
+    // BB_CAMERA_CUT_RESET=0: cuts are logged and counted, the history kept.
     static const bool enabled = [] {
         const char* env = std::getenv("BB_CAMERA_CUT_RESET");
         return !env || env[0] != '0';
@@ -461,9 +461,9 @@ void TemporalUpscaler::CheckCameraCut() {
             ++s.cuts;
             if (cut_lines < 100) {
                 ++cut_lines;
-                std::printf("Upscaler: camera cut (turned %.0f degrees, moved %.1f m in one frame; field of "
-                            "view %.0f degrees): %s%s\n",
-                            change.turn * kDegrees, change.move, fov * kDegrees,
+                std::printf("Upscaler: camera cut (turned %.0f degrees, moved %.1f m in one frame, %.1f m "
+                            "of it along the view; field of view %.0f degrees): %s%s\n",
+                            change.turn * kDegrees, change.move, change.along, fov * kDegrees,
                             enabled ? "history reset" : "history kept (BB_CAMERA_CUT_RESET=0)",
                             cut_lines == 100 ? "; further cuts counted only" : "");
             }

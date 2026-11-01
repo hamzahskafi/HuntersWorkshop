@@ -105,9 +105,10 @@ What changed since 0.4.3, for the release page. The engine work behind each line
 - **The upscalers start fresh at a camera cut.** DLSS, FSR and TAA build each frame on the frames
   before it; after a cut (a cutscene's next shot) that history showed the last shot for a few frames
   (ghosting). The first frame after the camera turns more than the field of view or moves more than
-  3 m now starts over, as NVIDIA's DLSS guide asks (§3.13). Frames after a loading screen (lamp
-  travel, death) already started over. The limits sit far above anything play does, as the guide
-  warns that needless resets flicker; the log names each cut.
+  15 m now starts over, as NVIDIA's DLSS guide asks (§3.13). Frames after a loading screen (lamp
+  travel, death) already started over. The limits sit far above anything play does (the follow
+  camera snapping up to 4 m towards the hunter when a wall comes between them included), as the
+  guide warns that needless resets flicker; the log names each cut.
 - **DLAA: 16 jitter positions instead of 8.** The image is shifted by a fraction of a pixel each
   frame so that DLSS sees a pixel's detail from several positions; at native resolution HW used 8,
   under the 16 NVIDIA's guide asks for as a minimum. DLSS at a lower render size already had more
@@ -178,7 +179,7 @@ What changed since 0.4.3, for the release page. The engine work behind each line
   `BB_FRAME_FIXES_SKIP=camera` leaves it out (the camera as before). `BB_CAMERA_FIX` applies only
   without the frame timer.
 - The log names each camera cut that starts the upscaler's history over (`Upscaler: camera cut
-  (turned ... degrees, moved ... m in one frame ...)`, the first 100). With frame statistics, every
+  (turned ... degrees, moved ... m in one frame, ... m of it along the view ...)`, the first 100). With frame statistics, every
   600 upscaled frames: the history resets by cause and the largest turn and move in one frame of the
   other frames (`Upscaler: history resets in 600 frames: ...`). `BB_CAMERA_CUT_RESET=0` in Extra
   variables: cuts logged and counted, the history kept.
