@@ -26,59 +26,62 @@ HW's `Prepare()` calls and the sampler's `+0x...` print. Each address below says
 
 ## Plan to 0.4.4 stable (decided 2026-10-31)
 
-Beta 22 is the last build (built and tested by the tester); nothing of beta 23 is started. Each beta
-gets its own branch, `claude/0.4.4-beta-N`. The reviews behind this plan are under "Lantern 0.9.39 and
-bbhost v0.2.20–v0.2.22, reviewed" below.
+Beta 22 is the last build kept. **Beta 23 failed** (the tester's call, 2026-11-01): built and tested,
+then withdrawn (its section below). Beta 24 (the camera) is built on beta 22 (`claude/0.4.4-beta-24` from
+`claude/0.4.4-beta-22`); beta 23's work is redone as beta 25 on top of it, AMD's FSR SDK moves to beta 26
+and the PC memory model's removal to beta 27. Each beta gets its own branch, `claude/0.4.4-beta-N`. The
+reviews behind this plan are under "Lantern 0.9.39 and bbhost v0.2.20–v0.2.22, reviewed" below.
 
 ### Decisions
 
 | Topic | Decision |
 |---|---|
-| FSR | AMD FSR SDK 2.4 (FidelityFX-SDK `v2.4.0`, 28 October 2026) on Windows: AMD's signed `amd_fidelityfx_loader_vk.dll` and `amd_fidelityfx_upscaler_vk.dll` with AMD's licence notice. Every unofficial FSR path is removed, not kept (beta 25). |
-| DLSS | NVIDIA's Streamline route, DLSS Programming Guide 310.6.0 §3.21: DLSS upscaling through Streamline's `sl.dlss.dll`, with HW's own Project ID (§5.2.1) instead of the shared 231313132 (beta 23). NVIDIA's NGX loader library (`nvsdk_ngx_s.lib`/`_d.lib`, §5.1.1) is not an option: the DLSS SDK licence (§2e) forbids use that puts the SDK under an open-source licence (HW is GPL), and the library is built for MSVC while HW's Windows build is MSYS2 CLANG64. Streamline is MIT. |
-| NVIDIA guide items | In beta 23 (its table). No DLSS cost table until a proper test (after 0.4.4). |
+| FSR | AMD FSR SDK 2.4 (FidelityFX-SDK `v2.4.0`, 28 October 2026) on Windows: AMD's signed `amd_fidelityfx_loader_vk.dll` and `amd_fidelityfx_upscaler_vk.dll` with AMD's licence notice. Every unofficial FSR path is removed, not kept (beta 26). |
+| DLSS | The driver's NGX core, as up to beta 22, started with HW's own Project ID (DLSS Programming Guide 310.6.0 §5.2.1) instead of the shared 231313132, on Windows and Linux (beta 25): `NVSDK_NGX_VULKAN_Init_ProjectID_Ext`, the core's entry point behind NVIDIA's `NVSDK_NGX_VULKAN_Init_with_ProjectID`, tested in beta 23. **Not Streamline** (§3.21), first chosen and built in beta 23: with its core loaded, NVIDIA's Vulkan driver presents through DXGI and holds V-Sync On (latest frame) to two frames a refresh (beta 23's section). NVIDIA's NGX loader library (`nvsdk_ngx_s.lib`/`_d.lib`, §5.1.1) is not linked: the DLSS SDK licence (§2e) forbids use that puts the SDK under an open-source licence (HW is GPL), and the library is built for MSVC while HW's Windows build is MSYS2 CLANG64. |
+| NVIDIA Reflex | Not offered from beta 25 (beta 23's ran through Streamline). It returns with a design of its own on `VK_NV_low_latency2` directly (the sleep before the frame's work, markers with present IDs), not built on frame generation's code, and measured against the 120 FPS cap first; which beta is open. |
+| NVIDIA guide items | In beta 25 (its table; first built in beta 23). No DLSS cost table until a proper test (after 0.4.4). |
 | Credits | AMD and NVIDIA items credit AMD's SDK and NVIDIA's guide (ground rules). |
-| FSR frame generation | Set aside. The current one (FireBurn's) goes with FireBurn in beta 25; AMD's official one needs AMD's swapchain (its docs call dispatching without it "highly discouraged") and comes after 0.4.4. DLSS frame generation is unaffected. |
+| FSR frame generation | Set aside. The current one (FireBurn's) goes with FireBurn in beta 26; AMD's official one needs AMD's swapchain (its docs call dispatching without it "highly discouraged") and comes after 0.4.4. |
+| Frame generation | Not offered from beta 25 (the tester's call in beta 23; it may be deprecated before release): `frame_gen` reads as off, its menu items and launcher rows left out, the code kept. |
 | OptiScaler | Set aside: the compatibility mode (`vk_optiscaler.h`) stays as it is, untested. The tester uses neither OptiScaler nor frame generation. Re-check after 0.4.4. |
 | Original camera | Fixed in HW's engine (beta 24): every per-frame weight of the follow camera, converted each frame with the frame timer. bbhost's weight list is a cross-check only; no code is taken from it or from Lantern. FPS++ becomes that base plus only what Kyo changed (beta 24). |
-| When AMD's or NVIDIA's runtime can't start | TAA, with a log line and a note in the game. |
+| When AMD's or NVIDIA's runtime can't start | TAA, with a log line and a note in the game (DLSS falls back to FSR 3.1 until beta 26 removes it). |
 | Linux | Set aside until Windows is done; notes kept below ("Linux, for later"). |
 | Test PC | RTX 3070 Ti; Windows HDR is off. HDR-output items are checked in the code, not in the tester's runs. DLSS's input point (§3.1, before tone mapping) concerns the game's internal image, so the runs do cover it. |
 | Frame lock / Match display | Pinned (ground rules). |
-| PC memory model | Removed before 0.4.4 ships, when the tester says (beta 26). |
+| PC memory model | Removed before 0.4.4 ships, when the tester says (beta 27). |
 | Live-path proxy trimming (upscale-2/3) | After 0.4.4 (recommended). |
 
-### Beta 23: fixes, NVIDIA's guide, DLSS through Streamline (`claude/0.4.4-beta-23`)
+### Beta 23: failed (its record: `claude/0.4.4-beta-23`)
 
-Betas 23 and 24 of the first draft, combined at the tester's request.
+Built and tested 2026-10-31 to 11-01 (engine ids 44 to 52), then withdrawn on the tester's call; its work is
+redone as beta 25. Its plan, its rows under "Done since the analysis" and its code are on its branch; the
+diagnostic build is `claude/0.4.4-beta-23a1` (beta 23a1, engine ids 46 to 50, not kept). What it found:
 
-| Item | Source / credit | Size |
-|---|---|---|
-| **Fixes** | | |
-| Leaving a room and destroying the online context send their server request from the online thread (`THD:np`), not the game's thread with `g.mu` held: no freeze of up to 8 s (NpPost's timeout) at session end. `m2_leave_room`/`m2_destroy_context` → `end_session_locked` → `ServerLeaveRoom` today | bbhost (droogie) | M |
-| A connection that dies in the 200–400 ms before the ESTABLISHED/ACTIVE notices (`announce_locked`) is not announced as live: `sig_fire` checks `Conn.dead` | bbhost (droogie) | S |
-| Cached graphics pipelines: one whose vertex shader writes motion vectors while its key has none is not built at start (an invalid layout; a crash risk on stricter drivers). `LoadGraphicsPipeline` checks only the opposite pairing | Lantern 0.9.39 beta 26 | S |
-| **NVIDIA's guide** | | |
-| History reset on a camera cut, for every upscaler (DLSS InReset; FSR's reset). A cautious threshold: §3.13 warns that misused resets flicker | NVIDIA §3.13 | M |
-| DLSS: the bias mask (BiasCurrentColor, `vk_dlss.cpp` ~517–523) no longer sent. FSR keeps its reactive mask (AMD's advice) | NVIDIA §3.15, 310.4.0 changelog | S |
-| DLSS models: "CNN (preset E)" and "(preset F)" removed from the launcher and the in-game menu (A–E removed in 310.4.0; F deprecated, "should not be used"); a saved `e`/`f` becomes Automatic. Automatic already matches NVIDIA's defaults (K for DLAA/Quality/Balanced, M Performance, L Ultra Performance) | NVIDIA 310.4.0 | S |
-| **DLSS through Streamline** | | |
-| DLSS upscaling through `sl.dlss.dll` (it wraps `nvngx_dlss.dll`); one Streamline setup for upscaling, frame generation and Reflex. Streamline becomes the Vulkan loader whenever DLSS is on (today only with DLSS frame generation) | NVIDIA §3.21 | L |
-| HW's own Project ID (a fixed GUID, engine type Custom, HW's version) instead of the shared 231313132, in `slInit`'s preferences | NVIDIA §5.2.1, §2.5 checklist | S |
-| Windows: HW's own NGX loading removed (the `NGXCore` registry key, the newest `nv*` DriverStore folder fallback, the parameter interface through fixed vtable slots). Streamline can't start: TAA with a note | — | M |
-| `tools/fetch_streamline.sh`: `sl.dlss.dll` added; `nvngx_dlss.dll` stays NVIDIA's 310.9.16 from github.com/NVIDIA/DLSS | — | S |
-| **Text and docs** | | |
-| Live resolution change explained properly (launcher and in-game): it matters only when the game starts at an output other than 1080p with an upscaler other than TAA; Off is faster, renders at the preset's size, needs a restart for changes, and gives DLSS/FSR the image after the game's post-processing (§3.1 asks for before tone mapping); at 1080p presets always change in the game | NVIDIA §3.1 | S |
-| The HDR mode hint checked against the code (fixed if wrong) | — | S |
-| Translations: 13 launcher languages, 10 in-game | — | M |
-| Docs: `docs/upscaler.md` (Streamline), release notes, this plan; version 0.4.4-beta.23, engine id | — | S |
-| ~~FSR 3 dispatches recorded in frame order (`BB_FSR3_RECORDER` the default)~~ | Dropped: that code goes with FireBurn in beta 25 | — |
-
-Test (none of it needs HDR): DLSS at the lamp spot, Quality and DLAA: the log says Streamline with the
-Project ID; the image as beta 22's or better on fire and particles; FPS against beta 22 (what Streamline
-itself costs: a quick A/B, not the DLSS cost table). Camera cuts (cutscenes, lamp travel, death, the
-Hunter's Dream): no smear or flicker on the first frame. The model list without E and F. Co-op: leaving a
-room and quitting do not freeze.
+- **The 120 FPS cap.** With NVIDIA Streamline's core loaded (every release tried, 2.10.3 to 2.14.16),
+  NVIDIA's Vulkan driver makes a Direct3D device of its own when the swapchain is created and presents
+  through DXGI, whose flip queue holds V-Sync On (latest frame) to two presents a refresh: the 240 preset
+  ran 120 on the tester's 60 Hz screen (100 at 50 Hz), each frame waiting 8.2 ms in
+  `vkAcquireNextImageKHR`. Not NVIDIA Reflex, DLSS or NGX, PC Latency, the swapchain's image count,
+  Streamline's present hook, the engine's submit lock, Reflex's frame limiter or DLSS-G's pacer; a
+  Direct3D device opened without Streamline leaves 240, and the driver's "Prefer native" present method,
+  globally or per game, changes nothing. The tester posted the findings on NVIDIA's tracker
+  (https://github.com/NVIDIA-RTX/Streamline/issues/112). The fix: Streamline not loaded, DLSS through the
+  driver's NGX core again (240 at the title screen and the lamp).
+- **HW's Project ID** (`e3c54136-7aa1-4a31-9b86-b9f1d103bfc9`) on the NGX core works: NGX started with it
+  and DLAA ran (engine id 52). The entry point was read from NVIDIA's loader libraries in the DLSS SDK
+  310.9.16 (disassembled, not linked).
+- **NVIDIA Reflex through Streamline** went with it. A review found its sleep for frame N+1 ran before
+  frame N was queued for presentation; it was built on DLSS-G's frame plumbing. Reflex gets a design of
+  its own (Decisions).
+- **Frame generation** not offered (the tester's call; it may be deprecated before release).
+- **The lamp, about 1.3% slower** (the tester felt beta 22 was faster). DLAA, 240 preset, GPU-bound, both
+  orders: a view of about 1,345 draws equal (GPU 7.34 against 7.31 ms); at the lamp (about 1,785 draws)
+  8.18 and 8.19 ms against beta 22's 7.90, 8.08 and 8.11; DLSS's own cost equal. Beta 23's windows at the
+  lamp had about 3 more render passes begun again after the copy shader and about 2 more images moved to
+  shader read a frame, which none of its code explains (it records the scene as beta 22 does), so the
+  game's own work in those windows is the likely cause; not settled. Beta 24 against beta 25 at the same
+  save settles it (beta 25's test).
 
 ### Beta 24: the follow camera's weights, per frame, in the engine
 
@@ -174,7 +177,45 @@ things once we get to beta 24"):
 Test, at 30, 60, 120, 144 and Uncapped, Original and FPS++: lock-on's swing, the tilt back after letting go
 of the stick, the chase while sprinting, entering a boss arena: each should match 30 FPS.
 
-### Beta 25: AMD FSR SDK 2.4 and the upscaling settings
+### Beta 25: beta 23 redone: fixes, NVIDIA's guide, DLSS with HW's Project ID (`claude/0.4.4-beta-25`)
+
+Beta 23's work as it ended (`claude/0.4.4-beta-23`), on top of beta 24: its final code, not its history.
+
+| Item | Source / credit | Size |
+|---|---|---|
+| **Fixes** | | |
+| Leaving a room and destroying the online context send their server request from the online thread (`THD:np`), not the game's thread with `g.mu` held: no freeze of up to 8 s (NpPost's timeout) at session end. `m2_leave_room`/`m2_destroy_context` → `end_session_locked` → `ServerLeaveRoom` today | bbhost (droogie) | M |
+| A connection that dies in the 200–400 ms before the ESTABLISHED/ACTIVE notices (`announce_locked`) is not announced as live: `sig_fire` checks `Conn.dead` | bbhost (droogie) | S |
+| Cached graphics pipelines: one whose vertex shader writes motion vectors while its key has none is not built at start (an invalid layout; a crash risk on stricter drivers). `LoadGraphicsPipeline` checks only the opposite pairing | Lantern 0.9.39 beta 26 | S |
+| The tests the first review of beta 23 found failing: the GPU library's runtime stubs for every test, Windows' libraries for the renderer tests, `_putenv_s` on Windows, stale expectations in `upscaler-support-test` and `widescreen-test` | — | S |
+| **NVIDIA's guide** | | |
+| History reset on a camera cut, for every upscaler (DLSS InReset; FSR's reset): more than the vertical field of view turned or more than 3 m moved in one frame; `BB_CAMERA_CUT_RESET=0` off. A cautious threshold: §3.13 warns that misused resets flicker | NVIDIA §3.13 | M |
+| DLSS: the bias mask (BiasCurrentColor) no longer sent, and the reactive mask not made while DLSS runs. FSR keeps its reactive mask (AMD's advice) | NVIDIA §3.15, 310.4.0 changelog | S |
+| DLSS models: "CNN (preset E)" and "(preset F)" removed from the launcher and the in-game menu (deprecated); a saved `e`/`f` becomes Automatic. Automatic already matches NVIDIA's defaults (K for DLAA/Quality/Balanced, M Performance, L Ultra Performance) | NVIDIA 310.4.0 | S |
+| DLSS at least 16 jitter phases (§2.4's minimum; §3.7's 8 x ratio² above it, so only DLAA moves, 8 → 16; the tester's call) | NVIDIA §2.4, §3.7 | S |
+| **DLSS** | | |
+| HW's own Project ID (engine type Custom, version 0.4.4) through the NGX core's `NVSDK_NGX_VULKAN_Init_ProjectID_Ext` on Windows and Linux; `Init_Ext2` with the shared id when the core lacks it or refuses (logged); `BB_DLSS_PROJECT_ID=0` starts with the shared id | NVIDIA §5.2.1, §2.5 checklist | S |
+| Streamline loaded only for DLSS-G (not offered) or a test (`BB_STREAMLINE=1`); the start log says why. The launcher no longer asks for Streamline's files for DLSS | — | S |
+| **Frame generation and Reflex** | | |
+| Frame generation not offered (Decisions); NVIDIA Reflex not offered until its own design (Decisions) | — | S |
+| **Text and docs** | | |
+| Live resolution change explained (launcher and in-game): at any output other than 1920x1080 the upscaler takes the game's tone-mapped frame whatever Live resolution says; only 1920x1080 gets it before post-processing (§3.1 asks for before tone mapping; moving it is after 0.4.4) | NVIDIA §3.1 | S |
+| The HDR mode hint (right, checked in beta 23); "not with HDR output" out of the frame-generation texts | — | S |
+| Translations: 13 launcher languages, 10 in-game | — | M |
+| Docs: `docs/upscaler.md`, release notes (beta 23's entry folded in), this plan; version 0.4.4-beta.25, engine id | — | S |
+
+Not carried: DLSS through Streamline as the main path, the removal of HW's own NGX loading, Reflex
+through Streamline, the FSR 3 dispatch order (FireBurn goes in beta 26). To decide when beta 25 starts
+(open questions): Streamline's DLSS test path and beta 22's boost hint.
+
+Test (none of it needs HDR): V-Sync On (latest frame) at the 240 preset: 240 FPS at the title screen and
+the lamp; the log's `DLSS: Super Resolution available (NGX core loaded, HW's Project ID)`. **The lamp
+against beta 24:** the same save at the lamp, no input, 60 s each, DLAA, in the order beta 24, beta 25,
+beta 24. DLSS's image as beta 22's or better on fire and particles. Camera cuts (cutscenes, lamp travel,
+death, the Hunter's Dream): no smear or flicker on the first frame. The model list without E and F.
+Co-op: leaving a room and quitting do not freeze.
+
+### Beta 26: AMD FSR SDK 2.4 and the upscaling settings
 
 | Item | Size |
 |---|---|
@@ -191,7 +232,7 @@ on AMD cards ships untested and AMD players need a way back to 3.1 without waiti
 notes say it is untested. Test: the tester alone, FSR 3.1.6 through the SDK on the RTX 3070 Ti against
 FireBurn's FSR 3.1 (0.64 ms at the lamp spot, Quality); the TAA fallback (the SDK's DLLs taken out).
 
-### Beta 26: the PC memory model removed
+### Beta 27: the PC memory model removed
 
 When the tester says; before 0.4.4 ships.
 
@@ -217,19 +258,27 @@ with Match display (pinned); the AMD/Intel shader-3 and CPU-bound items.
 | Topic | Note |
 |---|---|
 | FSR | AMD's SDK is Windows only. With FireBurn removed, Linux has no FSR until AMD ships for Linux. The Linux build keeps compiling; FSR is not offered there |
-| DLSS | Streamline is Windows only and NVIDIA's Linux loader library (`libnvsdk_ngx.a`) has the same licence problem: Linux keeps HW's own path (`libnvidia-ngx.so.1`), to which the Project ID is still to be added |
+| DLSS | Streamline is Windows only and NVIDIA's Linux loader library (`libnvsdk_ngx.a`) has the same licence problem: Linux keeps HW's own path (`libnvidia-ngx.so.1`), which from beta 25 is Windows' path too, with HW's Project ID on both |
 | FSR frame generation | Gone with FireBurn on Linux too |
 
 ### Settled since (2026-10-31)
 
-- The beta order: the camera (24) before AMD (25).
-- No AMD testers: the tester tests FSR alone (beta 25's note above).
-- Beta 23 started.
+- The beta order: the camera (24) before AMD (now 26).
+- No AMD testers: the tester tests FSR alone (beta 26's note above).
+- Beta 23 built and tested, then marked failed (2026-11-01, the tester's call): beta 24 from beta 22,
+  beta 23 redone as 25, AMD 26, the PC memory model 27.
 
 ### Open questions
 
 1. At the start of beta 24: the camera approach and +0x1a8 under FPS++ (beta 24's two questions).
-2. In beta 25's settings discussion: upscaler "Off"; merging the mip-bias settings.
+2. At the start of beta 25: Streamline's DLSS path (`StreamlineDlss`, kept in beta 23 only for the
+   `BB_STREAMLINE=1` test) carried or left on the beta 23 branch (recommended: left, nothing offered uses
+   it); beta 22's boost hint (`VK_NV_low_latency2`, boost only, `reflex` in config.ini), which beta 23
+   removed with its Reflex (it did not hold the clocks in the tester's runs): removed again or kept until
+   Reflex's own design.
+3. Where NVIDIA Reflex's own design goes (a beta before the release candidate, or after 0.4.4).
+4. Frame generation: deprecated before release, or kept as code that is not offered.
+5. In beta 26's settings discussion: upscaler "Off"; merging the mip-bias settings.
 
 ## Done since the analysis
 
@@ -814,19 +863,19 @@ Where each went is in the plan to 0.4.4 stable, above.
 
 **Lantern 0.9.39.** Mostly seamless co-op (a party kept across bosses, deaths and lamps, on Lantern's own
 server: a feature tied to that server) and a rewrite toward its own engine (its own system libraries, a
-new renderer and shader compiler, on by default in beta 24, with no measured gain): neither for HW.
+new renderer and shader compiler, on by default in its beta 24, with no measured gain): neither for HW.
 
 | Item | In HW? | Where it went |
 |---|---|---|
-| DLSS audit: the history reset on a camera cut | HW resets only on setting changes | Beta 23, credited to NVIDIA's guide §3.13 |
-| DLSS audit: the bias mask only for preset F | HW sends it with every preset | Beta 23: not sent at all (§3.15); F itself removed (310.4.0) |
+| DLSS audit: the history reset on a camera cut | HW resets only on setting changes | Beta 25, credited to NVIDIA's guide §3.13 |
+| DLSS audit: the bias mask only for preset F | HW sends it with every preset | Beta 25: not sent at all (§3.15); F itself removed (310.4.0) |
 | DLSS audit: the "less wobble while turning" jitter fade off by default | Never in HW (Lantern added it after the fork) | — |
 | Left open by the audit: DLSS gets the tone-mapped image at outputs other than 1080p | The same in HW (the startup patch) | The §3.1 decision after the proper DLSS test; the live path at 1080p is right |
 | Left open by the audit: some passes not jittered (a likely slight wobble while panning) | To check in HW | After 0.4.4 |
-| Left open by the audit: an NVIDIA sample application ID | HW uses the shared 231313132 | Beta 23: HW's own Project ID |
-| Cached pipelines with a motion-vector vertex shader and no motion in the key not built (beta 26) | HW checks only the opposite pairing | Beta 23, credited to Lantern |
-| Camera timing (beta 25): nine of the follow camera's rates scaled by the frame's length | Checked against HW: two of the nine are wrong (the pitch return's kept share treated as a rate; the focus is time-based already), and with FPS++ they would convert a second time | Not taken. HW's own conversion of every weight in beta 24 |
-| FSR through AMD's FSR SDK 2.4 | — | Beta 25, from AMD's SDK and credited to it |
+| Left open by the audit: an NVIDIA sample application ID | HW uses the shared 231313132 | Beta 25: HW's own Project ID |
+| Cached pipelines with a motion-vector vertex shader and no motion in the key not built (Lantern's beta 26) | HW checks only the opposite pairing | Beta 25, credited to Lantern |
+| Camera timing (Lantern's beta 25): nine of the follow camera's rates scaled by the frame's length | Checked against HW: two of the nine are wrong (the pitch return's kept share treated as a rate; the focus is time-based already), and with FPS++ they would convert a second time | Not taken. HW's own conversion of every weight in beta 24 |
+| FSR through AMD's FSR SDK 2.4 | — | Beta 26, from AMD's SDK and credited to it |
 | Anti-Lag 2, the 8 GB VRAM tweaks, optional lighting effects (heavy; ghosting listed as a known issue), a lamp-to-lamp patch, bbhost-format patches | — | Features, after 0.4.4 (Anti-Lag 2, lighting, lamp to lamp) or not taken |
 | The save repair (for seamless co-op); the PC memory model off on old AMD drivers | Not applicable (HW removes the model) | — |
 
@@ -835,15 +884,15 @@ rates up to 960, and Uncapped capped to the display (the opposite of HW's choice
 
 | Item | In HW? | Where it went |
 |---|---|---|
-| Leaving a room called the server on the game's thread: a freeze at every session end (droogie) | Yes: `end_session_locked` calls `ServerLeaveRoom` synchronously with `g.mu` held | Beta 23, credited to droogie |
-| A connection that died before its ESTABLISHED/ACTIVE notices announced as live again (droogie) | Yes: `sig_fire` does not check `Conn.dead` | Beta 23, credited to droogie |
+| Leaving a room called the server on the game's thread: a freeze at every session end (droogie) | Yes: `end_session_locked` calls `ServerLeaveRoom` synchronously with `g.mu` held | Beta 25, credited to droogie |
+| A connection that died before its ESTABLISHED/ACTIVE notices announced as live again (droogie) | Yes: `sig_fire` does not check `Conn.dead` | Beta 25, credited to droogie |
 | OK in message boxes ignored for the first 0.5 s (Kyoskii) | The game's behaviour | Optional, after 0.4.4 (a feel change) |
 | The community SSR patch's tuning writes slower than the game's values, 7.8 ms against 6.1 (Kyoskii) | HW ships another version with its own constants; SSR is off by default | Measured after 0.4.4 |
 | Korean menu text cut short (Kyoskii) | Not affected: HW finds the end of UTF-16 text two bytes at a time | — |
 | Its decompiled follow camera (`src/decomp/camera/follow_camera.cpp`), every weight converted | HW's Original converts two | A cross-check for beta 24; no code taken |
 
 **AMD and NVIDIA documents.** AMD FSR SDK 2.4 (FidelityFX-SDK `v2.4.0`, `7539ae8`): the FSR versions per
-GPU and the licence terms in beta 25's table; Vulkan games ship the DLLs (no driver override), and games
+GPU and the licence terms in beta 26's table; Vulkan games ship the DLLs (no driver override), and games
 on 4.1.2 or newer can take later driver upgrades; frame generation on Vulkan is FSR 3.1.6 through AMD's
 swapchain (4.0.2 needs RX 9000 and Windows 11). NVIDIA DLSS Programming Guide 310.6.0 (31 March 2026,
 NVIDIA/DLSS `9981c63`): §3.1 before tone mapping; §3.5 mip bias log2(render/display) − 1 (HW already);
@@ -888,5 +937,5 @@ Beta 9 changed alters Windows defaults in a way that could regress:
 | Lantern Engine (Awaken), later | 0.9.38 (2026-10-29); 0.9.39 betas 1–26 (2026-10-31) | Reviewed in their own sections |
 | bbport (deadinside28), later | 0.7, `0fc2921` | Reviewed 2026-10-29 |
 | bbhost (droogie, Kyoskii), later | v0.2.22 | Reviewed 2026-10-31 |
-| AMD FSR SDK | v2.4.0, `7539ae8` | The FSR plan (beta 25) |
-| NVIDIA DLSS | Programming Guide 310.6.0 (NVIDIA/DLSS `9981c63`); Streamline 2.14.16 | The DLSS plan (beta 23) |
+| AMD FSR SDK | v2.4.0, `7539ae8` | The FSR plan (beta 26) |
+| NVIDIA DLSS | Programming Guide 310.6.0 (NVIDIA/DLSS `9981c63`); Streamline 2.14.16 | The DLSS plan (beta 25; first built as beta 23) |
