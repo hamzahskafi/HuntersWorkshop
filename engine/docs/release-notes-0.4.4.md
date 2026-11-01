@@ -107,6 +107,10 @@ What changed since 0.4.3, for the release page. The engine work behind each line
   8 seconds on a slow or unreachable connection, with the game stopped meanwhile. The request now
   goes from the online thread, as every other request to the server does, and still reaches the
   server before anything the game asks for next (found by droogie in bbhost).
+- **Co-op: quitting leaves the room.** Quit to Desktop, the window's close button and Apply and
+  restart game ended the game without telling The Hunter's Dream's server, which kept the player in
+  the room until their heartbeat was 15 seconds old: the other players saw them leave late. The
+  game now leaves the room as it closes (at most 2 seconds, while the window is already hidden).
 - **Co-op: a connection that drops in its first moments stays dropped.** A connection is reported to
   the game as made and then as active 0.2 and 0.4 seconds after it starts; one that failed in between
   (its player gone, the room over) was reported as live after the game had been told it was gone. Those
@@ -156,7 +160,8 @@ What changed since 0.4.3, for the release page. The engine work behind each line
   `BB_FRAME_FIXES_SKIP=camera` leaves it out (the camera as before). `BB_CAMERA_FIX` applies only
   without the frame timer.
 - The log says when leaving a co-op room fails at the server (`np: leave_room for room ... failed
-  after ... ms`); the server then drops the player when their connection's heartbeat stops.
+  after ... ms`); the server then drops the player when their connection's heartbeat stops. On
+  closing the game in a room: `np: left room ... at exit in ... ms`.
 - The renderer's test programs build on Windows (`scene-resolution-test`, `taa-shader-test`,
   `camera-motion-test`), and `upscaler-support-test` and `widescreen-test` run there and match the
   current settings.

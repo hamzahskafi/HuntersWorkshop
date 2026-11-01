@@ -656,9 +656,9 @@ bool ServerJoinRoom(std::uint64_t room_id, Json& reply, std::string& error) {
 }
 
 bool ServerLeaveRoom(const std::string& session_id, int member_id, Json& reply,
-                     std::string& error) {
+                     std::string& error, int timeout_ms) {
     Json body = {{"SessionId", session_id}, {"MemberId", member_id}};
-    return NpPost("/mp/matching2/leave_room", body, reply, error);
+    return NpPost("/mp/matching2/leave_room", body, reply, error, timeout_ms);
 }
 
 int ServerHeartbeat(const std::string& session_id, int member_id) {

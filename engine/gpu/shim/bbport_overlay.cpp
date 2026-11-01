@@ -76,6 +76,8 @@ extern "C" const unsigned char bb_font_cjk_end[];
 #endif
 
 extern "C" void runtime_restart(void); // bb-probe (probe.c)
+extern "C" void bbnet_exit_begin(int timeout_ms); // bbnet_glue.cpp: out of a co-op room at exit
+extern "C" void bbnet_exit_wait(void);
 
 namespace Vulkan {
 extern std::atomic<u64> g_bb_compile_ns_total; // vk_pipeline_cache.cpp
@@ -1783,6 +1785,10 @@ void Menu() {
         if (ImGui::Button(
                 BbSettings::MenuText("Apply and restart game", "Применить и перезапустить игру"))) {
             BbSettings::Save();
+            // Out of a co-op room first, as closing the window is (bbgpu.cpp): the new process
+            // signs in as a new member, and the server kept the old one until its heartbeat aged.
+            bbnet_exit_begin(2000);
+            bbnet_exit_wait();
             runtime_restart();
         }
     }

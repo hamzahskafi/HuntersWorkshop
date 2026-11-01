@@ -4,11 +4,15 @@
 // the co-op contract bbhost found the game needs.
 #include "thd_internal.h"
 
+#include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <cstring>
 #include <memory>
 #include <mutex>
+#include <thread>
 #include <vector>
 
 #include "core/libraries/libs.h"
@@ -314,26 +318,77 @@ void forget_room_locked() {
     SignalingReset();
 }
 
+// ---- leaves owed to the server
+// Each leave the server is owed (the game's LeaveRoom, its context going away) is sent once, by the
+// thread that takes it first: the NP thread, or at the process's exit the exit's own (ExitBegin).
+// The server drops a member only when its heartbeat is 15 s old, so a leave never sent shows the
+// other players the hunter leaving late.
+struct OwedLeave {
+    std::uint64_t seq = 0;
+    std::string sid;
+    int member = 0;
+    std::uint64_t room = 0;
+};
+std::mutex g_leave_mu; // after g.mu, never before it
+std::condition_variable g_leave_cv;
+std::vector<OwedLeave> g_owed; // not taken yet
+int g_leaves_sending = 0;      // taken, not answered yet
+std::uint64_t g_leave_seq = 0;
+
+// For a taken leave (counted in g_leaves_sending).
+void send_leave(const OwedLeave& leave, int timeout_ms, bool at_exit) {
+    Json reply;
+    std::string err;
+    const std::int64_t start = NowMs();
+    if (!ServerLeaveRoom(leave.sid, leave.member, reply, err, timeout_ms)) {
+        Log("np: leave_room for room %llu failed after %lld ms%s: %s (the server drops us when our heartbeat "
+            "stops)",
+            static_cast<unsigned long long>(leave.room), static_cast<long long>(NowMs() - start),
+            at_exit ? " at exit" : "", err.c_str());
+    } else if (at_exit) {
+        Log("np: left room %llu at exit in %lld ms", static_cast<unsigned long long>(leave.room),
+            static_cast<long long>(NowMs() - start));
+    }
+    {
+        std::lock_guard lk(g_leave_mu);
+        --g_leaves_sending;
+    }
+    g_leave_cv.notify_all();
+}
+
+// The room the game is in, owed to the server, sent from the NP thread: queued now, so it reaches
+// the server before anything the game asks for next (a new room, a join).
+void owe_leave_locked() {
+    if (g.session_id.empty()) return;
+    std::uint64_t seq;
+    {
+        std::lock_guard lk(g_leave_mu);
+        seq = ++g_leave_seq;
+        g_owed.push_back({seq, g.session_id, static_cast<int>(g.member_id), g.room_id});
+    }
+    DispatchAfter(0, Prio::Request, [seq] {
+        OwedLeave leave;
+        {
+            std::lock_guard lk(g_leave_mu);
+            const auto it =
+                std::find_if(g_owed.begin(), g_owed.end(), [seq](const OwedLeave& o) { return o.seq == seq; });
+            if (it == g_owed.end()) return; // the exit took it
+            leave = std::move(*it);
+            g_owed.erase(it);
+            ++g_leaves_sending;
+        }
+        send_leave(leave, 8000, false);
+    });
+}
+
 // Our LeaveRoom (or the context going away): out of the server's room, DEAD for every member,
 // then 0x103 at +300 ms. The game's own thread calls this, with g.mu held: the server's leave is
 // sent from the NP thread, as every other server request is (it waited up to NpPost's 8 s there,
-// the game and every other caller of g.mu stopped meanwhile), queued now, so it reaches the server
-// before anything the game asks for next (a new room, a join) and before the callbacks below.
+// the game and every other caller of g.mu stopped meanwhile), queued before the callbacks below.
 void end_session_locked(const char* why) {
     if (!g.in_room && !g.leave_pending) return;
     Log("np: session over (%s): room %llu", why, static_cast<unsigned long long>(g.room_id));
-    if (!g.session_id.empty()) {
-        DispatchAfter(0, Prio::Request, [sid = g.session_id, member = static_cast<int>(g.member_id), room = g.room_id] {
-            Json reply;
-            std::string err;
-            const std::int64_t start = NowMs();
-            if (!ServerLeaveRoom(sid, member, reply, err)) {
-                Log("np: leave_room for room %llu failed after %lld ms: %s (the server drops us when our "
-                    "heartbeat stops)",
-                    static_cast<unsigned long long>(room), static_cast<long long>(NowMs() - start), err.c_str());
-            }
-        });
-    }
+    owe_leave_locked();
     std::vector<std::uint16_t> ids;
     for (const Peer& p : room_peers()) ids.push_back(p.member_id);
     schedule_dead(ids, kErrTerminatedByMyself, g.room_id, 0);
@@ -918,6 +973,67 @@ void RegisterMatching2(Core::Loader::SymbolsResolver* sym) {
     M2("HoqTrkS9c5Q", m2_set_room_member_data_internal);
     M2("wUmwXZHaX1w", m2_signaling_get_ping_info);
 #undef M2
+}
+
+namespace {
+struct ExitLeave {
+    std::mutex mu;
+    std::condition_variable cv;
+    bool done = false;
+    std::int64_t deadline_ms = 0;
+};
+std::shared_ptr<ExitLeave> g_exit_leave;
+} // namespace
+
+void ExitBegin(int timeout_ms) {
+    auto state = std::make_shared<ExitLeave>();
+    state->deadline_ms = NowMs() + timeout_ms;
+    g_exit_leave = state;
+    // Its own thread: the NP thread may be in a request of its own (a heartbeat waits up to 3 s), and
+    // a connection or name lookup is not bounded by the request's timeout; ExitWait's is the bound.
+    std::thread([state] {
+        std::vector<OwedLeave> mine;
+        {
+            std::lock_guard lk(g.mu);
+            // The room the game is in, as its LeaveRoom would leave it (the game's state is left as
+            // it is: the process ends, and a LeaveRoom meanwhile only sends one more leave).
+            if (g.in_room && !g.session_id.empty()) {
+                mine.push_back({0, g.session_id, static_cast<int>(g.member_id), g.room_id});
+            }
+        }
+        {
+            std::lock_guard lk(g_leave_mu);
+            for (OwedLeave& owed : g_owed) mine.push_back(std::move(owed));
+            g_owed.clear();
+            g_leaves_sending += static_cast<int>(mine.size());
+        }
+        for (const OwedLeave& leave : mine) {
+            send_leave(leave, static_cast<int>(std::max<std::int64_t>(state->deadline_ms - NowMs(), 100)), true);
+        }
+        {
+            // Those the NP thread is sending, answered before the process ends.
+            std::unique_lock lk(g_leave_mu);
+            const auto deadline = std::chrono::steady_clock::now() +
+                                  std::chrono::milliseconds(std::max<std::int64_t>(state->deadline_ms - NowMs(), 0));
+            g_leave_cv.wait_until(lk, deadline, [] { return g_leaves_sending == 0; });
+        }
+        {
+            std::lock_guard lk(state->mu);
+            state->done = true;
+        }
+        state->cv.notify_all();
+    }).detach();
+}
+
+void ExitWait() {
+    const std::shared_ptr<ExitLeave> state = g_exit_leave;
+    if (!state) return;
+    std::unique_lock lk(state->mu);
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds(std::max<std::int64_t>(state->deadline_ms - NowMs(), 0));
+    if (!state->cv.wait_until(lk, deadline, [&] { return state->done; })) {
+        Log("np: leaving the room at exit not answered in time (the server drops us when our heartbeat stops)");
+    }
 }
 
 } // namespace BbThd

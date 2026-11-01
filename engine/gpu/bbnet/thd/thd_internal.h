@@ -101,7 +101,8 @@ Peer PeersProvisional(const std::string& id, std::uint32_t addr, std::uint16_t p
 bool ServerContextStart(Json& reply, std::string& error);
 bool ServerCreateRoom(int max_members, const Json& extra, Json& reply, std::string& error);
 bool ServerJoinRoom(std::uint64_t room_id, Json& reply, std::string& error);
-bool ServerLeaveRoom(const std::string& session_id, int member_id, Json& reply, std::string& error);
+bool ServerLeaveRoom(const std::string& session_id, int member_id, Json& reply, std::string& error,
+                     int timeout_ms = 8000);
 int ServerHeartbeat(const std::string& session_id, int member_id); // 1 in the room, 0 not, -1 no answer
 bool ServerKickMember(const std::string& session_id, int member_id, int kicker_id,
                       const std::uint8_t* opt, std::size_t opt_len, std::string& error);

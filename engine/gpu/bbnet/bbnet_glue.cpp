@@ -391,6 +391,16 @@ extern "C" void bbnet_initialize(void) {
     Libraries::Np::NpManager::InitializeRuntime();
 }
 
+// The process is ending (the window closed, or Quit to Desktop): The Hunter's Dream's server is told
+// the player left the room (it hears nothing else until the heartbeat stops; shadNet keeps a TCP
+// connection to its server, which closes with the process).
+extern "C" void bbnet_exit_begin(int timeout_ms) {
+    if (BbThd::Enabled()) BbThd::ExitBegin(timeout_ms);
+}
+extern "C" void bbnet_exit_wait(void) {
+    if (BbThd::Enabled()) BbThd::ExitWait();
+}
+
 extern "C" void bbnet_set_image(unsigned char* image, uint64_t size) {
     BbThd::SetImage(image, size);
 }

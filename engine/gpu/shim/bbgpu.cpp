@@ -288,6 +288,10 @@ s32 PS4_SYSV_ABI sceKernelUsleep(u32 microseconds) {
 }
 } // namespace Libraries::Kernel
 
+// The online backend's leave at exit (bbnet_glue.cpp).
+extern "C" void bbnet_exit_begin(int timeout_ms);
+extern "C" void bbnet_exit_wait(void);
+
 namespace {
 // SDL video must be driven from one thread: the window lives on its own host thread.
 std::thread g_window_thread;
@@ -408,6 +412,11 @@ extern "C" int bbgpu_init(const BbGpuConfig* config) {
             std::printf("Exit: watchdog ended the process after %ld ms\n", watchdog_ms);
             TerminateNow(0);
         }).detach();
+        // Out of a co-op room before the process ends (Quit to Desktop closes the window too): The
+        // Hunter's Dream's server drops a member only when its heartbeat is 15 s old, so the other
+        // players saw the hunter leave late. Sent on its own thread, beside the cache save and the
+        // GPU drain below, and waited for with them, at most 2 s.
+        bbnet_exit_begin(2000);
         // Snapshot completed pipeline work and drain its asynchronous cache writes, on its own
         // thread: disk writes overlap the GPU drain below instead of preceding it.
         std::atomic<bool> cache_saved{false};
@@ -437,6 +446,7 @@ extern "C" int bbgpu_init(const BbGpuConfig* config) {
             cache_saved.wait(false, std::memory_order_acquire);
             saved = cache_saved.load(std::memory_order_acquire);
         }
+        bbnet_exit_wait();
         std::printf("Exit: clean shutdown in %lld ms\n",
                     static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(
                                                std::chrono::steady_clock::now() - exit_started)

@@ -29,5 +29,11 @@ void Register(Core::Loader::SymbolsResolver* sym);
 void SetImage(std::uint8_t* image, std::uint64_t size);
 // sceHttp: the headers the game server binds a request to the account and ruleset with.
 void AddGameHeaders(std::vector<std::pair<std::string, std::string>>& headers);
+// The process is ending (the window closed, or Quit to Desktop): out of the server's room before it
+// does, as the game's own LeaveRoom would have been. ExitBegin sends, from a thread of its own, the
+// leave for the room the game is in and any leave the NP thread has not sent yet; ExitWait returns
+// once they and those the NP thread is sending are answered, or `timeout_ms` after ExitBegin.
+void ExitBegin(int timeout_ms);
+void ExitWait();
 
 } // namespace BbThd
