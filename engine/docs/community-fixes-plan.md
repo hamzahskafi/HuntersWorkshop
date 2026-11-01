@@ -209,7 +209,7 @@ Each is written afresh from the code as it is, not taken from beta 23's branch.
 | **Frame generation and Reflex** | | |
 | Frame generation not offered (Decisions); NVIDIA Reflex not offered until its own design (Decisions) | — | S |
 | **Text and docs** | | |
-| Live resolution change explained (launcher and in-game): at any output other than 1920x1080 the upscaler takes the game's tone-mapped frame whatever Live resolution says; only 1920x1080 gets it before post-processing (§3.1 asks for before tone mapping; moving it is after 0.4.4) | NVIDIA §3.1 | S |
+| Live resolution change explained (launcher and in-game): at any output other than 1920x1080 the upscaler takes the game's tone-mapped frame whatever Live resolution says; only 1920x1080 gets it before post-processing (§3.1 asks for before tone mapping; moving it is not planned: the tester's call, 2026-11-01) | NVIDIA §3.1 | S |
 | The HDR mode hint (right, checked in beta 23); "not with HDR output" out of the frame-generation texts | — | S |
 | Translations: 13 launcher languages, 10 in-game | — | M |
 | Docs: `docs/upscaler.md`, release notes (beta 23's entry folded in), this plan; version 0.4.4-beta.25, engine id | — | S |
@@ -267,8 +267,7 @@ broad play, online.
 ### After 0.4.4
 
 AMD's official FSR frame generation (AMD's swapchain); OptiScaler compatibility re-checked, then kept or
-dropped; the proper DLSS test, then its cost table, then the §3.1 decision (DLSS at outputs other than
-1080p taking the image before tone mapping); live-path proxy trimming (upscale-2/3); the SSR patch's
+dropped; the proper DLSS test, then its cost table; live-path proxy trimming (upscale-2/3); the SSR patch's
 tuning writes measured (bbhost: 7.8 ms against the game's 6.1); smoothness and load hitches; less detail
 when the startup patch renders below 1080; the passes left unjittered (Lantern's DLSS audit; a likely slight
 wobble while panning) checked in HW; the message boxes' confirm delay (bbhost, Kyoskii; optional,
@@ -291,6 +290,9 @@ with Match display (pinned); the AMD/Intel shader-3 and CPU-bound items.
   beta 23 redone as 25, AMD 26, the PC memory model 27.
 - Beta 24's two questions (2026-11-01): the approach as described; +0x1a8 under FPS++ is Kyo's value.
 - DLSS's Project ID (2026-11-01): dropped; the shared id stays and the start code is not touched for it.
+- The upscaler's place at outputs other than 1080p (2026-11-01, the tester's call): it stays on the game's finished
+  frame. Taking it before tone mapping there (NVIDIA §3.1) would run the game's post-processing at the output
+  size, a renderer split the game was not built for, for a modest gain and a real cost; not planned.
 - Co-op: leaving the room on quit, in 25a (2026-11-01).
 
 ### Open questions
