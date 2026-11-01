@@ -22,7 +22,7 @@ namespace BloodborneLauncher.Core
             var memory = LowMemory(tail);
             if (memory != null) why += " " + memory;
             // OptiScaler hooks the submissions and runs DLSS itself: a device lost with it loaded
-            // says so (the engine runs a compatibility mode for it, Engine › OptiScaler compatibility).
+            // says so (the engine runs a compatibility mode for it, Engine switches › OptiScaler compatibility).
             if (tail.Any(DeviceLost) && OptiScalerVersion() is { } opti)
             {
                 // Its own frame generation on Vulkan runs through a D3D12 device it creates on the
@@ -30,7 +30,7 @@ namespace BloodborneLauncher.Core
                 var fg = OptiScalerFrameGeneration();
                 why += " " + (fg != null
                     ? L.F($"OptiScaler {opti} was loaded with its own frame generation on ({fg}); on Vulkan it runs through a D3D12 bridge that loses the GPU. Set Frame Generation to none in OptiScaler's menu (FGOutput=nofg in OptiScaler.ini) and use the launcher's frame generation instead.")
-                    : L.F($"OptiScaler {opti} was loaded: it hooks the game's GPU submissions and runs DLSS itself. Keep Engine › OptiScaler compatibility on; if the crash comes back, take OptiScaler's files out of engine\\out to rule it out."));
+                    : L.F($"OptiScaler {opti} was loaded: it hooks the game's GPU submissions and runs DLSS itself. Keep Engine switches › OptiScaler compatibility on; if the crash comes back, take OptiScaler's files out of engine\\out to rule it out."));
             }
             return why;
         }
@@ -94,7 +94,7 @@ namespace BloodborneLauncher.Core
                        L.T("(a resolution patch above 1080p, for example). Turn it off and choose the resolution in Display → Output resolution instead.");
             // Out of video memory first: a device lost often follows it in the same log.
             if (Has("ErrorOutOfDeviceMemory") || Has("ErrorOutOfHostMemory"))
-                return L.T("The graphics card ran out of video memory. A lower output resolution or upscaler preset (Graphics), ") +
+                return L.T("The graphics card ran out of video memory. A lower output resolution or upscaler preset (Visuals), ") +
                        L.T("fewer texture or model mods, and closing other programs (browsers, recorders) leave it more room; ") +
                        L.T("keep \"Use more VRAM for textures\" off on cards with 4-6 GB.");
             if (tail.Any(DeviceLost))
@@ -118,7 +118,7 @@ namespace BloodborneLauncher.Core
                 ulong.TryParse(fault.Groups[3].Value[8..], System.Globalization.NumberStyles.HexNumber, null, out var at) &&
                 at is >= 0x28ce7b0 and < 0x28cf580)
                 return $"The game crashed drawing an effect trail ({fault.Groups[3].Value}), a known crash on newer Intel CPUs. " +
-                       "Turn on Graphics › Experimental › Effect trail crash fix: it stops this crash, " +
+                       "Turn on Engine switches › Experimental engine features › Effect trail crash fix: it stops this crash, " +
                        "and that kind of effect trail is no longer drawn.";
             if (fault != null)
                 return fault.Groups[1].Value == "Guest"

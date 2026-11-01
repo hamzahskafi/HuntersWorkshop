@@ -1,5 +1,10 @@
 # DLSS Frame Generation and the upscaler options (2026-10-22)
 
+**Not offered since 0.4.4 beta 26** (the tester's call in beta 23; `community-fixes-plan.md`, Decisions):
+`BbSettings::FrameGenOffered` is false, so `frame_gen` (and `BB_FRAME_GEN`) reads as off with a log line,
+the in-game items and the launcher's rows are left out, and Streamline is never loaded for it. What
+follows describes the code, which stays until frame generation is decided on.
+
 `frame_gen=dlss` in `config.ini` (the menu's Frame generation > DLSS, the launcher's Graphics
 page) runs NVIDIA DLSS Frame Generation (DLSS-G) through NVIDIA Streamline. Off by default;
 loaded at start (a change needs a restart), switched on and off live once loaded. FSR 3.1 frame

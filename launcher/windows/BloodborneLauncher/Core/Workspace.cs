@@ -252,7 +252,7 @@ namespace BloodborneLauncher.Core
                 else if (!_iniWarned)
                 {
                     _iniWarned = true;
-                    Log("config.ini not written: the engine folder is not set (Settings › Engine).", LogLevel.Warn);
+                    Log("config.ini not written: the engine folder is not set (Settings › Engine folder).", LogLevel.Warn);
                 }
                 Saved?.Invoke();
             }

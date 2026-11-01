@@ -121,7 +121,11 @@ namespace BloodborneLauncher.Views
             Add(Card(SymbolRegular.Games24, L.T("Add to Steam"),
                 L.T("Bloodborne as a non-Steam game in your Steam library: Steam Input, the overlay and Big Picture work with it"),
                 SmallButton(L.T("Add to Steam"), SymbolRegular.Add24, (_, _) => AddToSteam()), out _));
+            // 0.4.4 beta 26: from the Display page, beside the game it is about.
+            SettingCombo(SymbolRegular.Translate24, L.T("Game language"), L.T("The game's own text and voices"), Choices.GameLanguages, "language");
 
+            // ==================== Saves ====================
+            Group(L.T("Saves"));
             // Player profiles: each its own saves and trophies (a button with a menu, not a drop-down,
             // so a click can't pick an entry by itself).
             _profileButton = SmallButton("Main", SymbolRegular.Person24, (_, _) => ShowProfileMenu());
@@ -165,9 +169,6 @@ namespace BloodborneLauncher.Views
             Add(Card(SymbolRegular.ArrowImport24, L.T("Import saves"),
                 L.T("From shadPS4, another Bloodborne port, or a PS4 save exported decrypted (Apollo Save Tool, Save Wizard). This profile's saves are backed up first"),
                 SmallButton(L.T("Import…"), SymbolRegular.FolderArrowRight24, (_, _) => ImportSaves()), out _));
-
-            ComboRow(SymbolRegular.LocalLanguage24, L.T("In-game menu language"), L.T("The port's settings menu (Insert or L3 + R3)"),
-                Choices.MenuLanguages, () => Ini.Get("menu_language", "en"), v => Ini.Set("menu_language", v));
 
             _clock = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
             _clock.Tick += (_, _) => UpdateRunning();
@@ -280,7 +281,7 @@ namespace BloodborneLauncher.Views
             if (game.Running)
             {
                 var up = DateTime.Now - game.StartedAt;
-                _playStatus.Text = L.F($"Running for {(int)up.TotalMinutes}:{up.Seconds:00}  ·  output on the Game output page");
+                _playStatus.Text = L.F($"Running for {(int)up.TotalMinutes}:{up.Seconds:00}  ·  output on the Log page");
                 _clock.Start();
             }
             else

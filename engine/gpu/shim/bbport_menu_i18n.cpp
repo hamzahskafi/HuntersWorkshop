@@ -160,8 +160,6 @@ constexpr Entry kSpanish[] = {
      "Aplicar y reiniciar el juego"},
     {"Other",
      "Otros"},
-    {"FPS counter in corner",
-     "Contador de FPS en la esquina"},
     {"Note while shaders build",
      "Aviso al compilar shaders"},
     {"Shows \"Building shaders\" in a corner while the game builds shaders for a place it shows for the first time. A stutter with this note is shader building and is gone on the next visit; one without it is loading.",
@@ -279,6 +277,13 @@ constexpr Entry kSpanish[] = {
      "Siempre"},
     {"The parts of the compatibility mode, each applied after a restart. Turn one off only to find which one a crash with OptiScaler comes from, and post your log either way.",
      "Las partes del modo de compatibilidad, cada una aplicada tras reiniciar. Desactiva una solo para averiguar de cuál viene un cierre con OptiScaler, y comparte tu registro en cualquier caso."},
+    // 0.4.4 beta 26: the camera section under the launcher's name for it, and HDR source.
+    {"Camera tuning",
+     "Ajuste de cámara"},
+    {"Turn on Camera tuning in the launcher (Gameplay) before starting; changes here are live.",
+     "Activa el ajuste de cámara en el launcher (Jugabilidad) antes de empezar; los cambios aquí se aplican al momento."},
+    {"HDR source",
+     "Fuente HDR"},
 };
 
 // Portuguese, Brazil (pt_BR)
@@ -418,8 +423,6 @@ constexpr Entry kPortugueseBrazil[] = {
      "Aplicar e reiniciar o jogo"},
     {"Other",
      "Outros"},
-    {"FPS counter in corner",
-     "Contador de FPS no canto"},
     {"Note while shaders build",
      "Aviso ao compilar shaders"},
     {"Shows \"Building shaders\" in a corner while the game builds shaders for a place it shows for the first time. A stutter with this note is shader building and is gone on the next visit; one without it is loading.",
@@ -537,6 +540,13 @@ constexpr Entry kPortugueseBrazil[] = {
      "Sempre"},
     {"The parts of the compatibility mode, each applied after a restart. Turn one off only to find which one a crash with OptiScaler comes from, and post your log either way.",
      "As partes do modo de compatibilidade, cada uma aplicada após reiniciar. Desligue uma só para descobrir de qual vem um travamento com o OptiScaler e envie seu log de qualquer forma."},
+    // 0.4.4 beta 26: the camera section under the launcher's name for it, and HDR source.
+    {"Camera tuning",
+     "Ajuste de câmera"},
+    {"Turn on Camera tuning in the launcher (Gameplay) before starting; changes here are live.",
+     "Ative o ajuste de câmera no launcher (Jogabilidade) antes de iniciar; as mudanças aqui valem na hora."},
+    {"HDR source",
+     "Fonte HDR"},
 };
 
 // French (fr)
@@ -678,8 +688,6 @@ constexpr Entry kFrench[] = {
      "Appliquer et redémarrer le jeu"},
     {"Other",
      "Divers"},
-    {"FPS counter in corner",
-     "Compteur FPS dans le coin"},
     {"Note while shaders build",
      "Message pendant la compilation des shaders"},
     {"Shows \"Building shaders\" in a corner while the game builds shaders for a place it shows for the first time. A stutter with this note is shader building and is gone on the next visit; one without it is loading.",
@@ -797,6 +805,13 @@ constexpr Entry kFrench[] = {
      "Toujours"},
     {"The parts of the compatibility mode, each applied after a restart. Turn one off only to find which one a crash with OptiScaler comes from, and post your log either way.",
      "Les parties du mode de compatibilité, chacune appliquée après un redémarrage. N'en désactivez une que pour trouver laquelle provoque un plantage avec OptiScaler, et envoyez votre journal dans tous les cas."},
+    // 0.4.4 beta 26: the camera section under the launcher's name for it, and HDR source.
+    {"Camera tuning",
+     "Réglage de la caméra"},
+    {"Turn on Camera tuning in the launcher (Gameplay) before starting; changes here are live.",
+     "Activez le réglage de la caméra dans le launcher (Jouabilité) avant de lancer ; les changements ici s'appliquent aussitôt."},
+    {"HDR source",
+     "Source HDR"},
 };
 
 // German (de)
@@ -938,8 +953,6 @@ constexpr Entry kGerman[] = {
      "Übernehmen und Spiel neu starten"},
     {"Other",
      "Sonstiges"},
-    {"FPS counter in corner",
-     "FPS-Anzeige in der Ecke"},
     {"Note while shaders build",
      "Hinweis beim Erstellen von Shadern"},
     {"Shows \"Building shaders\" in a corner while the game builds shaders for a place it shows for the first time. A stutter with this note is shader building and is gone on the next visit; one without it is loading.",
@@ -1057,6 +1070,13 @@ constexpr Entry kGerman[] = {
      "Immer"},
     {"The parts of the compatibility mode, each applied after a restart. Turn one off only to find which one a crash with OptiScaler comes from, and post your log either way.",
      "Die Teile des Kompatibilitätsmodus, jeder gilt nach einem Neustart. Schalte einen nur aus, um herauszufinden, von welchem ein Absturz mit OptiScaler kommt, und schick dein Log in jedem Fall mit."},
+    // 0.4.4 beta 26: the camera section under the launcher's name for it, and HDR source.
+    {"Camera tuning",
+     "Kameraanpassung"},
+    {"Turn on Camera tuning in the launcher (Gameplay) before starting; changes here are live.",
+     "Schalte die Kameraanpassung vor dem Start im Launcher ein (Spielablauf); Änderungen hier gelten sofort."},
+    {"HDR source",
+     "HDR-Quelle"},
 };
 
 // Italian (it)
@@ -1198,8 +1218,6 @@ constexpr Entry kItalian[] = {
      "Applica e riavvia il gioco"},
     {"Other",
      "Altro"},
-    {"FPS counter in corner",
-     "Contatore FPS nell'angolo"},
     {"Note while shaders build",
      "Avviso durante la compilazione degli shader"},
     {"Shows \"Building shaders\" in a corner while the game builds shaders for a place it shows for the first time. A stutter with this note is shader building and is gone on the next visit; one without it is loading.",
@@ -1317,6 +1335,13 @@ constexpr Entry kItalian[] = {
      "Sempre"},
     {"The parts of the compatibility mode, each applied after a restart. Turn one off only to find which one a crash with OptiScaler comes from, and post your log either way.",
      "Le parti della modalità compatibilità, ognuna applicata dopo un riavvio. Disattivane una solo per capire da quale viene un crash con OptiScaler, e invia comunque il tuo log."},
+    // 0.4.4 beta 26: the camera section under the launcher's name for it, and HDR source.
+    {"Camera tuning",
+     "Regolazione della telecamera"},
+    {"Turn on Camera tuning in the launcher (Gameplay) before starting; changes here are live.",
+     "Attiva la regolazione della telecamera nel launcher (Gameplay) prima di avviare; le modifiche qui valgono subito."},
+    {"HDR source",
+     "Sorgente HDR"},
 };
 
 // Polish (pl)
@@ -1455,8 +1480,6 @@ constexpr Entry kPolish[] = {
      "Zastosuj i uruchom grę ponownie"},
     {"Other",
      "Inne"},
-    {"FPS counter in corner",
-     "Licznik FPS w rogu"},
     {"Note while shaders build",
      "Komunikat podczas budowania shaderów"},
     {"Shows \"Building shaders\" in a corner while the game builds shaders for a place it shows for the first time. A stutter with this note is shader building and is gone on the next visit; one without it is loading.",
@@ -1574,6 +1597,13 @@ constexpr Entry kPolish[] = {
      "Zawsze"},
     {"The parts of the compatibility mode, each applied after a restart. Turn one off only to find which one a crash with OptiScaler comes from, and post your log either way.",
      "Części trybu zgodności, każda działa po restarcie. Wyłączaj je tylko po to, by znaleźć, która powoduje awarię z OptiScalerem, i w każdym razie wyślij log."},
+    // 0.4.4 beta 26: the camera section under the launcher's name for it, and HDR source.
+    {"Camera tuning",
+     "Strojenie kamery"},
+    {"Turn on Camera tuning in the launcher (Gameplay) before starting; changes here are live.",
+     "Włącz strojenie kamery w launcherze (Rozgrywka) przed uruchomieniem; zmiany tutaj działają od razu."},
+    {"HDR source",
+     "Źródło HDR"},
 };
 
 // Turkish (tr)
@@ -1712,8 +1742,6 @@ constexpr Entry kTurkish[] = {
      "Uygula ve oyunu yeniden başlat"},
     {"Other",
      "Diğer"},
-    {"FPS counter in corner",
-     "Köşede FPS sayacı"},
     {"Note while shaders build",
      "Gölgelendiriciler derlenirken bildirim"},
     {"Shows \"Building shaders\" in a corner while the game builds shaders for a place it shows for the first time. A stutter with this note is shader building and is gone on the next visit; one without it is loading.",
@@ -1831,6 +1859,13 @@ constexpr Entry kTurkish[] = {
      "Her zaman"},
     {"The parts of the compatibility mode, each applied after a restart. Turn one off only to find which one a crash with OptiScaler comes from, and post your log either way.",
      "Uyumluluk modunun parçaları; her biri yeniden başlatınca uygulanır. Birini yalnızca OptiScaler ile çökmenin hangisinden geldiğini bulmak için kapatın ve her durumda günlüğünüzü paylaşın."},
+    // 0.4.4 beta 26: the camera section under the launcher's name for it, and HDR source.
+    {"Camera tuning",
+     "Kamera ayarı"},
+    {"Turn on Camera tuning in the launcher (Gameplay) before starting; changes here are live.",
+     "Başlatmadan önce launcher'da kamera ayarını açın (Oynanış); buradaki değişiklikler hemen uygulanır."},
+    {"HDR source",
+     "HDR kaynağı"},
 };
 
 // Simplified Chinese (zh_CN). Lantern Menu SC (Noto Sans SC subset) supplies CJK glyphs.
@@ -1851,7 +1886,7 @@ constexpr Entry kChinese[] = {
     {"Active: HDR10 (PQ, BT.2020)", "已启用：HDR10（PQ、BT.2020）"},
     {"Native (from the game's HDR scene)", "原生（取自游戏 HDR 场景）"},
     {"Expand (from the SDR picture)", "扩展（取自 SDR 画面）"},
-    {"HDR mode", "HDR 模式"},
+    {"HDR source", "HDR 源"},
     {"Native: the brightness of lamps, fire, the moon and other highlights comes from the game's own HDR scene, before its tonemap clipped it to SDR white. Midtones, colours and the UI stay as in the SDR picture. Menus, loading screens and movies (no scene) use Expand. Expand: the SDR picture's brightest parts are stretched towards the peak.", "原生：灯光、火焰、月亮等高光取自游戏原始 HDR 场景，保留色调映射到 SDR 白色之前的亮度。中间调、色彩和界面保持 SDR 外观。菜单、加载画面和过场视频没有场景数据，会使用扩展模式。扩展：将 SDR 画面最亮的部分提升至设定的峰值亮度。"},
     {"Paper white (nits)", "纸白亮度（尼特）"},
     {"Peak brightness (nits)", "峰值亮度（尼特）"},
@@ -1929,7 +1964,6 @@ constexpr Entry kChinese[] = {
     {"Infinite consumables", "消耗品无限"},
     {"Molotovs, knives, pebbles, oil urns, antidotes, sedatives, elixirs, papers, Numbing Mist, Shining Coins and similar tools are not used up. Not Blood Vials or Quicksilver Bullets (above), key items, materials, or Insight and Blood Echo items. Off restores the item data.", "燃烧瓶、飞刀、石块、油壶、解毒药、镇静剂、药剂、附魔纸、麻痹雾、闪光硬币等工具不会耗尽。不包括上方的采血瓶和水银子弹，也不包括关键道具、材料、灵视及血之回响类道具。关闭后恢复原始物品数据。"},
     {"Other", "其他"},
-    {"FPS counter in corner", "显示角落帧率统计"},
     {"Note while shaders build",
      "着色器构建时显示提示"},
     {"Shows \"Building shaders\" in a corner while the game builds shaders for a place it shows for the first time. A stutter with this note is shader building and is gone on the next visit; one without it is loading.",
@@ -1970,8 +2004,8 @@ constexpr Entry kChinese[] = {
     {"Upscaler unavailable: %s", "超分辨率不可用：%s"},
     {"The mode selected above is active. You can select it again to retry.", "上方所选模式已启用，可再次选择以重试。"},
     {"Display (auto)", "显示器分辨率（自动）"},
-    {"PC Camera", "PC 镜头"},
-    {"Enable PC Camera in the launcher before starting; changes here are live.", "请在启动前于启动器开启 PC 镜头；此处调整即时生效。"},
+    {"Camera tuning", "镜头调校"},
+    {"Turn on Camera tuning in the launcher (Gameplay) before starting; changes here are live.", "请在启动前于启动器“游戏玩法”中开启镜头调校；此处调整即时生效。"},
     {"Camera FOV scale", "视野倍率"},
     {"Camera distance scale", "镜头距离倍率"},
     {"Camera height scale", "镜头高度倍率"},

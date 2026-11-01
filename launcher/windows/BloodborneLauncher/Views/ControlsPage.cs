@@ -70,15 +70,35 @@ namespace BloodborneLauncher.Views
             IniToggle(SymbolRegular.ArrowSortDown24, L.T("Invert vertical"), null, "mouse_invert_y", mouse);
             IniToggle(SymbolRegular.ArrowRotateClockwise24, L.T("Camera auto-rotation"), L.T("Let the camera turn by itself with movement, as with a gamepad"),
                 "mouse_auto_rotation", mouse);
-            ComboRow(SymbolRegular.KeyboardShift24, L.T("Button prompts"),
-                L.T("The button icons in the game's menus and prompts. Automatic shows your keys while the keyboard or mouse is in use, and the controller's buttons with a controller; also in-game under System › PC Controls"),
-                Choices.ButtonPrompts, () => Ini.Get("button_prompts", "auto"), v => Ini.Set("button_prompts", v), mouse);
             Body.Children.Add(mouse);
             ToggleRow(SymbolRegular.CursorHoverOff24, L.T("Hide mouse cursor"), L.T("Hidden 2 seconds after the mouse stops moving; moving it brings it back"),
                 () => Ini.Get("hide_cursor", "1") != "0", v => Ini.Set("hide_cursor", v ? "1" : "0"));
             void Enable() => mouse.IsEnabled = pc.IsChecked == true;
             pc.Click += (_, _) => { Enable(); Rebuild(); };
             Enable();
+
+            Group(L.T("Gamepad"));
+            Add(Card(SymbolRegular.XboxController24, L.T("Controller"), "", null, out _padStatus));
+            IniToggle(SymbolRegular.ArrowSwap24, L.T("Swap sticks"), L.T("Move with the right stick and look with the left"), "pad_swap_sticks", changed: () => Rebuild());
+            IniToggle(SymbolRegular.ArrowBidirectionalLeftRight24, L.T("Invert camera left / right"), L.T("The camera stick's horizontal direction"), "pad_invert_look_x");
+            IniToggle(SymbolRegular.ArrowBidirectionalUpDown24, L.T("Invert camera up / down"), L.T("The camera stick's vertical direction"), "pad_invert_look_y");
+            SliderRow(SymbolRegular.CircleSmall24, L.T("Stick dead zone"),
+                L.T("Ignores small stick movement, for sticks that drift. 0 = off (the game's own)"), 0, 30, 1,
+                () => double.TryParse(Ini.Get("pad_deadzone", "0"), out var v) ? v : 0,
+                v => Ini.Set("pad_deadzone", ((int)Math.Round(v)).ToString()), format: "0'%'");
+            // 0.4.4 beta 26: from the engine switches (BB_GAMEPAD), beside the other controller settings.
+            SwitchRow(EngineSwitches.All.Single(x => x.Env == "BB_GAMEPAD"), SymbolRegular.XboxController24);
+
+            // Button icons for the keyboard and the controller, side by side (0.4.4 beta 26: Button
+            // prompts was in the mouse panel, so turning PC controls off greyed it out).
+            Group(L.T("Button icons"));
+            ComboRow(SymbolRegular.KeyboardShift24, L.T("Button prompts"),
+                L.T("The button icons in the game's menus and prompts. Automatic shows your keys while the keyboard or mouse is in use, and the controller's buttons with a controller; also in-game under System › PC Controls"),
+                Choices.ButtonPrompts, () => Ini.Get("button_prompts", "auto"), v => Ini.Set("button_prompts", v));
+            ComboRow(SymbolRegular.Games24, L.T("Controller icons"),
+                L.T("The controller's buttons in the game's menus and prompts. Automatic shows PlayStation buttons with a PlayStation controller ") +
+                L.T("and Xbox buttons (A, B, X, Y, LB, RT…) with any other; rebound buttons show as bound. Also in-game under System › PC Controls"),
+                Choices.PadIcons, () => Ini.Get("pad_icons", "auto"), v => Ini.Set("pad_icons", v));
 
             // ==================== Profiles ====================
             Group(L.T("Profiles"));
@@ -97,20 +117,6 @@ namespace BloodborneLauncher.Views
             share.Children.Add(SmallButton(L.T("Import from link…"), SymbolRegular.Link24, async (_, _) => await ImportLinkAsync()));
             foreach (FrameworkElement b in share.Children) b.Margin = new Thickness(0, 4, 6, 0);
             Body.Children.Add(share);
-
-            Group(L.T("Gamepad"));
-            Add(Card(SymbolRegular.XboxController24, L.T("Controller"), "", null, out _padStatus));
-            ComboRow(SymbolRegular.Games24, L.T("Controller icons"),
-                L.T("The controller's buttons in the game's menus and prompts. Automatic shows PlayStation buttons with a PlayStation controller ") +
-                L.T("and Xbox buttons (A, B, X, Y, LB, RT…) with any other; rebound buttons show as bound. Also in-game under System › PC Controls"),
-                Choices.PadIcons, () => Ini.Get("pad_icons", "auto"), v => Ini.Set("pad_icons", v));
-            IniToggle(SymbolRegular.ArrowSwap24, L.T("Swap sticks"), L.T("Move with the right stick and look with the left"), "pad_swap_sticks", changed: () => Rebuild());
-            IniToggle(SymbolRegular.ArrowBidirectionalLeftRight24, L.T("Invert camera left / right"), L.T("The camera stick's horizontal direction"), "pad_invert_look_x");
-            IniToggle(SymbolRegular.ArrowBidirectionalUpDown24, L.T("Invert camera up / down"), L.T("The camera stick's vertical direction"), "pad_invert_look_y");
-            SliderRow(SymbolRegular.CircleSmall24, L.T("Stick dead zone"),
-                L.T("Ignores small stick movement, for sticks that drift. 0 = off (the game's own)"), 0, 30, 1,
-                () => double.TryParse(Ini.Get("pad_deadzone", "0"), out var v) ? v : 0,
-                v => Ini.Set("pad_deadzone", ((int)Math.Round(v)).ToString()), format: "0'%'");
 
             // ==================== Bindings ====================
             var header = new Grid { Margin = new Thickness(2, 24, 0, 8) };

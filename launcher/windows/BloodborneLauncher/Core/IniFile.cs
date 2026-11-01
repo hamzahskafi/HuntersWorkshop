@@ -10,10 +10,14 @@ namespace BloodborneLauncher.Core
     /// </summary>
     public sealed class IniFile
     {
+        /// <summary>The keys a new config.ini gets, at the engine's own defaults (bbport_settings.h).
+        /// 0.4.4 beta 26: the upscaler and preset as the engine's, FSR 3.1 at Native AA, which run on any
+        /// GPU (were FSR 4 at Ultra Performance); the first start's Best settings for this PC still
+        /// offers DLSS, FSR 4 and a preset by GPU. A config.ini that has them keeps its own.</summary>
         public static readonly (string Key, string Value)[] Defaults =
         {
-            ("upscaler", "fsr4"),
-            ("preset", "4"),
+            ("upscaler", "fsr3"),
+            ("preset", "0"),
             ("sharpen", "1"),
             ("sharpness", "0.20"),
             ("object_motion", "1"),

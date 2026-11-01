@@ -67,7 +67,7 @@ namespace BloodborneLauncher.Views
 
             Group(L.T("Blood Echoes"));
             IniToggle(SymbolRegular.Heart24, L.T("Keep echoes on death"), L.T("Dying never drops your Blood Echoes, so there is nothing to pick back up"), "cheat_keep_echoes");
-            ComboRow(SymbolRegular.ArrowTrendingLines24, L.T("Echoes from kills"), L.T("Enemies already loaded give the new amount after you rest at a lamp or reload"),
+            ComboRow(SymbolRegular.ArrowTrendingLines24, L.T("Blood Echo multiplier"), L.T("Enemies already loaded give the new amount after you rest at a lamp or reload"),
                 new[] { new Choice(L.T("Normal"), "1"), new Choice("x2", "2"), new Choice("x5", "5"), new Choice("x10", "10") },
                 () => Ini.Get("cheat_echo_multiplier", "1"), v => Ini.Set("cheat_echo_multiplier", v));
             Add(Card(SymbolRegular.Add24, L.T("Add echoes or insight"), L.T("In the in-game menu (Insert or L3 + R3): +1,000, +10,000, +100,000 echoes and +1 insight"), null, out _));

@@ -31,22 +31,18 @@ namespace BloodborneLauncher.Views
                 Body.Children.Add(Text(L.T("Online play is paused in this version. The game starts offline whatever is set here; ") +
                                        L.T("your settings are kept for when it returns."), "Faint"));
 
-            Group(L.T("Play"));
+            // One group for the one server (0.4.4 beta 26: three groups of one or two rows, and a Server
+            // choice with nothing else to choose).
+            Group(L.T("The Hunter's Dream"));
             _online = ToggleRow(SymbolRegular.Globe24, L.T("Play online"), L.T("Off: the game stays offline"),
                 () => Ini.Get("online_enabled") == "1", v => Ini.Set("online_enabled", v ? "1" : "0"));
-
-            Group(L.T("Server"));
-            ComboRow(SymbolRegular.Server24, L.T("Server"), L.T("Messages, bloodstains, ghosts, co-op and invasions"),
-                Choices.OnlineServers, () => "huntersdream", _ => { });
-            Add(Card(SymbolRegular.Globe24, L.T("The Hunter's Dream"), L.T("Players online, the map and your hunter's profile"),
-                SmallButton(L.T("Open website"), SymbolRegular.Open24, (_, _) =>
-                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(LauncherSettings.OnlineCommunity) { UseShellExecute = true })),
-                out _));
-
-            Group(L.T("The Hunter's Dream account"));
             _hdButton = SmallButton(L.T("Connect"), SymbolRegular.Person24, async (_, _) => await LinkAsync());
             Add(Card(SymbolRegular.PersonAccounts24, L.T("Hunter's Dream account"), null, _hdButton, out _hdHint));
             ShowLink();
+            Add(Card(SymbolRegular.Server24, L.T("Website"), L.T("Players online, the map and your hunter's profile"),
+                SmallButton(L.T("Open website"), SymbolRegular.Open24, (_, _) =>
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(LauncherSettings.OnlineCommunity) { UseShellExecute = true })),
+                out _));
 
             Group(L.T("Connection"));
             IniText(SymbolRegular.Router24, L.T("Local P2P port"), L.T("Empty: 3658, the PS4's"), "3658", "online_p2p_port", 120);

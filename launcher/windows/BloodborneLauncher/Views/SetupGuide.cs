@@ -318,7 +318,7 @@ namespace BloodborneLauncher.Views
                 case Step.Files:
                     _title.Text = L.T("3. Files check");
                     _intro.Text = L.T("A copy can stop half way, an antivirus can take eboot.bin away, and OneDrive can keep files online only. This step looks for the files the engine reads before the game starts.") + "\n\n" +
-                                  L.T("When you press Play, the engine also checks that eboot.bin is exactly the 1.09 one, and if it is not, the Game output page says what to do.");
+                                  L.T("When you press Play, the engine also checks that eboot.bin is exactly the 1.09 one, and if it is not, the Log page says what to do.");
                     if (!NeedsGame()) break;
                     Lines(SetupStep.Files);
                     _actions.Children.Add(ActionButton(L.T("Check again"), SymbolRegular.ArrowSync24, () => _ = CheckAsync()));
@@ -343,7 +343,7 @@ namespace BloodborneLauncher.Views
 
                 case Step.Style:
                     _title.Text = L.T("5. How it should run");
-                    _intro.Text = L.T("Pick what matters most to you. Each choice is sized to this PC (its graphics card, screen and processor), and only changes the launcher's settings, never the game files. You can change any of it later on the Graphics and Display pages.");
+                    _intro.Text = L.T("Pick what matters most to you. Each choice is sized to this PC (its graphics card, screen and processor), and only changes the launcher's settings, never the game files. You can change any of it later on the Display and Upscaling pages.");
                     if (_hardware != null) ShowWhere(_hardware.Summary);
                     foreach (var choice in Hardware.Styles)
                         _results.Children.Add(StyleCard(choice));

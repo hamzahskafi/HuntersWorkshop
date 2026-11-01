@@ -1,7 +1,7 @@
 namespace BloodborneLauncher.Core
 {
     /// <summary>
-    /// Graphics › Engine preset: the newer engine features on or off in one go. New is the default;
+    /// Engine switches › Engine preset: the newer engine features on or off in one go. New is the default;
     /// Legacy runs the engine the way the 0.9.33 stable did (the features that were only on in
     /// betas off). The shader compiler and occlusion culling are switches of their own. Changing a single feature by hand shows Custom.
     /// </summary>

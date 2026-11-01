@@ -1,6 +1,26 @@
 # Launcher layout: proposal
 
-**Status:** a proposal for the tester's review (2026-11-01). Nothing is built yet.
+**Status:** built in 0.4.4 beta 26 (2026-11-01). The tester took the four recommendations at the end, and
+the layout below is the one built, with the differences listed in "As built". The text below is the
+proposal as it was reviewed.
+
+## As built (beta 26)
+
+What differs from the proposal below, and why:
+
+- **Extra variables** sits at the top of Engine switches, under Changed switches, not at the bottom: it
+  is the other half of "what reaches the game", and a single row at the bottom would have been a group
+  of its own. Reset all leaves it alone (it is typed text).
+- **Gameplay:** Follow camera comes first in the Camera group, so Camera tuning's "the three settings
+  below" stays true; the second group is called **Extras** (Play already has a group called Game).
+- **The `fullscreen` default in settings.json stays:** the Linux launcher (`bbport_launcher.py`) reads it.
+- **Shared code:** the Avalonia launcher compiles the WPF launcher's `Core` folder and uses the same
+  translation files. Nothing it uses was removed (`EngineSwitches` keeps its groups; the WPF pages choose
+  which switches they show), so it builds and behaves as before, apart from the new config.ini defaults
+  and the hints that name the new places.
+- **In game:** the HDR source is "HDR 源" in Chinese (the menu font has no glyphs for 来 or 号), and the
+  camera section's note names the launcher's Gameplay page.
+
 
 - **Classic:** the WPF launcher's Classic layout is the one designed here.
 - **Modern:** it follows the same pages (its tab mapping is near the end).
@@ -197,7 +217,7 @@ Unchanged.
   - Shader compile threads · Area prefetch · Frame rate in the background.
 - **Sound:** Sound output · Sound threads first, both ← Settings › Performance · Run without sound.
 - **Game fixes:** unchanged.
-- **Extra variables** ← Settings › Diagnostics, at the bottom: for anything this page doesn't list. Its path becomes Engine switches › Extra variables.
+- **Extra variables** ← Settings › Diagnostics, at the bottom: for anything this page doesn't list. Its path becomes Engine switches › Extra variables. (Built at the top: see "As built".)
 
 ### Log (was Game output)
 

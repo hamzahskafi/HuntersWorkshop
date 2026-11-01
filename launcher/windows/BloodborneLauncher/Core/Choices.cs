@@ -46,6 +46,16 @@
             new(L.T("Off"), "off", L.T("Only while DLSS Frame Generation is off")),
         };
 
+        /// <summary>Display › Window mode (0.4.4 beta 26): config.ini's fullscreen with the launcher's
+        /// borderless_fullscreen (BB_EXCLUSIVE_FULLSCREEN=0), the two switches they were.</summary>
+        public static readonly Choice[] WindowModes =
+        {
+            new(L.T("Windowed"), "window"),
+            new(L.T("Borderless fullscreen"), "borderless", L.T("Trophy notifications and other windows show over the game")),
+            new(L.T("Fullscreen"), "fullscreen",
+                L.T("The driver may give the game the screen to itself (exclusive fullscreen): the lowest latency and G-SYNC's fullscreen-only mode, but trophy notifications and other windows don't show over it")),
+        };
+
         public static readonly Choice[] Presets =
         {
             new(L.T("Native AA (no upscaling; DLAA with DLSS)"), "0"),
@@ -169,7 +179,7 @@
             new("90 FPS", "90", L.F($"Kyo's 60 FPS++ with the engine's values for {90} FPS (Frame rate corrections). On a slower display the extra frames are drawn but never shown")),
             new("120 FPS", "120", L.F($"Kyo's 60 FPS++ with the engine's values for {120} FPS (Frame rate corrections). On a slower display the extra frames are drawn but never shown")),
             new("144 FPS", "144", L.F($"Kyo's 60 FPS++ with the engine's values for {144} FPS (Frame rate corrections). On a slower display the extra frames are drawn but never shown")),
-            new("240 FPS", "240", L.F($"Kyo's 60 FPS++ with the engine's values for {240} FPS. Needs Frame rate corrections (More › Engine): without them the game runs at {144}. On a slower display the extra frames are drawn but never shown")),
+            new("240 FPS", "240", L.F($"Kyo's 60 FPS++ with the engine's values for {240} FPS. Needs Frame rate corrections (Engine switches): without them the game runs at {144}. On a slower display the extra frames are drawn but never shown")),
             new(L.T("Uncapped"), "uncap", L.T("No limit: as fast as your PC can go, up to 480 FPS. Above 240 FPS the game is untested, and the old community uncapped patch froze in boss fights at such rates. For a high frame rate we recommend 240")),
         };
 

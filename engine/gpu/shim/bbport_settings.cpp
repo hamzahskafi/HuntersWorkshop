@@ -104,6 +104,12 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         v.frame_gen = value == "dlss"                     ? FrameGenDlss
                       : (value == "fsr3" || value == "1") ? FrameGenFsr3
                                                           : FrameGenOff;
+        // 0.4.4 beta 26: not offered (FrameGenOffered); saved back as off.
+        if (!FrameGenOffered && v.frame_gen != FrameGenOff) {
+            std::printf("Settings: frame generation is not offered in this version (frame_gen=%s); off\n",
+                        value.c_str());
+            v.frame_gen = FrameGenOff;
+        }
     } else if (key == "frame_gen_cap") {
         v.frame_gen_cap = i != 0;
     } else if (key == "frame_gen_frames") {

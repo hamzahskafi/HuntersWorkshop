@@ -7,13 +7,14 @@ using TextBox = System.Windows.Controls.TextBox;
 
 namespace BloodborneLauncher.Views
 {
-    /// <summary>The game's own output (run.py and bb-probe), live while it runs.</summary>
+    /// <summary>The game's own output (run.py and bb-probe), live while it runs, and what its log holds
+    /// (the Log options fold).</summary>
     public sealed class OutputPage : LauncherPage
     {
         private readonly TextBox _output;
         private readonly ToggleSwitch _follow;
 
-        public OutputPage() : base(L.T("Game output"), L.T("What run.py and the game print. Copy or export it when reporting a problem."))
+        public OutputPage() : base(L.T("Log"), "")
         {
             var bar = new Grid { Margin = new Thickness(0, 18, 0, 8) };
             bar.ColumnDefinitions.Add(new ColumnDefinition());
@@ -31,6 +32,28 @@ namespace BloodborneLauncher.Views
             Body.Children.Add(bar);
 
             SettingToggle(SymbolRegular.WindowConsole20, L.T("Show this page when the game starts"), null, "switch_to_output");
+            // What the game writes into its log (0.4.4 beta 26: from Settings › Diagnostics), beside the log.
+            var logs = Advanced(L.T("Log options"));
+            SettingCombo(SymbolRegular.DocumentText24, L.T("Log level"),
+                L.T("How much the game writes into its log: Standard for everyday play, Detailed when asked for a log of something odd, Debug only to chase a specific bug"),
+                Choices.LogLevels, "log_level", logs);
+            SettingToggle(SymbolRegular.TextBulletListSquare24, L.T("Frame statistics in the log"), "BB_FRAME_STATS", "frame_stats", logs);
+            SettingCombo(SymbolRegular.Pulse24, L.T("Hitch reports"),
+                L.T("A frame slower than this puts every thread's wait and stack in the log, for stutter reports. Pick about twice your frame time: 50 ms at 30 FPS, 40 at 60, 25 at 90, 20 at 120, 16 at 144 or uncapped. Each report pauses the game about 0.2 s; at most 12 a session, none in the first 20 s or just after a loading screen"),
+                Choices.HitchReports, "hitch_report_ms", logs);
+            SettingToggle(SymbolRegular.XboxController24, L.T("Controller details in the log"),
+                L.T("BB_PAD_LOG: each controller's USB ids, connection and rumble support, disconnects, the game's first vibration request and sticks past their round gate. For controller problems"),
+                "pad_log", logs);
+            SettingToggle(SymbolRegular.DeveloperBoard24, L.T("FSR 4 profile in the log"), "BB_FSR4_PROFILE", "fsr_profile", logs);
+            SettingToggle(SymbolRegular.DeveloperBoard24, L.T("GPU time in the log"),
+                L.T("BB_GPU_PROFILE: the GPU's time a frame by render pass, dispatch and upscaler, every 5 seconds. Costs a little GPU time"),
+                "gpu_profile", logs);
+            SettingToggle(SymbolRegular.Speaker224, L.T("Audio statistics in the log"), "BB_AUDIO_STATS", "audio_stats", logs);
+            SettingToggle(SymbolRegular.HourglassHalf24, L.T("Loading profile in the log"),
+                L.T("BB_SAMPLE_THREADS: where the game's main, render and file threads spend their time, every 5 seconds. For slow loading; costs a little speed"), "load_profile", logs);
+            SettingToggle(SymbolRegular.Timer24, L.T("Render stage timings in the log"), L.T("BB_SECTIONS: where each frame's CPU time goes (with frame statistics). Costs a little speed: a few tenths of a millisecond a frame on the draw recording thread"), "section_stats", logs);
+            SettingToggle(SymbolRegular.Camera24, L.T("Capture shaders"),
+                "BB_SHADER_CAPTURE: every shader the game uses is saved once to logs\\shaders (a few MB), for testing the new native shader compiler offline. Costs a little time the first time each shader is seen", "shader_capture", logs);
 
             _output = new TextBox { Height = 520, Margin = new Thickness(0, 4, 0, 0) };
             _output.SetResourceReference(StyleProperty, "CodeBox");

@@ -302,6 +302,9 @@ namespace BloodborneLauncher.Core
 
         public void Set(string key, string value) => _data[key] = value;
 
+        /// <summary>A setting's default, as Load seeds it (the Engine page's Reset all); null when it has none.</summary>
+        public static JsonNode? DefaultOf(string key) => Defaults().TryGetValue(key, out var value) ? value?.DeepClone() : null;
+
         /// <summary>Forgets a setting: it reads as absent ("" / false / 0) again.</summary>
         public void Remove(string key) => _data.Remove(key);
 

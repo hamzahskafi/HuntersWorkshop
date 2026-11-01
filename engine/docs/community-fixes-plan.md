@@ -28,28 +28,28 @@ HW's `Prepare()` calls and the sampler's `+0x...` print. Each address below says
 
 Beta 22 is the last build kept. **Beta 23 failed** (the tester's call, 2026-11-01): built and tested,
 then withdrawn (its section below). Beta 24 (the camera) is built on beta 22 (`claude/0.4.4-beta-24` from
-`claude/0.4.4-beta-22`); beta 23's work is redone as beta 25 on top of it, AMD's FSR SDK moves to beta 26
-and the PC memory model's removal to beta 27. Each beta gets its own branch, `claude/0.4.4-beta-N`. The
+`claude/0.4.4-beta-22`); beta 23's work is redone as beta 25 on top of it, the launcher's reorganisation is beta 26 (the tester's call,
+2026-11-01), AMD's FSR SDK beta 27 and the PC memory model's removal beta 28. Each beta gets its own branch, `claude/0.4.4-beta-N`. The
 reviews behind this plan are under "Lantern 0.9.39 and bbhost v0.2.20–v0.2.22, reviewed" below.
 
 ### Decisions
 
 | Topic | Decision |
 |---|---|
-| FSR | AMD FSR SDK 2.4 (FidelityFX-SDK `v2.4.0`, 28 October 2026) on Windows: AMD's signed `amd_fidelityfx_loader_vk.dll` and `amd_fidelityfx_upscaler_vk.dll` with AMD's licence notice. Every unofficial FSR path is removed, not kept (beta 26). |
+| FSR | AMD FSR SDK 2.4 (FidelityFX-SDK `v2.4.0`, 28 October 2026) on Windows: AMD's signed `amd_fidelityfx_loader_vk.dll` and `amd_fidelityfx_upscaler_vk.dll` with AMD's licence notice. Every unofficial FSR path is removed, not kept (beta 27). |
 | DLSS | The driver's NGX core, as up to beta 22, started with the shared application id 231313132 (`Init_Ext2`). **The shared id stays; no Project ID** (the tester's call, 2026-11-01): it brings HW nothing in practice, and the start code is not touched for it. The DLSS Programming Guide (310.6.0 §5.2.1) asks for one, but the core's entry point that takes it (`NVSDK_NGX_VULKAN_Init_ProjectID_Ext`, behind NVIDIA's `NVSDK_NGX_VULKAN_Init_with_ProjectID`) is declared nowhere public: beta 23 learned its arguments by disassembling NVIDIA's loader libraries, which the NVIDIA RTX SDKs licence (§4a) forbids. **Not Streamline** (§3.21), first chosen and built in beta 23: with its core loaded, NVIDIA's Vulkan driver presents through DXGI and holds V-Sync On (latest frame) to two frames a refresh (beta 23's section). NVIDIA's NGX loader library (`nvsdk_ngx_s.lib`/`_d.lib`, §5.1.1) is not linked: the DLSS SDK licence (§2e) forbids use that puts the SDK under an open-source licence (HW is GPL), and the library is built for MSVC while HW's Windows build is MSYS2 CLANG64. |
-| NVIDIA Reflex | Not offered from beta 25 (beta 23's ran through Streamline). It returns with a design of its own on `VK_NV_low_latency2` directly (the sleep before the frame's work, markers with present IDs), not built on frame generation's code, and measured against the 120 FPS cap first; which beta is open. |
+| NVIDIA Reflex | Not offered (beta 23's ran through Streamline; beta 26 took out its launcher row, and the in-game item shows only with Streamline loaded for a test). It returns with a design of its own on `VK_NV_low_latency2` directly (the sleep before the frame's work, markers with present IDs), not built on frame generation's code, and measured against the 120 FPS cap first; which beta is open. |
 | NVIDIA guide items | In beta 25 (its table; first built in beta 23). No DLSS cost table until a proper test (after 0.4.4). |
 | Credits | AMD and NVIDIA items credit AMD's SDK and NVIDIA's guide (ground rules). |
-| FSR frame generation | Set aside. The current one (FireBurn's) goes with FireBurn in beta 26; AMD's official one needs AMD's swapchain (its docs call dispatching without it "highly discouraged") and comes after 0.4.4. |
-| Frame generation | Not offered from beta 25 (the tester's call in beta 23; it may be deprecated before release): `frame_gen` reads as off, its menu items and launcher rows left out, the code kept. |
+| FSR frame generation | Set aside. The current one (FireBurn's) goes with FireBurn in beta 27; AMD's official one needs AMD's swapchain (its docs call dispatching without it "highly discouraged") and comes after 0.4.4. |
+| Frame generation | Not offered (the tester's call in beta 23; it may be deprecated before release): from beta 26 `frame_gen` reads as off (`BbSettings::FrameGenOffered`), its menu items and launcher rows left out, the code kept. |
 | OptiScaler | Set aside: the compatibility mode (`vk_optiscaler.h`) stays as it is, untested. The tester uses neither OptiScaler nor frame generation. Re-check after 0.4.4. |
 | Original camera | Fixed in HW's engine (beta 24): every per-frame weight of the follow camera, converted each frame with the frame timer. bbhost's weight list is a cross-check only; no code is taken from it or from Lantern. FPS++ becomes that base plus only what Kyo changed (beta 24). |
-| When AMD's or NVIDIA's runtime can't start | TAA, with a log line and a note in the game (DLSS falls back to FSR 3.1 until beta 26 removes it). |
+| When AMD's or NVIDIA's runtime can't start | TAA, with a log line and a note in the game (DLSS falls back to FSR 3.1 until beta 27 removes it). |
 | Linux | Set aside until Windows is done; notes kept below ("Linux, for later"). |
 | Test PC | RTX 3070 Ti; Windows HDR is off. HDR-output items are checked in the code, not in the tester's runs. DLSS's input point (§3.1, before tone mapping) concerns the game's internal image, so the runs do cover it. |
 | Frame lock / Match display | Pinned (ground rules). |
-| PC memory model | Removed before 0.4.4 ships, when the tester says (beta 27). |
+| PC memory model | Removed before 0.4.4 ships, when the tester says (beta 28). |
 | Live-path proxy trimming (upscale-2/3) | After 0.4.4 (recommended). |
 
 ### Beta 23: failed (its record: `claude/0.4.4-beta-23`)
@@ -207,7 +207,7 @@ Each is written afresh from the code as it is, not taken from beta 23's branch.
 | ~~HW's own Project ID through the NGX core's `NVSDK_NGX_VULKAN_Init_ProjectID_Ext`~~ **Dropped**: DLSS keeps the shared id 231313132 (Decisions; the tester's call, 2026-11-01) | NVIDIA §5.2.1 | — |
 | Streamline loaded only for DLSS-G (not offered) or a test (`BB_STREAMLINE=1`); the start log says why. The launcher no longer asks for Streamline's files for DLSS | — | S |
 | **Frame generation and Reflex** | | |
-| Frame generation not offered (Decisions); NVIDIA Reflex not offered until its own design (Decisions) | — | S |
+| Frame generation not offered (Decisions); NVIDIA Reflex not offered until its own design (Decisions). **Built in beta 26** (left as they were until 25b was checked) | — | S |
 | **Text and docs** | | |
 | Live resolution change explained (launcher and in-game): at any output other than 1920x1080 the upscaler takes the game's tone-mapped frame whatever Live resolution says; only 1920x1080 gets it before post-processing (§3.1 asks for before tone mapping; moving it is not planned: the tester's call, 2026-11-01) | NVIDIA §3.1 | S |
 | The HDR mode hint (right, checked in beta 23); "not with HDR output" out of the frame-generation texts | — | S |
@@ -215,7 +215,7 @@ Each is written afresh from the code as it is, not taken from beta 23's branch.
 | Docs: `docs/upscaler.md`, release notes (beta 23's entry folded in), this plan; version 0.4.4-beta.25, engine id | — | S |
 
 Not carried: DLSS through Streamline as the main path, the removal of HW's own NGX loading, Reflex
-through Streamline, the FSR 3 dispatch order (FireBurn goes in beta 26). To decide when beta 25 starts
+through Streamline, the FSR 3 dispatch order (FireBurn goes in beta 27). To decide when beta 25 starts
 (open questions): Streamline's DLSS test path and beta 22's boost hint.
 
 25a's status (the tester, 2026-11-01): built and run normally; the co-op test is dropped (the tester does not play co-op). Frame generation (off) and Reflex (not working) are left as they are until 25b is checked.
@@ -237,7 +237,25 @@ field of view and 15 m. DLAA: fine detail (hair, foliage, railings) as before or
 list in the launcher and in game without E and F. The reactive mask greyed out under DLSS in game.
 Performance as beta 25a, over a couple of runs each (single runs differ by a percent or two).
 
-### Beta 26: AMD FSR SDK 2.4 and the upscaling settings
+### Beta 26: the launcher reorganised (`claude/0.4.4-beta-26`)
+
+The tester's call (2026-11-01): the proposal (`docs/launcher-layout-proposal.md`) with its four
+recommendations: the sidebar's headers HUNT, VISUALS (was SIGHT), WORKSHOP, ENGINE; the launcher seeds the
+engine's defaults; the in-game menu's labels matched, its tabs as they are. Built as proposed, with the
+differences that document lists. Frame generation and Reflex not offered (beta 25's row) built here too.
+The WPF launcher compiles on Linux (`dotnet build -p:EnableWindowsTargeting=true`), as do the Avalonia
+launcher and the localization checks (which need Windows to run); settings-test passes with g++ and clang.
+
+Test: both layouts (Settings › Layout), and Modern with the sidebar too (Settings › Navigation): every page
+and group as the document lists, the greyed rows following their switch (FPS counter, HDR, Picture tuning,
+Camera tuning, trophy notifications and sound, Sharpening), the DLSS group with DLSS only; the search finds
+a row on each page (texture filtering, extra variables, log level); Window mode's three choices start the
+game as the two switches did; Engine switches › Reset all with a feature and a sound setting changed;
+an existing config.ini and settings.json load with nothing changed; the in-game menu: no frame generation,
+"FPS counter", "HDR source", "Camera tuning" with its note; a config.ini with `frame_gen=dlss` starts
+without it and the log says so.
+
+### Beta 27: AMD FSR SDK 2.4 and the upscaling settings
 
 | Item | Size |
 |---|---|
@@ -254,7 +272,7 @@ on AMD cards ships untested and AMD players need a way back to 3.1 without waiti
 notes say it is untested. Test: the tester alone, FSR 3.1.6 through the SDK on the RTX 3070 Ti against
 FireBurn's FSR 3.1 (0.64 ms at the lamp spot, Quality); the TAA fallback (the SDK's DLLs taken out).
 
-### Beta 27: the PC memory model removed
+### Beta 28: the PC memory model removed
 
 When the tester says; before 0.4.4 ships.
 
@@ -284,8 +302,8 @@ with Match display (pinned); the AMD/Intel shader-3 and CPU-bound items.
 
 ### Settled since (2026-10-31)
 
-- The beta order: the camera (24) before AMD (now 26).
-- No AMD testers: the tester tests FSR alone (beta 26's note above).
+- The beta order: the camera (24) before AMD (now 27, after the launcher's 26).
+- No AMD testers: the tester tests FSR alone (beta 27's note above).
 - Beta 23 built and tested, then marked failed (2026-11-01, the tester's call): beta 24 from beta 22,
   beta 23 redone as 25, AMD 26, the PC memory model 27.
 - Beta 24's two questions (2026-11-01): the approach as described; +0x1a8 under FPS++ is Kyo's value.
@@ -295,7 +313,8 @@ with Match display (pinned); the AMD/Intel shader-3 and CPU-bound items.
 - The launcher (2026-11-01, the tester's call): its sections reorganised, "SIGHT" becoming "Visuals" with a clearer
   structure, as a beta of its own once the new structure is agreed (proposal first). The classic layout is the one
   reworked; the Modern layout is kept and follows the same pages and groups (its tabs map to them); the Avalonia
-  launcher is left until Linux, last. The proposal (2026-11-01, for review): `docs/launcher-layout-proposal.md`.
+  launcher is left until Linux, last. The proposal, as built: `docs/launcher-layout-proposal.md`; its recommendations
+  taken (2026-11-01, the tester's call) and built as beta 26.
 - The upscaler's place at outputs other than 1080p (2026-11-01, the tester's call): it stays on the game's finished
   frame. Taking it before tone mapping there (NVIDIA §3.1) would run the game's post-processing at the output
   size, a renderer split the game was not built for, for a modest gain and a real cost; not planned.
@@ -310,7 +329,7 @@ with Match display (pinned); the AMD/Intel shader-3 and CPU-bound items.
    Reflex's own design.
 2. Where NVIDIA Reflex's own design goes (a beta before the release candidate, or after 0.4.4).
 3. Frame generation: deprecated before release, or kept as code that is not offered.
-4. In beta 26's settings discussion: upscaler "Off"; merging the mip-bias settings.
+4. In beta 27's settings discussion: upscaler "Off"; merging the mip-bias settings.
 
 ## Done since the analysis
 
@@ -379,6 +398,7 @@ with Match display (pinned); the AMD/Intel shader-3 and CPU-bound items.
 | 0.4.4 beta 25b's second run (15 m) | (this commit) | The tester's run (`20261101_211246`, engine 56; 240 preset, DLAA, preset K, frame statistics on; other areas than the view and the lamp, so no like-for-like figures): 114 stats lines, about 68,400 upscaled frames, **no camera-cut reset**; 4 for other causes, each a loading screen (the first load, area loads, a 6 s load). The largest in one frame: a turn of 4.4 degrees, a move of 2.6 m (the follow camera's snaps), under the field of view (43) and 15 m. No cutscene in the run: a real cut is still to be seen in a log. 140 to 220 FPS in play, no errors, a clean exit. At the start `624 of 630 cached pipelines built (6 left out)`: the records the last run saved in new areas that cannot be built again (the known 2 a start before), compiled in play at each start (2 to 9 compiles in the first reports); the log gives no reason per record, so which check leaves them out (25a's motion guard, missing shaders, the attributes) is open. |
 | 0.4.4 beta 25b's third run: cutscenes | (this commit) | The tester's run (`20261101_212324`, engine 56; 78 stats lines, about 46,800 upscaled frames). **Four cuts reset**, each a cutscene's: into one (turned 75 degrees, moved 30.6 m; field of view 42), a shot from the same place (43 degrees, 0.2 m; the shot's field of view 32), back to play (127 degrees, 30.6 m), and in a second one (38 degrees, 4.1 m; a field of view of 12, a long lens). **Two shot changes not reset**, in the stats lines' largest otherwise: 39.5 degrees with the camera in place (0.06 m), during the first cutscene, and 38.1 degrees with 5.2 m, at the end of the second: each turned less than the field of view of the moment, so most of the view was shared (the horizontal field is about 70 degrees) and the motion vectors reproject it; NVIDIA asks for resets at complete or significant changes only. Normal play stays far under the limits (6 degrees and 2.5 m the largest in one frame across these runs at 120 to 230 FPS), so a lower turn limit is possible but would come close to fast mouse turns at 30 to 60 FPS (about four to eight times larger a frame); kept until a shot change is seen to ghost. 2 resets for other causes (loading); no false cut. **The scenes** (the tester): the opening, the Blood Minister's transfusion and what follows (the long still stretch is the character creator, a preview), death, then the first cutscene in the Hunter's Dream. **The tester:** no ghosting noticed, nothing worse than 0.4.3, and DLAA perhaps a little sharper (16 jitter phases: twice the sample positions; not measured). **25b done.** `638 of 644 cached pipelines built (6 left out)`: the same 6 as the run before. |
 | 0.4.4 beta 25c: Live resolution Off or On | (this commit) | The tester's call (Decisions). The "Auto" choice (a GPU check, `bb-gpu-capabilities --live-resolution`, that turned the live path on for strong discrete GPUs) is gone: the in-game menu and the Windows launcher offer "Off (recommended)" and "On" (Off the default, as it was); a saved `auto` reads as off with a log line in the engine's settings, the Windows start program (`start/main.cpp`), `scripts/run_windows.py` and `run.sh`, and is saved back as 0; the GPU check is no longer asked (the tool keeps its option). The in-game hint loses its sentence on Auto and marks Off recommended; its 8 translations rewritten from the existing ones (Chinese: 首选, "preferred", as the menu font has no glyphs for 推荐), the launcher's 13 likewise (the two old labels removed). The Python launcher (Linux) and the setup tool offer the same two. Tests: settings-test (auto read as 0 and saved as 0, 1 kept), test_run_settings (auto as off whatever the GPU check, with and without sed/grep). Version stays 0.4.4-beta.25, engine id 57. Test: the launcher's Display page and the in-game menu show Off (recommended) and On; a config.ini with `live_resolution=auto` starts with the startup patch and the log's `live_resolution=auto is no longer offered; off`. |
+| 0.4.4 beta 26: the launcher reorganised | (this commit) | The tester's call: `docs/launcher-layout-proposal.md` with its recommendations (built as proposed; the differences are listed there). **Navigation:** HUNT (Play, Gameplay, Controls, Trophies, Online), VISUALS (Display, Upscaling, Picture, Interface), WORKSHOP (Mods & patches, Cheats), ENGINE (Engine switches, Log), Settings once at the bottom; Modern's tabs Play, Visuals (Display to Interface behind segmented buttons, as More), Gameplay, Controls, Trophies, Online, Settings, More (Mods & patches, Cheats, Engine switches, Log: the sidebar's names). `SectionedPage` holds what More did, for both. **Pages:** Graphics split into Upscaling and Picture; Gameplay and Interface new; Play's Game and Saves groups; Controls' Button icons group (Button prompts out of the mouse panel) and the preferred gamepad; Online's three groups and the do-nothing Server choice made one group; Engine switches with Settings' performance and sound rows, Extra variables, and Reset all over every row but Extra variables (`LauncherSettings.DefaultOf`); Log with the log options; Settings the launcher's own, the Background rows Modern only. **Window mode** (Windowed, Borderless fullscreen, Fullscreen) writes `fullscreen` and `borderless_fullscreen` as the two switches did. **Greying:** a row greys while its switch is off and hides for a choice not made; a group can be hidden whole (`ShowGroup`; its Modern box follows its header). Engine switches shown on other pages through `LauncherPage.SwitchRow` (texture filtering and the blur switch on Picture, the preferred gamepad on Controls); `EngineSwitches` (shared with the Avalonia launcher) unchanged. **Defaults:** config.ini seeds FSR 3.1 and Native AA, the engine's (were FSR 4 and Ultra Performance); vignette on when unset, as the engine; a config.ini with them keeps its own. **Labels:** Character motion vectors, FPS counter, Blood Echo multiplier in the launcher; HDR source, FPS counter, Camera tuning (with a note naming the launcher's Gameplay page) in game; hints name places as both layouts call them (Engine switches, Log, Display › Window mode). **Frame generation** not offered: `BbSettings::FrameGenOffered` false, `frame_gen` read as off with a log line, the in-game items behind it, the launcher's rows gone; NVIDIA Reflex's in-game item only with Streamline loaded (a test), not in the search. Translations: 13 launcher languages (27 strings added, among them ENGINE and Engine features, untranslated before; 12 kept with only the place they name changed; the frame generation and Graphics-page strings no launcher uses any more removed), 8 in-game tables (Chinese with the menu font's glyphs: HDR 源, 镜头调校). Version 0.4.4-beta.26, engine id 58. |
 
 Checked and found already in HW (no change):
 
@@ -982,5 +1002,5 @@ Beta 9 changed alters Windows defaults in a way that could regress:
 | Lantern Engine (Awaken), later | 0.9.38 (2026-10-29); 0.9.39 betas 1–26 (2026-10-31) | Reviewed in their own sections |
 | bbport (deadinside28), later | 0.7, `0fc2921` | Reviewed 2026-10-29 |
 | bbhost (droogie, Kyoskii), later | v0.2.22 | Reviewed 2026-10-31 |
-| AMD FSR SDK | v2.4.0, `7539ae8` | The FSR plan (beta 26) |
+| AMD FSR SDK | v2.4.0, `7539ae8` | The FSR plan (beta 27) |
 | NVIDIA DLSS | Programming Guide 310.6.0 (NVIDIA/DLSS `9981c63`); Streamline 2.14.16 | The DLSS plan (beta 25; first built as beta 23) |

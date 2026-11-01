@@ -131,9 +131,9 @@ namespace BloodborneLauncher
         private bool _sidebarNav;
 
         /// <summary>Settings › Navigation (live): the Modern layout's tabs across the top, or the
-        /// sidebar with the pages in groups (GAME, EXTRAS, SYSTEM), in the tabs' look. Classic always
-        /// has the sidebar. The page shown stays, marked in the other one (More's sections are
-        /// entries of their own in the sidebar).</summary>
+        /// sidebar with the pages in groups (HUNT, VISUALS, WORKSHOP, ENGINE, and Settings at the
+        /// bottom), in the tabs' look. Classic always has the sidebar. The page shown stays, marked in
+        /// the other one (Visuals' and More's sections are entries of their own in the sidebar).</summary>
         public void ApplyNavigation()
         {
             var sidebar = SettingRow.Classic || Workspace.Current.Settings.Str("ui_navigation") == "sidebar";
@@ -149,8 +149,6 @@ namespace BloodborneLauncher
                 Sidebar.BorderThickness = new Thickness(1);
                 Sidebar.SetResourceReference(Border.BackgroundProperty, "PillTrackBrush");
                 Sidebar.SetResourceReference(Border.BorderBrushProperty, "GlassPaneStrokeBrush");
-                // Settings once, in the ENGINE group (Classic has it at the bottom too).
-                ClassicSettingsBottom.Visibility = Visibility.Collapsed;
                 var style = (Style)FindResource("GlassSidebarItem");
                 foreach (var item in SettingSearch.Descendants(Sidebar).OfType<System.Windows.Controls.RadioButton>())
                     item.Style = style;
@@ -158,11 +156,13 @@ namespace BloodborneLauncher
             if (!switching)
                 return;
             var shown = PageFrame.Content?.GetType();
-            if (shown == typeof(MorePage) && _pages.TryGetValue(typeof(MorePage), out var more))
-                shown = ((MorePage)more).ShownPage ?? typeof(PlayPage);
-            // More holds Mods, Cheats, Engine and Log pages of its own: the ones of the navigation
-            // left are dropped, so the other makes its own with the settings as they are now.
-            foreach (var type in new[] { typeof(MorePage), typeof(ModsPage), typeof(CheatsPage), typeof(EnginePage), typeof(OutputPage) })
+            if (shown != null && _pages.TryGetValue(shown, out var holder) && holder is SectionedPage sectioned)
+                shown = sectioned.ShownPage ?? typeof(PlayPage);
+            // Visuals and More hold pages of their own (Display to Interface; Mods, Cheats, Engine
+            // switches and Log): the ones of the navigation left are dropped, so the other makes its
+            // own with the settings as they are now.
+            foreach (var type in new[] { typeof(VisualsPage), typeof(MorePage) }
+                         .Concat(VisualsPage.Sections.Select(s => s.Page)).Concat(MorePage.Sections.Select(s => s.Page)))
                 _pages.Remove(type);
             _searchPagesReady = null; // made again for the search when its box is next focused
             var nav = sidebar ? (FrameworkElement)Sidebar : TabStrip;
@@ -176,9 +176,8 @@ namespace BloodborneLauncher
                 target.IsChecked = true;
                 return;
             }
-            // A page of More's (Mods, Cheats, Engine, Log) back on the tabs: More, at that section.
-            var key = shown == typeof(ModsPage) ? "mods" : shown == typeof(CheatsPage) ? "cheats"
-                : shown == typeof(EnginePage) ? "engine" : shown == typeof(OutputPage) ? "output" : null;
+            // A page of Visuals' or More's back on the tabs: that tab, at that section.
+            var key = VisualsPage.Sections.Concat(MorePage.Sections).FirstOrDefault(s => s.Page == shown).Key;
             if (key != null) Show(key);
             else (sidebar ? ClassicPlay : PlayItem).IsChecked = true;
         }
@@ -226,7 +225,7 @@ namespace BloodborneLauncher
             var choice = Prompt.Choose(L.T("New engine or the 0.9.33 one?"),
                 L.T("This update brings a newer engine: a faster draw thread, quicker shader compiling and more VRAM for textures. " +
                     "Most players run faster with it. Legacy keeps the engine as 0.9.33 ran it.\n\n" +
-                    "You can change it any time under Graphics > Engine preset."),
+                    "You can change it any time under Engine switches > Engine preset."),
                 L.T("Stay on Legacy"), L.T("Use New (recommended)"));
             if (choice < 0) return;
             EnginePreset.Apply(ws.Settings, choice == 1 ? EnginePreset.New : EnginePreset.Legacy);
@@ -564,7 +563,9 @@ namespace BloodborneLauncher
             item.Content as string ??
             (item.Content as Panel)?.Children.OfType<System.Windows.Controls.TextBlock>().FirstOrDefault()?.Text;
 
-        /// <summary>Shows a page: a tab ("online", "advanced": Settings), or one of More's ("output", "mods", "engine").</summary>
+        /// <summary>Shows a page by its key: a tab or sidebar entry ("online", "controls", "gameplay",
+        /// "advanced": Settings), or a section of Visuals' ("display", "upscaling", "picture", "interface")
+        /// or More's ("mods", "cheats", "engine", "output"), which the sidebar lists as entries.</summary>
         public void Show(string page)
         {
             var item = _sidebarNav
@@ -577,6 +578,11 @@ namespace BloodborneLauncher
                     "cheats" when CheatsPage.Supported => ClassicCheats,
                     "engine" => ClassicEngine,
                     "controls" => ClassicControls,
+                    "gameplay" => ClassicGameplay,
+                    "display" => ClassicDisplay,
+                    "upscaling" => ClassicUpscaling,
+                    "picture" => ClassicPicture,
+                    "interface" => ClassicInterface,
                     _ => ClassicPlay,
                 }
                 : page switch
@@ -585,14 +591,16 @@ namespace BloodborneLauncher
                     "advanced" => SettingsItem,
                     "output" or "mods" or "engine" => MoreItem,
                     "cheats" when CheatsPage.Supported => MoreItem,
+                    "display" or "upscaling" or "picture" or "interface" => VisualsItem,
                     "controls" => ControlsItem,
+                    "gameplay" => GameplayItem,
                     _ => PlayItem,
                 };
             if (item.IsChecked == true)
                 SidebarItem_Checked(item, new RoutedEventArgs());
             item.IsChecked = true;
-            if (item == MoreItem && _pages.TryGetValue(typeof(MorePage), out var more))
-                ((MorePage)more).ShowSection(page);
+            if (item.Tag is Type type && _pages.TryGetValue(type, out var holder) && holder is SectionedPage sectioned)
+                sectioned.ShowSection(page);
         }
 
         private void PageFrame_Navigated(object sender, System.Windows.Navigation.NavigationEventArgs e)
@@ -608,11 +616,11 @@ namespace BloodborneLauncher
 
         /// <summary>
         /// The pages this layout's tabs or sidebar lead to, in their order, each made if not shown yet
-        /// (once; they are kept as when visited). More stands for its sections, each a place of its own.
+        /// (once; they are kept as when visited). Visuals and More stand for their sections, each a place of its own.
         /// </summary>
         private IEnumerable<SettingSearch.Place> SearchPlaces()
         {
-            // Classic lists Settings twice (top and bottom of the sidebar): the later entry is kept.
+            // A page listed twice would be searched once: the later entry is kept.
             var items = new List<System.Windows.Controls.RadioButton>();
             foreach (var item in SettingSearch.Descendants(_sidebarNav ? Sidebar : TabStrip).OfType<System.Windows.Controls.RadioButton>())
             {
@@ -627,7 +635,7 @@ namespace BloodborneLauncher
                 // Only pages already made: MakeSearchPagesAsync makes the rest in the background and
                 // searches again once they are all there.
                 if (!_pages.TryGetValue((Type)item.Tag, out var made)) continue;
-                if (made is MorePage more)
+                if (made is SectionedPage more)
                 {
                     foreach (var (key, label, page) in more.MadeSectionPages())
                         yield return new SettingSearch.Place($"{name} › {label}", page, () => { Open(); more.ShowSection(key); });
@@ -701,7 +709,7 @@ namespace BloodborneLauncher
             foreach (var type in items)
             {
                 await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
-                if (PageOf(type) is MorePage more)
+                if (PageOf(type) is SectionedPage more)
                     foreach (var key in more.SectionKeys)
                     {
                         await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);

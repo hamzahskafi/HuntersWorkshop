@@ -417,13 +417,14 @@
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
-            <!-- Classic, and Modern with Settings › Navigation: Sidebar: the pages in groups (the hunt, how it
-                 looks, the workshop's mods and cheats, the Hunter's Workshop itself). -->
+            <!-- Classic, and Modern with Settings › Navigation: Sidebar: the pages in groups (0.4.4 beta 26):
+                 the hunt, how it looks, the workshop's mods and cheats, the engine; Settings, the launcher
+                 itself, once at the bottom. -->
             <Border x:Name="Sidebar" Grid.Column="0" Grid.RowSpan="2" Width="196" Visibility="Collapsed"
                     Background="{DynamicResource WindowBaseBrush}"
                     BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="0,0,1,0">
                 <DockPanel Margin="0,16,0,10">
-                    <RadioButton x:Name="ClassicSettingsBottom" DockPanel.Dock="Bottom" GroupName="Classic" Style="{StaticResource SidebarItem}"
+                    <RadioButton x:Name="ClassicSettings" DockPanel.Dock="Bottom" GroupName="Classic" Style="{StaticResource SidebarItem}"
                                  Tag="{x:Type views:SettingsPage}" Checked="SidebarItem_Checked">
                         <StackPanel Orientation="Horizontal">
                             <ui:SymbolIcon Symbol="Settings24" Style="{StaticResource SidebarIcon}" />
@@ -437,6 +438,13 @@
                             <StackPanel Orientation="Horizontal">
                                 <ui:SymbolIcon Symbol="Play24" Style="{StaticResource SidebarIcon}" />
                                 <TextBlock Text="{loc:Tr &#x27;Play&#x27;}" />
+                            </StackPanel>
+                        </RadioButton>
+                        <RadioButton x:Name="ClassicGameplay" GroupName="Classic" Style="{StaticResource SidebarItem}"
+                                     Tag="{x:Type views:GameplayPage}" Checked="SidebarItem_Checked">
+                            <StackPanel Orientation="Horizontal">
+                                <ui:SymbolIcon Symbol="Games24" Style="{StaticResource SidebarIcon}" />
+                                <TextBlock Text="{loc:Tr &#x27;Gameplay&#x27;}" />
                             </StackPanel>
                         </RadioButton>
                         <RadioButton x:Name="ClassicControls" GroupName="Classic" Style="{StaticResource SidebarItem}"
@@ -460,19 +468,33 @@
                                 <TextBlock Text="{loc:Tr &#x27;Online&#x27;}" />
                             </StackPanel>
                         </RadioButton>
-                        <TextBlock Text="{loc:Tr &#x27;SIGHT&#x27;}" Style="{StaticResource SidebarHeader}" Margin="18,18,0,6" />
-                        <RadioButton GroupName="Classic" Style="{StaticResource SidebarItem}"
+                        <TextBlock Text="{loc:Tr &#x27;VISUALS&#x27;}" Style="{StaticResource SidebarHeader}" Margin="18,18,0,6" />
+                        <RadioButton x:Name="ClassicDisplay" GroupName="Classic" Style="{StaticResource SidebarItem}"
                                      Tag="{x:Type views:DisplayPage}" Checked="SidebarItem_Checked">
                             <StackPanel Orientation="Horizontal">
                                 <ui:SymbolIcon Symbol="Desktop24" Style="{StaticResource SidebarIcon}" />
                                 <TextBlock Text="{loc:Tr &#x27;Display&#x27;}" />
                             </StackPanel>
                         </RadioButton>
-                        <RadioButton GroupName="Classic" Style="{StaticResource SidebarItem}"
-                                     Tag="{x:Type views:GraphicsPage}" Checked="SidebarItem_Checked">
+                        <RadioButton x:Name="ClassicUpscaling" GroupName="Classic" Style="{StaticResource SidebarItem}"
+                                     Tag="{x:Type views:UpscalingPage}" Checked="SidebarItem_Checked">
                             <StackPanel Orientation="Horizontal">
                                 <ui:SymbolIcon Symbol="Sparkle24" Style="{StaticResource SidebarIcon}" />
-                                <TextBlock Text="{loc:Tr &#x27;Graphics&#x27;}" />
+                                <TextBlock Text="{loc:Tr &#x27;Upscaling&#x27;}" />
+                            </StackPanel>
+                        </RadioButton>
+                        <RadioButton x:Name="ClassicPicture" GroupName="Classic" Style="{StaticResource SidebarItem}"
+                                     Tag="{x:Type views:PicturePage}" Checked="SidebarItem_Checked">
+                            <StackPanel Orientation="Horizontal">
+                                <ui:SymbolIcon Symbol="Image24" Style="{StaticResource SidebarIcon}" />
+                                <TextBlock Text="{loc:Tr &#x27;Picture&#x27;}" />
+                            </StackPanel>
+                        </RadioButton>
+                        <RadioButton x:Name="ClassicInterface" GroupName="Classic" Style="{StaticResource SidebarItem}"
+                                     Tag="{x:Type views:InterfacePage}" Checked="SidebarItem_Checked">
+                            <StackPanel Orientation="Horizontal">
+                                <ui:SymbolIcon Symbol="Apps24" Style="{StaticResource SidebarIcon}" />
+                                <TextBlock Text="{loc:Tr &#x27;Interface&#x27;}" />
                             </StackPanel>
                         </RadioButton>
                         <TextBlock Text="{loc:Tr &#x27;WORKSHOP&#x27;}" Style="{StaticResource SidebarHeader}" Margin="18,18,0,6" />
@@ -491,13 +513,6 @@
                             </StackPanel>
                         </RadioButton>
                         <TextBlock Text="{loc:Tr &#x27;ENGINE&#x27;}" Style="{StaticResource SidebarHeader}" Margin="18,18,0,6" />
-                        <RadioButton x:Name="ClassicSettings" GroupName="Classic" Style="{StaticResource SidebarItem}"
-                                     Tag="{x:Type views:SettingsPage}" Checked="SidebarItem_Checked">
-                            <StackPanel Orientation="Horizontal">
-                                <ui:SymbolIcon Symbol="Settings24" Style="{StaticResource SidebarIcon}" />
-                                <TextBlock Text="{loc:Tr &#x27;Settings&#x27;}" />
-                            </StackPanel>
-                        </RadioButton>
                         <RadioButton x:Name="ClassicEngine" GroupName="Classic" Style="{StaticResource SidebarItem}"
                                      Tag="{x:Type views:EnginePage}" Checked="SidebarItem_Checked">
                             <StackPanel Orientation="Horizontal">
@@ -509,7 +524,7 @@
                                      Tag="{x:Type views:OutputPage}" Checked="SidebarItem_Checked">
                             <StackPanel Orientation="Horizontal">
                                 <ui:SymbolIcon Symbol="WindowConsole20" Style="{StaticResource SidebarIcon}" />
-                                <TextBlock Text="{loc:Tr &#x27;Game output&#x27;}" />
+                                <TextBlock Text="{loc:Tr &#x27;Log&#x27;}" />
                             </StackPanel>
                         </RadioButton>
                     </StackPanel>
@@ -522,10 +537,10 @@
                 <StackPanel Orientation="Horizontal">
                     <RadioButton x:Name="PlayItem" Style="{StaticResource TabItem}" Content="{loc:Tr &#x27;Play&#x27;}"
                                  Tag="{x:Type views:PlayPage}" Checked="SidebarItem_Checked" />
-                    <RadioButton Style="{StaticResource TabItem}" Content="{loc:Tr &#x27;Display&#x27;}"
-                                 Tag="{x:Type views:DisplayPage}" Checked="SidebarItem_Checked" />
-                    <RadioButton Style="{StaticResource TabItem}" Content="{loc:Tr &#x27;Graphics&#x27;}"
-                                 Tag="{x:Type views:GraphicsPage}" Checked="SidebarItem_Checked" />
+                    <RadioButton x:Name="VisualsItem" Style="{StaticResource TabItem}" Content="{loc:Tr &#x27;Visuals&#x27;}"
+                                 Tag="{x:Type views:VisualsPage}" Checked="SidebarItem_Checked" />
+                    <RadioButton x:Name="GameplayItem" Style="{StaticResource TabItem}" Content="{loc:Tr &#x27;Gameplay&#x27;}"
+                                 Tag="{x:Type views:GameplayPage}" Checked="SidebarItem_Checked" />
                     <RadioButton x:Name="ControlsItem" Style="{StaticResource TabItem}" Content="{loc:Tr &#x27;Controls&#x27;}"
                                  Tag="{x:Type views:ControlsPage}" Checked="SidebarItem_Checked" />
                     <RadioButton Style="{StaticResource TabItem}" Content="{loc:Tr &#x27;Trophies&#x27;}"

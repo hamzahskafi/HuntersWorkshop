@@ -6,10 +6,48 @@ What changed since 0.4.3, for the release page. The engine work behind each line
 ## Defaults
 
 - **The project's tested settings are the defaults:** depth of field on, the intro skipped,
-  sharpness 0.20, the FPS counter off, picture tuning off, and the unified frame time on (More ›
-  Engine). The follow camera stays Original and model detail As in the game.
+  sharpness 0.20, the FPS counter off, picture tuning off, and the unified frame time on (Engine
+  switches). The follow camera stays Original and model detail As in the game.
   Settings files from earlier versions get the unified frame time turned on once; everything else in
   them stays as it was.
+- **A new install starts on FSR 3.1 at Native AA**, the engine's own defaults, which run on any
+  graphics card (the launcher used to start it on FSR 4 at Ultra Performance). The first start's
+  Best settings for this PC still offers DLSS on an RTX card, FSR 4 on an RX 9000 and a quality
+  preset for the card. A settings file that has an upscaler and preset keeps them.
+
+## The launcher
+
+The Windows launcher's pages, reorganised (the Classic layout; the Modern layout has the same pages
+behind its tabs, Visuals holding Display to Interface; the Linux launchers are unchanged for now):
+
+- **The sidebar:** HUNT (Play, Gameplay, Controls, Trophies, Online), VISUALS (Display, Upscaling,
+  Picture, Interface; was SIGHT: Display and Graphics), WORKSHOP (Mods & patches, Cheats) and ENGINE
+  (Engine switches, Log), with Settings once, at the bottom.
+- **Display:** the monitor, the window, the output resolution, the frame rate and V-Sync, with
+  Best settings for this PC at the top. **Window mode** (Windowed, Borderless fullscreen,
+  Fullscreen) replaces the two fullscreen switches; it keeps the same settings.
+- **Upscaling:** the upscaler, its quality and sharpening; DLSS's own settings show with DLSS only.
+- **Picture:** HDR, picture tuning (with a Game's own picture button, as in game) and the game's
+  effects, with texture filtering and the motion blur switch beside the blur.
+- **Interface:** the in-game menu's shortcut and language, Sharp UI, the shader note and the FPS
+  counter.
+- **Gameplay:** the camera (Follow camera, Camera tuning) and the extras (Skip intro videos, Free
+  camera, Debug menu).
+- **Engine switches** also holds the performance and sound settings that were under Settings, and
+  Extra variables; **Reset all** puts back every setting on the page (it used to skip the engine
+  preset and the experimental features). **Log** (was Game output) has the log options.
+- **Settings** is the launcher's own: its look, the engine folder and how the game starts, files,
+  shared settings and updates. The Background rows show in the Modern layout only, where they do
+  something.
+- A setting's own switch greys out what depends on it (the FPS counter, HDR, picture tuning, the
+  camera, trophy notifications and their sound, sharpening strength, peak brightness), and rows for a
+  choice not made are hidden (the DLSS settings, the HDR UI settings with Expanded).
+- Every setting is in one place (the in-game menu's language was on two pages), labels match the
+  in-game menu's (Character motion vectors, FPS counter, HDR source, Blood Echo multiplier, Camera
+  tuning), and every hint names the page as both layouts call it. Nothing about the settings
+  themselves changed: settings files and shared codes from earlier versions work as before.
+- **Frame generation and NVIDIA Reflex are not offered** (the launcher's rows and the in-game items
+  are gone; a saved frame generation choice runs off and the log says so). The code stays.
 
 ## Performance
 
@@ -29,7 +67,7 @@ What changed since 0.4.3, for the release page. The engine work behind each line
   work only once it has, so it never reuses memory the GPU has yet to read. In play (RTX 3070 Ti):
   write faults went from about 1,400 a second at 120 FPS to almost none, and the time spent re-protecting memory from
   about 0.4 ms a frame to almost none. That freed the CPU; on its own the GPU's frame rate stayed
-  as in 0.4.3 (109 FPS at a dense spot). Experimental engine features › Per-frame GPU data in place
+  as in 0.4.3 (109 FPS at a dense spot). Engine switches › Experimental engine features › Per-frame GPU data in place
   turns it off (`BB_GX_IN_PLACE=0`), should something look wrong.
 - **The GPU gets its work as it reaches the end of what it has, with no timers.** The game's
   graphics and compute work goes to the GPU at the end of each of the game's submissions when the
@@ -164,9 +202,9 @@ What changed since 0.4.3, for the release page. The engine work behind each line
   submissions not made. The GX region's bindings across its edges are counted per edge.
 - The log and the GPU profile name the upscaler that runs (they said FSR for DLSS and TAA as
   well).
-- Settings › Log › GPU time in the log (`BB_GPU_PROFILE`): the GPU's time a frame by render pass,
+- Log › Log options › GPU time in the log (`BB_GPU_PROFILE`): the GPU's time a frame by render pass,
   dispatch and upscaler, every 5 seconds.
-- Settings › Log › Render stage timings stays on until it is turned off, like the other log
+- Log › Log options › Render stage timings stays on until it is turned off, like the other log
   options (it used to turn itself off after one game).
 - Windows logs give VRAM once a minute: the game's use against the driver's budget, and the
   engine's part of it.

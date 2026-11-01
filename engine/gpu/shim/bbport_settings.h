@@ -28,6 +28,11 @@ inline constexpr const char* FrameGenNames[] = {"off", "fsr3", "dlss"};
 static_assert(sizeof(FrameGenNames) / sizeof(FrameGenNames[0]) == FrameGenCount);
 /// frame_gen_frames: DLSS generated frames per real one (1 = 2x .. 5 = 6x; RTX 50 for more than 1).
 inline constexpr int FrameGenFramesMax = 5;
+/// 0.4.4 beta 26: frame generation (FSR 3.1 and DLSS) is not offered (the tester's call in beta 23;
+/// community-fixes-plan.md, Decisions): frame_gen reads as off (BB_FRAME_GEN too, logged), the
+/// in-game menu and the launcher leave it out, and DLSS Frame Generation's plugin is never
+/// requested. The code stays until it is decided on.
+inline constexpr bool FrameGenOffered = false;
 /// reflex in config.ini (BB_REFLEX): NVIDIA Reflex low latency while Streamline is loaded; on (at
 /// least) whenever DLSS Frame Generation runs, as NVIDIA requires.
 enum Reflex : int { ReflexOff = 0, ReflexOn = 1, ReflexBoost = 2, ReflexCount };

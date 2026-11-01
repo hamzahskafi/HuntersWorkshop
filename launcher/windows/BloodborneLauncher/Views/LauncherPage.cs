@@ -403,6 +403,8 @@ namespace BloodborneLauncher.Views
                         frame.Clip = new RectangleGeometry(new Rect(0, 0, e.NewSize.Width, e.NewSize.Height), 16, 16);
                     frame.SetResourceReference(Border.BackgroundProperty, "GlassPaneBrush");
                     frame.SetResourceReference(Border.BorderBrushProperty, "GlassPaneStrokeBrush");
+                    // A group shown only for one choice (ShowGroup hides its header): its box goes with it.
+                    frame.SetBinding(VisibilityProperty, new System.Windows.Data.Binding(nameof(Visibility)) { Source = child });
                     Body.Children.Add(frame);
                     continue;
                 }
@@ -438,6 +440,16 @@ namespace BloodborneLauncher.Views
             (into ?? Body).Children.Add(header);
             _group = text;
             return header;
+        }
+
+        /// <summary>Shows or hides a whole group: its header and the panel its rows are in (in Modern
+        /// the group's box follows its header). For a group that belongs to one choice, as the DLSS rows
+        /// to the DLSS upscaler; the settings search skips the rows while it is hidden.</summary>
+        protected static void ShowGroup(TextBlock header, UIElement rows, bool show)
+        {
+            var visibility = show ? Visibility.Visible : Visibility.Collapsed;
+            header.Visibility = visibility;
+            rows.Visibility = visibility;
         }
 
         /// <summary>
@@ -784,6 +796,54 @@ namespace BloodborneLauncher.Views
             };
             Add(Card(icon, title, hint, box, out _), into);
             return box;
+        }
+
+        /// <summary>
+        /// One engine switch's row (Core/EngineSwitches.cs): a toggle, a slider, a choice or a text field
+        /// bound to its env: setting, on whichever page it belongs. Returns what puts it back to the
+        /// engine's default (the Engine page's Reset all).
+        /// </summary>
+        protected Action SwitchRow(EngineSwitch item, SymbolRegular icon, Panel? into = null, Action? changed = null)
+        {
+            var info = EngineSwitches.Describe(item);
+            switch (item.Kind)
+            {
+                case SwitchKind.Toggle:
+                {
+                    var toggle = ToggleRow(icon, item.Title, info, () => EngineSwitches.Get(S, item) == item.On,
+                        v => EngineSwitches.Set(S, item, v ? item.On : item.Off), into, changed);
+                    return () => toggle.IsChecked = item.Default == item.On;
+                }
+                case SwitchKind.Number:
+                {
+                    var format = item.Unit.Length > 0 ? $"{item.Format}' {item.Unit}'" : item.Format;
+                    var slider = SliderRow(icon, item.Title, info, item.Min, item.Max, item.Step,
+                        () => EngineSwitches.NumberOf(S, item),
+                        v =>
+                        {
+                            EngineSwitches.Set(S, item, EngineSwitches.Format(item, v));
+                            changed?.Invoke();
+                        },
+                        format, into, valueWidth: item.Unit.Length > 0 ? 86 : 52);
+                    return () => slider.Value = EngineSwitches.DefaultNumber(item);
+                }
+                case SwitchKind.Text:
+                {
+                    var box = TextRow(icon, item.Title, info, item.Placeholder, () => EngineSwitches.Get(S, item),
+                        v =>
+                        {
+                            EngineSwitches.Set(S, item, v);
+                            changed?.Invoke();
+                        }, into);
+                    return () => box.Text = "";
+                }
+                default:
+                {
+                    var control = ComboRow(icon, item.Title, info, item.Options, () => EngineSwitches.Get(S, item),
+                        v => EngineSwitches.Set(S, item, v), into, changed: changed);
+                    return () => Pick(control, Choices.IndexOf(item.Options, item.Default));
+                }
+            }
         }
 
         protected static string Fmt(double value) => value.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
