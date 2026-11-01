@@ -217,7 +217,9 @@ Not carried: DLSS through Streamline as the main path, the removal of HW's own N
 through Streamline, the FSR 3 dispatch order (FireBurn goes in beta 26). To decide when beta 25 starts
 (open questions): Streamline's DLSS test path and beta 22's boost hint.
 
-Test of 25a: co-op, Quit to Desktop in a session: the other player sees the hunter leave at once (the
+25a's status (the tester, 2026-11-01): built and run normally; the co-op test is dropped (the tester does not play co-op). Frame generation (off) and Reflex (not working) are left as they are until 25b is checked.
+
+Test of 25a (dropped): co-op, Quit to Desktop in a session: the other player sees the hunter leave at once (the
 log's `np: left room ... at exit in ... ms`); leaving a room and quitting to the title do not freeze (with a slow or unreachable
 server, the log's `np: leave_room for room ... failed after ... ms`, the game going on meanwhile); summons
 and invasions still connect; the first start after updating builds a few pipelines again (records left
