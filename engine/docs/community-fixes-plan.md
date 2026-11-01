@@ -295,7 +295,7 @@ with Match display (pinned); the AMD/Intel shader-3 and CPU-bound items.
 - The launcher (2026-11-01, the tester's call): its sections reorganised, "SIGHT" becoming "Visuals" with a clearer
   structure, as a beta of its own once the new structure is agreed (proposal first). The classic layout is the one
   reworked; the Modern layout is kept and follows the same pages and groups (its tabs map to them); the Avalonia
-  launcher is left until Linux, last.
+  launcher is left until Linux, last. The proposal (2026-11-01, for review): `docs/launcher-layout-proposal.md`.
 - The upscaler's place at outputs other than 1080p (2026-11-01, the tester's call): it stays on the game's finished
   frame. Taking it before tone mapping there (NVIDIA §3.1) would run the game's post-processing at the output
   size, a renderer split the game was not built for, for a modest gain and a real cost; not planned.
