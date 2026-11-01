@@ -627,12 +627,15 @@ Slider camera[] = {
 };
 bool seeded=false;
 bool camera_page=false,graphics_page=false,input_page=false;
-Slider graphics_sliders[]={{nullptr,117007,0,0.2f,5},{nullptr,117006,1,0.2f,0}};
-Slider effect_sliders[]={{nullptr,120000,0,0.1f,10}};
-Slider fog_slider[]={{nullptr,117008,0,0.1f,10}};  // after the output list: the list stays row 4
+// 0.4.4 beta 26b: the 11 positions span what the launcher offers wherever the game's own value can sit
+// on one of them (fog and bloom were 0 to the game's own, contrast +-5%, hue +-20 degrees, shadow
+// distance 1 to 3): a value set in the launcher shows at its place here instead of at an end.
+Slider graphics_sliders[]={{nullptr,117007,0,0.2f,5},{nullptr,117006,0.5f,0.25f,2}};  // AO 0-2, shadows 0.5-3
+Slider effect_sliders[]={{nullptr,120000,0,0.2f,5}};  // bloom 0-2
+Slider fog_slider[]={{nullptr,117008,0,0.2f,5}};  // fog 0-2; after the output list: the list stays row 4
 // Brightness, contrast, saturation and hue (bbport): 5 is the area's own.
-Slider color_sliders[]={{nullptr,125000,0.5f,0.1f,5},{nullptr,125001,0.95f,0.01f,5},{nullptr,125002,0,0.2f,5},
-                        {nullptr,125003,-20.0f,4.0f,5}};
+Slider color_sliders[]={{nullptr,125000,0,0.2f,5},{nullptr,125001,0.8f,0.04f,5},{nullptr,125002,0,0.2f,5},
+                        {nullptr,125003,-180.0f,36.0f,5}};
 struct StartupToggle { std::atomic<bool>* setting=nullptr; std::uint32_t id; std::uint8_t value=0,last=0; };
 StartupToggle color_toggle[]={{nullptr,125004}};  // Picture tuning, live
 bool color_seeded=false;
@@ -771,8 +774,8 @@ constexpr std::uint32_t kQuitRowId=122000,kSystemQuitRowId=110015,kQuitQuestion=
 void AddQuitRow(void* builder,std::uint32_t caption);
 GUEST_ABI void* SystemFinalize(void* out,void* builder,void* arg3) {
     std::int64_t flag=0;
-    { Captions c(110013);GuestFunction f(kRowFunctorVTable,reinterpret_cast<void*>(&OpenEnhancementsRow));
-      hle_call_guest<std::int64_t>(guest_fn(kAddCommandRow),builder,c.buf,f.buf,&flag); }
+    // 0.4.4 beta 26b: Graphics, Effects and Colour first, then Camera Tuning, PC Controls and Key
+    // Bindings, then Extras (was PC Enhancements, first), then Quit to Desktop.
     if (graphics_page) {
         { Captions c(110007);GuestFunction f(kRowFunctorVTable,reinterpret_cast<void*>(&OpenGraphicsRow));
           hle_call_guest<std::int64_t>(guest_fn(kAddCommandRow),builder,c.buf,f.buf,&flag); }
@@ -781,11 +784,13 @@ GUEST_ABI void* SystemFinalize(void* out,void* builder,void* arg3) {
         { Captions c(110014);GuestFunction f(kRowFunctorVTable,reinterpret_cast<void*>(&OpenColorRow));
           hle_call_guest<std::int64_t>(guest_fn(kAddCommandRow),builder,c.buf,f.buf,&flag); }
     }
+    if (camera_page) { Captions c(110011);GuestFunction f(kRowFunctorVTable,reinterpret_cast<void*>(&OpenCameraRow));
+      hle_call_guest<std::int64_t>(guest_fn(kAddCommandRow),builder,c.buf,f.buf,&flag); }
     if(input_page) {
         {Captions c(110008);GuestFunction f(kRowFunctorVTable,reinterpret_cast<void*>(&OpenControlsRow));hle_call_guest<std::int64_t>(guest_fn(kAddCommandRow),builder,c.buf,f.buf,&flag);}
         {Captions c(110009);GuestFunction f(kRowFunctorVTable,reinterpret_cast<void*>(&OpenKeysRow));hle_call_guest<std::int64_t>(guest_fn(kAddCommandRow),builder,c.buf,f.buf,&flag);}
     }
-    if (camera_page) { Captions c(110011);GuestFunction f(kRowFunctorVTable,reinterpret_cast<void*>(&OpenCameraRow));
+    { Captions c(110013);GuestFunction f(kRowFunctorVTable,reinterpret_cast<void*>(&OpenEnhancementsRow));
       hle_call_guest<std::int64_t>(guest_fn(kAddCommandRow),builder,c.buf,f.buf,&flag); }
     // Quit to Desktop, last: the game's own Exit Game only goes back to the title.
     AddQuitRow(builder,kSystemQuitRowId);
@@ -794,7 +799,7 @@ GUEST_ABI void* SystemFinalize(void* out,void* builder,void* arg3) {
     static int logged=-1;
     if (const int rows=(graphics_page?1:0)|(camera_page?2:0); rows!=logged) {
         logged=rows;
-        host_log("pc-options: System list includes PC Enhancements%s%s, Quit to Desktop",graphics_page?", PC Graphics / PC Effects / PC Colour":"",camera_page?", PC Camera":"");
+        host_log("pc-options: System list includes %s%sExtras, Quit to Desktop",graphics_page?"Graphics / Effects / Colour, ":"",camera_page?"Camera Tuning, ":"");
     }
     return out;
 }
@@ -997,7 +1002,8 @@ void Tick() {
     auto push_sliders=[&](auto& rows,bool active) {
         bool moved=false;
         if (!active) return moved;
-        for (auto& s:rows) if (s.value!=s.last) { s.last=std::min<std::uint8_t>(s.value,10);*s.setting=s.base+s.last*s.step;changed=moved=true; }
+        // Rounded, so the game's own position gives the game's own value exactly (0.8 + 5 * 0.04 is not 1 in floats).
+        for (auto& s:rows) if (s.value!=s.last) { s.last=std::min<std::uint8_t>(s.value,10);*s.setting=std::round((s.base+s.last*s.step)*10000.0f)/10000.0f;changed=moved=true; }
         return moved;
     };
     auto push_toggles=[&](auto& rows,bool active) {
@@ -1015,7 +1021,13 @@ void Tick() {
     if(controls_seeded && sensitivity!=last_sensitivity){last_sensitivity=std::min<std::uint8_t>(sensitivity,10);BbSettings::Get().mouse_sensitivity=last_sensitivity;changed=true;}
     if(controls_seeded && prompts!=last_prompts){last_prompts=std::clamp(prompts,0,BbSettings::PromptsCount-1);BbSettings::Get().button_prompts=last_prompts;changed=true;}
     if(controls_seeded && pad_icons!=last_pad_icons){last_pad_icons=std::clamp(pad_icons,0,BbSettings::PadIconsCount-1);BbSettings::Get().pad_icons=last_pad_icons;changed=true;}
-    picture|=push_toggles(graphics_toggles,graphics_seeded);picture|=push_toggles(effect_toggles,effects_seeded);
+    // Anti-aliasing, ambient occlusion, motion blur, depth of field and chromatic aberration are effects
+    // of their own, which Picture Tuning does not gate: they no longer turn it on (0.4.4 beta 26b; the
+    // tester saw it on after changing effects). Of the toggles only the vignette is a picture setting.
+    push_toggles(graphics_toggles,graphics_seeded);
+    const std::uint8_t vignette=effect_toggles[3].last;
+    push_toggles(effect_toggles,effects_seeded);
+    picture|=effect_toggles[3].last!=vignette;
     if (picture && !BbSettings::Get().graphics_controls) {
         BbSettings::Get().graphics_controls=true;
         for (auto& t:color_toggle) t.value=t.last=1;

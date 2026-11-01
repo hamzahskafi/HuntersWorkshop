@@ -10,7 +10,20 @@ namespace BloodborneLauncher.Core
     /// </summary>
     public static class WindowsHdr
     {
-        public sealed record Display(uint AdapterLow, int AdapterHigh, uint Target, bool Supported, bool On);
+        /// <summary>One active display. Source is its Windows device name (\\.\DISPLAY1), as the launcher's
+        /// Monitor setting stores it; empty when Windows does not say.</summary>
+        public sealed record Display(uint AdapterLow, int AdapterHigh, uint Target, bool Supported, bool On, string Source = "");
+
+        /// <summary>The display the game opens on (Display › Monitor's device, or the Windows primary
+        /// monitor's when empty); null when it cannot be told (older Windows, a remote session, an
+        /// absent monitor): HDR's switch is then left as it is. 0.4.4 beta 26b.</summary>
+        public static Display? ForMonitor(string device)
+        {
+            if (string.IsNullOrEmpty(device))
+                device = WindowsMonitors.All().FirstOrDefault(m => m.Primary)?.Device ?? "";
+            if (device.Length == 0) return null;
+            return Displays().FirstOrDefault(d => string.Equals(d.Source, device, StringComparison.OrdinalIgnoreCase));
+        }
 
         /// <summary>Whether any active display has HDR on.</summary>
         public static bool AnyOn() => Displays().Any(d => d.On);
@@ -34,18 +47,20 @@ namespace BloodborneLauncher.Core
                 foreach (var path in pathInfo.Take((int)paths))
                 {
                     var target = path.TargetAdapter;
+                    var source = new SourceName { Header = Header(InfoSourceName, Marshal.SizeOf<SourceName>(), path.SourceAdapter, path.SourceId) };
+                    var gdi = DisplayConfigGetDeviceInfo(ref source) == 0 ? source.Gdi ?? "" : "";
                     var info2 = new AdvancedColorInfo2 { Header = Header(InfoAdvancedColor2, Marshal.SizeOf<AdvancedColorInfo2>(), target, path.TargetId) };
                     if (DisplayConfigGetDeviceInfo(ref info2) == 0)
                     {
                         // Windows 11 24H2 and later: HDR separate from Auto Color Management.
                         list.Add(new Display(target.Low, target.High, path.TargetId,
-                            (info2.Value & 0x10) != 0, info2.ActiveColorMode == 2));
+                            (info2.Value & 0x10) != 0, info2.ActiveColorMode == 2, gdi));
                         continue;
                     }
                     var info = new AdvancedColorInfo { Header = Header(InfoAdvancedColor, Marshal.SizeOf<AdvancedColorInfo>(), target, path.TargetId) };
                     if (DisplayConfigGetDeviceInfo(ref info) == 0)
                         list.Add(new Display(target.Low, target.High, path.TargetId,
-                            (info.Value & 1) != 0, (info.Value & 2) != 0 && (info.Value & 4) == 0));
+                            (info.Value & 1) != 0, (info.Value & 2) != 0 && (info.Value & 4) == 0, gdi));
                 }
             }
             catch
@@ -75,7 +90,7 @@ namespace BloodborneLauncher.Core
         }
 
         private const uint QdcOnlyActivePaths = 2;
-        private const uint InfoAdvancedColor = 9, SetAdvancedColorState = 10, InfoAdvancedColor2 = 15, SetHdrState = 16;
+        private const uint InfoSourceName = 1, InfoAdvancedColor = 9, SetAdvancedColorState = 10, InfoAdvancedColor2 = 15, SetHdrState = 16;
 
         private static DeviceInfoHeader Header(uint type, int size, Luid adapter, uint id) =>
             new() { Type = type, Size = (uint)size, Adapter = adapter, Id = id };
@@ -107,6 +122,14 @@ namespace BloodborneLauncher.Core
         [StructLayout(LayoutKind.Sequential)]
         private struct SetState { public DeviceInfoHeader Header; public uint Value; }
 
+        /// <summary>DISPLAYCONFIG_SOURCE_DEVICE_NAME: the source's GDI device name (\\.\DISPLAY1).</summary>
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct SourceName
+        {
+            public DeviceInfoHeader Header;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string Gdi;
+        }
+
         [DllImport("user32.dll")]
         private static extern int GetDisplayConfigBufferSizes(uint flags, out uint paths, out uint modes);
 
@@ -119,6 +142,9 @@ namespace BloodborneLauncher.Core
 
         [DllImport("user32.dll", EntryPoint = "DisplayConfigGetDeviceInfo")]
         private static extern int DisplayConfigGetDeviceInfo(ref AdvancedColorInfo2 info);
+
+        [DllImport("user32.dll", EntryPoint = "DisplayConfigGetDeviceInfo")]
+        private static extern int DisplayConfigGetDeviceInfo(ref SourceName info);
 
         [DllImport("user32.dll", EntryPoint = "DisplayConfigSetDeviceInfo")]
         private static extern int DisplayConfigSetDeviceInfo(ref SetState info);

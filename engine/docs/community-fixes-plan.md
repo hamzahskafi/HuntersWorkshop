@@ -255,6 +255,46 @@ an existing config.ini and settings.json load with nothing changed; the in-game 
 "FPS counter", "HDR source", "Camera tuning" with its note; a config.ini with `frame_gen=dlss` starts
 without it and the log says so.
 
+### Beta 26b: Graphics and Look, the folds, the menus in step (`claude/0.4.4-beta-26`)
+
+The tester's calls on beta 26 (2026-11-01): Upscaling and Picture rethought (VISUALS: Display, Graphics,
+Look, Interface; `docs/launcher-layout-proposal.md`, "As built (beta 26b)"); Picture tuning, HDR, the FPS
+counter and Camera tuning as switches whose settings fold under them; HDR checked on the game's monitor;
+save backups while playing every 10 minutes (was 15); and why the game's menus and the launcher
+disagreed (Live resolution Off yet the resolution changed in game; Picture tuning off in the launcher yet
+on in game). Three causes, each fixed where it starts:
+
+- **A 1920x1080 start ignored Live resolution Off.** With no startup patch at 1080p (`ScaledSizes`
+  returns none), `BB_RENDER_RES` is unset, `FixedRenderSession()` false, and an output change took effect
+  at once whatever the setting. `BbSettings::OutputChangesLive()` (live only with the setting On) and
+  `ResolutionNeedsRestart()` now cover that session; the upscaler keeps the start's output until then, the
+  Insert menu's hint and the System menu's help say so. settings-test: a 1080p start with Live 0 needs a
+  restart for an output change and not for a preset change; with Live 1 the output is live.
+- **The System menu's effect toggles turned Picture Tuning on.** `push_toggles` set `picture` for every
+  graphics and effect toggle; only the vignette is a picture setting (the others are effects of their own,
+  applied whether Picture Tuning is on or not). The ranges were narrower than the launcher's (fog and
+  bloom up to the game's own only, contrast ±5%, hue ±20°), so a launcher value sat at a slider's end;
+  they now span the launcher's with the game's own on a position, rounded to 4 places.
+- **The launcher never read config.ini again**, and wrote over the game's file while it ran. It now holds
+  config.ini writes while the game runs, merges them at its exit, reloads its pages, and reads the file
+  again when its window is activated with the file changed (`IniFile.FileTime`, `Workspace.ReloadIni`).
+
+The System menu's PC pages: named Graphics, Effects, Colour, Camera Tuning, Extras (were PC Graphics,
+PC Effects, PC Colour, PC Camera, PC Enhancements), Extras last; help texts name the game's own position
+and when a restart is needed (`pc_option_messages.tsv`, generator version 10). A parent "PC Settings" row
+and a "restart now?" question were not built: both need the game's menu code studied in its executable,
+which isn't here. Checks: both launchers and the localization checks compile (the checks need Windows to
+run); settings-test (g++, clang) and the menu text test pass. 13 launcher languages (17 strings added,
+5 retired), the System menu in English and Chinese.
+
+Test: the System menu: page names and order, a slider at the launcher's value, an effect toggled with
+Picture Tuning off (it stays off), Output Resolution changed at 1920x1080 with Live resolution Off (the
+game keeps 1080p until restarted) and On (at once). The launcher: Display, Graphics, Look, Interface in
+both layouts; each fold (switch off folds, on opens, the chevron by hand, the search opening one); HDR's
+switch on the HDR-less monitor (greyed, "This display shows no HDR"); a setting changed while the game
+runs (status "game settings apply at its next start", applied after the game exits) and one changed in
+game (the launcher shows it after the game exits); the mirror and rebirth rows; 1280 × 800.
+
 ### Beta 27: AMD FSR SDK 2.4 and the upscaling settings
 
 | Item | Size |
@@ -315,6 +355,10 @@ with Match display (pinned); the AMD/Intel shader-3 and CPU-bound items.
   reworked; the Modern layout is kept and follows the same pages and groups (its tabs map to them); the Avalonia
   launcher is left until Linux, last. The proposal, as built: `docs/launcher-layout-proposal.md`; its recommendations
   taken (2026-11-01, the tester's call) and built as beta 26.
+- Beta 26b (2026-11-01, the tester's calls): Display, Graphics, Look and Interface; Picture tuning kept as a
+  switch with its settings folded under it, as are HDR, the FPS counter and Camera tuning; the System
+  menu's PC pages renamed and reordered (a parent entry if the game's menu code allows, later); save
+  backups while playing every 10 minutes; the Steam Deck page kept.
 - The upscaler's place at outputs other than 1080p (2026-11-01, the tester's call): it stays on the game's finished
   frame. Taking it before tone mapping there (NVIDIA §3.1) would run the game's post-processing at the output
   size, a renderer split the game was not built for, for a modest gain and a real cost; not planned.
@@ -399,6 +443,7 @@ with Match display (pinned); the AMD/Intel shader-3 and CPU-bound items.
 | 0.4.4 beta 25b's third run: cutscenes | (this commit) | The tester's run (`20261101_212324`, engine 56; 78 stats lines, about 46,800 upscaled frames). **Four cuts reset**, each a cutscene's: into one (turned 75 degrees, moved 30.6 m; field of view 42), a shot from the same place (43 degrees, 0.2 m; the shot's field of view 32), back to play (127 degrees, 30.6 m), and in a second one (38 degrees, 4.1 m; a field of view of 12, a long lens). **Two shot changes not reset**, in the stats lines' largest otherwise: 39.5 degrees with the camera in place (0.06 m), during the first cutscene, and 38.1 degrees with 5.2 m, at the end of the second: each turned less than the field of view of the moment, so most of the view was shared (the horizontal field is about 70 degrees) and the motion vectors reproject it; NVIDIA asks for resets at complete or significant changes only. Normal play stays far under the limits (6 degrees and 2.5 m the largest in one frame across these runs at 120 to 230 FPS), so a lower turn limit is possible but would come close to fast mouse turns at 30 to 60 FPS (about four to eight times larger a frame); kept until a shot change is seen to ghost. 2 resets for other causes (loading); no false cut. **The scenes** (the tester): the opening, the Blood Minister's transfusion and what follows (the long still stretch is the character creator, a preview), death, then the first cutscene in the Hunter's Dream. **The tester:** no ghosting noticed, nothing worse than 0.4.3, and DLAA perhaps a little sharper (16 jitter phases: twice the sample positions; not measured). **25b done.** `638 of 644 cached pipelines built (6 left out)`: the same 6 as the run before. |
 | 0.4.4 beta 25c: Live resolution Off or On | (this commit) | The tester's call (Decisions). The "Auto" choice (a GPU check, `bb-gpu-capabilities --live-resolution`, that turned the live path on for strong discrete GPUs) is gone: the in-game menu and the Windows launcher offer "Off (recommended)" and "On" (Off the default, as it was); a saved `auto` reads as off with a log line in the engine's settings, the Windows start program (`start/main.cpp`), `scripts/run_windows.py` and `run.sh`, and is saved back as 0; the GPU check is no longer asked (the tool keeps its option). The in-game hint loses its sentence on Auto and marks Off recommended; its 8 translations rewritten from the existing ones (Chinese: 首选, "preferred", as the menu font has no glyphs for 推荐), the launcher's 13 likewise (the two old labels removed). The Python launcher (Linux) and the setup tool offer the same two. Tests: settings-test (auto read as 0 and saved as 0, 1 kept), test_run_settings (auto as off whatever the GPU check, with and without sed/grep). Version stays 0.4.4-beta.25, engine id 57. Test: the launcher's Display page and the in-game menu show Off (recommended) and On; a config.ini with `live_resolution=auto` starts with the startup patch and the log's `live_resolution=auto is no longer offered; off`. |
 | 0.4.4 beta 26: the launcher reorganised | (this commit) | The tester's call: `docs/launcher-layout-proposal.md` with its recommendations (built as proposed; the differences are listed there). **Navigation:** HUNT (Play, Gameplay, Controls, Trophies, Online), VISUALS (Display, Upscaling, Picture, Interface), WORKSHOP (Mods & patches, Cheats), ENGINE (Engine switches, Log), Settings once at the bottom; Modern's tabs Play, Visuals (Display to Interface behind segmented buttons, as More), Gameplay, Controls, Trophies, Online, Settings, More (Mods & patches, Cheats, Engine switches, Log: the sidebar's names). `SectionedPage` holds what More did, for both. **Pages:** Graphics split into Upscaling and Picture; Gameplay and Interface new; Play's Game and Saves groups; Controls' Button icons group (Button prompts out of the mouse panel) and the preferred gamepad; Online's three groups and the do-nothing Server choice made one group; Engine switches with Settings' performance and sound rows, Extra variables, and Reset all over every row but Extra variables (`LauncherSettings.DefaultOf`); Log with the log options; Settings the launcher's own, the Background rows Modern only. **Window mode** (Windowed, Borderless fullscreen, Fullscreen) writes `fullscreen` and `borderless_fullscreen` as the two switches did. **Greying:** a row greys while its switch is off and hides for a choice not made; a group can be hidden whole (`ShowGroup`; its Modern box follows its header). Engine switches shown on other pages through `LauncherPage.SwitchRow` (texture filtering and the blur switch on Picture, the preferred gamepad on Controls); `EngineSwitches` (shared with the Avalonia launcher) unchanged. **Defaults:** config.ini seeds FSR 3.1 and Native AA, the engine's (were FSR 4 and Ultra Performance); vignette on when unset, as the engine; a config.ini with them keeps its own. **Labels:** Character motion vectors, FPS counter, Blood Echo multiplier in the launcher; HDR source, FPS counter, Camera tuning (with a note naming the launcher's Gameplay page) in game; hints name places as both layouts call them (Engine switches, Log, Display › Window mode). **Frame generation** not offered: `BbSettings::FrameGenOffered` false, `frame_gen` read as off with a log line, the in-game items behind it, the launcher's rows gone; NVIDIA Reflex's in-game item only with Streamline loaded (a test), not in the search. Translations: 13 launcher languages (27 strings added, among them ENGINE and Engine features, untranslated before; 12 kept with only the place they name changed; the frame generation and Graphics-page strings no launcher uses any more removed), 8 in-game tables (Chinese with the menu font's glyphs: HDR 源, 镜头调校). Version 0.4.4-beta.26, engine id 58. |
+| 0.4.4 beta 26b: Graphics and Look, the folds, the menus in step | (this commit) | The tester's calls on beta 26 (the plan's beta 26b). **Launcher:** VISUALS is Display (HDR back, checked on the game's monitor: `WindowsHdr.ForMonitor` by the GDI source name, greyed with no HDR there, a hint with Windows' Use HDR off; 1280 × 800 for the Steam Deck), Graphics (`GraphicsPage`, was `UpscalingPage`: Best settings, Upscaling and anti-aliasing, Detail), Look (`LookPage`, was `PicturePage`: Effects, Picture tuning) and Interface; `LauncherPage.FoldToggle`: a switch whose rows fold under it (off folds and greys, on opens, a chevron by hand, the search opens it) for Picture tuning, HDR, the FPS counter and Camera tuning; Gameplay › Extras with the Hunter's Dream mirror and rebirth; "Keep Blood Echoes on death". **config.ini and the game:** `Workspace.SaveNow` holds config.ini while the game runs (`IniHeld`, the status line says so) and writes it at the game's exit over what the game saved, then reloads the pages (`ReloadIni`, `IniReloaded`); the window reads the file again when activated with it changed (`IniFile.FileTime`); closing or updating either launcher writes it at once (`final`). Save backups while playing every 10 minutes (was 15). **Engine:** `BbSettings::OutputChangesLive`; `ResolutionNeedsRestart` covers a 1080p start (no `BB_RENDER_RES`), whose output changes went live with Live resolution Off; the upscaler keeps the start's output until a restart; the Insert menu's hint follows. **System menu:** the PC pages named Graphics, Effects, Colour, Camera Tuning, Extras (Extras last); effect toggles no longer turn Picture Tuning on (only the vignette of them is a picture setting); slider ranges as the launcher's with the game's own on a position, values rounded; help texts (generator version 10). Checks: both launchers and the localization checks compile; settings-test (g++, clang) and the menu text test pass. Translations: 13 launcher languages (17 added, 5 retired), the System menu in English and Chinese. Version 0.4.4-beta.26, engine id 59. |
 
 Checked and found already in HW (no change):
 

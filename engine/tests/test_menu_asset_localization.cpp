@@ -9,8 +9,8 @@ int main(int argc, char** argv) {
     const auto english = read_messages();
     const auto chinese = read_messages(true);
     assert(english.size() == chinese.size());
-    assert(english.at(110010).text == "PC Effects");
-    assert(chinese.at(110010).text == "PC 特效");
+    assert(english.at(110010).text == "Effects"); // 0.4.4 beta 26b: was PC Effects
+    assert(chinese.at(110010).text == "特效");
     assert(chinese.at(110015).help == "关闭游戏并返回桌面。");
     assert(chinese.at(117010).text == "1280x720"); // untranslated technical value
     assert(chinese.at(920000).text.find('\n') != std::string::npos);

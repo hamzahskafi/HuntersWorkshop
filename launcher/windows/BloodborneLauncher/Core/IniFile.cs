@@ -45,9 +45,18 @@ namespace BloodborneLauncher.Core
         /// The game edits the same file (in-game menu) while the launcher holds an older copy.</summary>
         private readonly HashSet<string> _changed = new(StringComparer.Ordinal);
 
+        /// <summary>config.ini's time when it was last read or written here: a later time on disk means
+        /// the game (or someone) changed it since (MainWindow reads it again).</summary>
+        public DateTime FileTime { get; private set; }
+
+        /// <summary>Changes made here that are not in the file yet (Workspace holds them while the game runs).</summary>
+        public bool Pending => _changed.Count > 0;
+
         public void Load()
         {
             _changed.Clear();
+            try { FileTime = File.Exists(Paths.IniPath) ? File.GetLastWriteTimeUtc(Paths.IniPath) : default; }
+            catch (IOException) { FileTime = default; }
             _values.Clear();
             foreach (var (key, value) in Defaults)
                 _values[key] = value;
@@ -108,6 +117,7 @@ namespace BloodborneLauncher.Core
 
             Directory.CreateDirectory(Path.GetDirectoryName(Paths.IniPath)!);
             File.WriteAllText(Paths.IniPath, string.Join("\n", output) + "\n");
+            FileTime = File.GetLastWriteTimeUtc(Paths.IniPath);
             _lines = output;
         }
 

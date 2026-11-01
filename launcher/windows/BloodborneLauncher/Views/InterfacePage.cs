@@ -6,12 +6,12 @@ namespace BloodborneLauncher.Views
 {
     /// <summary>
     /// What is drawn over the game: the port's in-game menu, the HUD's sharpness, the shader note and
-    /// the FPS counter (0.4.4 beta 26: these were on the Display page). The counter's settings are
-    /// greyed while it is off, as in the in-game menu.
+    /// the FPS counter (0.4.4 beta 26: these were on the Display page). The counter is a switch whose
+    /// settings fold under it (26b), greyed while it is off, as in the in-game menu.
     /// </summary>
     public sealed class InterfacePage : LauncherPage
     {
-        private readonly StackPanel _counter = new();
+        private FoldRows _counter = null!;
 
         public InterfacePage() : base(L.T("Interface"), "")
         {
@@ -28,7 +28,8 @@ namespace BloodborneLauncher.Views
                 "compile_note");
 
             Group(L.T("FPS counter"));
-            IniToggle(SymbolRegular.DataUsage24, L.T("FPS counter"), L.T("Also in game: Insert or L3 + R3"), "show_fps", changed: ShowCounter);
+            _counter = FoldToggle(SymbolRegular.DataUsage24, L.T("FPS counter"), L.T("Also in game: Insert or L3 + R3"),
+                () => Ini.Flag("show_fps"), v => Ini.Set("show_fps", v ? "1" : "0"), out _, out _);
             // What the counter shows (on unless turned off).
             foreach (var (icon, key, title) in new[]
                      {
@@ -43,7 +44,7 @@ namespace BloodborneLauncher.Views
                 var fallback = key is "show_fps_cpu" or "show_fps_gpu" ? "0" : "1";
                 ToggleRow(icon, title, L.T("Shown in the FPS counter"), () => Ini.Get(key, fallback) == "1", v => Ini.Set(key, v ? "1" : "0"), _counter);
             }
-            var look = Advanced(L.T("Look"), _counter);
+            var look = _counter; // one list under the switch (26b: its look was folded once more)
             IniCombo(SymbolRegular.PositionToFront24, L.T("FPS counter position"), null, new Choice[]
             {
                 new(L.T("Top right"), "0"), new(L.T("Top left"), "1"), new(L.T("Bottom right"), "2"), new(L.T("Bottom left"), "3"), new(L.T("Top centre"), "4"),
@@ -62,12 +63,9 @@ namespace BloodborneLauncher.Views
             IniSlider(SymbolRegular.Blur24, L.T("FPS counter background opacity"), 0.0, 1.0, "fps_bg_opacity", look, fallback: 0.5);
             IniToggle(SymbolRegular.BorderAll24, L.T("FPS counter border"), null, "fps_border", look);
             Body.Children.Add(_counter);
-            ShowCounter();
         }
 
         private void IniSlider(SymbolRegular icon, string title, double min, double max, string key, Panel into, double fallback = 1.0) =>
             SliderRow(icon, title, null, min, max, 0.05, () => ParseDouble(Ini.Get(key, Fmt(fallback)), fallback), v => Ini.Set(key, Fmt(v)), into: into);
-
-        private void ShowCounter() => _counter.IsEnabled = Ini.Flag("show_fps");
     }
 }

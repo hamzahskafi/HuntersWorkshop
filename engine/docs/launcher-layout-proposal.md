@@ -21,6 +21,41 @@ What differs from the proposal below, and why:
 - **In game:** the HDR source is "HDR 源" in Chinese (the menu font has no glyphs for 来 or 号), and the
   camera section's note names the launcher's Gameplay page.
 
+## As built (beta 26b)
+
+The tester's second look (2026-11-01): Upscaling and Picture split the cost of a frame from its look in
+the wrong place. VISUALS became **Display, Graphics, Look, Interface**:
+
+| Page | Holds |
+|---|---|
+| Display | Monitor, window mode, resolution (1280 × 800 for the Steam Deck's screen), frame rate, V-Sync, live resolution, and **HDR** (back from Picture, as the in-game Display tab has it) |
+| Graphics | Best settings for this PC; **Upscaling and anti-aliasing** (upscaler, DLSS model with DLSS only, quality, render scale, sharpening, the game's own anti-aliasing, character motion vectors; mip bias and DLSS's sharper textures and auto exposure under Advanced); **Detail** (model detail, texture filtering, shadows from dynamic lights, SSAO, SSR) |
+| Look | **Effects** (depth of field, motion blur and its upscaler switch, chromatic aberration) and **Picture tuning** |
+| Interface | As built in beta 26, the FPS counter's Look fold flattened into its own fold |
+
+- **Folds:** Picture tuning, HDR, the FPS counter and Camera tuning are a switch with their settings folded
+  under it (`LauncherPage.FoldToggle`): off folds and greys them, on opens them, a chevron opens or folds
+  them by hand; the search opens a fold to show a row inside. Picture tuning keeps its switch: its values
+  apply only while it is on, in the launcher, the Insert menu and the System menu alike.
+- **HDR detection:** the switch is checked against the monitor the game opens on (Display › Monitor, or
+  Windows' primary): greyed when that monitor shows no HDR (a saved On can still be turned off), a hint
+  when Windows' Use HDR is off there. When the monitor can't be told (an old Windows, a remote session),
+  any display decides, as before, and the switch stays usable.
+- **Gameplay › Extras** also holds the Hunter's Dream mirror and rebirth at the altar (`change_appearance`,
+  `rebirth`), which were only in the game's System menu.
+- **The game and the launcher:** the game reads config.ini when it starts and its menus write over it,
+  so a launcher change made while it ran was lost and the launcher showed stale values after it. The
+  launcher now holds config.ini writes while the game runs (settings.json still saves), writes them over
+  what the game saved when it exits, and reads the file again then and when its window comes back with
+  the file changed. Closing the launcher (either one) or updating it writes at once.
+- **The System menu's PC pages** (the in-game side of the same settings): named Graphics, Effects, Colour,
+  Camera Tuning and Extras, in that order; effects no longer turn Picture Tuning on; the sliders span the
+  launcher's ranges with the game's own value on the slider. A parent "PC Settings" entry and a "restart
+  now?" question when the output resolution changes were looked at and not built: both need the game's
+  own menu code studied in the game's executable, which isn't at hand here. Fog stays on the Graphics page
+  (moving it would change the page's layout the game's menu was built with).
+- **Not built:** a Look preset (the effects and tuning as one choice), and Best settings suggesting HDR.
+
 
 - **Classic:** the WPF launcher's Classic layout is the one designed here.
 - **Modern:** it follows the same pages (its tab mapping is near the end).

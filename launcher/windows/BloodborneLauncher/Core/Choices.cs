@@ -68,7 +68,7 @@
 
         public static readonly Choice[] OutputResolutions =
         {
-            new(L.T("1280 × 720 (Steam Deck)"), "1280x720"),
+            new("1280 × 720", "1280x720"),
             new("1600 × 900", "1600x900"),
             new("1920 × 1080", "1920x1080"),
             new("2560 × 1440", "2560x1440"),
@@ -83,6 +83,9 @@
             new("7680 × 2160 (32:9)", "7680x2160"),
             // Narrower than 16:9: the camera and UI made taller to fill it (Widescreen).
             new("1280 × 1024 (5:4)", "1280x1024"),
+            // 0.4.4 beta 26b: the Steam Deck's own screen (LCD and OLED), 16:10; 720p was labelled for it and
+            // letterboxed there. The engine takes it as a custom size (any even WxH).
+            new(L.T("1280 × 800 (Steam Deck)"), "1280x800"),
             new("1680 × 1050 (16:10)", "1680x1050"),
             new("1920 × 1200 (16:10)", "1920x1200"),
             new("2560 × 1600 (16:10)", "2560x1600"),

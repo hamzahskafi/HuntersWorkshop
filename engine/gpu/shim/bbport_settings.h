@@ -334,7 +334,12 @@ void Load();
 void ConfigureUpscalerSupport(bool fsr4, bool fsr411, bool dlss = false);
 /// Startup-patched scene dimensions cannot change until run.sh prepares a new image.
 bool FixedRenderSession();
+/// 0.4.4 beta 26b: whether an output resolution chosen in game (the Insert menu, the pause menu's
+/// Graphics page) applies at once: only with Live resolution changes on when the game started.
+bool OutputChangesLive();
 int RenderPreset();
+/// A resolution chosen in game that waits for a restart: in a startup-patched session, or with Live
+/// resolution changes off in a session that needed no patch (started at 1920x1080).
 bool ResolutionNeedsRestart();
 /// Writes the file (menu changes).
 void Save();

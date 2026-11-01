@@ -328,6 +328,29 @@ int main() {
     BbSettings::Load();
     assert(s.frame_gen == fsr_fg && s.reflex == BbSettings::ReflexOn &&
            s.render_scale == BbSettings::RenderScaleMax);
+    // 0.4.4 beta 26b: Live resolution changes off holds at a 1920x1080 start too (no startup patch,
+    // BB_RENDER_RES unset): an output chosen in game waits for a restart; with it on, it is live.
+    {
+#ifdef _WIN32
+        _putenv_s("BB_RENDER_RES", "");
+#else
+        unsetenv("BB_RENDER_RES");
+#endif
+        { std::ofstream file(path); file << "output_res=1920x1080\nlive_resolution=0\n"; }
+        BbSettings::Load();
+        assert(!BbSettings::FixedRenderSession() && !BbSettings::OutputChangesLive());
+        assert(!BbSettings::ResolutionNeedsRestart());
+        s.output_res = BbSettings::OutputDefault == 2 ? 3 : 2; // another named size
+        assert(BbSettings::ResolutionNeedsRestart());
+        s.output_res = s.startup_output_res;
+        s.preset = BbSettings::Performance; // the preset at a 1080p start stays live
+        assert(!BbSettings::ResolutionNeedsRestart());
+        { std::ofstream file(path); file << "output_res=1920x1080\nlive_resolution=1\n"; }
+        BbSettings::Load();
+        assert(BbSettings::OutputChangesLive());
+        s.output_res = BbSettings::OutputDefault == 2 ? 3 : 2;
+        assert(!BbSettings::ResolutionNeedsRestart());
+    }
     std::filesystem::remove(temporary);
     std::puts("PASS: settings save keeps other keys, menu position");
 }

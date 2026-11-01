@@ -31,7 +31,7 @@ using Bytes = std::vector<std::uint8_t>;
 
 // Bumped whenever a generator or the recipe changes, so installs remake their
 // assets instead of keeping the last generation.
-constexpr int kGeneratorVersion = 9;  // 9: PC Colour, Fog on PC Graphics; 8: 8: PC Enhancements' three rows; 7: the PC Enhancements section; 6: event text (group 30) for the altar's rebirth
+constexpr int kGeneratorVersion = 10;  // 10: beta 26b names (Graphics, Effects, Colour, Camera Tuning, Extras) and help texts; 9: PC Colour, Fog on PC Graphics; 8: 8: PC Enhancements' three rows; 7: the PC Enhancements section; 6: event text (group 30) for the altar's rebirth
 
 const char kMessagesTsv[] =
 #include "pc_option_messages.inc"

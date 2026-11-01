@@ -268,6 +268,13 @@ namespace BloodborneLauncher.Views
     /// <summary>The rows inside an Advanced section (folded away until it is opened).</summary>
     public sealed class AdvancedRows : StackPanel { }
 
+    /// <summary>The settings a switch folds away (LauncherPage.FoldToggle). The settings search still
+    /// finds them, and Open shows them for it.</summary>
+    public sealed class FoldRows : StackPanel
+    {
+        public Action? Open { get; set; }
+    }
+
     /// <summary>
     /// A folded part of a group: an "Advanced (n)" line that opens and closes the rows under it.
     /// Rows put in Rows stay searchable; the search opens the section to show one.
@@ -523,8 +530,8 @@ namespace BloodborneLauncher.Views
         private bool Shown(DependencyObject? at)
         {
             for (; at != null && !ReferenceEquals(at, this); at = LogicalTreeHelper.GetParent(at))
-                if (at is UIElement { Visibility: not Visibility.Visible } && at is not AdvancedRows)
-                    return false; // a folded Advanced section still counts: the search opens it
+                if (at is UIElement { Visibility: not Visibility.Visible } && at is not AdvancedRows && at is not FoldRows)
+                    return false; // a folded Advanced section or switch fold still counts: the search opens it
             return at != null;
         }
 
@@ -535,7 +542,10 @@ namespace BloodborneLauncher.Views
         public bool Reveal(SettingRow row)
         {
             for (DependencyObject? at = row; at != null; at = LogicalTreeHelper.GetParent(at))
+            {
                 if (at is AdvancedSection section) section.IsOpen = true;
+                if (at is FoldRows fold) fold.Open?.Invoke();
+            }
             UpdateLayout();
             if (!row.IsVisible) return false;
             // Focus first: focusing scrolls the control into view, and the centring below comes after it.
@@ -796,6 +806,49 @@ namespace BloodborneLauncher.Views
             };
             Add(Card(icon, title, hint, box, out _), into);
             return box;
+        }
+
+        /// <summary>
+        /// A switch whose settings fold under it (0.4.4 beta 26b, the tester's idea): turning it on opens
+        /// them, turning it off closes them, and the arrow beside it opens or closes them any time. While
+        /// it is off they are greyed: they don't apply. Put the settings into the panel this returns, then
+        /// add the panel to the page (into, or the page itself). For HDR, the FPS counter, camera tuning
+        /// and picture tuning.
+        /// </summary>
+        protected FoldRows FoldToggle(SymbolRegular icon, string title, string? hint, Func<bool> get, Action<bool> set,
+            out ToggleSwitch toggle, out SettingRow row, Panel? into = null, Action? changed = null)
+        {
+            var rows = new FoldRows();
+            var arrow = new Button
+            {
+                Appearance = ControlAppearance.Transparent,
+                Padding = new Thickness(6),
+                Margin = new Thickness(0, 0, 6, 0),
+                VerticalAlignment = VerticalAlignment.Center,
+                ToolTip = L.T("Show or hide its settings"),
+            };
+            var on = new ToggleSwitch { IsChecked = get(), VerticalAlignment = VerticalAlignment.Center };
+            void Show(bool open)
+            {
+                rows.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+                arrow.Icon = Icon(open ? SymbolRegular.ChevronUp16 : SymbolRegular.ChevronDown16);
+            }
+            rows.Open = () => Show(true);
+            arrow.Click += (_, _) => Show(rows.Visibility != Visibility.Visible);
+            on.Click += (_, _) =>
+            {
+                var value = on.IsChecked == true;
+                set(value);
+                Ws.SaveSoon();
+                rows.IsEnabled = value;
+                Show(value);
+                changed?.Invoke();
+            };
+            row = Add(Card(icon, title, hint, Row(arrow, on), out _), into);
+            rows.IsEnabled = get();
+            Show(get());
+            toggle = on;
+            return rows;
         }
 
         /// <summary>

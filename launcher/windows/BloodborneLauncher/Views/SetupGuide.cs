@@ -343,7 +343,7 @@ namespace BloodborneLauncher.Views
 
                 case Step.Style:
                     _title.Text = L.T("5. How it should run");
-                    _intro.Text = L.T("Pick what matters most to you. Each choice is sized to this PC (its graphics card, screen and processor), and only changes the launcher's settings, never the game files. You can change any of it later on the Display and Upscaling pages.");
+                    _intro.Text = L.T("Pick what matters most to you. Each choice is sized to this PC (its graphics card, screen and processor), and only changes the launcher's settings, never the game files. You can change any of it later on the Display and Graphics pages.");
                     if (_hardware != null) ShowWhere(_hardware.Summary);
                     foreach (var choice in Hardware.Styles)
                         _results.Children.Add(StyleCard(choice));

@@ -476,18 +476,18 @@
                                 <TextBlock Text="{loc:Tr &#x27;Display&#x27;}" />
                             </StackPanel>
                         </RadioButton>
-                        <RadioButton x:Name="ClassicUpscaling" GroupName="Classic" Style="{StaticResource SidebarItem}"
-                                     Tag="{x:Type views:UpscalingPage}" Checked="SidebarItem_Checked">
+                        <RadioButton x:Name="ClassicGraphics" GroupName="Classic" Style="{StaticResource SidebarItem}"
+                                     Tag="{x:Type views:GraphicsPage}" Checked="SidebarItem_Checked">
                             <StackPanel Orientation="Horizontal">
                                 <ui:SymbolIcon Symbol="Sparkle24" Style="{StaticResource SidebarIcon}" />
-                                <TextBlock Text="{loc:Tr &#x27;Upscaling&#x27;}" />
+                                <TextBlock Text="{loc:Tr &#x27;Graphics&#x27;}" />
                             </StackPanel>
                         </RadioButton>
-                        <RadioButton x:Name="ClassicPicture" GroupName="Classic" Style="{StaticResource SidebarItem}"
-                                     Tag="{x:Type views:PicturePage}" Checked="SidebarItem_Checked">
+                        <RadioButton x:Name="ClassicLook" GroupName="Classic" Style="{StaticResource SidebarItem}"
+                                     Tag="{x:Type views:LookPage}" Checked="SidebarItem_Checked">
                             <StackPanel Orientation="Horizontal">
-                                <ui:SymbolIcon Symbol="Image24" Style="{StaticResource SidebarIcon}" />
-                                <TextBlock Text="{loc:Tr &#x27;Picture&#x27;}" />
+                                <ui:SymbolIcon Symbol="Color24" Style="{StaticResource SidebarIcon}" />
+                                <TextBlock Text="{loc:Tr &#x27;Look&#x27;}" />
                             </StackPanel>
                         </RadioButton>
                         <RadioButton x:Name="ClassicInterface" GroupName="Classic" Style="{StaticResource SidebarItem}"

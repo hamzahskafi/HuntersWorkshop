@@ -559,8 +559,19 @@ int RenderPreset() {
         v.upscaler == UpscalerTaa ? NativeAA : v.preset.load();
 }
 
+bool OutputChangesLive() {
+    return !FixedRenderSession() && Get().startup_live_resolution == 1;
+}
+
 bool ResolutionNeedsRestart() {
     const auto& v = Get();
+    // 0.4.4 beta 26b: a start at 1920x1080 needs no startup patch, so the session was not fixed and
+    // an output chosen in game applied at once whatever Live resolution changes said (the tester's
+    // report): the scene stayed at 1080p and the upscaler took the finished frame, the slower way
+    // Off avoids. Off now means a restart wherever the game started; the quality preset at 1080p
+    // stays live (nothing is lost there: post-processing runs at the output size either way).
+    if (!FixedRenderSession())
+        return !OutputChangesLive() && v.output_res != v.startup_output_res;
     // TAA needs the live path (native guest targets): run.sh selects it on restart.
     return FixedRenderSession() &&
         (v.preset != v.startup_preset || v.output_res != v.startup_output_res ||

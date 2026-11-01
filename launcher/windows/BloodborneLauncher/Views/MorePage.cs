@@ -6,7 +6,7 @@ namespace BloodborneLauncher.Views
 {
     /// <summary>
     /// A tab of the Modern layout that holds several pages behind segmented buttons at its top: Visuals
-    /// (Display, Upscaling, Picture, Interface) and More (mods, cheats, the engine's switches, the log).
+    /// (Display, Graphics, Look, Interface) and More (mods, cheats, the engine's switches, the log).
     /// The sidebar lists the same pages as entries of their own, under the same names.
     /// </summary>
     public abstract class SectionedPage : LauncherPage
@@ -53,6 +53,9 @@ namespace BloodborneLauncher.Views
         /// <summary>The page types of the sections, made or not.</summary>
         public IEnumerable<Type> SectionTypes => _sections.Select(s => s.Page);
 
+        /// <summary>The key of the section shown (MainWindow.ReloadPages keeps it).</summary>
+        public string? ShownKey => _current >= 0 ? _sections[_current].Key : null;
+
         /// <summary>The page of the section shown (Settings › Navigation keeps it when it switches).</summary>
         public Type? ShownPage => _current >= 0 ? _sections[_current].Page : null;
 
@@ -91,14 +94,15 @@ namespace BloodborneLauncher.Views
         }
     }
 
-    /// <summary>How the game looks (0.4.4 beta 26: the Display and Graphics tabs before).</summary>
+    /// <summary>How the game looks (0.4.4 beta 26: the Display and Graphics tabs before; 26b: Display,
+    /// Graphics, Look and Interface, were Display, Upscaling, Picture and Interface).</summary>
     public sealed class VisualsPage : SectionedPage
     {
         public static readonly (string Key, string Label, Type Page)[] Sections =
         {
             ("display", L.T("Display"), typeof(DisplayPage)),
-            ("upscaling", L.T("Upscaling"), typeof(UpscalingPage)),
-            ("picture", L.T("Picture"), typeof(PicturePage)),
+            ("graphics", L.T("Graphics"), typeof(GraphicsPage)),
+            ("look", L.T("Look"), typeof(LookPage)),
             ("interface", L.T("Interface"), typeof(InterfacePage)),
         };
 

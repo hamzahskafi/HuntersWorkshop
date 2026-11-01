@@ -584,7 +584,9 @@ bool TemporalUpscaler::OnFrameStart() {
     const bool active = Active();
     const bool jitter_on = active && settings.jitter && !BbToggle::Disabled(1u << 25);
     const int upscaler = settings.upscaler.load();
-    const int output = settings.output_res.load();
+    // 0.4.4 beta 26b: with Live resolution changes off, an output chosen in game waits for the restart
+    // (BbSettings::ResolutionNeedsRestart), also when the game started at 1920x1080 (not scaled_session).
+    const int output = BbSettings::ResolutionNeedsRestart() ? settings.startup_output_res : settings.output_res.load();
     const bool output_changed = !scaled_session && applied_output != output;
     if (output_changed) {
         target_width = BbSettings::OutputWidth(output);

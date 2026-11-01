@@ -586,12 +586,12 @@ void PictureSection() {
         Hint(BbSettings::MenuText(
             "Changes apply live, Picture tuning too, to the game's own colour, fog and lighting of each area "
             "(the HUD and menus keep theirs). Moving one turns Picture tuning on; off: the game's own picture. 1.00 and Hue 0 are the game's. Fog 0 clears the haze over distant streets. The "
-            "same settings are in the game's System menu (PC Graphics, PC Effects, PC Colour) and the "
+            "same settings are in the game's System menu (Graphics, Effects, Colour) and the "
             "launcher. Ctrl+click a slider to type any value, beyond its ends too (brightness, saturation and fog "
             "up to 5, contrast 0.5-1.5, hue -180-180, bloom up to 10, shadow distance 0.25-8).",
             "Меняются сразу, как и сама настройка: собственные цвет, туман и освещение каждой области "
             "(интерфейс и меню не меняются). Выкл. — картинка игры. 1.00 и оттенок 0 — как в игре. Туман 0 убирает дымку над дальними улицами. Те же "
-            "настройки есть в системном меню игры (PC Graphics, PC Effects, PC Colour) и в лаунчере. "
+            "настройки есть в системном меню игры (Graphics, Effects, Colour) и в лаунчере. "
             "Ctrl+клик по ползунку — ввести любое значение, в том числе за его краями (яркость, "
             "насыщенность и туман до 5, контраст 0.5-1.5, оттенок -180-180, bloom до 10, дальность теней "
             "0.25-8)."));
@@ -1354,7 +1354,7 @@ void OutputSection() {
             }
             ImGui::EndCombo();
         }
-        if (BbSettings::FixedRenderSession()) {
+        if (!BbSettings::OutputChangesLive()) { // 0.4.4 beta 26b: Live resolution changes off, 1080p starts too
             Hint(BbSettings::MenuText(
                 "Size of the final frame and UI. The preset sets the scene size relative to "
                 "the output: 4K Performance = 1920x1080. Applies after restarting the game.",

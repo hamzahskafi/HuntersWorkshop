@@ -20,19 +20,29 @@ What changed since 0.4.3, for the release page. The engine work behind each line
 The Windows launcher's pages, reorganised (the Classic layout; the Modern layout has the same pages
 behind its tabs, Visuals holding Display to Interface; the Linux launchers are unchanged for now):
 
-- **The sidebar:** HUNT (Play, Gameplay, Controls, Trophies, Online), VISUALS (Display, Upscaling,
-  Picture, Interface; was SIGHT: Display and Graphics), WORKSHOP (Mods & patches, Cheats) and ENGINE
+- **The sidebar:** HUNT (Play, Gameplay, Controls, Trophies, Online), VISUALS (Display, Graphics,
+  Look, Interface; was SIGHT: Display and Graphics), WORKSHOP (Mods & patches, Cheats) and ENGINE
   (Engine switches, Log), with Settings once, at the bottom.
-- **Display:** the monitor, the window, the output resolution, the frame rate and V-Sync, with
-  Best settings for this PC at the top. **Window mode** (Windowed, Borderless fullscreen,
-  Fullscreen) replaces the two fullscreen switches; it keeps the same settings.
-- **Upscaling:** the upscaler, its quality and sharpening; DLSS's own settings show with DLSS only.
-- **Picture:** HDR, picture tuning (with a Game's own picture button, as in game) and the game's
-  effects, with texture filtering and the motion blur switch beside the blur.
+- **Display:** what the screen gets: the monitor, the window, the output resolution, the frame rate
+  and V-Sync, and HDR. **Window mode** (Windowed, Borderless fullscreen, Fullscreen) replaces the two
+  fullscreen switches; it keeps the same settings. **HDR** is checked on the monitor the game opens
+  on: its switch greys out when that monitor shows no HDR, and says so when Windows' Use HDR is off.
+  The **Steam Deck** output is its screen's 1280 × 800 (the list had 1280 × 720 under its name).
+- **Graphics:** Best settings for this PC at the top, then **Upscaling and anti-aliasing** (the
+  upscaler; the DLSS model with DLSS only; quality, render scale and sharpening; the game's own
+  anti-aliasing; character motion vectors; texture mip bias and DLSS's two finer settings under
+  Advanced) and **Detail** (model detail, texture filtering, shadows from dynamic lights, ambient
+  occlusion, screen-space reflections): what costs frames, in one place.
+- **Look:** the game's lens effects (depth of field, motion blur with its switch for upscalers,
+  chromatic aberration) and picture tuning, with a Game's own picture button, as in game.
 - **Interface:** the in-game menu's shortcut and language, Sharp UI, the shader note and the FPS
   counter.
 - **Gameplay:** the camera (Follow camera, Camera tuning) and the extras (Skip intro videos, Free
-  camera, Debug menu).
+  camera, Debug menu, and the Hunter's Dream mirror and rebirth at the altar, which were only in the
+  game's System menu).
+- **Picture tuning, HDR, the FPS counter and Camera tuning** are switches whose settings fold under
+  them: turning one off folds them away, turning it on opens them, and the arrow beside the switch
+  opens or folds them by hand. The search still finds a row inside and opens its fold.
 - **Engine switches** also holds the performance and sound settings that were under Settings, and
   Extra variables; **Reset all** puts back every setting on the page (it used to skip the engine
   preset and the experimental features). **Log** (was Game output) has the log options.
@@ -46,6 +56,12 @@ behind its tabs, Visuals holding Display to Interface; the Linux launchers are u
   in-game menu's (Character motion vectors, FPS counter, HDR source, Blood Echo multiplier, Camera
   tuning), and every hint names the page as both layouts call it. Nothing about the settings
   themselves changed: settings files and shared codes from earlier versions work as before.
+- **The launcher and the game no longer overwrite each other's settings.** The game reads its
+  settings when it starts and writes its own when you change them in game, so a change made in the
+  launcher while the game ran was lost. The launcher now keeps those changes until the game exits
+  (the status line says "game settings apply at its next start"), then writes them over what the
+  game saved, and its pages show what was changed in game.
+- **Save backups while playing every 10 minutes** (was 15), when the saves changed.
 - **Frame generation and NVIDIA Reflex are not offered** (the launcher's rows and the in-game items
   are gone; a saved frame generation choice runs off and the log says so). The code stays.
 
@@ -164,6 +180,21 @@ behind its tabs, Visuals holding Display to Interface; the Linux launchers are u
   game's post-processing at 1080p at every preset, and only helps someone who changes resolution in
   the game. Off (the default) renders everything at the preset's size; a saved Auto runs Off and the
   log says so.
+- **Live resolution change Off now holds at a 1920 × 1080 output too.** Started at 1920 × 1080,
+  the game took an output resolution changed in its menus at once, as if the setting were On. It now
+  applies at the next start, as at every other output (the menus say so); with the setting On it
+  applies at once, as before.
+- **The PC pages of the game's System menu,** reworked:
+  - Named Graphics, Effects, Colour, Camera Tuning and Extras (were PC Graphics, PC Effects,
+    PC Colour, PC Camera and PC Enhancements), in that order, then PC Controls and Key Bindings,
+    with Extras (the mirror, rebirth and Camera Tuning's switch) last instead of first.
+  - Turning an effect on or off (anti-aliasing, ambient occlusion, motion blur, depth of field,
+    chromatic aberration) no longer turns Picture Tuning on: those apply whether it is on or not.
+    Only the picture settings it applies do (ambient occlusion strength, shadow distance, fog,
+    vignette, bloom and the Colour page).
+  - The sliders cover what the launcher's do, with the game's own value on the slider (fog and
+    bloom went only up to the game's own, contrast ±5%, hue ±20°): a value set in the launcher shows
+    at its place instead of at an end. Each help text names the game's own position.
 - **Co-op: no freeze when a session ends.** Leaving a room (or the game closing its online session)
   asked the server to take the player out on the game's own thread and waited for the answer, up to
   8 seconds on a slow or unreachable connection, with the game stopped meanwhile. The request now

@@ -125,6 +125,8 @@ namespace BloodborneLauncher.Core
                         SignInRefused?.Invoke(name, refused.Reason);
                     }
                 }
+                // What the game's menus changed, with what was changed here meanwhile written over it.
+                ReloadIni();
                 GameStateChanged?.Invoke();
             });
         }
@@ -226,6 +228,21 @@ namespace BloodborneLauncher.Core
             TrophiesChanged?.Invoke();
         }
 
+        /// <summary>Game settings changed here while the game runs, held for its next start (SaveNow).</summary>
+        public bool IniHeld { get; private set; }
+
+        /// <summary>config.ini was read again (after the game exited): the pages show what it holds now.</summary>
+        public event Action? IniReloaded;
+
+        /// <summary>Reads config.ini again after the game or someone else changed it, keeping the changes made
+        /// here that are not written yet (they go over it).</summary>
+        public void ReloadIni()
+        {
+            SaveNow();
+            if (!Ini.Pending && !Game.Running) Ini.Load();
+            IniReloaded?.Invoke();
+        }
+
         public void SaveSoon()
         {
             if (_saveTimer == null)
@@ -241,14 +258,25 @@ namespace BloodborneLauncher.Core
             _saveTimer.Start();
         }
 
-        public void SaveNow()
+        /// <summary>
+        /// Saves settings.json, and config.ini unless the game is running: the game reads config.ini only
+        /// when it starts, and its in-game menus write theirs over the file, so a change made here meanwhile
+        /// was lost. It is held until the game exits and then written over what the game saved (0.4.4 beta
+        /// 26b). <paramref name="final"/>: written anyway (the launcher is closing).
+        /// </summary>
+        public void SaveNow(bool final = false)
         {
             _saveTimer?.Stop();
             try
             {
                 Settings.Save();
-                if (Paths.IsPortDir(Paths.PortDir) || Environment.GetEnvironmentVariable("BB_CONFIG") is { Length: > 0 })
+                if (Game.Running && !final)
+                    IniHeld = Ini.Pending;
+                else if (Paths.IsPortDir(Paths.PortDir) || Environment.GetEnvironmentVariable("BB_CONFIG") is { Length: > 0 })
+                {
                     Ini.Save();
+                    IniHeld = false;
+                }
                 else if (!_iniWarned)
                 {
                     _iniWarned = true;

@@ -27,7 +27,25 @@ namespace BloodborneLauncher
             LogList.ItemsSource = _log;
             var ws = Workspace.Current;
             ws.Logged += OnLogged;
-            ws.Saved += () => SavedText.Text = L.F($"Saved {DateTime.Now:HH:mm:ss}");
+            // While the game runs, game settings changed here wait for its next start (Workspace.SaveNow).
+            ws.Saved += () => SavedText.Text = ws.IniHeld ? L.F($"Saved {DateTime.Now:HH:mm:ss} · game settings apply at its next start")
+                                                         : L.F($"Saved {DateTime.Now:HH:mm:ss}");
+            // config.ini read again (the game exited): the pages show what the in-game menus changed.
+            ws.IniReloaded += ReloadPages;
+            // Changed while the launcher was in the background (a game started another way, an edit by
+            // hand): read again when it comes back.
+            Activated += (_, _) =>
+            {
+                try
+                {
+                    if (!ws.Game.Running && System.IO.File.Exists(Paths.IniPath) &&
+                        System.IO.File.GetLastWriteTimeUtc(Paths.IniPath) != ws.Ini.FileTime)
+                        ws.ReloadIni();
+                }
+                catch (System.IO.IOException)
+                {
+                }
+            };
             ws.GameStateChanged += UpdatePlayButton;
             ws.GameCrashed += OnGameCrashed;
             ws.SignInRefused += OnSignInRefused;
@@ -267,6 +285,9 @@ namespace BloodborneLauncher
             if (current == null) return;
             var page = _pages[current.GetType()] = (LauncherPage)Activator.CreateInstance(current.GetType())!;
             PageFrame.Navigate(page);
+            // Visuals or More: at the section that was shown.
+            if (current is SectionedPage shown && shown.ShownKey is { } key && page is SectionedPage again)
+                again.ShowSection(key);
             page.OnShown();
         }
 
@@ -507,7 +528,7 @@ namespace BloodborneLauncher
 
         private async void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
         {
-            Workspace.Current.SaveNow();
+            Workspace.Current.SaveNow(final: true); // config.ini too, the game running or not
             if (_closing || !Workspace.Current.Game.Running)
                 return;
 
@@ -564,7 +585,7 @@ namespace BloodborneLauncher
             (item.Content as Panel)?.Children.OfType<System.Windows.Controls.TextBlock>().FirstOrDefault()?.Text;
 
         /// <summary>Shows a page by its key: a tab or sidebar entry ("online", "controls", "gameplay",
-        /// "advanced": Settings), or a section of Visuals' ("display", "upscaling", "picture", "interface")
+        /// "advanced": Settings), or a section of Visuals' ("display", "graphics", "look", "interface")
         /// or More's ("mods", "cheats", "engine", "output"), which the sidebar lists as entries.</summary>
         public void Show(string page)
         {
@@ -580,8 +601,8 @@ namespace BloodborneLauncher
                     "controls" => ClassicControls,
                     "gameplay" => ClassicGameplay,
                     "display" => ClassicDisplay,
-                    "upscaling" => ClassicUpscaling,
-                    "picture" => ClassicPicture,
+                    "graphics" => ClassicGraphics,
+                    "look" => ClassicLook,
                     "interface" => ClassicInterface,
                     _ => ClassicPlay,
                 }
@@ -591,7 +612,7 @@ namespace BloodborneLauncher
                     "advanced" => SettingsItem,
                     "output" or "mods" or "engine" => MoreItem,
                     "cheats" when CheatsPage.Supported => MoreItem,
-                    "display" or "upscaling" or "picture" or "interface" => VisualsItem,
+                    "display" or "graphics" or "look" or "interface" => VisualsItem,
                     "controls" => ControlsItem,
                     "gameplay" => GameplayItem,
                     _ => PlayItem,
@@ -909,7 +930,7 @@ namespace BloodborneLauncher
             var progress = new Progress<double>(p => TitleUpdateText.Text = L.F($"Downloading {p:P0}"));
             try
             {
-                ws.SaveNow();
+                ws.SaveNow(final: true);
                 var skipped = await Updater.InstallAsync(release, package, progress);
                 if (skipped.Count > 0)
                     Prompt.Tell(L.T("Updated, with files left out"),
