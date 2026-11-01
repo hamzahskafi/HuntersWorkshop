@@ -31,9 +31,19 @@ The sections after this one are the record of the work from the first frame anal
 - **Sharpening:** `sharpen` (on) and `sharpness` (0-2, default 0.20). FSR 3.1 and 4 apply their own
   RCAS up to 1 and an extra RCAS pass above it; DLSS, which has no sharpening of its own, gets the
   whole range from that pass; TAA has its own pass (docs/MODS.md, "TAA sharpening").
-- **Reactive mask** (`reactive`, off by default): FSR 3.1's reactive mask and DLSS's
-  bias-current-colour mask; FSR 4 takes none, so its output is blended with the current frame where
-  the mask marks blended effects (`fsr4_reactive.comp`); TAA does not use it.
+- **Reactive mask** (`reactive`, off by default): FSR 3.1's reactive mask; FSR 4 takes none, so its
+  output is blended with the current frame where the mask marks blended effects
+  (`fsr4_reactive.comp`); TAA and DLSS do not use it, and it is not made for them. Up to 0.4.4 beta
+  25a DLSS was given it as its bias-current-colour mask, which NVIDIA's guide (310.4.0, §3.15) says
+  should not be used.
+- **History reset on a camera cut** (0.4.4 beta 25b, every upscaler): the first frame after the
+  camera turned more than the vertical field of view or moved more than 3 m starts the history again
+  (`camera_cut.h`; NVIDIA §3.13). Frames after a loading screen started again already (a frame
+  without the upscaler resets the next). The log names each cut (`Upscaler: camera cut ...`); with
+  frame statistics, the resets by cause and the largest turn and move of the other frames.
+  `BB_CAMERA_CUT_RESET=0`: logged and counted, the history kept.
+- **Jitter:** a Halton(2,3) pattern of 8 x (output / render)^2 phases (AMD's and NVIDIA's formula);
+  DLSS at least 16 (NVIDIA's checklist; from 0.4.4 beta 25b), so DLAA has 16 instead of 8.
 - **Frame generation, DLSS's options and the mip bias:**
   [dlss_frame_generation.md](dlss_frame_generation.md).
 

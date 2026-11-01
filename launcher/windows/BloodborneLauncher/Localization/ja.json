@@ -1403,7 +1403,6 @@
   "FPS++ retune": "FPS++ 再調整",
   "Kyo's 60 FPS++ camera: further back and slower to follow": "Kyo の 60 FPS++ カメラ: より後ろに引き、追従が遅めになります",
   "The newer model: steadier thin and moving objects (a weapon on the back, railings)": "新しいモデル: 細い物体や動く物体がより安定します (背中の武器、手すりなど)",
-  "The older model: a little faster on RTX 20 and 30 cards, softer and more ghosting in motion": "以前のモデル: RTX 20・30 シリーズではやや高速ですが、映像が柔らかくなり、動きの中で残像が増えます",
   "The DLL's default": "DLL の既定値",
   "Whatever the included DLSS version picks for each quality mode": "同梱の DLSS バージョンが品質モードごとに選ぶモデル",
   "Insert or L3 + R3": "Insert または L3 + R3",

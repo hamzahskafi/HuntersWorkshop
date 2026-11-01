@@ -1012,7 +1012,8 @@ void DlssSection() {
     Section("DLSS");
     if (const char* label = Item("DLSS model", "Модель DLSS")) {
         // The letters NVIDIA's DLSS 4 and 4.5 DLLs know; a preset the DLL refuses runs its default.
-        static constexpr int presets[] = {BbSettings::DlssPresetAuto, 11, 10, 13, 12, 5, 6,
+        // 0.4.4 beta 25b: E and F (CNN) left out: NVIDIA deprecated them (DLSS 310.6.0).
+        static constexpr int presets[] = {BbSettings::DlssPresetAuto, 11, 10, 13, 12,
                                           BbSettings::DlssPresetDefault};
         const char* names[] = {
             BbSettings::MenuText("Auto: K, M for Performance, L for Ultra Performance",
@@ -1022,8 +1023,6 @@ void DlssSection() {
             BbSettings::MenuText("M: transformer, 2nd generation", "M: трансформер 2-го поколения"),
             BbSettings::MenuText("L: transformer, 2nd generation (Ultra Performance)",
                                  "L: трансформер 2-го поколения (Ultra Performance)"),
-            BbSettings::MenuText("E: CNN", "E: CNN"),
-            BbSettings::MenuText("F: CNN (Ultra Performance, DLAA)", "F: CNN (Ultra Performance, DLAA)"),
             BbSettings::MenuText("The DLL's default", "По умолчанию DLL"),
         };
         static_assert(std::size(presets) == std::size(names));
@@ -1163,9 +1162,11 @@ void MaskSection() {
     auto& s = BbSettings::Get();
     const bool upscaler_on = s.upscaler != BbSettings::UpscalerOff;
     const bool taa = s.upscaler == BbSettings::UpscalerTaa;
+    // 0.4.4 beta 25b: DLSS takes no mask (ReactiveOn): its bias mask is one NVIDIA advises against.
+    const bool dlss = s.upscaler == BbSettings::UpscalerDlss;
     ImGui::BeginDisabled(!upscaler_on);
     Section("Reactive mask");
-    ImGui::BeginDisabled(taa);
+    ImGui::BeginDisabled(taa || dlss);
     if (const char* label = Item("Enable mask")) {
         Checkbox(label, s.reactive);
         Hint(BbSettings::MenuText(
@@ -1175,9 +1176,8 @@ void MaskSection() {
         const char* use = s.upscaler == BbSettings::UpscalerFsr3
                               ? BbSettings::MenuText("FSR 3.1 uses it as its reactive mask.",
                                                      "FSR 3.1 берёт её как свою реактивную маску.")
-                          : s.upscaler == BbSettings::UpscalerDlss
-                              ? BbSettings::MenuText("DLSS uses it to trust the current frame more (its bias mask).",
-                                                     "DLSS по ней больше доверяет текущему кадру (маска смещения).")
+                          : dlss
+                              ? BbSettings::MenuText("DLSS does not use it.", "DLSS её не использует.")
                           : BbSettings::IsFsr4(s.upscaler)
                               ? BbSettings::MenuText("FSR 4 has no mask input: the marked pixels are blended with "
                                                      "this frame after it.",

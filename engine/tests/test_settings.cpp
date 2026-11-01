@@ -238,10 +238,10 @@ int main() {
     // The DLSS model and its mip bias (live in the menu), the OptiScaler switches (read at start).
     {
         std::ofstream file(path);
-        file << "dlss_preset=e\ndlss_mip_bias=0\noptiscaler_compat=0\noptiscaler_sync_submit=1\n";
+        file << "dlss_preset=j\ndlss_mip_bias=0\noptiscaler_compat=0\noptiscaler_sync_submit=1\n";
     }
     BbSettings::Load();
-    assert(s.dlss_preset == 5 && !s.dlss_mip_bias && !s.optiscaler_compat &&
+    assert(s.dlss_preset == 10 && !s.dlss_mip_bias && !s.optiscaler_compat &&
            s.optiscaler_sync_submit == BbSettings::OptiSubmitOn);
     assert(!s.startup_optiscaler.compat && s.startup_optiscaler.sync_submit == BbSettings::OptiSubmitOn);
     s.dlss_preset = BbSettings::DlssPresetDefault;
@@ -273,7 +273,11 @@ int main() {
     // Letters DLSS 310.9 removed (A-D) or ignores (G-I, N, O): K.
     assert(BbSettings::DlssPresetFromText("a") == BbSettings::DlssPresetK);
     assert(BbSettings::DlssPresetFromText("h") == BbSettings::DlssPresetK);
-    assert(BbSettings::DlssPresetFromText("j") == 10 && BbSettings::DlssPresetFromText("f") == 6);
+    assert(BbSettings::DlssPresetFromText("j") == 10);
+    // The CNN presets NVIDIA deprecated read as Auto (0.4.4 beta 25b).
+    assert(BbSettings::DlssPresetFromText("e") == BbSettings::DlssPresetAuto);
+    assert(BbSettings::DlssPresetFromText("F") == BbSettings::DlssPresetAuto);
+    assert(!BbSettings::DlssPresetValid(5) && !BbSettings::DlssPresetValid(6) && BbSettings::DlssPresetValid(13));
     // DLSS Frame Generation, Reflex, the Custom preset's ratio, the mip bias offset.
     {
         std::ofstream file(path);

@@ -224,6 +224,13 @@ int main() {
     assert(JitterPhases(960, 1920) == 32);
     assert(JitterPhases(640, 1920) == 72);
     assert(JitterPhases(0, 1920) == 8);
+    // DLSS's minimum: DLAA and render sizes above about 71% go to 16; the rest as before.
+    assert(JitterPhases(1920, 1920, kDlssMinJitterPhases) == 16);
+    assert(JitterPhases(1600, 1920, kDlssMinJitterPhases) == 16); // 8 x 1.44 = 11.52
+    assert(JitterPhases(1280, 1920, kDlssMinJitterPhases) == 18);
+    assert(JitterPhases(960, 1920, kDlssMinJitterPhases) == 32);
+    assert(JitterPhases(640, 1920, kDlssMinJitterPhases) == 72);
+    assert(JitterPhases(0, 1920, kDlssMinJitterPhases) == 16);
     std::puts("Motion history: PASS (ranges, restart, offsets, matching, instances, anchors, capacity, gating, "
               "holds, reasons, giving way, index cache, jitter)");
 }

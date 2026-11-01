@@ -173,7 +173,9 @@
             new(L.T("Uncapped"), "uncap", L.T("No limit: as fast as your PC can go, up to 480 FPS. Above 240 FPS the game is untested, and the old community uncapped patch froze in boss fights at such rates. For a high frame rate we recommend 240")),
         };
 
-        /// <summary>The DLSS model (BB_DLSS_PRESET): NVIDIA's render presets.</summary>
+        /// <summary>The DLSS model (BB_DLSS_PRESET): NVIDIA's render presets. The CNN presets E and F are
+        /// deprecated by NVIDIA (DLSS 310.6.0) and not offered from 0.4.4 beta 25b; a saved one reads as
+        /// Auto (the engine's settings).</summary>
         public static readonly Choice[] DlssModels =
         {
             new(L.T("Auto (per quality)"), "auto", L.T("NVIDIA's DLSS 4.5 pairing: K for DLAA, Quality and Balanced, M for Performance, L for Ultra Performance")),
@@ -181,8 +183,6 @@
             new(L.T("Transformer 2 (preset M)"), "m", L.T("DLSS 4.5's model for Performance: sharper, a little heavier")),
             new(L.T("Transformer 2 (preset L)"), "l", L.T("DLSS 4.5's model for Ultra Performance")),
             new(L.T("Transformer (preset J)"), "j", L.T("Like K, slightly less ghosting and a little more flicker")),
-            new(L.T("CNN (preset E)"), "e", L.T("The older model: a little faster on RTX 20 and 30 cards, softer and more ghosting in motion")),
-            new(L.T("CNN (preset F)"), "f", L.T("The older model for Ultra Performance and DLAA")),
             new(L.T("The DLL's default"), "default", L.T("Whatever the included DLSS version picks for each quality mode")),
         };
 

@@ -195,6 +195,9 @@ private:
     /// Available and switched on (menu setting, toggle 1 << 24).
     [[nodiscard]] bool Active() const;
     [[nodiscard]] bool ReactiveOn() const;
+    /// 0.4.4 beta 25b: after the motion pass (which commits this frame's camera), before the upscaler
+    /// is recorded: the history reset on a camera cut (camera_cut.h), with its log lines and counts.
+    void CheckCameraCut();
     bool EnsureResources(u32 width, u32 height, u32 out_width, u32 out_height, bool hdr);
     /// 0.4.4 beta 21: makes `image` (render size) if it has none: the images only some features
     /// use (reactive mask, FSR 4's linear input, TAA's diagnostics) are made on first need, not
@@ -218,10 +221,9 @@ private:
     /// The upscaler that runs now, for the log and the GPU profile: TAA, DLSS (DLAA at 1:1),
     /// FSR 4.1, FSR 4, or FSR 3.1 (also what runs when the one selected is unavailable).
     [[nodiscard]] const char* BackendName() const;
-    /// Records FSR 4 into output_image; on a permanent failure FSR 3 takes over. `reactive`: this
-    /// frame's reactive mask is ready, given to DLSS as its bias-current-colour mask.
+    /// Records FSR 4 (or DLSS) into output_image; on a permanent failure FSR 3 takes over.
     bool RecordFsr4(vk::CommandBuffer cmdbuf, Fsr4Upscaler::Image color, Fsr4Upscaler::Image depth,
-                    u32 w, u32 h, u32 ow, u32 oh, float frame_ms, bool reactive = false);
+                    u32 w, u32 h, u32 ow, u32 oh, float frame_ms);
     void RecordTaa(vk::CommandBuffer cmdbuf, vk::ImageView color, vk::ImageView depth);
     /// 0.4.4 beta 21: an image as FSR 3.1 is given it (the colour, the depth, the output).
     struct Fsr3Image {
@@ -293,6 +295,13 @@ private:
     std::array<float, 2> jitter{};
     u32 jitter_index = 0;
     bool reset = true;
+    /// 0.4.4 beta 25b: CheckCameraCut's counts since its last stats line (frame statistics), and the
+    /// camera cuts logged one by one (the first 100).
+    struct CutStats {
+        u32 frames = 0, cuts = 0, other_resets = 0;
+        float max_turn = 0.0f, max_move = 0.0f; ///< the largest of the frames that were not reset
+    } cut_stats;
+    u32 cut_lines = 0;
     u64 frame_id = 0;
     std::chrono::steady_clock::time_point last_frame{};
 

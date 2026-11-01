@@ -133,7 +133,7 @@ guest flip ─► GPU command thread ──────────────�
 | OptiScaler | Engine before | Now |
 |---|---|---|
 | Upscaler choice | FSR 3.1, FSR 4, FSR 4.1.1, DLSS, TAA, off | same |
-| DLSS presets (render preset override) | `dlss_preset` K/J/M/L/E/F/default | + `auto` (K for DLAA, Quality and Balanced, M for Performance, L for Ultra Performance); letters NVIDIA's 310.9 SDK removed (A-D) or ignores (G-I, N, O) are refused at load (K instead) |
+| DLSS presets (render preset override) | `dlss_preset` K/J/M/L/default | + `auto` (K for DLAA, Quality and Balanced, M for Performance, L for Ultra Performance); E and F, the CNN models NVIDIA deprecated (310.6.0), read as `auto` from 0.4.4 beta 25b; letters NVIDIA removed (A-D) or ignores (G-I, N, O) are refused at load (K instead) |
 | Quality presets / DLAA | Native AA (DLAA) .. Ultra Performance | + Custom: `render_scale` 1.0-3.0 (render = output / scale) |
 | Ratio overrides per quality mode | fixed 1.5 / 1.7 / 2.0 / 3.0 | Custom covers it |
 | Sharpening (RCAS) and strength | `sharpen`, `sharpness` 0-2 | same |
@@ -178,7 +178,7 @@ guest flip ─► GPU command thread ──────────────�
 | `frame_gen_target_fps` | | 0-1000, the dynamic mode's target (0: the display's refresh rate) | yes |
 | `frame_gen_cap` | `BB_FRAME_GEN_CAP` | Uncapped only: game at refresh / (generated + 1) (default on) | yes |
 | `reflex` | `BB_REFLEX` | `off`, `on` (default), `boost` (with Streamline loaded; on while DLSS-G runs) | yes |
-| `dlss_preset` | `BB_DLSS_PRESET` | `auto`, `default`, or E, F, J, K, L, M (default K) | yes |
+| `dlss_preset` | `BB_DLSS_PRESET` | `auto`, `default`, or J, K, L, M (default K; E and F read as `auto`) | yes |
 | `render_scale` | `BB_RENDER_SCALE` | 1.0-3.0, the Custom preset's ratio | as presets |
 | `mip_bias` | `BB_MIP_BIAS` | -2.0..1.0 added to the scene's LOD bias | yes |
 | `dlss_auto_exposure` | | 0/1 | yes (the feature is made again) |

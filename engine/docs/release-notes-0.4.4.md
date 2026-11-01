@@ -102,6 +102,24 @@ What changed since 0.4.3, for the release page. The engine work behind each line
   unconverted, as that share is the same at any rate. Without the frame timer (`BB_FRAME_TIMER=0`) the
   camera is as in earlier versions; should the engine fail to place its conversion, it converts the camera
   once for the chosen rate instead, as before.
+- **The upscalers start fresh at a camera cut.** DLSS, FSR and TAA build each frame on the frames
+  before it; after a cut (a cutscene's next shot) that history showed the last shot for a few frames
+  (ghosting). The first frame after the camera turns more than the field of view or moves more than
+  3 m now starts over, as NVIDIA's DLSS guide asks (§3.13). Frames after a loading screen (lamp
+  travel, death) already started over. The limits sit far above anything play does, as the guide
+  warns that needless resets flicker; the log names each cut.
+- **DLAA: 16 jitter positions instead of 8.** The image is shifted by a fraction of a pixel each
+  frame so that DLSS sees a pixel's detail from several positions; at native resolution HW used 8,
+  under the 16 NVIDIA's guide asks for as a minimum. DLSS at a lower render size already had more
+  (18 to 72). FSR and TAA keep AMD's 8.
+- **DLSS: no bias mask.** With the reactive mask on, DLSS was given it as its "bias current colour"
+  mask, which NVIDIA's guide says should not be used (310.4.0). DLSS no longer gets it, and the mask
+  is not made while DLSS runs; in the in-game menu the option is greyed out under DLSS, as under TAA
+  ("DLSS does not use it"). FSR 3.1 and FSR 4 use it as before. The mask is off by default.
+- **DLSS presets E and F removed** from the launcher and the in-game menu: NVIDIA deprecated these
+  older CNN models (DLSS 310.6.0; F "should not be used"). A saved E or F runs Auto, NVIDIA's model
+  for each quality mode (K for DLAA, Quality and Balanced, M for Performance, L for Ultra
+  Performance).
 - **Co-op: no freeze when a session ends.** Leaving a room (or the game closing its online session)
   asked the server to take the player out on the game's own thread and waited for the answer, up to
   8 seconds on a slow or unreachable connection, with the game stopped meanwhile. The request now
@@ -159,6 +177,11 @@ What changed since 0.4.3, for the release page. The engine work behind each line
   weights every frame, 14 sites`), and `camera` among the corrections in `Frame rate fixes: on`.
   `BB_FRAME_FIXES_SKIP=camera` leaves it out (the camera as before). `BB_CAMERA_FIX` applies only
   without the frame timer.
+- The log names each camera cut that starts the upscaler's history over (`Upscaler: camera cut
+  (turned ... degrees, moved ... m in one frame ...)`, the first 100). With frame statistics, every
+  600 upscaled frames: the history resets by cause and the largest turn and move in one frame of the
+  other frames (`Upscaler: history resets in 600 frames: ...`). `BB_CAMERA_CUT_RESET=0` in Extra
+  variables: cuts logged and counted, the history kept.
 - The log says when leaving a co-op room fails at the server (`np: leave_room for room ... failed
   after ... ms`); the server then drops the player when their connection's heartbeat stops. On
   closing the game in a room: `np: left room ... at exit in ... ms`.

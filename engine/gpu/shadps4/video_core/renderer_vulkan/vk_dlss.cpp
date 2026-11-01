@@ -514,15 +514,10 @@ struct DlssUpscaler::Impl {
         SetP(params, "Depth", &depth);
         SetP(params, "MotionVectors", &motion);
         SetP(params, "Output", &output);
-        // bbport: the reactive mask (menu) as DLSS's bias towards the current colour: 1 trusts this
-        // frame alone where blended effects changed it. Null clears the previous frame's.
-        ResourceVk bias{};
-        if (f.reactive.view) {
-            bias = Resource(f.reactive, vk::ImageAspectFlagBits::eColor, false);
-        }
-        SetP(params, "DLSS.Input.Bias.Current.Color.Mask", f.reactive.view ? &bias : nullptr);
-        SetUI(params, "DLSS.Input.Bias.Current.Color.Subrect.Base.X", 0);
-        SetUI(params, "DLSS.Input.Bias.Current.Color.Subrect.Base.Y", 0);
+        // 0.4.4 beta 25b: no bias-current-colour mask. NVIDIA's guide: it "should not be used"
+        // (310.4.0), a binary mask for problem assets once the integration is done (§3.15); HW
+        // gave it the reactive mask (graded). Set null each frame: the parameters outlive frames.
+        SetP(params, "DLSS.Input.Bias.Current.Color.Mask", nullptr);
         SetF(params, "Jitter.Offset.X", f.jitter[0]);
         SetF(params, "Jitter.Offset.Y", f.jitter[1]);
         SetF(params, "Sharpness", 0.0f);

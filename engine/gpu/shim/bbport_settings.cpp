@@ -765,8 +765,9 @@ int ModelPreset(int preset) {
 }
 
 bool DlssPresetValid(int preset) {
-    // NVSDK_NGX_DLSS_Hint_Render_Preset (DLSS SDK 310.9): E, F, J, K, L, M.
-    return preset == DlssPresetDefault || preset == 5 || preset == 6 || (preset >= 10 && preset <= 13);
+    // NVSDK_NGX_DLSS_Hint_Render_Preset, as NVIDIA's DLSS Programming Guide 310.6.0 has it: A-D
+    // removed, E and F (the CNN models) deprecated, G-I reserved; J, K, L, M (the transformers).
+    return preset == DlssPresetDefault || (preset >= 10 && preset <= 13);
 }
 
 int DlssPresetFromText(const char* text) {
@@ -778,11 +779,16 @@ int DlssPresetFromText(const char* text) {
     }
     const char letter = char(std::tolower(static_cast<unsigned char>(text[0])));
     if (letter >= 'a' && letter <= 'z' && text[1] == '\0') {
+        // 0.4.4 beta 25b: E and F, the CNN models NVIDIA deprecated (310.6.0; F "should not be used"),
+        // are no longer offered: a saved one runs Auto, NVIDIA's model for each quality mode.
+        if (letter == 'e' || letter == 'f') {
+            std::printf("Settings: DLSS preset '%s' (a CNN model) is deprecated by NVIDIA; auto\n", text);
+            return DlssPresetAuto;
+        }
         // bbport: letters NVIDIA removed (A-D) or ignores (G-I, N, O) ran the DLL's default
         // while the menu showed the letter: K instead, said once here.
         if (!DlssPresetValid(letter - 'a' + 1)) {
-            std::printf("Settings: DLSS preset '%s' is not in NVIDIA's DLSS 310.9 (E, F, J, K, L, M); k\n",
-                        text);
+            std::printf("Settings: DLSS preset '%s' is not one of NVIDIA's (J, K, L, M); k\n", text);
             return DlssPresetK;
         }
         return letter - 'a' + 1;

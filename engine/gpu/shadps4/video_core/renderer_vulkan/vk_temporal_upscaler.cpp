@@ -2,6 +2,7 @@
 #include "video_core/renderer_vulkan/vk_temporal_upscaler.h"
 #include "video_core/renderer_vulkan/vk_gpu_profiler.h"
 #include "video_core/renderer_vulkan/motion_history.h"
+#include "video_core/renderer_vulkan/camera_cut.h"
 #include "video_core/renderer_vulkan/vk_scene_resolution.h"
 #include "video_core/renderer_vulkan/ui_composition.h"
 
@@ -425,11 +426,62 @@ bool TemporalUpscaler::Active() const {
 }
 
 bool TemporalUpscaler::ReactiveOn() const {
-    // FSR 3.1 takes it as its reactive mask, DLSS as its bias-current-colour mask (RecordFsr4).
-    // FSR 4 takes no reactive mask itself: the mask blends its output afterwards
-    // (RecordFsr4Reactive). TAA has no use for it.
+    // FSR 3.1 takes it as its reactive mask. FSR 4 takes no reactive mask itself: the mask blends
+    // its output afterwards (RecordFsr4Reactive). TAA has no use for it, nor DLSS (0.4.4 beta 25b):
+    // it was given DLSS as its bias-current-colour mask, which NVIDIA's guide says should not be
+    // used (310.4.0; §3.15: a binary mask for problem assets once all else works; this one is
+    // graded), so neither the mask nor its opaque snapshot is made while DLSS runs.
+    const int upscaler = BbSettings::Get().upscaler;
     return BbSettings::Get().reactive && !BbToggle::Disabled(1u << 27) &&
-           BbSettings::Get().upscaler != BbSettings::UpscalerTaa;
+           upscaler != BbSettings::UpscalerTaa && upscaler != BbSettings::UpscalerDlss;
+}
+
+void TemporalUpscaler::CheckCameraCut() {
+    // 0.4.4 beta 25b: NVIDIA's guide §3.13: the first frame after a cut resets the history, or the
+    // last shot's "ghost images" carry over. A frame after one without the upscaler resets already
+    // (loading screens: lamp travel, death, areas); this catches cuts while the scene keeps drawing
+    // (a cutscene's shots). Every upscaler: DLSS's InReset, FSR's reset, TAA's history. The limits
+    // (camera_cut.h: the vertical field of view, 3 m) sit far above play; the largest turn and move
+    // of the other frames are in the stats line to confirm it. BB_CAMERA_CUT_RESET=0: cuts are
+    // logged and counted, the history kept.
+    static const bool enabled = [] {
+        const char* env = std::getenv("BB_CAMERA_CUT_RESET");
+        return !env || env[0] != '0';
+    }();
+    constexpr float kDegrees = 57.29578f;
+    auto& s = cut_stats;
+    ++s.frames;
+    const auto cameras = camera_motion.CameraMatrices();
+    if (reset) {
+        ++s.other_resets; // starting over already (a setting, a frame without the upscaler, a preview)
+    } else if (cameras.valid) {
+        const CameraCut::Change change = CameraCut::Between(cameras.prev_view, cameras.view);
+        const float fov = camera_motion.VerticalFov();
+        if (CameraCut::IsCut(change, fov)) {
+            ++s.cuts;
+            if (cut_lines < 100) {
+                ++cut_lines;
+                std::printf("Upscaler: camera cut (turned %.0f degrees, moved %.1f m in one frame; field of "
+                            "view %.0f degrees): %s%s\n",
+                            change.turn * kDegrees, change.move, fov * kDegrees,
+                            enabled ? "history reset" : "history kept (BB_CAMERA_CUT_RESET=0)",
+                            cut_lines == 100 ? "; further cuts counted only" : "");
+            }
+            if (enabled) {
+                reset = true;
+            }
+        } else if (change.valid) {
+            s.max_turn = std::max(s.max_turn, change.turn);
+            s.max_move = std::max(s.max_move, change.move);
+        }
+    }
+    if (BbStats::enabled && s.frames >= 600) {
+        std::printf("Upscaler: history resets in %u frames: %u at camera cuts, %u for other causes "
+                    "(settings, frames without the upscaler, previews); the largest turn and move in one "
+                    "frame otherwise %.1f degrees and %.2f m\n",
+                    s.frames, s.cuts, s.other_resets, s.max_turn * kDegrees, s.max_move);
+        s = {};
+    }
 }
 
 void TemporalUpscaler::RecordFsr4Reactive(vk::CommandBuffer cmdbuf, vk::ImageView color, u32 w,
@@ -616,8 +668,10 @@ bool TemporalUpscaler::OnFrameStart() {
     }
     // CameraMotion::OnDisplayPass has already cleared Depth(). Use the context's render
     // size, which survives the frame boundary (Performance 960 -> 1920 needs 32 phases).
-    const u32 phases = Scaled() ? Motion::JitterPhases(render_width, target_width)
-        : Motion::JitterPhases(scene_targets.Size().width, 1920);
+    // 0.4.4 beta 25b: DLSS at least 16 (NVIDIA's checklist; DLAA had 8); FSR and TAA as AMD's.
+    const u32 min_phases = upscaler == BbSettings::UpscalerDlss ? Motion::kDlssMinJitterPhases : 8;
+    const u32 phases = Scaled() ? Motion::JitterPhases(render_width, target_width, min_phases)
+        : Motion::JitterPhases(scene_targets.Size().width, 1920, min_phases);
     jitter_index = jitter_index % phases + 1;
     jitter = {Halton(jitter_index, 2) - 0.5f, Halton(jitter_index, 3) - 0.5f};
     return changed;
@@ -1696,6 +1750,7 @@ void TemporalUpscaler::Run() {
 
     MarkRunStep("upscaler Run: motion vectors");
     camera_motion.RecordMotion(input_depth_view, *motion_view, w, h);
+    CheckCameraCut(); // this frame's camera is committed now; before anything reads `reset`
     own_barrier(vk::Image(motion_image), vk::ImageLayout::eGeneral,
                 vk::PipelineStageFlagBits2::eComputeShader, vk::AccessFlagBits2::eShaderWrite,
                 vk::ImageLayout::eGeneral, all, vk::AccessFlagBits2::eShaderRead);
@@ -1751,7 +1806,7 @@ void TemporalUpscaler::Run() {
     } else if (fsr4_backend) {
         dispatched = RecordFsr4(cmdbuf, {input_color, input_color_view, w, h, color.info.pixel_format},
                                 {input_depth, input_depth_view, w, h, depth_format}, w, h, ow, oh,
-                                frame_ms, has_reactive);
+                                frame_ms);
         if (dispatched && has_reactive && BbSettings::IsFsr4(BbSettings::Get().upscaler)) {
             RecordFsr4Reactive(cmdbuf, input_color_view, w, h, ow, oh);
         }
@@ -2554,6 +2609,7 @@ void TemporalUpscaler::RunScaled() {
             all, vk::AccessFlagBits2::eNone, vk::ImageLayout::eGeneral,
             vk::PipelineStageFlagBits2::eComputeShader, vk::AccessFlagBits2::eShaderWrite);
     camera_motion.RecordMotion(depth_view, *motion_view, w, h);
+    CheckCameraCut(); // this frame's camera is committed now; before anything reads `reset`
     barrier(vk::Image(motion_image), vk::ImageAspectFlagBits::eColor, vk::ImageLayout::eGeneral,
             vk::PipelineStageFlagBits2::eComputeShader, vk::AccessFlagBits2::eShaderWrite,
             vk::ImageLayout::eGeneral, all, vk::AccessFlagBits2::eShaderRead);
@@ -2581,7 +2637,7 @@ void TemporalUpscaler::RunScaled() {
                              {color_image, color_view, source_width, source_height,
                               color.info.pixel_format},
                              {depth_image, depth_view, source_width, source_height, depth_format},
-                             w, h, ow, oh, frame_ms, mask_ready && ReactiveOn());
+                             w, h, ow, oh, frame_ms);
             } else {
             // bbport: FSR 4 treats its colour as linear light; this frame is the game's
             // tonemapped, sRGB-encoded one. Decoded first, the output encoded again below.
@@ -2991,7 +3047,7 @@ bool TemporalUpscaler::UseFsr4() const {
 
 bool TemporalUpscaler::RecordFsr4(vk::CommandBuffer cmdbuf, Fsr4Upscaler::Image color,
                                   Fsr4Upscaler::Image depth, u32 w, u32 h, u32 ow, u32 oh,
-                                  float frame_ms, bool reactive) {
+                                  float frame_ms) {
     const auto& settings = BbSettings::Get();
     // Same jitter convention as FSR 3; the menu (or toggle 1 << 26) flips it for tests.
     const float sign =
@@ -3016,10 +3072,6 @@ bool TemporalUpscaler::RecordFsr4(vk::CommandBuffer cmdbuf, Fsr4Upscaler::Image 
         .sharpen = settings.sharpen,
         .reset = reset,
         .auto_exposure = settings.fsr4_auto_exposure,
-        .reactive = reactive && use_dlss
-                        ? Fsr4Upscaler::Image{vk::Image(reactive_image), *reactive_view, w, h,
-                                              vk::Format::eR8Unorm}
-                        : Fsr4Upscaler::Image{},
     };
     const bool ok = use_dlss ? dlss->Record(frame) : fsr4->Record(frame);
     // The menu shows the reason; it outlives this frame (FSR 4 keeps its last message).

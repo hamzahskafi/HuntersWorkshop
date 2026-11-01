@@ -340,8 +340,8 @@ const char* PresetName(int preset);
 /// The fixed preset nearest a preset's scale (Custom: its render_scale): the FSR 4 model and
 /// DLSS quality mode it runs with.
 int ModelPreset(int preset);
-/// dlss_preset letters NVIDIA's DLSS 310.9 knows: E, F (CNN), J, K, L, M (transformer); A-D are
-/// removed and G-I, N, O fall back to its default.
+/// dlss_preset letters offered: J, K, L, M (the transformers). NVIDIA removed A-D and deprecated E
+/// and F (the CNN models; read as auto from 0.4.4 beta 25b); G-I, N, O fall back to its default.
 bool DlssPresetValid(int preset);
 const char* UpscalerName(int upscaler);
 
