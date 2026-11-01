@@ -27,6 +27,7 @@
 // (the default; BB_FRAME_TIMER=0 leaves it out) the cave calls ours: the same step as the task step's, from the same measurement, into
 // the task step, 0x575a908 and every value here before the frame's tasks run - one step for all of it.
 #include "frame_rate.h"
+#include "camera_rate.h"
 #include "engine_hooks.h"
 #include "engine_state.h"
 #include "skip_list.h"
@@ -369,6 +370,7 @@ void WriteSlot(const Slot& s, double seconds);
 
 // A frame of `seconds`: the cloth's substep, the slots, the play time and the eases.
 void Update(double seconds) {
+    CameraRate::Frame(seconds);
     if (g_cloth_last) {
         // A whole 1/30 s of frame time since the last: this frame's solves are the last substep's.
         constexpr double kThirtieth = 1.0 / 30;
@@ -589,6 +591,18 @@ bool Install(std::uint8_t* image, std::size_t size) {
     for (const Ease& e : kEases) {
         if (!holds(e.insn, Hex(e.bytes)) || !inside(e.constant, 4)) fail(Group::Camera, e.insn);
     }
+    // The follow camera's weights every frame (camera_rate.cpp), with the eases: its sites, and the constructor's
+    // values as the tuning has them. FPS++: the retune's jump over the game's camera is in (Kyo's values there).
+    const auto skipped = std::vector<std::uint8_t>(std::begin(kCameraSkipped), std::end(kCameraSkipped));
+    const bool fpp = holds(kCameraSkip, skipped);
+    if (on[std::size_t(Group::Camera)]) {
+        std::uint64_t bad = 0;
+        if (!CameraRate::Check(image, size, fpp, &bad)) {
+            on[std::size_t(Group::Camera)] = false;
+            host_log("Frame rate fixes: camera left out: 0x%llx is not as 1.09 has it with the %s tuning",
+                     (unsigned long long)bad, fpp ? "FPS++" : "Original");
+        }
+    }
 
     // The slots: from the first 16-byte boundary past the game's data to the end of that page, which must
     // be in the image and unused (zero, as the loader leaves it).
@@ -709,21 +723,30 @@ bool Install(std::uint8_t* image, std::size_t size) {
             g_timer = true;
             next += kSlot;
             ++applied[std::size_t(Group::Timer)];
-            // The camera's eases: the retune's (its jump over the game's camera is in) a 60 FPS frame's, unless
-            // BB_CAMERA_FIX=1; the game's a 30 FPS frame's otherwise. As a 30 FPS frame's: 1 - (1 - w)^2.
-            const auto skipped = std::vector<std::uint8_t>(std::begin(kCameraSkipped), std::end(kCameraSkipped));
-            const char* fix = std::getenv("BB_CAMERA_FIX");
-            const bool sixty = holds(kCameraSkip, skipped) && !(fix && fix[0] == '1');
+            // The follow camera, all or none: its weights converted where the game uses them (camera_rate.cpp),
+            // and its two eases from slots. FPS++: Kyo's values as a 30 FPS frame's (1 - (1 - w)^2), only those he
+            // changed (the chase-rate ease, which he left, is the game's); the game's otherwise.
+            if (on[std::size_t(Group::Camera)] && !CameraRate::Install(image, size, fpp)) {
+                on[std::size_t(Group::Camera)] = false;
+                host_log("Frame rate fixes: camera left out: its caves could not be placed");
+            }
             for (const Ease& e : kEases) {
                 if (!on[std::size_t(Group::Camera)]) break;
-                const double w = FromBits(sixty ? e.listed : e.game);
+                const bool kyo = fpp && e.listed != e.game;
+                const double w = FromBits(kyo ? e.listed : e.game);
                 const auto ease_disp = std::int32_t(next - (at(e.insn) + e.length));
                 if (!write(e.insn + e.disp, &ease_disp, sizeof ease_disp)) continue;
-                g_eases.push_back({next, sixty ? 1 - (1 - w) * (1 - w) : w});
+                g_eases.push_back({next, kyo ? 1 - (1 - w) * (1 - w) : w});
                 const float now = Rated(Kind::Decay, float(g_eases.back().was), step);
                 std::memcpy(next, &now, sizeof now);
                 next += kSlot;
                 ++applied[std::size_t(Group::Camera)];
+            }
+            if (on[std::size_t(Group::Camera)]) {
+                applied[std::size_t(Group::Camera)] += int(CameraRate::Sites().size());
+                host_log("Frame rate fixes: the follow camera's weights every frame, %zu sites (%s)",
+                         CameraRate::Sites().size(),
+                         fpp ? "FPS++: Kyo's changes as a 30 FPS frame's on the game's camera" : "Original");
             }
         }
     }

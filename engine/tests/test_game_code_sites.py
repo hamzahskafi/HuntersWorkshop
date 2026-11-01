@@ -8,6 +8,17 @@ from paths import ROOT
 
 HEADER = ROOT / 'gpu/shim/engine/crash_guards.h'
 FRAME_RATE = ROOT / 'gpu/shim/engine/frame_rate.cpp'
+CAMERA_RATE = ROOT / 'gpu/shim/engine/camera_rate.cpp'
+
+
+def camera_tables(text):
+    """camera_rate.cpp's sites {"name", 0x..., "hex"} and its constructor fields {0x..., 0x..., 0x..., 0x..., Fpp::}."""
+    sites = [(name, int(at, 16), bytes.fromhex(code))
+             for name, at, code in re.findall(r'\{"([^"]+)", (0x[0-9a-f]+), "([0-9a-f]+)"\}', text)]
+    fields = [tuple(int(v, 16) for v in row)
+              for row in re.findall(r'\{(0x[0-9a-f]+), (0x[0-9a-f]+), (0x[0-9a-f]+), (0x[0-9a-f]+), Fpp::', text)]
+    setup = [(int(at, 16), bytes.fromhex(code)) for at, code in re.findall(r'\{(0x[0-9a-f]+), "([0-9a-f]+)"\}', text)]
+    return sites, fields, setup
 
 
 def arrays(text):
@@ -55,6 +66,23 @@ class GameCodeSites(unittest.TestCase):
             'cloth factor': (cls.at['kClothFactor'] - 0x400000, cls.bytes['kClothFactorPrologue']),
         }
 
+    def test_the_camera_sites_parse(self):
+        # camera_rate.cpp: 13 sites of at least 14 bytes, apart; the constructor's second set, each an immediate of
+        # mov dword [rbx + field], imm32 (6 bytes in); the debug menu's two setup blocks.
+        sites, fields, setup = camera_tables(CAMERA_RATE.read_text(encoding='utf-8'))
+        self.assertEqual(len(sites), 13)
+        self.assertEqual(len(fields), 13)
+        self.assertEqual([at for at, _ in setup], [0x183ff29, 0x1840799])
+        spans = sorted((at, at + len(code)) for _, at, code in sites)
+        for name, at, code in sites:
+            self.assertGreaterEqual(len(code), 14, name)
+            self.assertTrue(0x183ac60 <= at and at + len(code) <= 0x183facd, name)  # in the camera's update
+        for (_, end), (start, _) in zip(spans, spans[1:]):
+            self.assertLessEqual(end, start)
+        # Kyo's jump and wall-escape byte are outside every site.
+        for at in (0x183dc96, 0x183dcfe):
+            self.assertFalse([1 for lo, hi in spans if lo <= at < hi], hex(at))
+
     def test_the_sources_parse(self):
         # A hook overwrites 14 bytes at least; begin and end are replaced whole.
         for name, (_, code) in self.sites.items():
@@ -94,6 +122,21 @@ class GameCodeSites(unittest.TestCase):
         # The cloth's one substep is the 60 FPS++ list's write over the game's substep count.
         self.assertEqual(read_image(elf, self.at['kClothSubsteps'] - 0x400000, 11),
                          bytes.fromhex('8b581885db7504418b5d20'))
+        # The follow camera: its sites, the constructor's second set with the game's values (mov dword [rbx +
+        # field]), the debug menu's setup, and the two constants the wall turn reads (rip-relative, 4 bytes into
+        # the sites' last instruction, 13 bytes in): the -0 mask and 1 degree.
+        sites, fields, setup = camera_tables(CAMERA_RATE.read_text(encoding='utf-8'))
+        for name, at, code in sites:
+            self.assertEqual(read_image(elf, at - 0x400000, len(code)), code, name)
+        for at, field, game, _kyo in fields:
+            self.assertEqual(read_image(elf, at - 6 - 0x400000, 10), b'\xc7\x83' + struct.pack('<II', field, game), hex(at))
+        for at, code in setup:
+            self.assertEqual(read_image(elf, at - 0x400000, len(code)), code, hex(at))
+        by_name = {name: (at, code) for name, at, code in sites}
+        for name, size, value in (('wall turn fade and limit', 16, '00000080' * 4), ('wall turn cut-off', 4, '35fa8e3c')):
+            at, code = by_name[name]
+            rel, = struct.unpack_from('<i', code, 17)
+            self.assertEqual(read_image(elf, at + len(code) + rel - 0x400000, size), bytes.fromhex(value), name)
 
 
 if __name__ == '__main__':

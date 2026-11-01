@@ -46,6 +46,13 @@ def frame_fixes_on(env=os.environ):
     return not env.get('BB_FRAME_FIXES','1').startswith('0')
 
 
+def camera_per_frame(env=os.environ):
+    """The engine converts the follow camera's weights every frame (camera_rate.cpp, 0.4.4 beta 24) with the frame
+    timer: the corrections on, BB_FRAME_TIMER not 0, neither camera nor timer in BB_FRAME_FIXES_SKIP."""
+    skip={''.join(n.split()).lower() for n in env.get('BB_FRAME_FIXES_SKIP','').split(',')}
+    return frame_fixes_on(env) and not env.get('BB_FRAME_TIMER','1').startswith('0') and not skip&{'camera','timer'}
+
+
 def fps_preset(fps, corrections):
     """The FPS preset's patch names, and whether it is the 60 FPS++ list at a rate above 60."""
     if corrections and fps not in ('30','60'):
@@ -131,12 +138,18 @@ CLOTH_LEFT_OUT=((0xB6FBD4,0xB6FBD8),(0xB73F84,0xB73F8D),(0xB73FA8,0xB73FC1),(0x4
 # and the chase-rate ease (0x4D25E94, 1/30). That conversion is BB_CAMERA_FIX=1 (below).
 #
 # Original (camera_tuning in config.ini or BB_CAMERA_TUNING, the default) leaves Kyo's retune out: the
-# constructor's defaults, the stores (and the jumps after them: the per-area camera parameters load again),
-# the wall escape and the jump over the game's follow camera, converting the game's own eases from a 30 fps
-# frame, as bbhost's Camera tuning: Original (players saw the retune pull back, lag and widen while
-# sprinting, GitHub issue 32). FPS++ above 60 with the frame-rate corrections on: the retune's weights and
-# eases (the constructor's, the stores', the list's distance and chase-rate eases and LockCamParam's blend)
-# are a 60 fps frame's, converted from it, so the camera moves as it does at 60 (bbhost's camera_tuned_fps).
+# constructor's defaults, the stores (in place of two blocks of the camera's debug-menu sliders), the wall
+# escape and the jump over the game's follow camera (players saw the retune pull back, lag and widen while
+# sprinting, GitHub issue 32).
+#
+# With the frame timer (camera_per_frame, 0.4.4 beta 24) the engine converts every per-frame weight of the
+# camera each frame from the game's 30 fps frame (camera_rate.cpp): Original is the game's camera at every rate,
+# and FPS++ keeps Kyo's constructor values, wall escape and jump as the list has them (the engine makes the values
+# the game's plus his changes, as a 30 fps frame's) without his debug-menu stores; nothing is converted here.
+# Without it (BB_FRAME_TIMER=0), as up to beta 23: Original converts the game's own eases from a 30 fps frame,
+# and FPS++ above 60 with the frame-rate corrections on: the retune's weights and eases (the constructor's, the
+# stores', the list's distance and chase-rate eases and LockCamParam's blend) are a 60 fps frame's, converted
+# from it once for the preset's rate (bbhost's camera_tuned_fps).
 CAMERA_FIELDS={0x183a4c3:0x19c,0x183a4cd:0x1a0,0x183a4d7:0x1a4,0x183a4e1:0x1a8,0x183a4f5:0x1b0,
                0x183a4ff:0x1b4,0x183a509:0x1b8,0x183a527:0x1c4,0x183a531:0x1c8,0x183a53b:0x1cc,
                0x183a649:0x238,0x183a653:0x23c,0x183a65d:0x240,0x183a8c1:0x19c,0x183a8cb:0x1a0,
@@ -176,16 +189,18 @@ def kyo_camera_site(address, size):
             any(address<hi and address+size>lo for lo,hi in CAMERA_STORES))
 
 
-def frame_rate_fixes(writes, fps, elf=None, original_camera=False, sixty_camera=False):
+def frame_rate_fixes(writes, fps, elf=None, original_camera=False, sixty_camera=False, per_frame=False):
     """The frame-rate preset's writes with the corrections above, for `fps` (None: uncapped on its own
     list, whose rate is not known here; only the effects' rate is put back). `original_camera`: the
-    game's follow camera; `sixty_camera`: the retune's weights converted from 60 above it."""
+    game's follow camera; `sixty_camera`: the retune's weights converted from 60 above it; `per_frame`: the
+    engine converts the camera every frame (nothing converted here)."""
     f=lambda v: struct.pack('<f',v)
-    # BB_CAMERA_FIX=1 (the launcher's Extra variables): the camera eases as far in a second as the
-    # game does at 30. Off by default: players found it trailing too far behind when running (#32);
-    # the camera keeps the FPS++ list's values, as up to 0.9.24.
-    camera=not original_camera and os.environ.get('BB_CAMERA_FIX','0')=='1'
-    sixty_camera=sixty_camera and not original_camera and not camera and bool(fps) and fps>60
+    per_frame=per_frame and bool(fps)
+    # BB_CAMERA_FIX=1 (the launcher's Extra variables), without the frame timer only: the camera eases as far
+    # in a second as the game does at 30. Off by default: players found it trailing too far behind when running
+    # (#32); the camera keeps the FPS++ list's values, as up to 0.9.24.
+    camera=not per_frame and not original_camera and os.environ.get('BB_CAMERA_FIX','0')=='1'
+    sixty_camera=sixty_camera and not per_frame and not original_camera and not camera and bool(fps) and fps>60
     original_camera=original_camera and bool(fps)
     out=[]
     for offset,data in writes:
@@ -196,8 +211,11 @@ def frame_rate_fixes(writes, fps, elf=None, original_camera=False, sixty_camera=
             if kyo_camera_site(a,len(data)):
                 continue
             if a in CAMERA_EASES:
-                out.append((offset,f(camera_value(None,CAMERA_EASES[a],30/fps))))
+                # Per frame the engine reads the eases from slots of its own: the game's constants stay.
+                if not per_frame: out.append((offset,f(camera_value(None,CAMERA_EASES[a],30/fps))))
                 continue
+        elif per_frame and any(a<hi and a+len(data)>lo for lo,hi in CAMERA_STORES):
+            continue  # FPS++ per frame: the debug menu's sliders as the game has them
         if fps and fps>60:
             left=next(((lo,hi) for lo,hi in CLOTH_LEFT_OUT if lo<=a<hi),None)
             if left:
@@ -849,9 +867,13 @@ def main():
         fps={'60':60,'90':90,**SCALED_FPS,**TABLE_FPS}.get(a.fps)
         if a.fps=='uncap' and on_sixty: fps=UNCAPPED_REFERENCE
         tuning=os.environ.get('BB_CAMERA_TUNING',read_settings(a.settings).get('camera_tuning','original')).lower()
-        writes=frame_rate_fixes(writes,fps,elf,tuning!='fps++',corrections)
+        per_frame=corrections and camera_per_frame()
+        writes=frame_rate_fixes(writes,fps,elf,tuning!='fps++',corrections,per_frame)
         if fps:
-            print('Patches: follow camera '+('as the game has it, its eases converted from 30 FPS' if tuning!='fps++' else
+            print('Patches: follow camera '+(
+                  ('as the game has it' if tuning!='fps++' else 'with the FPS++ retune')+
+                  ' (the engine converts its weights every frame)' if per_frame else
+                  'as the game has it, its eases converted from 30 FPS' if tuning!='fps++' else
                   'with the FPS++ retune, its weights converted from 60 FPS' if corrections and fps>60 else
                   'with the FPS++ retune (camera_tuning=fps++)'))
     writes+=old_hunters_writes(elf)

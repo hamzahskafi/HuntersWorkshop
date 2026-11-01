@@ -11,6 +11,7 @@
 // every page closed, then each segment opened in whole pages; a slot outside the game's data segment would
 // fault in Tick (0.2.0's first build put them past the whole image, in a closed page).
 #include "../gpu/shim/engine/frame_rate.h"
+#include "../gpu/shim/engine/camera_rate.h"
 #include <cassert>
 #include <cmath>
 #include <cstdarg>
@@ -210,6 +211,16 @@ struct Image {
     }
 };
 
+// The follow camera's constructor, second set (camera_rate.cpp): mov dword [rbx + field], the game's or Kyo's value.
+void CameraFields(const Image& image, bool kyo) {
+    for (const auto& f : BbEngine::CameraRate::Fields()) {
+        std::uint8_t mov[10] = {0xc7, 0x83};
+        std::memcpy(mov + 2, &f.field, 4);
+        std::memcpy(mov + 6, kyo ? &f.kyo : &f.game, 4);
+        image.put(f.at - 6, {mov, mov + 10});
+    }
+}
+
 // The game's bytes everywhere, with the 60 FPS++ list's where it writes (`listed`), or the game's alone.
 Image Build(std::size_t size, bool listed) {
     Image image{Allocate(Pages(size)), size};
@@ -236,6 +247,14 @@ Image Build(std::size_t size, bool listed) {
         image.put(e.insn, Hex(e.bytes));
         std::memcpy(image.at(e.constant), listed ? &e.listed : &e.game, 4);
     }
+    // The follow camera's sites, the two constants its wall turn reads, its constructor (the game's values; Kyo's
+    // with the retune, CameraFields) and the debug menu's camera setup as the game has it.
+    for (const auto& site : BbEngine::CameraRate::Sites()) image.put(site.at, Hex(site.bytes));
+    image.put(0x4cf2520, Hex("00000080000000800000008000000080"));
+    image.put(0x4d25e58, Hex("35fa8e3c"));
+    CameraFields(image, false);
+    image.put(0x183ff29, Hex("498bbd38030000"));
+    image.put(0x1840799, Hex("498bbd38030000"));
     image.put(play_time.first, Hex(play_time.second));
     image.put(0xb6e67a, Hex(listed ? "bb01000000909090909090" : "8b581885db7504418b5d20")); // the cloth's substeps
     return image;
@@ -470,7 +489,7 @@ void TestTimer() {
         for (const char* fps : {"60", "120"}) {
             const Image image = Build(kSize, true);
             constexpr std::uint64_t kCave = 0x2418e3d, kSkip = 0x183dc96;
-            if (retune) image.put(kSkip, {0xe9, 0xd6, 0x05, 0x00, 0x00});
+            if (retune) image.put(kSkip, {0xe9, 0xd6, 0x05, 0x00, 0x00}), CameraFields(image, true);
             SetEnv("BB_FPS", fps);
             SetEnv("BB_FRAME_TIMER", nullptr); // the default: on
             assert(BbEngine::FrameRate::Install(image.base, image.size));
@@ -503,12 +522,16 @@ void TestTimer() {
                     std::memcpy(&momentum, image.slot_of(l), 4);
                     assert(Near(momentum, Rated(Kind::Keep, 0.95f, got)));
                 }
+                // The eases: Kyo's with the retune where he changed them (as a 30 FPS frame's), the game's otherwise.
                 for (const Ease& e : eases) {
                     float w;
                     std::memcpy(&w, Pointed(image, e.insn, e.length, e.disp), 4);
-                    const double base = retune ? 1 - (1 - double(F(e.listed))) * (1 - double(F(e.listed))) : double(F(e.game));
+                    const bool kyo = retune && e.listed != e.game;
+                    const double base = kyo ? 1 - (1 - double(F(e.listed))) * (1 - double(F(e.listed))) : double(F(e.game));
                     assert(Near(w, 1 - std::pow(1 - base, 30.0 * got)));
                 }
+                // The camera's caves read the same frame.
+                assert(Near(BbEngine::CameraRate::Frames(), 30.0 * got));
             };
             check(1 / 45.0f, float(1 / rate), 1 / 45.0);       // a long frame: its own length, at once
             check(1 / 200.0f, float(1 / rate), 1 / rate);      // a short one: no shorter than the target
@@ -516,12 +539,18 @@ void TestTimer() {
             check(1 / 300.0f, 0, 1 / 300.0);                   // no target (a loading screen): the measured time
             check(std::nanf(""), float(1 / rate), 1 / rate);   // no measurement: a frame at the rate
             if (retune && rate == 60) {
-                // The FPS++ retune at 60 eases exactly as the list's values did.
+                // The FPS++ retune at 60 eases exactly as the list's values did where Kyo changed them; the
+                // chase-rate ease, which he left, at the game's speed. Its constructor: the base plus his changes.
                 check(1 / 60.0f, 1 / 60.0f, 1 / 60.0);
                 for (const Ease& e : eases) {
                     float w;
                     std::memcpy(&w, Pointed(image, e.insn, e.length, e.disp), 4);
-                    assert(Near(w, F(e.listed)));
+                    assert(Near(w, e.listed != e.game ? double(F(e.listed)) : 1 - std::pow(1 - double(F(e.game)), 0.5)));
+                }
+                for (const auto& f : BbEngine::CameraRate::Fields()) {
+                    std::uint32_t v;
+                    std::memcpy(&v, image.at(f.at), 4);
+                    assert(v == BbEngine::CameraRate::FppValue(f));
                 }
             }
             // The play time: the steps' milliseconds; Tick (the frame hook) leaves everything to Step.

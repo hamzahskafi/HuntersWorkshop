@@ -434,6 +434,35 @@ class FrameRateFixTests(unittest.TestCase):
                 self.assertAlmostEqual(self.value(image, 0x4D25E68), 1 - 0.9 ** (30 / fps), places=6)
                 self.assertAlmostEqual(self.value(image, 0x4D25E94), 1 - (1 - 1 / 30) ** (30 / fps), places=6)
 
+    def test_the_camera_per_frame_is_the_engines(self):
+        # With the frame timer (0.4.4 beta 24) the engine converts the camera every frame: FPS++ keeps Kyo's
+        # constructor values, wall escape and jump as the list has them, without his debug-menu stores, and nothing
+        # is converted here (BB_CAMERA_FIX ignored); Original leaves his retune out and the game's eases as they are.
+        os.environ['BB_CAMERA_FIX'] = '1'
+        self.addCleanup(os.environ.pop, 'BB_CAMERA_FIX', None)
+        writes = patches.compile_patches(XML, ['60 FPS++'], '01.09', self.WIDE)
+        plain = {o + EBOOT_BASE: d for o, d in writes}
+        for fps in (60, 120, 144):
+            with self.subTest(fps=fps):
+                fpp = {o + EBOOT_BASE: d for o, d in patches.frame_rate_fixes(writes, fps, sixty_camera=True,
+                                                                               per_frame=True)}
+                for at in (0x183A4D7, 0x183A8D5, 0x183AA47, 0x4D25E68, 0x4D25E94, patches.CAMERA_SKIP,
+                           patches.CAMERA_WALL_ESCAPE):
+                    self.assertEqual(fpp[at], plain[at], hex(at))
+                self.assertFalse([at for at in fpp if any(lo <= at < hi for lo, hi in patches.CAMERA_STORES)])
+                self.assertNotIn(patches.CAMERA_PARAM_EASE[0], fpp)
+                original = patches.frame_rate_fixes(writes, fps, original_camera=True, per_frame=True)
+                self.assertFalse([o for o, d in original if patches.kyo_camera_site(o + EBOOT_BASE, len(d))])
+                self.assertFalse([o for o, _ in original if o + EBOOT_BASE in patches.CAMERA_EASES])
+
+    def test_camera_per_frame_follows_the_timer(self):
+        self.assertTrue(patches.camera_per_frame({}))
+        self.assertTrue(patches.camera_per_frame({'BB_FRAME_FIXES_SKIP': 'cloth, steps'}))
+        self.assertFalse(patches.camera_per_frame({'BB_FRAME_TIMER': '0'}))
+        self.assertFalse(patches.camera_per_frame({'BB_FRAME_FIXES': '0'}))
+        self.assertFalse(patches.camera_per_frame({'BB_FRAME_FIXES_SKIP': 'cloth, Camera'}))
+        self.assertFalse(patches.camera_per_frame({'BB_FRAME_FIXES_SKIP': ' timer '}))
+
     def test_status_effects_follow_the_frame_time_twice(self):
         # Issue 15: the second advance of a character's effects (0x1cbc50d) reads the frame's
         # time wherever a list points the first (0x1cbc4f7) at it; the list's own 1/60 was right at 60 only.

@@ -401,9 +401,14 @@ target_compile_options(engine-hooks-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(engine-hooks-test PRIVATE ..)
 # The frame-rate corrections on a synthetic image built from their own table (no game files).
 add_executable(frame-rate-test EXCLUDE_FROM_ALL ../tests/test_frame_rate.cpp shim/engine/frame_rate.cpp
-    shim/engine/engine_hooks.cpp)
+    shim/engine/camera_rate.cpp shim/engine/engine_hooks.cpp)
 target_compile_options(frame-rate-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(frame-rate-test PRIVATE shim shim/engine)
+# The follow camera's weights every frame: its caves run natively on a synthetic image (no game files).
+add_executable(camera-rate-test EXCLUDE_FROM_ALL ../tests/test_camera_rate.cpp shim/engine/camera_rate.cpp
+    shim/engine/engine_hooks.cpp)
+target_compile_options(camera-rate-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(camera-rate-test PRIVATE shim shim/engine)
 # The work pools' lock and node cache against models of the game's lock and job list.
 add_executable(job-pool-test EXCLUDE_FROM_ALL ../tests/test_job_pool.cpp shim/engine/job_pool.cpp)
 target_compile_options(job-pool-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
