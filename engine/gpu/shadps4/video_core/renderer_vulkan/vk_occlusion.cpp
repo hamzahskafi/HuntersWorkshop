@@ -108,8 +108,10 @@ struct Occlusion::Shared {
 
 bool Occlusion::Wanted() {
     static const bool on = [] {
+        // 0.4.4 beta 28: off unless BB_OCCLUSION=1, as the launcher had it (objects and floors
+        // popped in late or flickered with it, Lantern 0.9.37 beta 9.9).
         const char* env = std::getenv("BB_OCCLUSION");
-        return !(env && env[0] == '0');
+        return env && env[0] == '1';
     }();
     return on;
 }
@@ -119,7 +121,7 @@ Occlusion::Occlusion(const Instance& instance_, Scheduler& scheduler_)
 
 std::unique_ptr<Occlusion> Occlusion::Create(const Instance& instance, Scheduler& scheduler) {
     if (!Wanted()) {
-        std::printf("Occlusion: off (BB_OCCLUSION=0): every query the game makes reads visible\n");
+        std::printf("Occlusion: off (BB_OCCLUSION=1: on): every query the game makes reads visible\n");
         return nullptr;
     }
     std::unique_ptr<Occlusion> occlusion{new Occlusion(instance, scheduler)};

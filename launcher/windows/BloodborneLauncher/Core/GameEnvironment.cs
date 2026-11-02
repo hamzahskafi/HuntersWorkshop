@@ -171,7 +171,7 @@ namespace BloodborneLauncher.Core
             if (!s.Bool("exp_thread_priority")) env["BB_GPU_THREAD_PRIORITY"] = "0";
             if (!s.Bool("exp_sleep_spin")) env["BB_SLEEP_SPIN_US"] = "600";
             if (!s.Bool("exp_async_pipelines")) env["BB_ASYNC_PIPELINES"] = "0";
-            if (!s.Bool("exp_occlusion")) env["BB_OCCLUSION"] = "0";
+            if (s.Bool("exp_occlusion")) env["BB_OCCLUSION"] = "1";
             if (s.Bool("exp_sharp_ui")) env["BB_SHARP_UI"] = "1";
             if (!s.Bool("exp_fast_draws")) env["BB_FAST_DRAWS"] = "0";
             // Sound threads first (CPUs with many slower cores): off unless chosen.
@@ -185,7 +185,7 @@ namespace BloodborneLauncher.Core
             if (!s.Bool("exp_frame_fixes")) env["BB_FRAME_FIXES"] = "0";
             // The unified frame time off: the frame timer and the camera's per-frame eases left out.
             if (!s.Bool("exp_frame_timer")) env["BB_FRAME_FIXES_SKIP"] = "timer,camera";
-            if (s.Bool("exp_hot_pages")) env["BB_HOT_PAGES"] = "2";
+            if (!s.Bool("exp_hot_pages")) env["BB_HOT_PAGES"] = "0";
             // The game's per-frame GPU memory read in place (on unless 0; safe mode sets 0 below).
             if (!s.Bool("exp_gx_in_place")) env["BB_GX_IN_PLACE"] = "0";
             if (!s.Bool("exp_native_calls")) env["BB_NATIVE_CALLS"] = "0";

@@ -262,7 +262,7 @@ private:
     // cost a protection fault in the writing thread plus an mprotect with TLB shootdowns on
     // every upload. After HotFaults faults a page stays writable and counts as always CPU
     // modified, so it is uploaded on every use instead. The set is rebuilt every HotPeriod.
-    // Opt-in (BB_HOT_PAGES=1): in Hunter's Nightmare the set grew to ~14k pages (56 MB), each
+    // BB_HOT_PAGES=1: in Hunter's Nightmare the set grew to ~14k pages (56 MB), each
     // re-uploaded on every binding, which cost far more than the faults (33 FPS) and preceded
     // a GPU ring timeout.
     //
@@ -274,11 +274,15 @@ private:
     // qualified (14-62 hot pages at 2800 write faults/s), and each fault cost stage B a re-protect
     // (0.35 us per packet, ~7% of it); the uploads run on the copy threads. At
     // most HotMaxPages pages are hot at once (8 MiB), so a scene full of them cannot grow the set
-    // as the =1 rule did.
+    // as the =1 rule did. The default since 0.4.4 beta 28 (the launcher's since Lantern 0.9.37
+    // beta 4); BB_HOT_PAGES=0: off.
     static int HotMode() {
         static const int mode = [] {
             const char* env = std::getenv("BB_HOT_PAGES");
-            return env && (env[0] == '1' || env[0] == '2') ? env[0] - '0' : 0;
+            if (!env || !env[0]) {
+                return 2;
+            }
+            return env[0] == '1' || env[0] == '2' ? env[0] - '0' : 0;
         }();
         return BbToggle::Disabled(BbToggle::HotPages) ? 0 : mode;
     }
