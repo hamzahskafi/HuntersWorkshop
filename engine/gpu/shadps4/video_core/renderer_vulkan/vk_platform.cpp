@@ -25,7 +25,6 @@
 #include "sdl_window.h"
 #include "video_core/renderer_vulkan/vk_optiscaler.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
-#include "video_core/renderer_vulkan/vk_streamline_loader.h"
 
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
@@ -288,13 +287,8 @@ vk::UniqueInstance CreateInstance(Frontend::WindowSystemType window_type, bool e
 #endif
 
     static vk::detail::DynamicLoader dl;
-    // bbport: DLSS Frame Generation (frame_gen=dlss at start): NVIDIA Streamline's loader for the
-    // whole engine (vk_streamline.h); vulkan-1.dll as before when it is not wanted or not there.
-    PFN_vkGetInstanceProcAddr get_instance_proc_addr = Streamline::LoadBeforeVulkan();
-    if (!get_instance_proc_addr) {
-        get_instance_proc_addr = dl.getProcAddress<PFN_vkGetInstanceProcAddr>("vkGetInstanceProcAddr");
-    }
-    VULKAN_HPP_DEFAULT_DISPATCHER.init(get_instance_proc_addr);
+    VULKAN_HPP_DEFAULT_DISPATCHER.init(
+        dl.getProcAddress<PFN_vkGetInstanceProcAddr>("vkGetInstanceProcAddr"));
 
     const auto [available_version_result, available_version] =
         VULKAN_HPP_DEFAULT_DISPATCHER.vkEnumerateInstanceVersion

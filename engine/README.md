@@ -27,7 +27,7 @@ and [shadPS4](https://github.com/shadps4-emu/shadPS4), and added:
 - **renderer performance work**: draw preparation on worker threads, cached render state, pipeline
   cache warm-up with a crash guard, occlusion culling and frame pacing;
 - **the PC version**: native PC menus and keyboard and mouse controls, high frame rates, widescreen,
-  HDR, TAA, DLSS, FSR 3.1, 4 and 4.1.1, frame generation, trophies, and online play through The
+  HDR, TAA, DLSS, AMD FSR (through AMD's FSR SDK), trophies, and online play through The
   Hunter's Dream.
 
 Hunter's Workshop's own changes since then are recorded in
@@ -82,8 +82,7 @@ A Windows package is the launcher at the top, `package.json` (its version and en
 default settings, the shader catalogs (`shader-catalog/`: pipelines compiled ahead, so fewer
 shaders compile during play) and AMD's FSR SDK runtime (`amd-fsr/`: AMD's signed DLLs and their
 licence). The shader catalogs and the upscalers' files are not kept in this repository;
-`tools/fetch_dlss.sh`, `tools/fetch_amd_fsr.sh` and `tools/fetch_streamline.sh` download DLSS, AMD's
-FSR SDK runtime and Streamline.
+`tools/fetch_dlss.sh` and `tools/fetch_amd_fsr.sh` download DLSS and AMD's FSR SDK runtime.
 
 ## Tests and checks
 
@@ -130,10 +129,10 @@ video core and shader recompiler (GPL-2.0-or-later), shadNet's client (`licenses
 the AMD FSR SDK's API headers (MIT; AMD's DLLs are loaded at run time under AMD's licence,
 `licenses/AMD-FSR-SDK.md`),
 [LibAtrac9](https://github.com/Thealexbarney/LibAtrac9) (MIT),
-[Dear ImGui](https://github.com/ocornut/imgui) (MIT), NVIDIA Streamline (headers; DLSS and Reflex),
-cpp-httplib (MIT), wepoll (BSD), and the DejaVu and Lantern Menu SC fonts (the latter a Noto Sans SC
-subset, SIL OFL 1.1). VRAM cleanup and frame pacing were adapted from IFreemz's shadPS4 fork, and
-crash and controller fixes from AwesomeObserver, Supermedo and deadinside28.
+[Dear ImGui](https://github.com/ocornut/imgui) (MIT), cpp-httplib (MIT), wepoll (BSD), and the
+DejaVu and Lantern Menu SC fonts (the latter a Noto Sans SC subset, SIL OFL 1.1). VRAM cleanup and
+frame pacing were adapted from IFreemz's shadPS4 fork, and crash and controller fixes from
+AwesomeObserver, Supermedo and deadinside28.
 
 The built-in game patches (`patches/Bloodborne.xml`) are the Bloodborne modding community's: Kyo,
 Lance McDonald, auser1337, illusion, Whitehawkx, emoose, Dasaav, bloo, Imedved, Foxy Hooligans,

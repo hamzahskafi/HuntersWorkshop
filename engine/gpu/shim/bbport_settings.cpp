@@ -103,32 +103,6 @@ void Set(Values& v, const std::string& key, const std::string& value) {
     } else if (key == "fsr_version") {
         // 0.4.4 beta 27c: "auto" or a version's name; 27a's "3.1" (and "31") the newest FSR 3.1.
         SetFsrVersion(value == "31" ? std::string("3.1") : value);
-    } else if (key == "frame_gen") {
-        // bbport: "off" / "fsr3" / "dlss"; 0 and 1 too (BB_FRAME_GEN=0).
-        v.frame_gen = value == "dlss"                     ? FrameGenDlss
-                      : (value == "fsr3" || value == "1") ? FrameGenFsr3
-                                                          : FrameGenOff;
-        // 0.4.4 beta 26: not offered (FrameGenOffered); saved back as off.
-        if (!FrameGenOffered && v.frame_gen != FrameGenOff) {
-            std::printf("Settings: frame generation is not offered in this version (frame_gen=%s); off\n",
-                        value.c_str());
-            v.frame_gen = FrameGenOff;
-        }
-    } else if (key == "frame_gen_cap") {
-        v.frame_gen_cap = i != 0;
-    } else if (key == "frame_gen_frames") {
-        v.frame_gen_frames = std::clamp(i, 1, FrameGenFramesMax);
-    } else if (key == "reflex") {
-        int mode = -1;
-        for (int m = 0; m < ReflexCount; ++m) {
-            if (value == ReflexNames[m] || value == std::to_string(m)) {
-                mode = m;
-            }
-        }
-        if (mode < 0) {
-            std::printf("Settings: unknown reflex '%s' (expected off, on or boost); on\n", value.c_str());
-        }
-        v.reflex = mode < 0 ? ReflexOn : mode;
     } else if (key == "render_scale") {
         v.render_scale = Clamp(std::isfinite(f) && f > 0.0f ? f : 1.3f, RenderScaleMin, RenderScaleMax);
     } else if (key == "mip_bias") {
@@ -152,10 +126,6 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         v.reactive_threshold = Clamp(f, 0.0f, 1.0f);
     } else if (key == "reactive_max") {
         v.reactive_max = Clamp(f, 0.0f, 1.0f);
-    } else if (key == "frame_gen_dynamic") {
-        v.frame_gen_dynamic = i != 0;
-    } else if (key == "frame_gen_target_fps") {
-        v.frame_gen_target_fps = std::clamp(i, 0, 1000);
     } else if (key == "fsr3_velocity_factor") {
         v.fsr3_velocity_factor = Clamp(f, 0.0f, 1.0f);
     } else if (key == "fsr3_reactiveness_scale") {
@@ -489,11 +459,8 @@ void Load() {
         {"BB_UPSCALE_PRESET", "preset"},            {"BB_OBJECT_MOTION", "object_motion"},
         {"BB_HDR", "hdr"},                          {"BB_HDR_PAPER_WHITE", "hdr_paper_white"},
         {"BB_HDR_PEAK", "hdr_peak"},                {"BB_HDR_BOOST", "hdr_boost"},
-        {"BB_HDR_MODE", "hdr_mode"},                {"BB_FRAME_GEN", "frame_gen"},
-        {"BB_FRAME_GEN_CAP", "frame_gen_cap"},     {"BB_DLSS_PRESET", "dlss_preset"},
-        {"BB_FRAME_GEN_FRAMES", "frame_gen_frames"},
-        {"BB_REFLEX", "reflex"},                   {"BB_RENDER_SCALE", "render_scale"},
-        {"BB_MIP_BIAS", "mip_bias"},
+        {"BB_HDR_MODE", "hdr_mode"},                {"BB_DLSS_PRESET", "dlss_preset"},
+        {"BB_RENDER_SCALE", "render_scale"},        {"BB_MIP_BIAS", "mip_bias"},
     };
     for (const auto& [env, key] : env_keys) {
         if (const char* value = std::getenv(env)) {
@@ -505,7 +472,6 @@ void Load() {
     }
     v.startup_preset = v.preset;
     v.startup_render_scale = v.render_scale;
-    v.startup_frame_gen = v.frame_gen;
     v.startup_upscaler = v.upscaler;
     v.startup_object_motion = v.object_motion;
     for (int e = 0; e < EffectCount; ++e) {
@@ -599,10 +565,6 @@ void Save() {
     put("upscaler", UpscalerName(v.upscaler));
     put("fsr_version", FsrVersion());
     put("preset", v.preset == PresetAuto ? std::string("auto") : std::to_string(v.preset.load()));
-    put("frame_gen", FrameGenNames[std::clamp(v.frame_gen.load(), 0, FrameGenCount - 1)]);
-    put("frame_gen_cap", flag(v.frame_gen_cap));
-    put("frame_gen_frames", std::to_string(std::clamp(v.frame_gen_frames.load(), 1, FrameGenFramesMax)));
-    put("reflex", ReflexNames[std::clamp(v.reflex.load(), 0, ReflexCount - 1)]);
     put("render_scale", fixed(v.render_scale, 2));
     put("mip_bias", fixed(v.mip_bias, 2));
     put("sharpen", flag(v.sharpen));
@@ -613,8 +575,6 @@ void Save() {
     put("reactive_scale", fixed(v.reactive_scale, 2));
     put("reactive_threshold", fixed(v.reactive_threshold, 2));
     put("reactive_max", fixed(v.reactive_max, 2));
-    put("frame_gen_dynamic", flag(v.frame_gen_dynamic));
-    put("frame_gen_target_fps", std::to_string(v.frame_gen_target_fps.load()));
     put("fsr3_velocity_factor", fixed(v.fsr3_velocity_factor, 3));
     put("fsr3_reactiveness_scale", fixed(v.fsr3_reactiveness_scale, 3));
     put("fsr3_shading_change_scale", fixed(v.fsr3_shading_change_scale, 3));

@@ -384,18 +384,14 @@ int main() {
     assert(BbSettings::DlssPresetFromText("e") == BbSettings::DlssPresetAuto);
     assert(BbSettings::DlssPresetFromText("F") == BbSettings::DlssPresetAuto);
     assert(!BbSettings::DlssPresetValid(5) && !BbSettings::DlssPresetValid(6) && BbSettings::DlssPresetValid(13));
-    // DLSS Frame Generation, Reflex, the Custom preset's ratio, the mip bias offset.
+    // The Custom preset's ratio, the mip bias offset. 0.4.4 beta 28: frame generation and Reflex are
+    // gone; their old keys are ignored and kept as they are.
     {
         std::ofstream file(path);
         file << "frame_gen=dlss\nframe_gen_frames=9\nreflex=boost\npreset=5\nrender_scale=1.3\n"
                 "mip_bias=-5\n";
     }
     BbSettings::Load();
-    // 0.4.4 beta 26: frame generation reads as off while it is not offered (FrameGenOffered).
-    const int dlss_fg = BbSettings::FrameGenOffered ? BbSettings::FrameGenDlss : BbSettings::FrameGenOff;
-    const int fsr_fg = BbSettings::FrameGenOffered ? BbSettings::FrameGenFsr3 : BbSettings::FrameGenOff;
-    assert(s.frame_gen == dlss_fg && s.startup_frame_gen == dlss_fg);
-    assert(s.frame_gen_frames == BbSettings::FrameGenFramesMax && s.reflex == BbSettings::ReflexBoost);
     assert(s.preset == BbSettings::PresetCustom && s.render_scale == 1.3f);
     assert(s.mip_bias == BbSettings::MipBiasMin);
     assert(BbSettings::PresetScale(BbSettings::PresetCustom) == 1.3f);
@@ -406,16 +402,15 @@ int main() {
     BbSettings::Save();
     {
         const std::string text = Read(path);
-        assert(text.find(BbSettings::FrameGenOffered ? "frame_gen=dlss\n" : "frame_gen=off\n") != std::string::npos);
-        assert(text.find("frame_gen_frames=5\n") != std::string::npos);
+        assert(text.find("frame_gen=dlss\n") != std::string::npos);
+        assert(text.find("frame_gen_frames=9\n") != std::string::npos);
         assert(text.find("reflex=boost\n") != std::string::npos);
         assert(text.find("render_scale=1.10\n") != std::string::npos);
         assert(text.find("mip_bias=-2.00\n") != std::string::npos);
     }
-    { std::ofstream file(path); file << "frame_gen=fsr3\nreflex=sometimes\nrender_scale=9\n"; }
+    { std::ofstream file(path); file << "render_scale=9\n"; }
     BbSettings::Load();
-    assert(s.frame_gen == fsr_fg && s.reflex == BbSettings::ReflexOn &&
-           s.render_scale == BbSettings::RenderScaleMax);
+    assert(s.render_scale == BbSettings::RenderScaleMax);
     // 0.4.4 beta 26b: Live resolution changes off holds at a 1920x1080 start too (no startup patch,
     // BB_RENDER_RES unset): an output chosen in game waits for a restart; with it on, it is live.
     {

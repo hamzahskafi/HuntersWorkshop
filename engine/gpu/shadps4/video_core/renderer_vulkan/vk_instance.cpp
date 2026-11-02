@@ -21,7 +21,6 @@
 #include "bbport_toggles.h"
 #include "video_core/renderer_vulkan/vk_breadcrumbs.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
-#include "video_core/renderer_vulkan/vk_streamline.h"
 #include "video_core/renderer_vulkan/vk_amd_fsr.h"
 #include "video_core/renderer_vulkan/vk_occlusion.h"
 #include "video_core/renderer_vulkan/vk_optiscaler.h"
@@ -287,8 +286,6 @@ Instance::Instance(const Frontend::WindowSystemInfo& window_info, s32 physical_d
 }
 
 Instance::~Instance() {
-    // bbport: Streamline goes before the device (the presenter's swapchain went already).
-    Streamline::Shutdown();
     ImGui::Core::Shutdown(GetDevice());
     vmaDestroyAllocator(allocator);
 }
@@ -525,10 +522,9 @@ bool Instance::CreateDevice() {
     hdr_metadata = add_extension(VK_EXT_HDR_METADATA_EXTENSION_NAME);
     // bbport (0.9.37 beta 6): NVIDIA's low latency extension for its boost hint alone (Swapchain:
     // GPU clocks held up while the engine leaves the GPU idle between its waits; an RTX 3070 ran
-    // 45-59 FPS without it and 106 with Reflex Boost through Streamline). Streamline adds and
-    // drives the extension itself when it is loaded, and OptiScaler hooks the device's creation
-    // (it may add Reflex's extensions too). BB_NV_BOOST=0: not used.
-    if (!Streamline::Loaded() && !OptiScaler::Detect().loaded &&
+    // 45-59 FPS without it and 106 with Reflex Boost). Not with OptiScaler loaded: it hooks the
+    // device's creation (it may add Reflex's extensions too). BB_NV_BOOST=0: not used.
+    if (!OptiScaler::Detect().loaded &&
         !(std::getenv("BB_NV_BOOST") && std::getenv("BB_NV_BOOST")[0] == '0') &&
         std::ranges::find(available_extensions, std::string{VK_NV_LOW_LATENCY_2_EXTENSION_NAME}) !=
             available_extensions.end()) {
@@ -860,9 +856,6 @@ bool Instance::CreateDevice() {
         return false;
     }
     device = std::move(dev);
-    // bbport: created through Streamline's proxy when it is loaded: DLSS Frame Generation's
-    // support on this GPU (vk_streamline.h).
-    Streamline::OnDeviceCreated(physical_device);
 
     graphics_queue = device->getQueue(queue_family_index, 0);
     present_queue = device->getQueue(queue_family_index, 0);

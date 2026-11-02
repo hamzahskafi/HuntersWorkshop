@@ -13,8 +13,8 @@ to 22). Re-count before each release (`tools/hardware_census.sh <folder of logs>
 
 | GPU family | Seen in logs | Driver | Notes |
 |---|---|---|---|
-| NVIDIA RTX 40 / 50 | 4060 (most common), 4060 Ti, 4070, 4070 Ti Super, 4080 Super, 4090, 5060, 5070 Ti, 5090 | 581 to 621 | DLSS, Reflex, frame generation (40/50) |
-| NVIDIA RTX 20 / 30 | 2060, 2070, 2080 Super, 3050, 3060 (+ laptop), 3070, 3080 | 552 to 617 | DLSS; no DLSS frame generation |
+| NVIDIA RTX 40 / 50 | 4060 (most common), 4060 Ti, 4070, 4070 Ti Super, 4080 Super, 4090, 5060, 5070 Ti, 5090 | 581 to 621 | DLSS |
+| NVIDIA RTX 20 / 30 | 2060, 2070, 2080 Super, 3050, 3060 (+ laptop), 3070, 3080 | 552 to 617 | DLSS |
 | NVIDIA GTX 16 | 1660 Ti, 1660 Super | 617 | Turing without RT/tensor cores: no DLSS |
 | NVIDIA GTX 10 and older | 1050 Ti, 1070 Ti | 576, 582 | Pascal: the 580 driver branch is its last; fewer Vulkan extensions |
 | AMD RDNA 1 to 4 | RX 5600 XT, 6600, 7700 XT, 7900 GRE, 9070 XT | 2.0.353 to 2.0.416 | FSR 4 on RDNA 4 |

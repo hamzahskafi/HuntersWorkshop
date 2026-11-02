@@ -22,7 +22,6 @@
 #include "bbport_heap_sites.h"
 #include "bbport_wait_trace.h"
 #include "bbport_freeze.h"
-#include "bbport_settings.h"
 #include "video_core/renderer_vulkan/vk_frame_capture.h"
 #include "common/debug.h"
 #include "common/thread.h"
@@ -508,10 +507,7 @@ static void LogLoad(double seconds, u64 flips, double worst_ms, u64 slow) {
 void VideoOutDriver::Flip(const Request& req) {
     BbFreeze::NoteFlip();
     // Update HDR status before presenting, then present the frame (bbport: on the swap thread).
-    // bbport: frame generation drops its generated frame while the next flip waits here.
-    presenter->NoteFlipQueued(1);
     RunPresenter([this, frame = req.frame, hdr = req.port->is_hdr] {
-        presenter->NoteFlipQueued(-1);
         presenter->SetHDR(hdr);
         presenter->Present(frame);
     });
@@ -1157,35 +1153,6 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
     }
     auto frame_period = frame_limit ? std::chrono::nanoseconds(1000000000 / frame_limit)
                                     : std::chrono::nanoseconds(0);
-    // bbport: frame generation's cap (BbSettings::frame_gen_cap, any present mode): the game at
-    // half the refresh rate, so its frame and the generated one fill every refresh (with Mailbox
-    // a faster game replaces generated frames before they are shown). Applied while generated
-    // frames are shown (BbSettings::frame_gen_active), back to the limit above otherwise.
-    const u32 base_limit = frame_limit;
-    // The frame limit caps the frames shown, generated ones included: the game runs at half of
-    // it (a 120 FPS limit is 60 + 60 generated, not 120 + 120). bbport: DLSS Frame Generation
-    // shows frame_gen_multiplier frames per game frame (up to 6): the limit and the cap divide by
-    // that. Only with the uncapped preset: the others (30, 60, 90, 120, 144) are fixed-timestep
-    // patches whose game speed follows the flip rate, and a halved limit ran the game in slow
-    // motion with twice the input lag (DLSS-G test, 60 FPS preset at 30).
-    static const bool variable_timestep = [] {
-        const char* fps = std::getenv("BB_FPS");
-        return fps && std::string_view{fps} == "uncap";
-    }();
-    const auto effective_limit = [&] {
-        const auto& s = BbSettings::Get();
-        if (!variable_timestep || !s.frame_gen_active.load(std::memory_order_relaxed)) {
-            return base_limit;
-        }
-        const u32 shown = u32(std::clamp(s.frame_gen_multiplier.load(std::memory_order_relaxed), 2,
-                                         BbSettings::FrameGenFramesMax + 1));
-        u32 limit = base_limit / shown;
-        const u32 refresh_share = Frontend::DisplayRefreshHz() / shown;
-        if (refresh_share >= 20 && s.frame_gen_cap.load(std::memory_order_relaxed)) {
-            limit = limit == 0 ? refresh_share : std::min(limit, refresh_share);
-        }
-        return limit == 0 ? base_limit : limit;
-    };
     auto next_flip = std::chrono::steady_clock::now();
     // A flip waits for its slot, a frame period after the one before: on time (within a quarter of a period)
     // the slots keep their cadence, so a sleep's overshoot never adds up. After a late flip they start again from
@@ -1256,19 +1223,6 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
         const auto pace_of = [&] { return frame_limit ? frame_period : vblank_period; };
         PrecisePacing::Cadence ticks{vblank_period, Clock::now() + vblank_period};
         PrecisePacing::Cadence flips{pace_of()};
-        // The pace follows frame generation's cap (effective_limit) when it changes.
-        const auto update_pace = [&] {
-            const u32 limit = effective_limit();
-            if (limit == frame_limit) {
-                return;
-            }
-            std::printf("VideoOut: frame limit %u FPS%s\n", limit,
-                        limit != base_limit ? " (frame generation: half the frames shown)" : "");
-            frame_limit = limit;
-            frame_period = frame_limit ? std::chrono::nanoseconds(1000000000 / frame_limit)
-                                       : std::chrono::nanoseconds(0);
-            flips.SetPeriod(pace_of());
-        };
         // Flips are timed exactly (a spin of at most an eighth of the vblank period). Ticks only
         // spin without a frame limit: with one they just count time, and a spin before each of
         // 480 ticks a second took a core from the game's threads on 6-8 core CPUs.
@@ -1280,16 +1234,15 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
         // each slot sits just past a vblank, so every frame is shown for exactly N refreshes. A
         // cadence of its own drifts against the display's clock and its flips cross vblanks now
         // and then: a frame up a refresh longer, the next one shorter (judder at 60 FPS on 180 Hz).
-        // Not with Immediate (tearing, no vblank to wait for) or while frame generation paces the
-        // frames it adds; G-Sync and FreeSync refresh on the flips, and the watch reports nothing.
+        // Not with Immediate (tearing, no vblank to wait for); G-Sync and FreeSync refresh on the
+        // flips, and the watch reports nothing.
         const bool lock_allowed = PrecisePacing::VblankPacing() &&
                                   EmulatorSettings.GetPresentMode() != "Immediate";
         bool locked = false;
         int lock_reports = 0;
         const auto lock_to_vblank = [&] {
             std::optional<PrecisePacing::VblankTime> vblank;
-            if (lock_allowed && frame_limit &&
-                !BbSettings::Get().frame_gen_active.load(std::memory_order_relaxed)) {
+            if (lock_allowed && frame_limit) {
                 vblank = PrecisePacing::Vblank();
             }
             u32 refreshes = 0;
@@ -1338,7 +1291,6 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
         };
 
         while (!token.stop_requested()) {
-            update_pace();
             const Clock::time_point tick_deadline = ticks.Slot(); // the next tick
 
             if (DebugState.IsGuestThreadsPaused()) {
@@ -1390,14 +1342,6 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
     while (!token.stop_requested()) {
         timer.Start();
         const auto tick_deadline = std::chrono::steady_clock::now() + vblank_period;
-        // bbport: frame generation's cap with VSync (effective_limit).
-        if (immediate_flips) {
-            if (const u32 limit = effective_limit(); limit != frame_limit) {
-                frame_limit = limit;
-                frame_period = frame_limit ? std::chrono::nanoseconds(1000000000 / frame_limit)
-                                           : std::chrono::nanoseconds(0);
-            }
-        }
 
         if (DebugState.IsGuestThreadsPaused()) {
             DrawLastFrame();

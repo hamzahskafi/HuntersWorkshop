@@ -42,25 +42,6 @@ std::string FsrVersionKey(const std::string& name);
 /// Which of `offered` a wanted version asks for: its exact name, or the newest listed of a family
 /// ("3.1": the first 3.1.x), one shipped with the game before the driver's; -1 for "auto" or none.
 int FsrVersionMatch(const std::vector<std::string>& offered, const std::string& wanted);
-/// bbport: frame_gen in config.ini (BB_FRAME_GEN): generated frames between the game's own
-/// (vk_frame_generation.h): NVIDIA DLSS Frame Generation through Streamline (vk_streamline.h; RTX
-/// 40/50, loaded at start, frame_gen_frames per real one). FSR 3.1 frame interpolation went with
-/// FireBurn's FSR in 0.4.4 beta 27: "fsr3" reads as off (AMD's own needs AMD's swapchain; after 0.4.4).
-enum FrameGen : int { FrameGenOff = 0, FrameGenFsr3 = 1, FrameGenDlss = 2, FrameGenCount };
-inline constexpr const char* FrameGenNames[] = {"off", "fsr3", "dlss"};
-static_assert(sizeof(FrameGenNames) / sizeof(FrameGenNames[0]) == FrameGenCount);
-/// frame_gen_frames: DLSS generated frames per real one (1 = 2x .. 5 = 6x; RTX 50 for more than 1).
-inline constexpr int FrameGenFramesMax = 5;
-/// 0.4.4 beta 26: frame generation (FSR 3.1 and DLSS) is not offered (the tester's call in beta 23;
-/// community-fixes-plan.md, Decisions): frame_gen reads as off (BB_FRAME_GEN too, logged), the
-/// in-game menu and the launcher leave it out, and DLSS Frame Generation's plugin is never
-/// requested. The code stays until it is decided on.
-inline constexpr bool FrameGenOffered = false;
-/// reflex in config.ini (BB_REFLEX): NVIDIA Reflex low latency while Streamline is loaded; on (at
-/// least) whenever DLSS Frame Generation runs, as NVIDIA requires.
-enum Reflex : int { ReflexOff = 0, ReflexOn = 1, ReflexBoost = 2, ReflexCount };
-inline constexpr const char* ReflexNames[] = {"off", "on", "boost"};
-static_assert(sizeof(ReflexNames) / sizeof(ReflexNames[0]) == ReflexCount);
 /// Custom (render_scale in config.ini): output / render size of the player's choosing. 0.4.4 beta 27c:
 /// Auto (preset=auto, the default) picks one by the output's height (AutoPreset); config.ini keeps the
 /// others' numbers as before.
@@ -188,33 +169,6 @@ struct Values {
     /// fsr_version: FsrVersion() / SetFsrVersion() (a name); counts its changes, for the renderer.
     std::atomic<unsigned> fsr_version_serial{0};
     std::atomic<int> preset{PresetAuto};
-    std::atomic<int> frame_gen{FrameGenOff}; ///< FrameGen; live
-    /// While generated frames are shown, the game runs at half the refresh rate so every
-    /// generated frame reaches the display (any present mode); live.
-    std::atomic<bool> frame_gen_cap{true};
-    /// Set by the renderer: frame generation is running (the FPS counter shows both rates), and
-    /// the frames shown and the game's own frames a second.
-    std::atomic<bool> frame_gen_active{false};
-    std::atomic<float> frame_gen_shown_fps{0.0f}, frame_gen_game_fps{0.0f};
-    /// bbport: frames shown per game frame while frame_gen_active (2 for FSR 3.1, generated + 1
-    /// for DLSS): the flip driver's frame limit and cap divide by it. Set by the renderer.
-    std::atomic<int> frame_gen_multiplier{2};
-    /// DLSS Frame Generation: generated frames per real one (1..FrameGenFramesMax); live.
-    std::atomic<int> frame_gen_frames{1};
-    /// bbport: DLSS dynamic multi frame generation (frame_gen_dynamic; live; RTX 50, Streamline's
-    /// DLSSGMode::eDynamic): the driver picks 2x..(frame_gen_frames + 1)x per moment to reach
-    /// frame_gen_target_fps (0: the display's refresh rate), as OptiScaler's ForceDMFG.
-    std::atomic<bool> frame_gen_dynamic{false};
-    std::atomic<int> frame_gen_target_fps{0};
-    /// Set by the renderer: this GPU and driver can run DLSS dynamic multi frame generation.
-    std::atomic<bool> dlss_fg_dynamic_supported{false};
-    /// Reflex (Reflex); live while Streamline is loaded.
-    std::atomic<int> reflex{ReflexOn};
-    /// Set by the renderer: Streamline is loaded (frame_gen=dlss at start), DLSS Frame Generation
-    /// runs on this GPU, the most frames it may generate per real one, and why not (or null).
-    std::atomic<bool> streamline_loaded{false}, dlss_fg_supported{false};
-    std::atomic<int> dlss_fg_max_frames{0};
-    std::atomic<const char*> dlss_fg_problem{nullptr};
     std::atomic<bool> sharpen{true};
     std::atomic<float> sharpness{0.2f};
     std::atomic<bool> jitter{true};
@@ -348,8 +302,6 @@ struct Values {
     /// Startup settings for the explicit BB_RENDER_RES compatibility patch only.
     int startup_preset = PresetAuto;
     float startup_render_scale = 1.3f;
-    /// frame_gen at start: DLSS Frame Generation loads Streamline before the Vulkan instance.
-    int startup_frame_gen = FrameGenOff;
     int startup_upscaler = UpscalerFsr;
     bool startup_object_motion = true;
     bool startup_effects[EffectCount]{};

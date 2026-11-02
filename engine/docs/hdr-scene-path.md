@@ -98,9 +98,7 @@ of those passes get the 16-bit attachment format (part of the pipeline key, as t
 - **Upscalers**: their input is the scene before the composite, so they are unchanged; the
   composite's output is already output-sized (the hook `9a9cf8a9` is before it).
 - **Encode** (`hdr_output.frag`): the 16-bit frame times paper white, capped at the peak, in HDR10
-  or scRGB. Frame generation was off with HDR when this was written; it runs with HDR now
-  (docs/hdr.md), but FSR 3.1's needs an 8-bit display buffer (`vk_frame_generation.cpp`), which
-  this chain replaces.
+  or scRGB.
 
 Wide gamut (BT.2020 colours beyond BT.709) is left for later: the game grades in BT.709 and its
 colour table is BT.709.

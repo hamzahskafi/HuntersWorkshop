@@ -149,22 +149,6 @@ Presenter::Presenter(Frontend::WindowSDL& window_, AmdGpu::Liverpool* liverpool_
         frame.present_done = fence;
         free_queue.push(&frame);
     }
-    // bbport: frame generation's frames (images made at their first use).
-    for (u32 i = 0; i < generated_frames.size(); ++i) {
-        Frame& frame = generated_frames[i];
-        frame.id = u8(num_images + i);
-        frame.present_done = Check<"create present done fence">(
-            device.createFence({.flags = vk::FenceCreateFlagBits::eSignaled}));
-    }
-    frame_gen = std::make_unique<FrameGenerator>(instance, draw_scheduler);
-    rasterizer->GetUpscaler().SetFrameGenerator(frame_gen.get());
-    // bbport: DLSS Frame Generation (vk_streamline.h): a slot and a HUD-less frame per
-    // presentation frame (images made at their first use).
-    dlss_fg = std::make_unique<DlssFrameGen>(instance, num_images);
-    dlss_hudless_frames.resize(num_images);
-    for (u32 i = 0; i < num_images; ++i) {
-        dlss_hudless_frames[i].id = u8(num_images + NumGeneratedFrames + i);
-    }
 
     fsr_settings.enable = EmulatorSettings.IsFsrEnabled();
     fsr_settings.use_rcas = EmulatorSettings.IsRcasEnabled();
@@ -173,8 +157,8 @@ Presenter::Presenter(Frontend::WindowSDL& window_, AmdGpu::Liverpool* liverpool_
 
     fsr_pass.Create(device, instance.GetAllocator(), num_images);
     pp_pass.Create(device, swapchain.GetSurfaceFormat().format);
-    // bbport: + 2: frame generation presents up to twice per game frame, and adds a swapchain
-    // image; the menu's vertex buffers rotate over this many.
+    // bbport: the menu's vertex buffers rotate over this many (two more than the presentation
+    // frames).
     BbOverlay::Init(instance, swapchain.GetSurfaceFormat().format, num_images + 2);
     // bbport: HDR output (hdr in config.ini): frames, passes and the menu stay SDR; the encode
     // pass writes the HDR swapchain format chosen at start.
@@ -261,45 +245,24 @@ Presenter::~Presenter() {
         device.destroyImageView(frame.image_view);
         device.destroyFence(frame.present_done);
     }
-    frame_gen.reset();
-    for (auto& frame : generated_frames) {
-        if (frame.image) {
-            vmaDestroyImage(instance.GetAllocator(), frame.image, frame.allocation);
-            device.destroyImageView(frame.image_view);
-        }
-        device.destroyFence(frame.present_done);
-    }
-    dlss_fg.reset();
-    for (auto& frame : dlss_hudless_frames) {
-        if (frame.image) {
-            vmaDestroyImage(instance.GetAllocator(), frame.image, frame.allocation);
-            device.destroyImageView(frame.image_view);
-        }
-    }
     DestroyHdrTarget(hdr_game);
     DestroyHdrTarget(hdr_overlay);
-    DestroyHdrTarget(dlss_hdr_composite);
-    DestroyHdrTarget(dlss_hdr_hudless);
 }
 
-void Presenter::CreateHdrTarget(HdrTarget& target, vk::Extent2D extent, const char* name,
-                                vk::Format format) {
+void Presenter::CreateHdrTarget(HdrTarget& target, vk::Extent2D extent, const char* name) {
     const vk::Device device = instance.GetDevice();
     // The SDR format: the blit's and the menu pipeline's (BbOverlay::Init); sRGB encoded values,
     // decoded by the encode pass. Format support is checked by Swapchain::FindPresentFormat.
-    // Another format (DLSS-G's HDR HUD-less frame) is the swapchain's HDR one, read by DLSS-G.
-    const bool sdr = format == vk::Format::eUndefined;
     const vk::ImageCreateInfo image_info = {
         .imageType = vk::ImageType::e2D,
-        .format = sdr ? swapchain.GetSurfaceFormat().format : format,
+        .format = swapchain.GetSurfaceFormat().format,
         .extent = {extent.width, extent.height, 1},
         .mipLevels = 1,
         .arrayLayers = 1,
         .samples = vk::SampleCountFlagBits::e1,
         .tiling = vk::ImageTiling::eOptimal,
         .usage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferDst |
-                 vk::ImageUsageFlagBits::eSampled |
-                 (sdr ? vk::ImageUsageFlags{} : vk::ImageUsageFlagBits::eTransferSrc),
+                 vk::ImageUsageFlagBits::eSampled,
         .initialLayout = vk::ImageLayout::eUndefined,
     };
     const VmaAllocationCreateInfo alloc_info = {
@@ -351,24 +314,7 @@ void Presenter::EnsureHdrTargets(vk::Extent2D extent) {
     hdr_extent = extent;
 }
 
-void Presenter::EnsureDlssHdrTargets(vk::Extent2D extent) {
-    if (dlss_hdr_hudless.image && dlss_hdr_extent == extent) {
-        return;
-    }
-    if (dlss_hdr_hudless.image) {
-        present_scheduler.DeferOperation(
-            [this, composite = dlss_hdr_composite, hudless = dlss_hdr_hudless] {
-                DestroyHdrTarget(composite);
-                DestroyHdrTarget(hudless);
-            });
-    }
-    CreateHdrTarget(dlss_hdr_composite, extent, "DLSS-G HUD-less composite");
-    CreateHdrTarget(dlss_hdr_hudless, extent, "DLSS-G HUD-less", swapchain.GetHdrFormat().format);
-    dlss_hdr_extent = extent;
-}
-
-void Presenter::PresentHdr(vk::CommandBuffer cmdbuf, Frame* frame, vk::Extent2D extent,
-                           bool dlss_inputs) {
+void Presenter::PresentHdr(vk::CommandBuffer cmdbuf, Frame* frame, vk::Extent2D extent) {
     EnsureHdrTargets(extent);
     const vk::Image swapchain_image = swapchain.Image();
     const bool overlay = BbOverlay::Visible();
@@ -470,11 +416,7 @@ void Presenter::PresentHdr(vk::CommandBuffer cmdbuf, Frame* frame, vk::Extent2D 
     // frame this display buffer holds, vk_hdr_native.h), else plain SDR at paper white for this
     // frame (title, menus, loading, movies: nothing in them is meant to be brighter).
     const int mode = std::clamp(settings.hdr_mode.load(), 0, BbSettings::HdrModeCount - 1);
-    // A generated frame (FSR 3.1 frame generation) has no gain map of its own: it takes the
-    // real frame's it was interpolated towards (PresentGenerated), or every other frame would
-    // fall back to plain SDR.
-    const Frame* gain = hdr_gain_source ? hdr_gain_source : frame;
-    const bool native = mode == BbSettings::HdrModeNative && gain->hdr_native && gain->hdr_gain;
+    const bool native = mode == BbSettings::HdrModeNative && frame->hdr_native && frame->hdr_gain;
     LogHdrState(scrgb, mode, native);
     // BB_HDR_DEBUG=1: the gain as a heat map over a grey picture (hdr_output.frag).
     static const bool debug = [] {
@@ -518,14 +460,14 @@ void Presenter::PresentHdr(vk::CommandBuffer cmdbuf, Frame* frame, vk::Extent2D 
     if (native) {
         // Written on the draw scheduler's queue before this submission's wait (Present).
         const std::array gain_ready{
-            barrier(vk::Image(gain->hdr_gain->image), Layout::eGeneral, Layout::eGeneral,
+            barrier(vk::Image(frame->hdr_gain->image), Layout::eGeneral, Layout::eGeneral,
                     Stage::eAllCommands, Access::eMemoryWrite, Stage::eFragmentShader,
                     Access::eShaderSampledRead),
         };
         barriers(gain_ready);
     }
     hdr_pass.Render(cmdbuf, hdr_game.view, overlay ? hdr_overlay.view : hdr_game.view,
-                    native ? *gain->hdr_gain->view : hdr_game.view,
+                    native ? *frame->hdr_gain->view : hdr_game.view,
                     native ? Layout::eGeneral : Layout::eShaderReadOnlyOptimal,
                     swapchain.ImageView(), extent, hdr);
 
@@ -535,60 +477,6 @@ void Presenter::PresentHdr(vk::CommandBuffer cmdbuf, Frame* frame, vk::Extent2D 
                 Stage::eBottomOfPipe, Access::eNone),
     };
     barriers(to_present);
-
-    // bbport: DLSS Frame Generation in HDR: the frame without its UI, placed and encoded as the
-    // back buffer's frame was (same pass and settings, without the menu layer), so the two differ
-    // only in the UI and the menu; DLSS-G takes it and the UI alpha made from the difference.
-    if (!dlss_inputs || !DlssFrameGenHdr()) {
-        return;
-    }
-    const Frame& hudless = dlss_hudless_frames[frame->id];
-    if (!hudless.image) {
-        return;
-    }
-    EnsureDlssHdrTargets(extent);
-    const std::array to_copy{
-        barrier(dlss_hdr_composite.image, Layout::eUndefined, Layout::eTransferDstOptimal,
-                Stage::eAllCommands, Access::eNone, Stage::eTransfer, Access::eTransferWrite),
-        barrier(hudless.image, Layout::eGeneral, Layout::eTransferSrcOptimal, Stage::eAllCommands,
-                Access::eMemoryWrite, Stage::eTransfer, Access::eTransferRead),
-    };
-    barriers(to_copy);
-    cmdbuf.clearColorImage(dlss_hdr_composite.image, Layout::eTransferDstOptimal, black, color_range);
-    cmdbuf.pipelineBarrier2(vk::DependencyInfo{
-        .memoryBarrierCount = 1,
-        .pMemoryBarriers = &clear_done,
-    });
-    cmdbuf.blitImage(hudless.image, Layout::eTransferSrcOptimal, dlss_hdr_composite.image,
-                     Layout::eTransferDstOptimal,
-                     MakeImageBlitFit(hudless.width, hudless.height, extent.width, extent.height),
-                     vk::Filter::eLinear);
-    const std::array to_encode{
-        barrier(dlss_hdr_composite.image, Layout::eTransferDstOptimal,
-                Layout::eShaderReadOnlyOptimal, Stage::eTransfer, Access::eTransferWrite,
-                Stage::eFragmentShader, Access::eShaderSampledRead),
-        barrier(hudless.image, Layout::eTransferSrcOptimal, Layout::eGeneral, Stage::eTransfer,
-                Access::eTransferRead, Stage::eAllCommands, Access::eMemoryRead),
-        barrier(dlss_hdr_hudless.image, Layout::eUndefined, Layout::eColorAttachmentOptimal,
-                Stage::eAllCommands, Access::eNone, Stage::eColorAttachmentOutput,
-                Access::eColorAttachmentWrite),
-    };
-    barriers(to_encode);
-    auto hudless_hdr = hdr;
-    hudless_hdr.flags &= ~HostPasses::HdrOutputPass::FlagOverlay;
-    hdr_pass.Render(cmdbuf, dlss_hdr_composite.view, dlss_hdr_composite.view,
-                    native ? *frame->hdr_gain->view : dlss_hdr_composite.view,
-                    native ? Layout::eGeneral : Layout::eShaderReadOnlyOptimal,
-                    dlss_hdr_hudless.view, extent, hudless_hdr);
-    const std::array encoded{
-        barrier(dlss_hdr_hudless.image, Layout::eColorAttachmentOptimal, Layout::eGeneral,
-                Stage::eColorAttachmentOutput, Access::eColorAttachmentWrite, Stage::eAllCommands,
-                Access::eMemoryRead),
-    };
-    barriers(encoded);
-    dlss_fg->RecordPresent(cmdbuf, frame->dlss, dlss_hdr_hudless.image, dlss_hdr_hudless.view,
-                           extent, swapchain_image, swapchain.GetHdrFormat().format, extent,
-                           vk::Rect2D{{0, 0}, extent});
 }
 
 void Presenter::LogHdrState(bool scrgb, int mode, bool native_frame) {
@@ -857,66 +745,14 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
     pp_settings.srgb_input =
         attribute.attrib.pixel_format == Libraries::VideoOut::PixelFormat::A2R10G10B10Srgb;
 
-    // bbport: frame generation: this frame's generated one, shown before it. Without a free
-    // generated frame the interpolation still runs (its history stays whole) but none is shown.
-    frame->generated = nullptr;
-    std::optional<FrameGenerator::Job> gen_job;
-    Frame* generated = nullptr;
-    {
-        const bool hdr = BbSettings::Get().hdr_output.load(std::memory_order_relaxed) !=
-                             BbSettings::HdrOutputOff ||
-                         frame->is_hdr;
-        gen_job = frame_gen->Prepare(image_size, view_info.format, hdr, fsr_settings.enable,
-                                     draw_scheduler.CurrentTick());
-        if (gen_job && gen_job->present) {
-            generated = TakeGeneratedFrame();
-            if (generated) {
-                if (generated->width != frame->width || generated->height != frame->height ||
-                    generated->is_hdr != frame->is_hdr) {
-                    RecreateFrame(generated, frame->width, frame->height);
-                }
-                std::atomic_ref<bool>(generated->generated_ok).store(false);
-            } else {
-                gen_job->present = false;
-            }
-        }
-    }
-
-    // bbport: DLSS Frame Generation: this game frame's number (its Reflex markers) and, with a
-    // DLSS job, its inputs: the captures into the frame's slot and the frame without its UI
-    // through the same post process as the frame (vk_streamline.h).
-    frame->dlss = {};
-    frame->dlss.index = dlss_fg->CurrentFrame();
-    Frame* dlss_hudless = nullptr;
-    if (gen_job && gen_job->dlss && dlss_fg->Available()) {
-        dlss_hudless = &dlss_hudless_frames[frame->id];
-        if (dlss_hudless->width != frame->width || dlss_hudless->height != frame->height ||
-            dlss_hudless->is_hdr != frame->is_hdr || !dlss_hudless->image) {
-            RecreateFrame(dlss_hudless, frame->width, frame->height);
-        }
-        dlss_fg->EnsureSlot(frame->id, gen_job->render_width, gen_job->render_height);
-        frame->dlss.inputs = true;
-        frame->dlss.slot = frame->id;
-        frame->dlss.render_width = gen_job->render_width;
-        frame->dlss.render_height = gen_job->render_height;
-        frame->dlss.jitter = gen_job->jitter;
-        frame->dlss.near_plane = gen_job->near_plane;
-        frame->dlss.vertical_fov = gen_job->vertical_fov;
-        frame->dlss.reset = gen_job->reset;
-        frame->dlss.camera = gen_job->camera;
-    }
-    const bool dlss_srgb = view_info.format == vk::Format::eR8G8B8A8Srgb ||
-                           view_info.format == vk::Format::eB8G8R8A8Srgb;
-
     // Numbered here, in command order; marked where the commands are recorded.
     const u32 stream = draw_scheduler.CrumbStream();
     const bool crumbs = Breadcrumbs::Enabled();
     const u32 fsr_crumb = crumbs ? Breadcrumbs::Note(stream, {.name = "presenter FSR"}) : 0;
     const u32 pp_crumb = crumbs ? Breadcrumbs::Note(stream, {.name = "presenter post process"}) : 0;
     draw_scheduler.Record([this, frame, image_view, image_size, frame_subresources, stream,
-                           fsr_crumb, pp_crumb, fsr = fsr_settings, pp = pp_settings, generated,
-                           gen_job, dlss_hudless, dlss_srgb, dlss = dlss_fg.get(),
-                           fg = frame_gen.get()](vk::CommandBuffer cmdbuf) {
+                           fsr_crumb, pp_crumb, fsr = fsr_settings,
+                           pp = pp_settings](vk::CommandBuffer cmdbuf) {
         // Frames of different submissions may be recorded on two threads at once.
         std::scoped_lock lock{passes_mutex};
         const auto pre_barrier = vk::ImageMemoryBarrier2{
@@ -947,78 +783,15 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
         if (pp_crumb) {
             Breadcrumbs::Mark(cmdbuf, stream, pp_crumb, true);
         }
-        // bbport: DLSS Frame Generation's inputs for this frame: copies of the captures, and the
-        // frame without its UI through the same post process (its capture stays in General).
-        if (dlss_hudless) {
-            dlss->RecordInputs(cmdbuf, frame->id, fg->DepthImage(), fg->MotionImage(),
-                               gen_job->render_width, gen_job->render_height);
-            const auto hudless_barrier = [&](vk::ImageLayout from, vk::ImageLayout to) {
-                const vk::ImageMemoryBarrier2 barrier{
-                    .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
-                    .srcAccessMask = vk::AccessFlagBits2::eMemoryWrite,
-                    .dstStageMask = vk::PipelineStageFlagBits2::eAllCommands,
-                    .dstAccessMask = vk::AccessFlagBits2::eMemoryRead |
-                                     vk::AccessFlagBits2::eMemoryWrite,
-                    .oldLayout = from,
-                    .newLayout = to,
-                    .image = fg->HudlessImage(),
-                    .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
-                };
-                cmdbuf.pipelineBarrier2(
-                    {.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &barrier});
-            };
-            const auto to_target = vk::ImageMemoryBarrier2{
-                .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
-                .srcAccessMask = vk::AccessFlagBits2::eMemoryRead,
-                .dstStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-                .dstAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite,
-                .oldLayout = vk::ImageLayout::eUndefined,
-                .newLayout = vk::ImageLayout::eColorAttachmentOptimal,
-                .image = dlss_hudless->image,
-                .subresourceRange{frame_subresources},
-            };
-            cmdbuf.pipelineBarrier2(
-                vk::DependencyInfo{.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &to_target});
-            hudless_barrier(vk::ImageLayout::eGeneral, vk::ImageLayout::eShaderReadOnlyOptimal);
-            pp_pass.Render(cmdbuf, fg->HudlessView(dlss_srgb), image_size, *dlss_hudless, pp);
-            hudless_barrier(vk::ImageLayout::eShaderReadOnlyOptimal, vk::ImageLayout::eGeneral);
-        }
-        // bbport: frame generation: interpolated and composed, then the same post process
-        // into the generated frame's image.
-        if (gen_job && frame_gen->Record(cmdbuf, *gen_job, image_view) && generated) {
-            const auto to_target = vk::ImageMemoryBarrier2{
-                .srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-                .srcAccessMask = vk::AccessFlagBits2::eColorAttachmentRead,
-                .dstStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-                .dstAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite,
-                .oldLayout = vk::ImageLayout::eUndefined,
-                .newLayout = vk::ImageLayout::eColorAttachmentOptimal,
-                .image = generated->image,
-                .subresourceRange{frame_subresources},
-            };
-            cmdbuf.pipelineBarrier2(vk::DependencyInfo{
-                .imageMemoryBarrierCount = 1,
-                .pImageMemoryBarriers = &to_target,
-            });
-            pp_pass.Render(cmdbuf, frame_gen->ComposedView(), image_size, *generated, pp);
-            std::atomic_ref<bool>(generated->generated_ok).store(true, std::memory_order_release);
-        }
     });
 
     // Flush frame creation commands.
     BbStats::frame_number.fetch_add(1, std::memory_order_relaxed); // bbport: game frames shown
     frame->ready_semaphore = draw_scheduler.GetWorkSemaphore()->Handle();
     frame->ready_tick = draw_scheduler.CurrentTick();
-    if (generated) {
-        generated->ready_semaphore = frame->ready_semaphore;
-        generated->ready_tick = frame->ready_tick;
-        generated->hdr_native = false;
-        frame->generated = generated;
-    }
     SubmitInfo info{};
     draw_scheduler.Flush(info);
     BbTimeline::Note(BbTimeline::PipeTask, 5, frame->ready_tick);
-    dlss_fg->OnFrameSubmitted(); // bbport: Reflex: this frame's render submit ended
 
     // bbport: the GPU command thread runs at most BB_FRAMES_AHEAD (default 1) guest frames
     // ahead of the GPU: it waits here for the frame that many flips back. When the GPU is the
@@ -1117,64 +890,7 @@ Frame* Presenter::PrepareBlankFrame(bool present_thread) {
     return frame;
 }
 
-Frame* Presenter::TakeGeneratedFrame() {
-    const vk::Device device = instance.GetDevice();
-    for (u32 i = 0; i < generated_frames.size(); ++i) {
-        Frame& frame = generated_frames[i];
-        if (generated_busy[i].load(std::memory_order_acquire) ||
-            device.getFenceStatus(frame.present_done) != vk::Result::eSuccess) {
-            continue;
-        }
-        generated_busy[i].store(true, std::memory_order_release);
-        return &frame;
-    }
-    return nullptr;
-}
-
-bool Presenter::PresentGenerated(Frame* frame, Frame* generated) {
-    // Its commands went out with the real frame's submission.
-    if (frame->ready_semaphore == draw_scheduler.GetWorkSemaphore()->Handle()) {
-        draw_scheduler.WaitSubmitted(frame->ready_tick);
-    }
-    bool shown = false;
-    if (std::atomic_ref<bool>(generated->generated_ok).load(std::memory_order_acquire) &&
-        frame_gen->ShouldPresentGenerated()) {
-        const auto start = FrameGenerator::Clock::now();
-        hdr_gain_source = frame; // HDR output: the real frame's gain map (PresentHdr)
-        Present(generated, true, false);
-        hdr_gain_source = nullptr;
-        shown = true;
-        frame_gen->WaitForRealSlot(start);
-    }
-    const auto index = size_t(generated - generated_frames.data());
-    generated_busy[index].store(false, std::memory_order_release);
-    return shown;
-}
-
 void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame) {
-    // bbport: frame generation: one more swapchain image while it is on; the generated frame
-    // goes first, the real one half a game frame later.
-    const bool real_game_frame = !is_reusing_frame && is_game_frame;
-    const auto present_start = FrameGenerator::Clock::now();
-    bool generated_made = false, generated_shown = false;
-    if (real_game_frame) {
-        if (swapchain.SetExtraImages(frame_gen->WantsExtraImage() ? 1 : 0) &&
-            window.GetWidth() != 0 && window.GetHeight() != 0) {
-            dlss_fg->BeforeSwapchainChange();
-            swapchain.Recreate(window.GetWidth(), window.GetHeight());
-            std::printf("Frame generation: swapchain of %u images\n", swapchain.GetImageCount());
-        }
-        if (Frame* generated = std::exchange(frame->generated, nullptr)) {
-            generated_made = true;
-            generated_shown = PresentGenerated(frame, generated);
-        }
-    }
-    const auto note_real = [&] {
-        if (real_game_frame && frame_gen->Enabled()) {
-            frame_gen->OnRealPresented(present_start, generated_shown, generated_made);
-        }
-    };
-
     // Free the frame for reuse
     const auto free_frame = [&] {
         if (!is_reusing_frame) {
@@ -1193,7 +909,6 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
     // Recreate the swapchain if the window was resized (or was minimised at the last try).
     if (window.GetWidth() != swapchain.GetWidth() || window.GetHeight() != swapchain.GetHeight() ||
         !swapchain.IsPresentable()) {
-        dlss_fg->BeforeSwapchainChange();
         swapchain.Recreate(window.GetWidth(), window.GetHeight());
         if (!swapchain.IsPresentable()) {
             free_frame();
@@ -1202,7 +917,6 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
     }
 
     if (!swapchain.AcquireNextImage()) {
-        dlss_fg->BeforeSwapchainChange();
         swapchain.Recreate(window.GetWidth(), window.GetHeight());
         if (!swapchain.AcquireNextImage()) {
             // User resizes the window too fast and GPU can't keep up. Skip this frame.
@@ -1243,7 +957,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
     if (hdr_output) {
         const vk::Extent2D extent = swapchain.GetExtent();
         SetExpectedGameSize(s32(extent.width), s32(extent.height));
-        PresentHdr(cmdbuf, frame, extent, real_game_frame && frame->dlss.inputs);
+        PresentHdr(cmdbuf, frame, extent);
     } else {
         const vk::Extent2D extent = swapchain.GetExtent();
         SetExpectedGameSize(s32(extent.width), s32(extent.height));
@@ -1353,14 +1067,6 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
                                    vk::PipelineStageFlagBits::eBottomOfPipe,
                                    vk::DependencyFlagBits::eByRegion, {}, {}, to_present);
         }
-        // bbport: DLSS Frame Generation: the frame without its UI at the back buffer's size and
-        // the UI alpha image, from the finished back buffer (vk_streamline.h).
-        if (real_game_frame && frame->dlss.inputs) {
-            const Frame& hudless = dlss_hudless_frames[frame->id];
-            dlss_fg->RecordPresent(cmdbuf, frame->dlss, hudless.image, hudless.image_view,
-                                   {frame->width, frame->height}, swapchain_image,
-                                   swapchain.GetSurfaceFormat().format, extent, fit);
-        }
     }
     if (EmulatorSettings.IsVkHostMarkersEnabled()) {
         cmdbuf.endDebugUtilsLabelEXT();
@@ -1380,19 +1086,14 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
     info.AddSignal(frame->present_done);
     scheduler.Flush(info);
 
-    // Present to swapchain. bbport: DLSS Frame Generation's constants, tags and markers for
-    // this frame go out right before (none for a frame shown again).
-    const DlssFrameInfo* dlss_info = real_game_frame ? &frame->dlss : nullptr;
-    dlss_fg->BeforePresent(dlss_info, BbOverlay::MenuOpen(), hdr_output);
+    // Present to swapchain.
     bool presented;
     {
         std::scoped_lock submit_lock{Scheduler::submit_mutex};
         presented = swapchain.Present();
     }
-    dlss_fg->AfterPresent(dlss_info);
     // bbport: recreated after the lock: its device wait takes it (Swapchain::WaitIdle).
     if (!presented) {
-        dlss_fg->BeforeSwapchainChange();
         swapchain.Recreate(window.GetWidth(), window.GetHeight());
     }
 
@@ -1400,7 +1101,6 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
     if (!is_reusing_frame && is_game_frame) {
         DebugState.IncFlipFrameNum();
     }
-    note_real();
 }
 
 Frame* Presenter::GetRenderFrame() {

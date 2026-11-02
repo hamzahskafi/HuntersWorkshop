@@ -902,7 +902,7 @@ void DlssModelRow() {
 }
 
 // The anti-aliasing, the upscaler with its quality, version or model, sharpening, and the fine settings
-// (Advanced); frame generation while it is not offered stays out.
+// (Advanced).
 void UpscalerSection() {
     auto& s = BbSettings::Get();
     Section("Temporal upscaler", "Временной апскейлер");
@@ -1015,149 +1015,6 @@ void UpscalerSection() {
         DlssModelRow();
     }
     ImGui::Unindent();
-    // bbport: frame generation (vk_frame_generation.h, vk_streamline.h); live, DLSS loaded at start.
-    const char* frame_gens[] = {BbSettings::MenuText("Off", "Выкл"), "FSR 3.1", "DLSS (NVIDIA)"};
-    static_assert(std::size(frame_gens) == BbSettings::FrameGenCount);
-    const int frame_gen = std::clamp(s.frame_gen.load(), 0, BbSettings::FrameGenCount - 1);
-    const bool dlss_loaded = s.streamline_loaded.load();
-    const bool dlss_fg = s.dlss_fg_supported.load();
-    // 0.4.4 beta 26: not offered (BbSettings::FrameGenOffered); the items stay for when it is.
-    if (BbSettings::FrameGenOffered) {
-        if (const char* label = Item("Frame generation", "Генерация кадров")) {
-            if (ImGui::BeginCombo(label, frame_gens[frame_gen])) {
-                for (int i = 0; i < BbSettings::FrameGenCount; ++i) {
-                    // DLSS: selectable to load it on the next start; not when it was loaded and this GPU
-                    // has none.
-                    const bool unavailable = i == BbSettings::FrameGenDlss && dlss_loaded && !dlss_fg;
-                    ImGui::BeginDisabled(unavailable);
-                    if (ImGui::Selectable(frame_gens[i], i == frame_gen)) {
-                        Store(s.frame_gen, i, true);
-                    }
-                    ImGui::EndDisabled();
-                    if (unavailable) {
-                        ImGui::SameLine();
-                        ImGui::TextDisabled("%s", BbSettings::MenuText("— not supported by this GPU",
-                                                                       "— не поддерживается видеокартой"));
-                    }
-                }
-                ImGui::EndCombo();
-            }
-            if (frame_gen == BbSettings::FrameGenDlss) {
-                Hint(BbSettings::MenuText(
-                    "NVIDIA DLSS Frame Generation: generated frames from the game's depth, motion vectors "
-                    "and the frame without its UI, paced by the driver, with NVIDIA Reflex. RTX 40 (one "
-                    "frame) or RTX 50 (up to five); Hardware-accelerated GPU scheduling on. Loads when the "
-                    "game starts with it selected. Off in menus, movies and with HDR output.",
-                    "NVIDIA DLSS Frame Generation: кадры из глубины, векторов движения и кадра без "
-                    "интерфейса игры, подачу ведёт драйвер, с NVIDIA Reflex. RTX 40 (один кадр) или RTX 50 "
-                    "(до пяти); должно быть включено аппаратное планирование GPU. Загружается, если игра "
-                    "запущена с этим выбором. Не работает в меню, роликах и с HDR."));
-            } else {
-                Hint(BbSettings::MenuText(
-                    "Shows an extra frame between the game's own (2x smoother motion). Adds a little input "
-                    "lag. Needs an upscaler; off in menus, movies and with HDR output.",
-                    "Показывает дополнительный кадр между кадрами игры (движение в 2 раза плавнее). Немного "
-                    "увеличивает задержку ввода. Нужен апскейлер; не работает в меню, роликах и с HDR."));
-            }
-            if (frame_gen == BbSettings::FrameGenDlss) {
-                ImGui::PushTextWrapPos();
-                if (!dlss_loaded) {
-                    ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "%s",
-                                       BbSettings::MenuText("Restart the game to load DLSS Frame Generation.",
-                                                            "Перезапустите игру, чтобы загрузить DLSS Frame Generation."));
-                }
-                if (const char* problem = s.dlss_fg_problem.load()) {
-                    ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f),
-                                       BbSettings::MenuText("DLSS Frame Generation unavailable: %s",
-                                                            "DLSS Frame Generation недоступна: %s"),
-                                       BbSettings::MenuText(problem));
-                }
-                ImGui::PopTextWrapPos();
-            }
-        }
-        if (frame_gen == BbSettings::FrameGenDlss || Searching()) {
-            if (const char* label = Item("DLSS: generated frames", "DLSS: сгенерированных кадров")) {
-                const int max_frames = dlss_fg ? std::max(1, s.dlss_fg_max_frames.load()) : BbSettings::FrameGenFramesMax;
-                int frames = std::clamp(s.frame_gen_frames.load(), 1, max_frames);
-                char shown[16];
-                std::snprintf(shown, sizeof(shown), "%d (%dx)", frames, frames + 1);
-                if (ImGui::SliderInt(label, &frames, 1, max_frames, shown, ImGuiSliderFlags_AlwaysClamp)) {
-                    Store(s.frame_gen_frames, frames, true);
-                }
-                Hint(BbSettings::MenuText(
-                    "Generated frames per frame the game renders: 1 doubles the frames shown, 3 is 4x. More "
-                    "than one needs an RTX 50 GPU (DLSS multi frame generation). Live.",
-                    "Сгенерированных кадров на каждый кадр игры: 1 удваивает число кадров, 3 — это 4x. "
-                    "Больше одного — только RTX 50 (DLSS Multi Frame Generation). Меняется сразу."));
-            }
-            // bbport: DLSS dynamic multi frame generation (vk_streamline.cpp SetMode), as OptiScaler's
-            // ForceDMFG: the driver adds only the frames the target needs.
-            const bool dynamic_ok = s.dlss_fg_dynamic_supported.load();
-            if (const char* label = Item("DLSS: dynamic multi frame generation",
-                                         "DLSS: динамическая генерация кадров")) {
-                ImGui::BeginDisabled(!dynamic_ok && !Searching());
-                Checkbox(label, s.frame_gen_dynamic);
-                ImGui::EndDisabled();
-                Hint(dynamic_ok
-                         ? BbSettings::MenuText(
-                               "The driver picks 2x, 3x or 4x moment by moment to reach the target (up to "
-                               "the generated frames above): fewer generated frames when the game is fast, "
-                               "less lag and fewer artifacts. Live.",
-                               "Драйвер сам выбирает 2x, 3x или 4x, чтобы достичь цели (не больше числа "
-                               "кадров выше): меньше сгенерированных кадров, когда игра быстрая, меньше "
-                               "задержка и артефактов. Меняется сразу.")
-                         : BbSettings::MenuText("Needs an RTX 50 GPU, a recent driver and DLSS Frame Generation loaded.",
-                                                "Нужна RTX 50, свежий драйвер и загруженная DLSS Frame Generation."));
-            }
-            if (const char* label = Item("DLSS: dynamic target FPS", "DLSS: целевой FPS")) {
-                ImGui::BeginDisabled(!s.frame_gen_dynamic.load());
-                int target = s.frame_gen_target_fps.load();
-                char shown[32];
-                if (target == 0) {
-                    std::snprintf(shown, sizeof(shown), "%s", BbSettings::MenuText("Refresh rate", "Частота экрана"));
-                } else {
-                    std::snprintf(shown, sizeof(shown), "%d FPS", target);
-                }
-                if (ImGui::SliderInt(label, &target, 0, 360, shown, ImGuiSliderFlags_AlwaysClamp)) {
-                    Store(s.frame_gen_target_fps, target, true);
-                }
-                ImGui::EndDisabled();
-            }
-        }
-        if (const char* label = Item("Frame generation: game at a share of the refresh rate",
-                                     "Генерация кадров: игра на доле частоты экрана")) {
-            ImGui::BeginDisabled(frame_gen == BbSettings::FrameGenOff);
-            Checkbox(label, s.frame_gen_cap);
-            ImGui::EndDisabled();
-            Hint(BbSettings::MenuText(
-                "Every generated frame reaches the screen evenly: the game at the refresh rate divided by "
-                "the frames shown per game frame (60 + 60 at 120 Hz with one generated frame). Off: the "
-                "game runs faster, but the screen skips some generated frames.",
-                "Каждый сгенерированный кадр равномерно попадает на экран: игра на частоте экрана, "
-                "делённой на число показанных кадров (60 + 60 при 120 Гц с одним сгенерированным). Выкл: "
-                "игра быстрее, но часть сгенерированных кадров экран пропускает."));
-        }
-    }
-    // Only while Streamline is loaded (a test, BB_STREAMLINE=1): NVIDIA Reflex is not offered until
-    // its own design (community-fixes-plan.md, Decisions), so the search does not list it either.
-    if (dlss_loaded) {
-        if (const char* label = Item("NVIDIA Reflex")) {
-            const char* modes[] = {BbSettings::MenuText("Off", "Выкл"), BbSettings::MenuText("On", "Вкл"),
-                                   BbSettings::MenuText("On + Boost", "Вкл + Boost")};
-            static_assert(std::size(modes) == BbSettings::ReflexCount);
-            int mode = std::clamp(s.reflex.load(), 0, BbSettings::ReflexCount - 1);
-            if (ImGui::Combo(label, &mode, modes, BbSettings::ReflexCount)) {
-                Store(s.reflex, mode, true);
-            }
-            Hint(BbSettings::MenuText(
-                "Lower input lag: the GPU's queue is kept short. On (at least) whenever DLSS Frame "
-                "Generation runs; Boost also keeps the GPU clocks up. Only with DLSS Frame Generation "
-                "loaded.",
-                "Меньше задержка ввода: очередь GPU остаётся короткой. Включается всегда, когда "
-                "работает DLSS Frame Generation; Boost ещё держит частоты GPU. Только когда DLSS Frame "
-                "Generation загружена."));
-        }
-    }
     const bool temporal = s.upscaler != BbSettings::UpscalerOff; // an upscaler or TAA
     // Sharpening after an upscaler or TAA, its strength under it. 0.4.4 beta 27d (the tester): their
     // hints say where it runs for what runs, as the launcher's lines: FSR sharpens up to 1 itself and an
@@ -1402,10 +1259,9 @@ void OptiScalerSection() {
                 ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f),
                                    BbSettings::MenuText(
                                        "Its own frame generation is on (%s). If the GPU is lost, set Frame "
-                                       "Generation to none in OptiScaler's menu and use Frame generation above.",
+                                       "Generation to none in OptiScaler's menu.",
                                        "Включена его собственная генерация кадров (%s). Если GPU теряется, "
-                                       "выберите none для Frame Generation в меню OptiScaler и используйте "
-                                       "генерацию кадров выше."),
+                                       "выберите none для Frame Generation в меню OptiScaler."),
                                    opti.frame_generation.c_str());
             }
         }
@@ -2045,11 +1901,6 @@ void FpsCounter() {
     if (s.show_fps_rate) {
         n += std::snprintf(text + n, sizeof(text) - n, "%.0f FPS",
                            frame_ms_avg > 0.0f ? 1000.0f / frame_ms_avg : 0.0f);
-        // bbport: with frame generation the frames shown and the game's own.
-        if (s.frame_gen_active) {
-            n += std::snprintf(text + n, sizeof(text) - n, " (game %.0f, frame gen 2x)",
-                               s.frame_gen_game_fps.load());
-        }
     }
     if (s.show_fps_frame_time) {
         n += std::snprintf(text + n, sizeof(text) - n, "%s%.1f ms", n ? "  " : "", frame_ms_avg);
@@ -2086,7 +1937,7 @@ void FpsCounter() {
         return;
     }
     // bbport: the text changes twice a second: redrawn every frame its numbers flickered too fast
-    // to read (100+ frames a second with frame generation).
+    // to read (at 100+ frames a second).
     static char shown[sizeof(text)] = "";
     static auto shown_at = std::chrono::steady_clock::time_point{};
     const auto now = std::chrono::steady_clock::now();
@@ -2113,8 +1964,7 @@ void FpsCounter() {
     static size_t min_width_key = 0;
     const size_t width_key = size_t(s.show_fps_rate) | size_t(s.show_fps_frame_time) << 1 |
                              size_t(s.show_fps_upscaler) << 2 | size_t(s.show_fps_cpu) << 3 |
-                             size_t(s.show_fps_gpu) << 4 | size_t(s.frame_gen_active) << 5 |
-                             size_t(s.upscaler) << 6 | size_t(s.fps_scale * 100.0f) << 12;
+                             size_t(s.show_fps_gpu) << 4 | size_t(s.upscaler) << 6 | size_t(s.fps_scale * 100.0f) << 12;
     if (width_key != min_width_key) {
         min_width = 0.0f;
         min_width_key = width_key;

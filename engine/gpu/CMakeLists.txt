@@ -161,8 +161,6 @@ add_host_shader(taa_sharpen.comp taa_sharpen_comp)
 add_host_shader(taa_sharpen.comp taa_sharpen_ldr_comp LDR_OUTPUT=1)
 add_host_shader(fsr4_color.comp fsr4_decode_comp)
 add_host_shader(fsr4_color.comp fsr4_encode_comp ENCODE=1)
-add_host_shader(frame_gen_compose.comp frame_gen_compose_comp)
-add_host_shader(frame_gen_depth.comp frame_gen_depth_comp)
 add_host_shader(depth_to_color.comp depth_to_color_comp)
 add_host_shader(depth_to_color.comp depth_to_color_uint_comp UINT_OUTPUT=1)
 add_host_shader(depth_to_color.comp depth_to_color_r16_comp R16_OUTPUT=1)
@@ -170,7 +168,6 @@ add_host_shader(depth_to_color.comp depth_to_color_r16_uint_comp R16_UINT_OUTPUT
 add_host_shader(color_to_depth.frag color_to_depth_frag)
 add_host_shader(color_to_depth.frag color_to_depth_bits_frag BITS32=1)
 add_host_shader(color_to_depth.frag color_to_depth_u16_frag U16=1)
-add_host_shader(dlss_ui_alpha.comp dlss_ui_alpha_comp)
 add_host_shader(buffer_multi_copy.comp buffer_multi_copy_comp)
 add_host_shader(indirect_clamp.comp indirect_clamp_comp)
 add_host_shader(depth_resample.frag depth_resample_frag)
@@ -231,8 +228,6 @@ set_source_files_properties(shim/bbport_overlay.cpp PROPERTIES
 set_source_files_properties(shim/engine/keycap_art.cpp PROPERTIES
     OBJECT_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/misc/fonts/Roboto-Medium.ttf)
 target_include_directories(bbgpu PRIVATE shim shadps4 ${SHADER_INCLUDE} third_party/half/include)
-# bbport: NVIDIA Streamline SDK headers (MIT), for DLSS Frame Generation (vk_streamline.cpp).
-target_include_directories(bbgpu PRIVATE third_party/streamline/include)
 target_compile_definitions(bbgpu PRIVATE BOOST_ASIO_STANDALONE NDEBUG)
 target_compile_options(bbgpu PRIVATE -Wno-deprecated-declarations -Wno-missing-field-initializers)
 # The Linux shared library is loaded at process startup; Windows links it statically.

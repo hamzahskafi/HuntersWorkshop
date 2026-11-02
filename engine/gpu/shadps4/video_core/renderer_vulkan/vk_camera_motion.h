@@ -73,7 +73,7 @@ public:
     [[nodiscard]] std::array<std::array<float, 4>, 3> TaaDepthParameters() const noexcept;
     /// bbport: this frame's camera and the previous one, as the motion pass uses them (3x4 rows,
     /// world to view and back; projection x/y/z scale and z offset, the x/y scales signed by the
-    /// G-buffer viewport: ndc +y down). DLSS Frame Generation's constants (vk_streamline.cpp).
+    /// G-buffer viewport: ndc +y down).
     struct Matrices {
         std::array<float, 12> view{}, inv_view{}, prev_view{};
         std::array<float, 4> proj{}, prev_proj{};

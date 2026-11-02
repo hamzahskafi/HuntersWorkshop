@@ -334,7 +334,7 @@ public:
         return hdr_metadata;
     }
 
-    /// bbport: VK_NV_low_latency2 is enabled for its boost hint (Swapchain), without Streamline.
+    /// bbport: VK_NV_low_latency2 is enabled for its boost hint (Swapchain).
     bool IsLowLatencyBoostEnabled() const {
         return low_latency_boost;
     }

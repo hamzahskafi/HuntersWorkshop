@@ -22,7 +22,6 @@
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_optiscaler.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
-#include "video_core/renderer_vulkan/vk_streamline.h"
 #include "bbport_settings.h"
 
 namespace Vulkan {
@@ -617,11 +616,7 @@ struct DlssUpscaler::Impl {
         if (capabilities) {
             destroy_parameters(capabilities);
         }
-        // bbport: with Streamline loaded its DLSS Frame Generation shares NGX on this device and
-        // shuts it down itself (slShutdown, after this).
-        if (!Streamline::Loaded()) {
-            shutdown(VkDevice(instance.GetDevice()));
-        }
+        shutdown(VkDevice(instance.GetDevice()));
     }
 };
 

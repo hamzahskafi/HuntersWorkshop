@@ -117,8 +117,7 @@ void Swapchain::Create(u32 width_, u32 height_) {
         .pNext = FullScreenExclusiveDisallowed(full_screen_exclusive),
         .latencyModeEnable = true,
     };
-    const bool boost = instance.IsLowLatencyBoostEnabled() &&
-                       BbSettings::Get().reflex.load() != BbSettings::ReflexOff;
+    const bool boost = instance.IsLowLatencyBoostEnabled();
     const vk::SwapchainCreateInfoKHR swapchain_info = {
         .pNext = boost ? static_cast<const void*>(&latency_info)
                        : FullScreenExclusiveDisallowed(full_screen_exclusive),
@@ -153,7 +152,7 @@ void Swapchain::Create(u32 width_, u32 height_) {
     if (boost && VULKAN_HPP_DEFAULT_DISPATCHER.vkSetLatencySleepModeNV) {
         // bbport (0.9.37 beta 6): the driver keeps the GPU's clocks up (Reflex Boost) instead of
         // lowering them whenever the GPU waits for the engine: half the frame rate on an RTX 3070
-        // without it. Low latency mode itself (its sleep and markers) is Streamline's.
+        // without it. Low latency mode itself (its sleep and markers) stays off.
         const VkLatencySleepModeInfoNV mode{
             .sType = VK_STRUCTURE_TYPE_LATENCY_SLEEP_MODE_INFO_NV,
             .lowLatencyMode = VK_FALSE,
@@ -165,7 +164,7 @@ void Swapchain::Create(u32 width_, u32 height_) {
         static bool logged = false;
         if (!logged || result != VK_SUCCESS) {
             logged = true;
-            std::printf("GPU: NVIDIA boost clocks %s (Reflex setting; BB_NV_BOOST=0: off)\n",
+            std::printf("GPU: NVIDIA boost clocks %s (BB_NV_BOOST=0: off)\n",
                         result == VK_SUCCESS ? "on" : vk::to_string(vk::Result(result)).c_str());
         }
     }
@@ -471,7 +470,7 @@ bool Swapchain::SetSurfaceProperties() {
     }
 
     // Select number of images in swap chain, we prefer one buffer in the background to work on
-    image_count = capabilities.minImageCount + 1 + extra_images; // bbport: + frame generation's
+    image_count = capabilities.minImageCount + 1;
     if (capabilities.maxImageCount > 0) {
         image_count = std::min(image_count, capabilities.maxImageCount);
     }
