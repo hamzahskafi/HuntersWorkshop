@@ -143,7 +143,7 @@ def c(s):
 U = ' *(unchanged)*'
 
 
-pages = {}; problems = []; seen = set()
+pages = {}; problems = []; seen = set(); index = []
 count = dict(rows=0, lines=0, tips=0, renames=0, lists=0)
 for r in expand():
     title, line_now, tip_now, ch_now, def_now = now_fields(r)
@@ -169,16 +169,21 @@ for r in expand():
     pl = p.get('line', '?')
     if p.get('removed'):
         pages.setdefault(r['page'], []).append(f"| {setting} | {today} | Row removed: {c(p['removed'])} | — | — | {c(p.get('note'))} |")
+        index.append(f"| {PAGES[r['page']]} | {c(title)} | row removed ({c(p['removed']).lower()}) |")
         count['removed'] = count.get('removed', 0) + 1
         continue
-    if pl == KEEP: pl_txt = c(line_now) + U if line_now else (c(extra) + U if extra else '?')
-    elif pl is None: pl_txt = '—'
-    else: pl_txt = c(pl); count['lines'] += 1
+    # A line ends without a full stop: the row code drops a kept line's last one (its translation stays).
+    if pl == KEEP: shown_line = c(line_now).rstrip('.') if line_now else None; pl_txt = shown_line + U if line_now else (c(extra) + U if extra else '?')
+    elif pl is None: shown_line = None; pl_txt = '—'
+    else: shown_line = c(pl); pl_txt = shown_line; count['lines'] += 1
     if pl is None and line_now and 'FPS counter' not in (line_now or '') and k[0] != 'Interface': problems.append(('line dropped', k, line_now))
     if pl == KEEP and line_now and line_now.endswith('…'): problems.append(('kept a cut line', k, line_now))
     if isinstance(pl, str) and pl != KEEP and len(pl) > 60: problems.append(('line over 60', k, len(pl), pl))
     tp = p.get('tip')
-    if tp is None: tp_txt = c(tip_now) + U if tip_now else '—'
+    repeated = tp is None and bool(tip_now) and bool(shown_line) and c(tip_now).rstrip('.') == shown_line
+    if repeated:
+        tp_txt = 'None: it would repeat the line'; count['repeats'] = count.get('repeats', 0) + 1
+    elif tp is None: tp_txt = c(tip_now) + U if tip_now else '—'
     elif tp == '': tp_txt = 'None: the line says it all' if pl else 'None'
     else:
         # An engine switch's tooltip keeps the line the launcher adds under its hint (EngineSwitches.Describe).
@@ -188,7 +193,9 @@ for r in expand():
     said = ' '.join([tp if tp else '', tip_now or '' if tp is None else '', ' '.join(x['label'] for x in ch_now or [])]).lower()
     dp = (def_now or '').replace(' (default)', '').replace(' (Default)', '').replace(' (recommended)', '')
     if dp and dp != 'not set' and dp not in RAW_DEFAULTS and r['kind'] != 'engine' and 'default' not in said:
-        tp_txt = (f"*Default: {dp}*" if tp_txt in ('—', 'None') else tp_txt + f" + *Default: {dp}*")
+        tp_txt = (f"*Default: {dp}*" if tp_txt in ('—', 'None') else
+                  f"None (it would repeat the line) + *Default: {dp}*" if tp_txt.startswith('None: it would') else
+                  tp_txt + f" + *Default: {dp}*")
     def item(x, note):
         return c(x['label']) + (f" ({c(note)})" if note else '')
     if p.get('order') or p.get('choice_notes'):
@@ -204,9 +211,17 @@ for r in expand():
     else: pch = '—'
     notes = []
     if p.get('rewrite'): notes.append('Tooltip corrected.')
-    if p.get('ingame'): notes.append(f"In-game menu: {c(p['ingame'])}.")
+    if p.get('ingame'): notes.append(f"In-game overlay menu: {c(p['ingame'])}.")
     if p.get('note'): notes.append(c(p['note']))
     pages.setdefault(r['page'], []).append(f"| {setting} | {today} | {pl_txt} | {tp_txt} | {pch} | {' '.join(notes)} |")
+    what = []
+    if name: what.append('renamed')
+    if pl not in (KEEP, None): what.append('new line')
+    if isinstance(tp, str) and tp: what.append('tooltip corrected' if p.get('rewrite') else 'tooltip added')
+    if tp == '' and tip_now: what.append('tooltip dropped')
+    if repeated: what.append('tooltip dropped (repeated the line)')
+    if p.get('order') or p.get('choice_notes'): what.append('list ' + ('reordered' if p.get('order') else 'notes reworded'))
+    if what: index.append(f"| {PAGES[r['page']]} | {c(name or title)} | {', '.join(what)} |")
 for k in P:
     if k not in seen: problems.append(('proposal for no row', k))
 
@@ -238,5 +253,11 @@ for pg, rows in pages.items():
         os.makedirs(sys.argv[3], exist_ok=True)
         open(os.path.join(sys.argv[3], f"{pg}.md"), 'w', encoding='utf-8').write(table)
 open(sys.argv[2], 'w', encoding='utf-8').write(''.join(out))
+if len(sys.argv) > 3:
+    open(os.path.join(sys.argv[3], 'index.md'), 'w', encoding='utf-8').write(
+        f"\n## What changes\n\n{len(index)} of the {count['rows']} rows change; the other {count['rows'] - len(index)} keep "
+        "everything as today. Each is shown in full in its page's table below.\n\n"
+        "| Page | Setting | What changes |\n| --- | --- | --- |\n" + '\n'.join(index) + '\n')
+    print(len(index), 'rows change')
 print(count)
 for x in problems: print(*x)

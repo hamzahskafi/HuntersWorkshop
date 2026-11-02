@@ -1,5 +1,6 @@
 # Extracts every launcher row's texts (title, description, tooltip, choices, default) to JSON.
-# Usage: python3 extract.py now.json, then python3 render.py now.json rows.md; the review is head.md + rows.md + tail.md.
+# Usage: python3 extract.py now.json, then python3 render.py now.json rows.md pages/; the review is head.md + pages/index.md
+# + rows.md + tail.md.
 import re,json,os,sys
 ROOT=os.path.join(os.path.dirname(os.path.abspath(__file__)),'..','..','BloodborneLauncher')
 def strip_comments(t):

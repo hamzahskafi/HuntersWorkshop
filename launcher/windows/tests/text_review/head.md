@@ -23,11 +23,16 @@ draft keeps that voice and fixes what is wrong, cut or out of date, rather than 
 - **Today's texts stay** wherever they are right, with their translations (110 descriptions are translated
   in all 13 languages). Tooltips change in 36 rows: 16 corrected (wrong, overpromising or out of date), 20
   added where today says nothing useful, mostly rows with no tooltip at all, such as the picture sliders.
-- **The line under the title** is new in 122 rows, where Classic cuts today's text mid-sentence or it says
-  too little (a variable's name alone, "Relaxed is the default"). It is a complete phrase saying what the
-  setting is or does ("Frees VRAM held by textures the GPU drew"), with no instruction ("Choose…") and no
-  full stop. 60 characters is the English target; a translated line wraps instead of being cut. Folders,
-  files and the FPS counter's items keep no line.
+- **The line under the title** is new in 124 rows, where Classic cuts today's text mid-sentence, it says
+  too little (a variable's name alone, "Relaxed is the default") or it describes one choice of two. It
+  says what the setting is or does ("Frees VRAM held by textures the GPU drew"), or gives a short
+  instruction where that reads more clearly ("Use the keyboard and mouse layout below"). It ends without
+  a full stop: the row code drops a kept line's last one. New lines keep to 60 characters; kept lines stay
+  as today, up to 64. A translated line wraps instead of being cut. Folders, files and the FPS counter's
+  items keep no line.
+- **No tooltip that only repeats the line.** In 28 rows today's tooltip is the line again; the row code
+  leaves it out, and hovering shows only the default line, where there is one. The two stick invert rows
+  drop theirs, as the mouse's do: their new line says more.
 - **Specifics stay:** VRAM, FSR and DLSS names, `BB_` names on Engine switches and Log, costs ("about 10%
   FPS", measured), advice ("Recommended: on", "turn it off if…"), and "Applied when the game starts" where
   it is said today.
@@ -57,3 +62,6 @@ draft keeps that voice and fixes what is wrong, cut or out of date, rather than 
 | Fixed-refresh frame lock greys while Precise frame pacing is off | It needs it; its own value is kept | Engine switches |
 | Share your settings shares everything except what belongs to this PC, to the player or to one session | The tester's call | Settings |
 | Suggested settings read the game's monitor; Changed switches lists what Extra variables override | Two bugs the outside review found | Graphics, Engine switches |
+
+**Still open:** the effect trail crash fix moving under the Intel effect crash fix and greying while that one
+is on (Changes outside the texts, 9).

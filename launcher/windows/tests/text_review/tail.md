@@ -42,8 +42,15 @@ What the launcher does changes in these, not only what it says. Each comes with 
    gain the name).
 7. **In-game overlay menu names:** Quality becomes Upscaling quality and Sharpness becomes Sharpening
    strength (8 language tables).
-8. **The default line** comes from each setting's own default in the row code, not from reading its text;
-   rows whose tooltip already says "On by default" carry a flag that leaves it out.
+8. **The row code:** the default line comes from each setting's own default, not from reading its text
+   (rows whose tooltip already says "On by default" carry a flag that leaves it out); a line's last full
+   stop is dropped; a tooltip that would only repeat its line is left out. Check: V-Sync's hover shows
+   "Default: On (latest frame)" alone; Reset trophy progress's line has no full stop.
+9. **Proposed, not yet decided: the two Intel effect fixes together.** The effect trail crash fix moves
+   from Experimental engine features to Game fixes, under the Intel effect crash fix, and greys while that
+   one is on; it is then left out of the start, as the Intel fix's tooltip already asks ("Turn off the
+   Effect trail crash fix with it"). Today both can be on at once. Check: with both on in the settings,
+   only the Intel fix is applied, and the start log says why.
 
 ## Outside review
 
@@ -107,10 +114,15 @@ An outside review of the fourth draft (2026-11-02, at commit `434d381`) checked 
 
 ## What applying it involves
 
-- 122 new lines and 36 new or corrected tooltips, translated into the 13 launcher languages; every other
-  tooltip keeps its text and translations.
+- 124 new lines and 36 new or corrected tooltips, translated into the 13 launcher languages; every other
+  tooltip keeps its text and translations. The translations are machine-made in the text step and nobody
+  fluent reads them before the release; players' corrections are welcome.
 - The row code: the line apart from the tooltip (no more cutting at 64 characters), the default line.
 - Eight lists reordered or reworded, four renames, one row removed (Unified frame time).
 - The changes outside the texts above, the Also found fixes, and the in-game overlay menu's names and
   sections in its 8 language tables.
-- Both launchers built, the localization checks clean, the strict check for this step's texts passing.
+- **On screen:** nobody has seen the new lines in the launcher yet. The step checks Classic's wrapping
+  and Modern's (i) at 100% and 150% scaling, in English, German and Japanese, before the version step.
+- **The Avalonia launcher** (for Linux, later) keeps its own pages until the Linux work; it gets only the
+  strings it shares with this one.
+- Both launchers build, the localization checks clean, the strict check for this step's texts passing.
