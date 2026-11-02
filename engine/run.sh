@@ -11,8 +11,8 @@ if [[ ${1:-} == --software ]]; then
     if [[ -z ${VK_DRIVER_FILES:-} ]]; then echo 'Lavapipe not found; set VK_DRIVER_FILES.' >&2; exit 1; fi
     export VK_LOADER_LAYERS_DISABLE='~implicit~'
 fi
-# BB_PREBUILT=1 (packaged builds, the AppImage): out/bb-probe and its GPU library are installed
-# next to this script; nothing is built and no nix-shell is needed.
+# BB_PREBUILT=1 (packaged builds): out/bb-probe and its GPU library are installed next to this
+# script; nothing is built.
 # BB_DATA_DIR: writable directory for the generated files (out/), saves (user/) and config.ini;
 # by default this directory. BB_OUT_DIR: the generated files elsewhere (the Linux package keeps
 # them in engine/out beside its programs, as on Windows; packaging/linux/bb-start).
@@ -20,10 +20,6 @@ data=${BB_DATA_DIR:-.}
 out=${BB_OUT_DIR:-$data/out}
 mkdir -p "$out"
 export BB_CONFIG=${BB_CONFIG:-$data/config.ini}
-if [[ -z ${BB_PREBUILT:-} && -z ${BB_IN_NIX_SHELL:-} ]] && ! { command -v pkg-config >/dev/null && pkg-config --exists vulkan sdl3; } && command -v nix-shell >/dev/null; then
-    args=''; if (( $# )); then args=$(printf '%q ' "$@"); fi
-    exec env BB_IN_NIX_SHELL=1 nix-shell shell.nix --run "bash run.sh $args"
-fi
 # BB_SAVE_LOG=1 (launcher: "Save the log and statistics to a file"): this run's output and its
 # per-frame statistics also go to $data/logs/<time>.log, .frames.csv and .readbacks.csv.
 if [[ ${BB_SAVE_LOG:-} == 1 ]]; then
@@ -34,16 +30,11 @@ if [[ ${BB_SAVE_LOG:-} == 1 ]]; then
     export BB_READBACK_LOG=${BB_READBACK_LOG:-$logs/$stamp.readbacks.csv}
     echo "Log: $logs/$stamp.log"
     exec 3>"$logs/$stamp.log"
-    # Bash builtins only (the AppImage's PATH has no tee).
+    # Bash builtins only (a minimal PATH may have no tee).
     exec > >(while IFS= read -r line || [[ -n $line ]]; do printf '%s\n' "$line"; printf '%s\n' "$line" >&3; done) 2>&1
 fi
 if [[ -z ${PYTHON:-} ]]; then
     PYTHON=$(command -v python3 || true)
-    if [[ -z $PYTHON ]]; then
-        for candidate in /nix/store/*-python3-*/bin/python3; do
-            if [[ -x $candidate ]]; then PYTHON=$candidate; break; fi
-        done
-    fi
 fi
 if [[ -z ${PYTHON:-} ]]; then echo 'Install Python 3 or set PYTHON.' >&2; exit 1; fi
 # BB_GAME_DIR: the game's folder (eboot.bin, sce_module, ...); default next to this directory.
@@ -122,7 +113,7 @@ fi
 live=0
 if [[ -n ${scaled_output:-} ]]; then
     live=${BB_LIVE_RES:-}
-    # Bash builtins only: the AppImage's PATH has no sed/grep (a missing one ended run.sh silently).
+    # Bash builtins only: a minimal PATH may have no sed/grep (a missing one ended run.sh silently).
     if [[ -z $live && -f $BB_CONFIG ]]; then
         while IFS= read -r line || [[ -n $line ]]; do
             [[ $line =~ ^live_resolution=([01]|auto)$ ]] && live=${BASH_REMATCH[1]}
@@ -170,21 +161,12 @@ if [[ ${BB_AS_0_3:-0} == 1 ]]; then
     export BB_GUEST_IN_PLACE=0 BB_HOST_COPY_WAITS=all BB_PRODUCER_CHECK=1
 fi
 export BB_GUEST_IN_PLACE=${BB_GUEST_IN_PLACE:-${BB_PC_MODEL:-0}}
-# MangoHud (launcher switch: MANGOHUD=1) must be drawn once. Two overlays on top of each other
-# showed doubled, offset text: the Steam Deck's performance overlay (mangoapp, game mode) plus the
-# in-game layer, or the AppImage's bundled layer plus a system MangoHud (the layer names differ,
-# so the Vulkan loader loads both).
-if [[ ${MANGOHUD:-0} == 1 ]]; then
-    if pgrep -x mangoapp > /dev/null 2>&1; then
-        echo "MangoHud: Steam's performance overlay is on; the in-game MangoHud stays off"
-        unset MANGOHUD
-        export DISABLE_MANGOHUD=1
-    elif grep -qs '"VK_LAYER_MANGOHUD' /usr/share/vulkan/implicit_layer.d/*.json \
-            /etc/vulkan/implicit_layer.d/*.json \
-            "${XDG_DATA_HOME:-$HOME/.local/share}"/vulkan/implicit_layer.d/*.json; then
-        # The system's own MangoHud (and its config) is used; the bundled one is skipped.
-        export VK_LOADER_LAYERS_DISABLE=${VK_LOADER_LAYERS_DISABLE:+$VK_LOADER_LAYERS_DISABLE,}VK_LAYER_MANGOHUD_overlay_64_x86_64
-    fi
+# MangoHud (MANGOHUD=1) must be drawn once: the Steam Deck's performance overlay (mangoapp, game
+# mode) plus the in-game layer showed doubled, offset text.
+if [[ ${MANGOHUD:-0} == 1 ]] && pgrep -x mangoapp > /dev/null 2>&1; then
+    echo "MangoHud: Steam's performance overlay is on; the in-game MangoHud stays off"
+    unset MANGOHUD
+    export DISABLE_MANGOHUD=1
 fi
 # Write tracking with userfaultfd write-protection instead of mprotect (no address-space write lock:
 # a streaming burst re-protected thousands of pages, ~10-20 ms); falls back to mprotect when the

@@ -112,8 +112,7 @@ FSR SDK runtime and Streamline.
 | `patches/` | the community's game patches and their checks |
 | `tests/` | tests and the shader lab |
 | `tools/` | developer tools |
-| `packaging/` | the Linux package (`packaging/linux`); `default.nix` and `appimage.sh` are bbport's AppImage, kept for NixOS |
-| `launcher/` | bbport's GTK launcher, which that AppImage packages |
+| `packaging/` | the Linux package (`packaging/linux`: Ubuntu setup, build, the start script) |
 | `docs/` | design notes; `docs/history` keeps notes that no longer describe the engine, many from the projects it started from |
 
 ## Credits and licenses

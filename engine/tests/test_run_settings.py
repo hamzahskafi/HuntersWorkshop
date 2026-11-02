@@ -59,7 +59,7 @@ class RestartResolutionTests(unittest.TestCase):
                 env['BB_RENDER_RES'] = '800x450'
             if live:
                 env['BB_LIVE_RES'] = '1'
-            if bare_path:  # the AppImage's PATH: coreutils and bash, no sed/grep
+            if bare_path:  # a minimal PATH: coreutils and bash, no sed/grep
                 tools = data / 'bin'
                 tools.mkdir()
                 for name in ('bash', 'dirname', 'mkdir', 'realpath'):
@@ -93,7 +93,7 @@ class RestartResolutionTests(unittest.TestCase):
         self.assertEqual(self.run_restarts(ini_extra='live_resolution=auto\n')[0]['BB_RENDER_RES'], '852x480')
 
     def test_live_resolution_without_sed_or_grep(self):
-        # A missing sed ended run.sh (exit 127) before the game in the AppImage on NixOS.
+        # A missing sed ended run.sh (exit 127) before the game (bbport's AppImage on NixOS had none).
         self.assertEqual(self.run_restarts(ini_extra='live_resolution=0\n',
                                            bare_path=True)[0]['BB_RENDER_RES'], '852x480')
         self.assertEqual(self.run_restarts(ini_extra='live_resolution=auto\n',

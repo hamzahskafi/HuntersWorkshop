@@ -80,7 +80,7 @@ Build and CPU tests:
 
 ```bash
 cd engine
-nix-shell shell.nix --run 'bash build.sh && ninja -C out/gpu motion-history-test motion-shader-test && out/gpu/motion-history-test && out/gpu/motion-shader-test out/motion-shaders'
+bash build.sh && ninja -C out/gpu motion-history-test motion-shader-test && out/gpu/motion-history-test && out/gpu/motion-shader-test out/motion-shaders
 ```
 
 (The folder was `native_probe` then; the tests are `engine/tests/test_motion_history.cpp` and

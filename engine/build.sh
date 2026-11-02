@@ -4,20 +4,12 @@ cd -- "$(dirname -- "$0")"
 mkdir -p out
 if [[ -z ${CC:-} ]]; then
     CC=$(command -v cc || command -v gcc || true)
-    if [[ -z $CC ]]; then
-        for candidate in /nix/store/*-gcc-wrapper-*/bin/gcc; do
-            if [[ -x $candidate ]]; then CC=$candidate; break; fi
-        done
-    fi
 fi
 if [[ -z ${CC:-} ]]; then echo 'Install GCC/Clang or set CC.' >&2; exit 1; fi
-# Dependencies come from pkg-config (Vulkan loader/headers, SDL3). On NixOS the
-# environment is provided by shell.nix; re-enter it automatically if needed.
+# Dependencies come from pkg-config (Vulkan loader/headers, SDL3): MSYS2 CLANG64 on Windows (README),
+# packaging/linux/setup-ubuntu.sh on Linux. 0.4.4 beta 28: the NixOS shell went with the AppImage.
 if ! { command -v pkg-config >/dev/null && pkg-config --exists vulkan sdl3 && command -v cmake >/dev/null && command -v ninja >/dev/null; }; then
-    if [[ -z ${BB_IN_NIX_SHELL:-} ]] && command -v nix-shell >/dev/null; then
-        exec env BB_IN_NIX_SHELL=1 nix-shell shell.nix --run "bash build.sh $*"
-    fi
-    echo 'Need pkg-config with vulkan and sdl3, cmake and ninja (see shell.nix).' >&2; exit 1
+    echo 'Need pkg-config with vulkan and sdl3, cmake and ninja (packaging/linux/setup-ubuntu.sh lists them).' >&2; exit 1
 fi
 read -r -a includes <<< "$(pkg-config --cflags vulkan sdl3)"
 read -r -a libraries <<< "$(pkg-config --libs vulkan sdl3)"
