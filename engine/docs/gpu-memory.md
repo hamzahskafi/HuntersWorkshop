@@ -7,10 +7,9 @@ that has been done. Paths are relative to `engine/`; shadPS4's (`video_core/...`
 
 ## Status (2026-10-31, 0.4.4 beta 21)
 
-- **The PC memory model (`BB_GUEST_IN_PLACE`) is still off by default** (since 0.4.0 beta 4): an
-  Experimental launcher option (PC memory model, `exp_guest_in_place`). It is to be removed before
-  0.4.4 ships. That is not done yet: its code and switches are still in the build, and what this
-  file says of them still holds. Causes 1 and 2, step 2 and step 3.3 go with it.
+- **The PC memory model (`BB_GUEST_IN_PLACE`) was removed in 0.4.4 beta 28**, with its switches
+  and the launcher option (`exp_guest_in_place`); it had been off by default since 0.4.0 beta 4.
+  What this file says of it is history now: causes 1 and 2, step 2 and step 3.3 went with it.
 - **0.4.4 took the work up again for the memory every player's game uses, without moving any:**
   - beta 1: residency chunks kept longer (step 3.2); each long frame's own figures (step 1);
   - betas 1 to 4: freed image memory reused (step 3.1): removed again in beta 5;

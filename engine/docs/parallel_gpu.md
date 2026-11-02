@@ -20,8 +20,8 @@ the threads and a frame as they are now. What changed since:
   signalled at recording time. With honest labels it came back: since 0.4.4 beta 5 the game's GX
   region (288 MiB of per-frame data) is imported and read in place by default on Windows
   (`BB_GX_IN_PLACE`; through a buffer of its own since beta 9). The PC memory model
-  (`BB_GUEST_IN_PLACE`, all of the game's memory in place) is an Experimental option, off by
-  default since 0.4.0 beta 4 and to be removed before 0.4.4 ships.
+  (`BB_GUEST_IN_PLACE`, all of the game's memory in place), off by default since 0.4.0 beta 4,
+  was removed in 0.4.4 beta 28.
 - **Thread counts** follow the threads available to the process (`BbThreads::Available()`): the
   draw pipe (`BB_DRAW_PIPE`) and the lookahead are on from 8; draw preparation workers are a
   quarter of them below 16 (at least 1) and 3/8 from 16 (6 to 8; `BB_PREP_WORKERS`); recording

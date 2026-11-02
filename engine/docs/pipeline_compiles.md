@@ -278,10 +278,9 @@ model (`BB_GUEST_IN_PLACE=1`), native draw calls (`BB_NATIVE_CALLS=1`), hot page
 and the native shader compiler. Beta 4's launcher makes that set the default
 (`LauncherSettings.PerfDefaults`, switched once over older files by `perf_defaults_b4`; every one
 stays a toggle in Graphics › Experimental engine features, and safe mode turns them off).
-The PC memory model left that set again in Hunter's Workshop 0.4.0 beta 4: it is an Experimental
-option, off by default and switched off once over older settings files, and is to be removed
-before 0.4.4 ships (`gpu-memory.md`); the game's GX region is read in place by default instead
-(`BB_GX_IN_PLACE`). The rest of the set are still the defaults.
+The PC memory model left that set again in Hunter's Workshop 0.4.0 beta 4 (off by default, then
+removed in 0.4.4 beta 28: `gpu-memory.md`); the game's GX region is read in place by default
+instead (`BB_GX_IN_PLACE`). The rest of the set are still the defaults.
 The catalog seeds a legacy-compiler cache as fully as a native one (510 pipelines each).
 OptiScaler's compatibility mode sends every submission from one thread while its frame generation
 is on: players capped by it should try without OptiScaler's frame generation.

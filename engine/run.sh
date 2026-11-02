@@ -143,24 +143,8 @@ if [[ -n ${BB_PREBUILT:-} && -n ${BB_GPU_USER_DIR:-} ]]; then
 fi
 # Background upload of the game's GPU memory into VRAM ahead of use (BufferCache::Preupload):
 # 1 = only memory already in VRAM that the game rewrote (no new VRAM), 2 = all of it (~3 GB more
-# VRAM), 0 = off. BB_GUEST_GPU_MEMORY=1 puts guest direct memory in GPU-visible dma-buf chunks
-# (BB_GUEST_IN_PLACE below implies it: it commits all allocated memory up front and rules out BB_UFFD).
+# VRAM), 0 = off.
 export BB_PREUPLOAD=${BB_PREUPLOAD:-1}
-# Memory model and translation. BB_PC_MODEL=1 (the launcher's "New memory and translation model",
-# experimental, off by default) selects how a PC release would work: the GPU uses the game's
-# memory where it is (GPU-visible system memory) and keeps the data it reads often in VRAM, the
-# command processor's work is translated rather than emulated (BB_GUEST_IN_PLACE=1 and what
-# depends on it). AMD GPUs only for now: on others the GPU library keeps it off
-# (BB_PC_MODEL_ANY_GPU=1: try it anyway; NVIDIA, whose dma-buf maps at offset 0 only, gets one
-# chunk per direct memory allocation). 0 (default): the model of 0.3 (VRAM copies of the game's
-# memory, write tracking), with the fixes made since. BB_GUEST_IN_PLACE set by hand overrides it.
-# BB_AS_0_3=1 (the launcher's developer switch "Synchronisation as in 0.3"): what changed since the
-# 0.3 release is reverted for comparisons: the 0.3 memory model, WRITE_DATA/DMA waiting for every
-# host copy, the scheduler's concurrent recording check.
-if [[ ${BB_AS_0_3:-0} == 1 ]]; then
-    export BB_GUEST_IN_PLACE=0 BB_HOST_COPY_WAITS=all BB_PRODUCER_CHECK=1
-fi
-export BB_GUEST_IN_PLACE=${BB_GUEST_IN_PLACE:-${BB_PC_MODEL:-0}}
 # MangoHud (MANGOHUD=1) must be drawn once: the Steam Deck's performance overlay (mangoapp, game
 # mode) plus the in-game layer showed doubled, offset text.
 if [[ ${MANGOHUD:-0} == 1 ]] && pgrep -x mangoapp > /dev/null 2>&1; then

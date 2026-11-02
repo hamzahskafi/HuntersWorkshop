@@ -1599,6 +1599,7 @@
   "GPU time in the log": "在日志中记录 GPU 时间",
   "BB_GPU_PROFILE: the GPU's time a frame by render pass, dispatch and upscaler, every 5 seconds. Costs a little GPU time": "BB_GPU_PROFILE：每 5 秒记录一次每帧的 GPU 时间，按渲染通道、计算调度和超分辨率分列。会占用少量 GPU 时间",
   "The memory the game rewrites for the GPU every frame (288 MiB) is read by the GPU where the game writes it, as a PC game's upload heap: no write faults or uploads for it, and less CPU and GPU time a frame. On by default; does nothing while the PC memory model is on, which reads all of the game's memory in place. Off: watched and copied as before 0.4.4, should something look wrong": "游戏每帧为 GPU 重写的内存（288 MiB）由 GPU 直接在游戏写入的位置读取，如同 PC 游戏的上传堆：没有写入故障和上传，每帧占用更少的 CPU 和 GPU 时间。默认开启；开启 PC 内存模型时无效（它会原地读取游戏的全部内存）。关闭：像 0.4.4 之前一样监视并复制，用于画面出现异常时",
+  "The memory the game rewrites for the GPU every frame (288 MiB) is read by the GPU where the game writes it, as a PC game's upload heap: no write faults or uploads for it, and less CPU and GPU time a frame. On by default. Off: watched and copied as before 0.4.4, should something look wrong": "游戏每帧为 GPU 重写的内存（288 MiB）由 GPU 直接在游戏写入的位置读取，如同 PC 游戏的上传堆：没有写入故障和上传，每帧占用更少的 CPU 和 GPU 时间。默认开启。关闭：像 0.4.4 之前一样监视并复制，用于画面出现异常时",
   "Blood Echo multiplier": "血之回响获取倍率",
   "Button icons": "按键图标",
   "Character motion vectors": "角色运动矢量",
