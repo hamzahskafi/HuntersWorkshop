@@ -1,5 +1,6 @@
 """Switches that stand for several (0.4.4 beta 28): bb-start (start/main.cpp ExpandSwitchGroups) and run.sh
-hold the same table, and run.sh expands it as bb-start does."""
+hold the same table, and run.sh expands it as bb-start does. The same for the diagnostics list, BB_DIAG
+(ExpandDiagnostics, run.sh's diag parts)."""
 import os
 import re
 import subprocess
@@ -9,9 +10,9 @@ from pathlib import Path
 ENGINE = Path(__file__).resolve().parents[1]
 
 
-def block(text):
-    start = text.index('switch-groups-begin')
-    return text[start:text.index('switch-groups-end', start)]
+def block(text, marker='switch-groups'):
+    start = text.index(f'{marker}-begin')
+    return text[start:text.index(f'{marker}-end', start)]
 
 
 def bb_start_groups():
@@ -30,6 +31,22 @@ def run_sh_groups():
         name, when = trigger.split('=')
         groups[name] = (when, mode == 'force', tuple(tuple(s.split('=')) for s in sets))
     return groups
+
+
+def bb_start_diag_parts():
+    parts = {}
+    for name, fallback, sets in re.findall(r'\{"(\w+)", "(\w*)", \{(.*?)\}\},',
+                                           block((ENGINE / 'start/main.cpp').read_text(), 'diag-parts')):
+        parts[name] = (fallback, tuple(re.findall(r'\{"(\w+)", "(\w*)"\}', sets)))
+    return parts
+
+
+def run_sh_diag_parts():
+    parts = {}
+    for line in re.findall(r'^\s*"(.*)"$', block((ENGINE / 'run.sh').read_text(), 'diag-parts'), re.M):
+        name, fallback, *sets = line.split()
+        parts[name] = ('' if fallback == '-' else fallback, tuple(tuple(s.split('=')) for s in sets))
+    return parts
 
 
 class SwitchGroupTests(unittest.TestCase):
@@ -65,6 +82,37 @@ class SwitchGroupTests(unittest.TestCase):
                          ['0', '0', '0'])
         self.assertEqual(values['BB_SUBMIT_END_TASKS'], 'unset')
         self.assertEqual(self.expand()['BB_SKIP_UNCOMPILED'], 'unset')
+
+
+class DiagnosticsTests(unittest.TestCase):
+    def test_bb_start_and_run_sh_hold_the_same_parts(self):
+        start = bb_start_diag_parts()
+        self.assertIn('heap', start)
+        self.assertEqual(start, run_sh_diag_parts())
+
+    def expand(self, **env):
+        text = (ENGINE / 'run.sh').read_text()
+        start = text.index('\n', text.index('# diag-parts-begin')) + 1
+        snippet = text[start:text.index('\nfi\n', start) + 4]  # the table and the code that expands it
+        names = sorted({v for _, sets in bb_start_diag_parts().values() for v, _ in sets})
+        clean = {k: v for k, v in os.environ.items() if not k.startswith('BB_')}
+        out = subprocess.run(['bash', '-c', snippet + ''.join(f'echo "{n}=${{{n}-unset}}"\n' for n in names)],
+                             env={**clean, **env}, capture_output=True, text=True, check=True).stdout
+        return dict(line.split('=', 1) for line in out.splitlines() if line.startswith('BB_'))
+
+    def test_parts_set_their_switches(self):
+        values = self.expand(BB_DIAG='frame, heap,hitch=25,threads=gpu+audio')
+        self.assertEqual(values['BB_FRAME_STATS'], '1')
+        self.assertEqual([values[n] for n in ('BB_WRITE_LOG', 'BB_FREE_CHECK', 'BB_HEAP_SITES')], ['1', '1', '1'])
+        self.assertEqual(values['BB_HITCH_REPORT_MS'], '25')
+        self.assertEqual(values['BB_SAMPLE_THREADS'], 'gpu,audio')
+        self.assertEqual(values['BB_GPU_PROFILE'], 'unset')
+
+    def test_a_bare_hitch_takes_its_default_and_a_switch_set_on_its_own_wins(self):
+        values = self.expand(BB_DIAG='hitch,gpu,nonsense', BB_GPU_PROFILE='0')
+        self.assertEqual(values['BB_HITCH_REPORT_MS'], '40')
+        self.assertEqual(values['BB_GPU_PROFILE'], '0')
+        self.assertEqual(self.expand()['BB_FRAME_STATS'], 'unset')
 
 
 if __name__ == '__main__':

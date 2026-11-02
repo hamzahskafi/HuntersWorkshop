@@ -351,12 +351,69 @@ void ExpandSwitchGroups() {
         for (const auto& [name, value] : group.sets) {
             if (group.force || !Env(name)) SetEnv(name, value);
         }
-        Log("Engine: %s=%s sets %zu switches", group.name, group.when, group.sets.size());
+        Log("Engine: %s=%s sets %u switches", group.name, group.when, unsigned(group.sets.size()));
     }
+}
+
+// 0.4.4 beta 28: the diagnostics as one list, BB_DIAG=part,part,... (the launcher's Log page): each part
+// stands for engine switches, set unless set on their own. "hitch=N" takes the hitch report's
+// threshold in ms (40 without one), "threads=a+b" the thread samplers' names. The same table is in run.sh
+// (diag parts); tests/test_switch_groups.py checks they agree.
+// diag-parts-begin
+struct DiagPart {
+    const char* name;
+    const char* fallback; // the part's value when BB_DIAG names it without one ("" for none)
+    std::vector<std::pair<const char*, const char*>> sets; // a value of "" takes the part's value
+};
+const DiagPart kDiagParts[] = {
+    {"frame", "", {{"BB_FRAME_STATS", "1"}}},
+    {"hitch", "40", {{"BB_HITCH_REPORT_MS", ""}}},
+    {"gpu", "", {{"BB_GPU_PROFILE", "1"}}},
+    {"sections", "", {{"BB_SECTIONS", "1"}}},
+    {"load", "", {{"BB_SAMPLE_THREADS", "load"}}},
+    {"audio", "", {{"BB_AUDIO_STATS", "1"}}},
+    {"pad", "", {{"BB_PAD_LOG", "1"}}},
+    {"heap", "", {{"BB_WRITE_LOG", "1"}, {"BB_FREE_CHECK", "1"}, {"BB_HEAP_SITES", "1"}}},
+    {"shaders", "", {{"BB_SHADER_CAPTURE", "1"}}},
+    {"timeline", "", {{"BB_TIMELINE", "1"}}},
+    {"waits", "", {{"BB_WAIT_TRACE", "1"}}},
+    {"threads", "", {{"BB_SAMPLE_THREADS", ""}}},
+};
+// diag-parts-end
+
+void ExpandDiagnostics() {
+    const std::string list = Env("BB_DIAG", "");
+    std::string named;
+    size_t at = 0;
+    while (at <= list.size() && !list.empty()) {
+        const size_t comma = std::min(list.find(',', at), list.size());
+        const std::string item = Trim(list.substr(at, comma - at));
+        at = comma + 1;
+        if (item.empty()) continue;
+        const size_t eq = item.find('=');
+        const std::string name = Lower(item.substr(0, eq));
+        std::string value = eq == std::string::npos ? "" : item.substr(eq + 1);
+        std::replace(value.begin(), value.end(), '+', ',');
+        const DiagPart* part = nullptr;
+        for (const DiagPart& p : kDiagParts)
+            if (name == p.name) part = &p;
+        if (!part) {
+            Log("Diagnostics: no part \"%s\" in BB_DIAG", name.c_str());
+            continue;
+        }
+        if (value.empty()) value = part->fallback;
+        for (const auto& [variable, fixed] : part->sets) {
+            const std::string set = *fixed ? std::string(fixed) : value;
+            if (!set.empty() && !Env(variable)) SetEnv(variable, set);
+        }
+        named += (named.empty() ? "" : ", ") + name + (value.empty() ? "" : "=" + value);
+    }
+    if (!named.empty()) Log("Diagnostics: %s (BB_DIAG)", named.c_str());
 }
 
 int Main(std::vector<std::wstring> arguments) {
     ExpandSwitchGroups();
+    ExpandDiagnostics();
     const Folders folders = Locate();
     std::optional<std::string> game = Env("BB_GAME_DIR");
     if (arguments.size() > 1 && arguments[0] == L"--game-dir") {

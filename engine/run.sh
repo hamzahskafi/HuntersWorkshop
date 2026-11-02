@@ -43,6 +43,57 @@ for group in "${switch_groups[@]}"; do
     done
     echo "Engine: $trigger sets ${#assignments[@]} switches"
 done
+# The diagnostics as one list, BB_DIAG=part,part,... (the launcher's Log page): each part stands for
+# engine switches, set unless set on their own. "hitch=N" takes the hitch report's threshold in ms
+# (40 without one), "threads=a+b" the thread samplers' names. Each entry: the part, its value when
+# none is given (- for none), what it sets (an empty value takes the part's value). The same table
+# is in start/main.cpp (kDiagParts); tests/test_switch_groups.py checks they agree.
+# diag-parts-begin
+diag_parts=(
+    "frame - BB_FRAME_STATS=1"
+    "hitch 40 BB_HITCH_REPORT_MS="
+    "gpu - BB_GPU_PROFILE=1"
+    "sections - BB_SECTIONS=1"
+    "load - BB_SAMPLE_THREADS=load"
+    "audio - BB_AUDIO_STATS=1"
+    "pad - BB_PAD_LOG=1"
+    "heap - BB_WRITE_LOG=1 BB_FREE_CHECK=1 BB_HEAP_SITES=1"
+    "shaders - BB_SHADER_CAPTURE=1"
+    "timeline - BB_TIMELINE=1"
+    "waits - BB_WAIT_TRACE=1"
+    "threads - BB_SAMPLE_THREADS="
+)
+# diag-parts-end
+if [[ -n ${BB_DIAG:-} ]]; then
+    IFS=, read -ra diag_items <<< "$BB_DIAG"
+    diag_named=
+    for item in "${diag_items[@]}"; do
+        item=${item//[[:space:]]/}
+        [[ -n $item ]] || continue
+        diag_name=${item%%=*}
+        diag_name=${diag_name,,}
+        diag_value=
+        [[ $item == *=* ]] && diag_value=${item#*=}
+        diag_value=${diag_value//+/,}
+        diag_found=
+        for entry in "${diag_parts[@]}"; do
+            read -r part fallback sets <<< "$entry"
+            [[ $part == "$diag_name" ]] || continue
+            diag_found=1
+            [[ -n $diag_value || $fallback == - ]] || diag_value=$fallback
+            read -ra assignments <<< "$sets"
+            for assignment in "${assignments[@]}"; do
+                variable=${assignment%%=*}
+                value=${assignment#*=}
+                [[ -n $value ]] || value=$diag_value
+                if [[ -n $value && -z ${!variable+set} ]]; then export "$variable=$value"; fi
+            done
+        done
+        if [[ -z $diag_found ]]; then echo "Diagnostics: no part \"$diag_name\" in BB_DIAG"; continue; fi
+        diag_named+=${diag_named:+, }$diag_name${diag_value:+=$diag_value}
+    done
+    [[ -z $diag_named ]] || echo "Diagnostics: $diag_named (BB_DIAG)"
+fi
 # BB_SAVE_LOG=1 (launcher: "Save the log and statistics to a file"): this run's output and its
 # per-frame statistics also go to $data/logs/<time>.log, .frames.csv and .readbacks.csv.
 if [[ ${BB_SAVE_LOG:-} == 1 ]]; then

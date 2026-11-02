@@ -143,14 +143,25 @@ namespace BloodborneLauncher.Core
             // Settings › Performance: empty is the engine's own choice (left unset).
             if (s.Str("draw_pipe") is "0" or "1") env["BB_DRAW_PIPE"] = s.Str("draw_pipe");
             if (s.Str("readbacks") is "0" or "2") env["BB_READBACKS"] = s.Str("readbacks");
-            if (s.Bool("frame_stats")) env["BB_FRAME_STATS"] = "1";
-            // The log level (standard is the engine's own, left unset), hitch reports and controller details.
+            // The log level (standard is the engine's own, left unset).
             if (s.Str("log_level") is "detailed" or "debug") env["BB_LOG_LEVEL"] = s.Str("log_level");
-            if (int.TryParse(s.Str("hitch_report_ms"), out var hitch) && hitch > 0) env["BB_HITCH_REPORT_MS"] = hitch.ToString();
-            if (s.Bool("pad_log")) env["BB_PAD_LOG"] = "1";
-            if (s.Bool("gpu_profile")) env["BB_GPU_PROFILE"] = "1";
-            if (s.Bool("audio_stats")) env["BB_AUDIO_STATS"] = "1";
-            if (s.Bool("load_profile")) env["BB_SAMPLE_THREADS"] = "load";
+            // The Log page's Diagnostics as one list (0.4.4 beta 28: the engine's start programs expand
+            // BB_DIAG, bb-start's ExpandDiagnostics and run.sh; a switch set on its own wins).
+            var diag = new List<string>();
+            if (s.Bool("frame_stats")) diag.Add("frame");
+            if (int.TryParse(s.Str("hitch_report_ms"), out var hitch) && hitch > 0) diag.Add($"hitch={hitch}");
+            if (s.Bool("gpu_profile")) diag.Add("gpu");
+            if (s.Bool("section_stats")) diag.Add("sections");
+            if (s.Bool("load_profile")) diag.Add("load");
+            if (s.Bool("audio_stats")) diag.Add("audio");
+            if (s.Bool("pad_log")) diag.Add("pad");
+            if (s.Bool("heap_checks")) diag.Add("heap");
+            if (s.Bool("shader_capture"))
+            {
+                diag.Add("shaders");
+                env["BB_SHADER_CAPTURE_DIR"] = Path.Combine(Path.GetDirectoryName(GameRunner.SessionLog)!, "shaders");
+            }
+            if (diag.Count > 0) env["BB_DIAG"] = string.Join(",", diag);
             // Experimental engine features: on by default, each can be turned off.
             // 0.4.4 beta 28: what is on by default in the engine is passed only when off.
             if (!s.Bool("exp_frame_pacing")) env["BB_PRECISE_PACING"] = "0";
@@ -192,14 +203,8 @@ namespace BloodborneLauncher.Core
             if (s.Bool("exp_sfx_workaround")) env["BB_SFX_WORKAROUND"] = "1";
             if (s.Bool("borderless_fullscreen")) env["BB_EXCLUSIVE_FULLSCREEN"] = "0";
             if (!s.Bool("exp_compile_skip")) env["BB_COMPILE_SKIP"] = "0";
-            if (s.Bool("section_stats")) env["BB_SECTIONS"] = "1";
             if (s.Str("overlay_keys") is "insert" or "off") env["BB_OVERLAY_KEYS"] = s.Str("overlay_keys");
             if (s.Bool("legacy_shaders")) env["BB_NATIVE_SHADERS"] = "0";
-            if (s.Bool("shader_capture"))
-            {
-                env["BB_SHADER_CAPTURE"] = "1";
-                env["BB_SHADER_CAPTURE_DIR"] = Path.Combine(Path.GetDirectoryName(GameRunner.SessionLog)!, "shaders");
-            }
             // Safe mode (after a crash, one run): every experimental engine option and the mods off, a crash
             // guard on (the engine's start programs set them, whatever the rows above say).
             if (s.Bool("safe_mode_next")) env["BB_SAFE_MODE"] = "1";

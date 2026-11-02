@@ -97,6 +97,7 @@ namespace BloodborneLauncher.Core
             ["load_profile"] = false,
             ["section_stats"] = false,
             ["shader_capture"] = false,
+            ["heap_checks"] = false, // 0.4.4 beta 28: BB_DIAG=heap
             ["overlay_keys"] = "both",
             ["dlss_preset"] = "k",
             ["legacy_shaders"] = false, // beta 9.8 made legacy the default; beta 4 the native one again (PerfDefaults)
