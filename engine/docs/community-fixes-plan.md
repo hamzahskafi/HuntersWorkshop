@@ -438,8 +438,10 @@ From the audit of 27c (four read-only audits, re-checked) and the tester's calls
   repeats the line, "Default: …" from the setting, checked in English through `Localization.Source`), every
   text, the changes outside the texts, the in-game overlay menu's Enhancements section and names (its 8
   tables), the Also found fixes, and the 165 new texts in all 13 languages (machine-made). Not done here: the
-  on-screen check at 100% and 150% in English, German and Japanese (needs Windows), and the ~206 older texts
-  the 12 other catalogs still lack (zh-CN has them; they show in English, as before this step).
+  on-screen check at 100% and 150% in English, German and Japanese (needs Windows). The ~206 older texts
+  the 12 other catalogs lacked (zh-CN had them) were translated after it (2026-11-03): 199 of them; the
+  other 7 are looked up only by the Avalonia launcher (frame generation, the PC memory model and other
+  rows since removed) and go with the Linux work.
 - **The Log page** (the tester, 2026-11-02): one Log options fold again, the log level first in it and the
   diagnostics after it (part 12 had put the log level above a Diagnostics fold).
 - **Then the version step:** 0.4.4-beta.28, engine id 64, release notes (their Defaults section: a new

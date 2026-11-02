@@ -126,6 +126,11 @@ behind its tabs, Visuals holding Display to Interface; the Linux launchers are u
   rewritten or corrected (`docs/launcher-text-review.md`), in all 13 languages (machine-made: players'
   corrections are welcome). Every list has Off or None first. The game's System menu help lines fit
   the window (Output resolution's was cut off).
+- **Every language complete:** 199 older texts that showed in English in 12 of the 13 languages
+  (since 0.9.37 beta 5, only Simplified Chinese had them) are translated: the setup guide above all,
+  and the DLSS model names, the log level and diagnostics rows, hitch reports, shader catalogs and the
+  Engine page's older switches (machine-made, like the rest). German addresses the player as "Sie"
+  throughout (11 texts used "du").
 
 ## AMD FSR
 
