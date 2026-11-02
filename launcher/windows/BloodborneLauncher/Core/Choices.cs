@@ -27,13 +27,14 @@
             new(L.T("None"), "none"),
         };
 
-        /// <summary>Graphics › Anti-aliasing (0.4.4 beta 27b), with Upscaler None: TAA (upscaler=taa), the
-        /// game's own pass (upscaler=off, effect_game_aa=1) or none (upscaler=off, effect_game_aa=0).
-        /// With an upscaler the upscaler anti-aliases, and the engine leaves the game's own pass out.</summary>
+        /// <summary>Graphics › Anti-aliasing (0.4.4 beta 27b), with Upscaler None: the game's own pass
+        /// (upscaler=off, effect_game_aa=1; the default from beta 28), TAA (upscaler=taa) or none (upscaler=off,
+        /// effect_game_aa=0), in that order (the tester's, beta 28). With an upscaler the upscaler anti-aliases,
+        /// and the engine leaves the game's own pass out.</summary>
         public static readonly Choice[] AntiAliasing =
         {
-            new("TAA", "taa"),
             new(L.T("The game's own"), "game", L.T("Applied when the game starts")),
+            new("TAA", "taa"),
             new(L.T("Off"), "off"),
         };
 

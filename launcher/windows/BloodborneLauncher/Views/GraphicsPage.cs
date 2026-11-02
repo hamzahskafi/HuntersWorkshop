@@ -186,11 +186,12 @@ namespace BloodborneLauncher.Views
 
         /// <summary>The Anti-aliasing choice config.ini holds: TAA or Off from the upscaler, the game's own
         /// from effect_game_aa. With an upscaler, what Upscaler None goes back to.</summary>
+        // The game's own pass unless effect_game_aa=0 (0.4.4 beta 28: on by default in the engine too).
         private static string AntiAliasingNow() => Ini.Get("upscaler") switch
         {
             "taa" => "taa",
-            "off" => Ini.Flag("effect_game_aa") ? "game" : "off",
-            _ => Ini.Flag("effect_game_aa") ? "game" : "taa",
+            "off" => Ini.Get("effect_game_aa") != "0" ? "game" : "off",
+            _ => Ini.Get("effect_game_aa") != "0" ? "game" : "taa",
         };
 
         private static double CustomScale() => Math.Clamp(ParseDouble(Ini.Get("render_scale", "1.30"), 1.3), 1.0, 3.0);

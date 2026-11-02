@@ -911,12 +911,13 @@ void UpscalerSection() {
     // own pass (a patch at start) or none. An upscaler anti-aliases itself; the game's pass is left out
     // under it (patches.cpp NoUpscaler).
     if (const char* label = Item("Anti-aliasing", "Сглаживание")) {
-        const char* modes[] = {"TAA", BbSettings::MenuText("The game's own", "Собственное игры"),
+        // 0.4.4 beta 28 (the tester): the game's own first, then TAA and Off.
+        const char* modes[] = {BbSettings::MenuText("The game's own", "Собственное игры"), "TAA",
                                BbSettings::MenuText("Off", "Выкл")};
         const bool game_aa = s.effects[BbSettings::EffectGameAa];
-        const int mode = s.upscaler == BbSettings::UpscalerOff ? (game_aa ? 1 : 2)
-                         : s.upscaler == BbSettings::UpscalerTaa ? 0
-                                                                 : (game_aa ? 1 : 0); // what None goes back to
+        const int mode = s.upscaler == BbSettings::UpscalerOff ? (game_aa ? 0 : 2)
+                         : s.upscaler == BbSettings::UpscalerTaa ? 1
+                                                                 : (game_aa ? 0 : 1); // what None goes back to
         int picked = mode;
         // 0.4.4 beta 27d (the tester): with an upscaler the box names it, greyed, as the launcher's; the
         // choice is kept for Upscaler None.
@@ -935,17 +936,17 @@ void UpscalerSection() {
             ImGui::EndCombo();
         }
         if (picked != mode) {
-            Store(s.upscaler, picked == 0 ? int(BbSettings::UpscalerTaa) : int(BbSettings::UpscalerOff), true);
-            Store(s.effects[BbSettings::EffectGameAa], picked == 1, true);
+            Store(s.upscaler, picked == 1 ? int(BbSettings::UpscalerTaa) : int(BbSettings::UpscalerOff), true);
+            Store(s.effects[BbSettings::EffectGameAa], picked == 0, true);
         }
         ImGui::EndDisabled();
         if (!upscaling) {
             Hint(BbSettings::MenuText(
-                "TAA: smooth edges at the output resolution, live (sharpening helps). The game's "
-                "own: its anti-aliasing pass, as on the PS4, after a restart. Off: the sharpest "
+                "The game's own: its anti-aliasing pass, as on the PS4, after a restart. TAA: "
+                "smooth edges at the output resolution, live (sharpening helps). Off: the sharpest "
                 "picture, with jagged edges.",
-                "TAA: гладкие края в разрешении вывода, сразу (поможет резкость). Собственное "
-                "игры: её проход сглаживания, как на PS4, после перезапуска. Выкл: самая резкая "
+                "Собственное игры: её проход сглаживания, как на PS4, после перезапуска. TAA: "
+                "гладкие края в разрешении вывода, сразу (поможет резкость). Выкл: самая резкая "
                 "картинка, с лесенками."));
         }
     }
