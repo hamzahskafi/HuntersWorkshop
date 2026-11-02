@@ -24,9 +24,6 @@ namespace BloodborneLauncher.Views
         private readonly List<(string Key, string Title)> _tracked = new();
         private readonly List<EngineSwitch> _switches = new();
         private readonly TextBlock _changedHint;
-        private readonly FrameworkElement _enginePreset;
-        private readonly Dictionary<string, Wpf.Ui.Controls.ToggleSwitch> _features = new();
-        private bool _syncing;
 
         public EnginePage()
         {
@@ -47,11 +44,8 @@ namespace BloodborneLauncher.Views
 
             // Engine features from 0.9.4, each with a switch of its own (were on the Graphics page).
             Group(L.T("Engine features"));
-            // Engine preset: New or Legacy (0.9.33) turns the newer features below on or off at
-            // once; a feature changed by hand shows Custom.
-            _enginePreset = ComboRow(SymbolRegular.Options24, L.T("Engine preset"),
-                L.T("New is the current engine. Legacy runs it the way 0.9.33 did: try it if the game crashes or draws something wrong"),
-                EnginePreset.Choices, () => EnginePreset.Current(S), v => EnginePreset.Apply(S, v), changed: SyncFeatures);
+            // 0.4.4 beta 28 (the tester): the Engine preset (New / Legacy 0.9.33) went; each feature has
+            // its own switch, and safe mode turns them all off for a run.
             var exp = Advanced(L.T("Experimental engine features"));
             Tracked(SymbolRegular.Code24, L.T("Legacy shader compiler"),
                 L.T("Off by default: the native compiler reads constant data through the GPU's constant cache. On compiles the game's shaders the way 0.9.33 did: try it if something draws wrong. Switching recompiles every shader once"),
@@ -147,9 +141,8 @@ namespace BloodborneLauncher.Views
 
         public override void OnShown() => ShowChanged();
 
-        /// <summary>A switch the engine preset sets: changing it by hand shows the preset it now matches.</summary>
         private void Feature(SymbolRegular icon, string title, string hint, string key, Panel into) =>
-            _features[key] = Tracked(icon, title, hint, key, into, SyncPreset);
+            Tracked(icon, title, hint, key, into);
 
         /// <summary>A launcher setting's switch on this page: counted by Changed switches, put back by Reset all.</summary>
         private Wpf.Ui.Controls.ToggleSwitch Tracked(SymbolRegular icon, string title, string hint, string key, Panel? into = null, Action? changed = null)
@@ -201,25 +194,6 @@ namespace BloodborneLauncher.Views
                 : S.Str(key) == DefaultText(key);
 
         /// <summary>The preset was picked: its switches show their new values.</summary>
-        private void SyncFeatures()
-        {
-            foreach (var (key, toggle) in _features)
-                toggle.IsChecked = S.Bool(key);
-            SyncPreset();
-            ShowChanged();
-        }
-
-        private void SyncPreset()
-        {
-            if (_syncing) return;
-            _syncing = true;
-            var index = Choices.IndexOf(EnginePreset.Choices, EnginePreset.Current(S));
-            if (_enginePreset is Segmented segmented) segmented.Select(index, notify: false);
-            else if (_enginePreset is ComboBox box) box.SelectedIndex = index;
-            _syncing = false;
-        }
-
-
         private static SymbolRegular GroupIcon(string group) => group switch
         {
             EngineSwitches.Graphics => SymbolRegular.Sparkle24,
@@ -265,7 +239,6 @@ namespace BloodborneLauncher.Views
                 S.Remove(item.Key);
             foreach (var reset in _resets)
                 reset();
-            SyncPreset();
             Ws.SaveSoon();
             ShowChanged();
         }

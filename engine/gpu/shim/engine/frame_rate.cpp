@@ -501,10 +501,8 @@ bool Install(std::uint8_t* image, std::size_t size) {
     on.fill(true);
     for (const std::string& name : SkipList("BB_FRAME_FIXES_SKIP", kGroupNames, on))
         host_log("Frame rate fixes: no group \"%s\" to skip", name.c_str());
-    // The cloth's last substep: BB_CLOTH_STEP=0 leaves it out too (the launcher's Game fixes, for its A/B test).
-    if (const char* cloth = std::getenv("BB_CLOTH_STEP"); cloth && cloth[0] == '0') {
-        on[std::size_t(Group::ClothStep)] = false;
-    }
+    // The cloth's last substep is one of the groups, with the other corrections (0.4.4 beta 28: its own A/B switch,
+    // BB_CLOTH_STEP, went; the tester's call).
     // The frame timer and the camera's per-frame eases with it: on unless "timer" is skipped (0.4.4: the default,
     // after every log from 0.3.0 to 0.4.3 ran with it; beta 28: BB_FRAME_TIMER=0, the same as skipping timer and
     // camera, went).
