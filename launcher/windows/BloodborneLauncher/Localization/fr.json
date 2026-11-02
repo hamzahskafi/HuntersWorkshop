@@ -1462,7 +1462,7 @@
   "0.20 is light. High values can halo edges and show grain.": "0.20 est léger. Des valeurs élevées peuvent créer des halos aux bords et faire ressortir le grain.",
   "The game gives no motion for moving characters; this works it out. Off: faster, but moving enemies can trail. After a restart.": "Le jeu ne fournit pas le mouvement des personnages ; ceci le calcule. Désactivé : plus rapide, mais les ennemis en mouvement peuvent laisser une traînée. Après un redémarrage.",
   "0 is what NVIDIA and AMD advise with an upscaler. Below 0 can shimmer.": "0 est ce que NVIDIA et AMD conseillent avec un upscaler. Sous 0, l'image peut scintiller.",
-  "TAA: smooth edges, live. The game's own: its PS4 pass, after a restart. Off: the sharpest, with jagged edges.": "TAA : bords lisses, en direct. Celui du jeu : sa passe PS4, après un redémarrage. Désactivé : le plus net, avec des bords crénelés.",
+  "Off: the sharpest, with jagged edges. The game's own: its PS4 pass, after a restart. TAA: smooth edges, live.": "Désactivé : le plus net, avec des bords crénelés. Celui du jeu : sa passe PS4, après un redémarrage. TAA : bords lisses, en direct.",
   "DLSS needs an NVIDIA RTX card; AMD FSR runs on any GPU. Both anti-alias as they upscale.": "DLSS demande une carte NVIDIA RTX ; AMD FSR fonctionne sur tout GPU. Les deux anticrénèlent en upscalant.",
   "Newer is usually better. (driver) marks one AMD's graphics driver provides.": "Plus récent est souvent mieux. (pilote) marque une version fournie par le pilote graphique d'AMD.",
   "Auto: K from DLAA to Balanced, M at Performance, L at Ultra Performance.": "Auto : K de DLAA à Équilibré, M en Performances, L en Ultra Performance.",

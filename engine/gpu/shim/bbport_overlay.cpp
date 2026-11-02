@@ -911,13 +911,14 @@ void UpscalerSection() {
     // own pass (a patch at start) or none. An upscaler anti-aliases itself; the game's pass is left out
     // under it (patches.cpp NoUpscaler).
     if (const char* label = Item("Anti-aliasing", "Сглаживание")) {
-        // 0.4.4 beta 28 (the tester): the game's own first, then TAA and Off.
-        const char* modes[] = {BbSettings::MenuText("The game's own", "Собственное игры"), "TAA",
-                               BbSettings::MenuText("Off", "Выкл")};
+        // 0.4.4 beta 28 (the tester): Off first, then the game's own and TAA.
+        enum { AaOff, AaGame, AaTaa };
+        const char* modes[] = {BbSettings::MenuText("Off", "Выкл"),
+                               BbSettings::MenuText("The game's own", "Собственное игры"), "TAA"};
         const bool game_aa = s.effects[BbSettings::EffectGameAa];
-        const int mode = s.upscaler == BbSettings::UpscalerOff ? (game_aa ? 0 : 2)
-                         : s.upscaler == BbSettings::UpscalerTaa ? 1
-                                                                 : (game_aa ? 0 : 1); // what None goes back to
+        const int mode = s.upscaler == BbSettings::UpscalerOff ? (game_aa ? AaGame : AaOff)
+                         : s.upscaler == BbSettings::UpscalerTaa ? AaTaa
+                                                                 : (game_aa ? AaGame : AaTaa); // what None goes back to
         int picked = mode;
         // 0.4.4 beta 27d (the tester): with an upscaler the box names it, greyed, as the launcher's; the
         // choice is kept for Upscaler None.
@@ -936,29 +937,30 @@ void UpscalerSection() {
             ImGui::EndCombo();
         }
         if (picked != mode) {
-            Store(s.upscaler, picked == 1 ? int(BbSettings::UpscalerTaa) : int(BbSettings::UpscalerOff), true);
-            Store(s.effects[BbSettings::EffectGameAa], picked == 0, true);
+            Store(s.upscaler, picked == AaTaa ? int(BbSettings::UpscalerTaa) : int(BbSettings::UpscalerOff), true);
+            Store(s.effects[BbSettings::EffectGameAa], picked == AaGame, true);
         }
         ImGui::EndDisabled();
         if (!upscaling) {
             Hint(BbSettings::MenuText(
-                "The game's own: its anti-aliasing pass, as on the PS4, after a restart. TAA: "
-                "smooth edges at the output resolution, live (sharpening helps). Off: the sharpest "
-                "picture, with jagged edges.",
-                "Собственное игры: её проход сглаживания, как на PS4, после перезапуска. TAA: "
-                "гладкие края в разрешении вывода, сразу (поможет резкость). Выкл: самая резкая "
-                "картинка, с лесенками."));
+                "Off: the sharpest picture, with jagged edges. The game's own: its anti-aliasing pass, "
+                "as on the PS4, after a restart. TAA: smooth edges at the output resolution, live "
+                "(sharpening helps).",
+                "Выкл: самая резкая картинка, с лесенками. Собственное игры: её проход сглаживания, "
+                "как на PS4, после перезапуска. TAA: гладкие края в разрешении вывода, сразу "
+                "(поможет резкость)."));
         }
     }
     if (const char* label = Item("Upscaler", "Апскейлер")) {
         // 0.4.4 beta 27: one FSR, AMD's (AMD's FSR SDK picks the version); FSR 3.1 (FireBurn's), FSR 4
         // and FSR 4.1.1 went. 27b: the upscalers or None, as the launcher's Graphics page; with None,
-        // Anti-aliasing below decides (TAA, the game's own pass or none).
-        const char* upscalers[] = {"AMD FSR", "DLSS (NVIDIA)", BbSettings::MenuText("None", "Нет")};
-        const int kinds[] = {BbSettings::UpscalerFsr, BbSettings::UpscalerDlss, BbSettings::UpscalerOff};
+        // Anti-aliasing below decides (none, the game's own pass or TAA).
+        // 0.4.4 beta 28 (the tester): None first.
+        const char* upscalers[] = {BbSettings::MenuText("None", "Нет"), "AMD FSR", "DLSS (NVIDIA)"};
+        const int kinds[] = {BbSettings::UpscalerOff, BbSettings::UpscalerFsr, BbSettings::UpscalerDlss};
         static const char* later[] = {"XeSS"};
         const int upscaler = s.upscaler;
-        const int shown = upscaler == BbSettings::UpscalerFsr ? 0 : upscaler == BbSettings::UpscalerDlss ? 1 : 2;
+        const int shown = upscaler == BbSettings::UpscalerFsr ? 1 : upscaler == BbSettings::UpscalerDlss ? 2 : 0;
         if (ImGui::BeginCombo(label, upscalers[shown])) {
             for (int i = 0; i < int(std::size(upscalers)); ++i) {
                 const bool supported = kinds[i] == BbSettings::UpscalerFsr    ? s.fsr_supported.load()

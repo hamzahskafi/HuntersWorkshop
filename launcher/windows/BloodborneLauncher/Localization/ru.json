@@ -1462,7 +1462,7 @@
   "0.20 is light. High values can halo edges and show grain.": "0.20 — слегка. Высокие значения дают ореолы по краям и зерно.",
   "The game gives no motion for moving characters; this works it out. Off: faster, but moving enemies can trail. After a restart.": "Игра не даёт движения персонажей; это его вычисляет. Выкл.: быстрее, но движущиеся враги могут оставлять шлейф. После перезапуска.",
   "0 is what NVIDIA and AMD advise with an upscaler. Below 0 can shimmer.": "0 — то, что советуют NVIDIA и AMD с апскейлером. Ниже 0 может мерцать.",
-  "TAA: smooth edges, live. The game's own: its PS4 pass, after a restart. Off: the sharpest, with jagged edges.": "TAA: гладкие края, сразу. Собственное игры: её проход с PS4, после перезапуска. Выкл.: резче всего, с лесенками.",
+  "Off: the sharpest, with jagged edges. The game's own: its PS4 pass, after a restart. TAA: smooth edges, live.": "Выкл.: резче всего, с лесенками. Собственное игры: её проход с PS4, после перезапуска. TAA: гладкие края, сразу.",
   "DLSS needs an NVIDIA RTX card; AMD FSR runs on any GPU. Both anti-alias as they upscale.": "DLSS нужна видеокарта NVIDIA RTX; AMD FSR работает на любой. Оба сглаживают при апскейле.",
   "Newer is usually better. (driver) marks one AMD's graphics driver provides.": "Новее — обычно лучше. (драйвер) отмечает версию из графического драйвера AMD.",
   "Auto: K from DLAA to Balanced, M at Performance, L at Ultra Performance.": "Авто: K — от DLAA до «Баланс», M — «Производительность», L — «Ультра».",

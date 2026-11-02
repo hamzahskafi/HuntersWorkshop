@@ -1670,7 +1670,7 @@
   "0.20 is light. High values can halo edges and show grain.": "0.20 较轻。数值过高会让边缘出现光晕并显出颗粒。",
   "The game gives no motion for moving characters; this works it out. Off: faster, but moving enemies can trail. After a restart.": "游戏不提供角色的运动信息，此项会计算它。关闭：更快，但移动中的敌人可能拖影。重启后生效。",
   "0 is what NVIDIA and AMD advise with an upscaler. Below 0 can shimmer.": "0 是 NVIDIA 和 AMD 对超分辨率算法给出的建议值。低于 0 可能闪烁。",
-  "TAA: smooth edges, live. The game's own: its PS4 pass, after a restart. Off: the sharpest, with jagged edges.": "TAA：边缘平滑，立即生效。游戏自带：PS4 上的处理，重启后生效。关闭：最锐利，但有锯齿。",
+  "Off: the sharpest, with jagged edges. The game's own: its PS4 pass, after a restart. TAA: smooth edges, live.": "关闭：最锐利，但有锯齿。游戏自带：PS4 上的处理，重启后生效。TAA：边缘平滑，立即生效。",
   "DLSS needs an NVIDIA RTX card; AMD FSR runs on any GPU. Both anti-alias as they upscale.": "DLSS 需要 NVIDIA RTX 显卡；AMD FSR 可在任何 GPU 上运行。两者在放大时都会抗锯齿。",
   "Newer is usually better. (driver) marks one AMD's graphics driver provides.": "通常越新越好。（驱动）表示由 AMD 显卡驱动提供的版本。",
   "Auto: K from DLAA to Balanced, M at Performance, L at Ultra Performance.": "自动：DLAA 到平衡用 K，性能用 M，超高性能用 L。",

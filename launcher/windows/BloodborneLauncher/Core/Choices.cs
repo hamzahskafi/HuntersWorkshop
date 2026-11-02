@@ -8,34 +8,37 @@
     /// <summary>Every list the launcher offers, in English, with the values bbport expects.</summary>
     public static class Choices
     {
+        // 0.4.4 beta 28 (the tester): where Off or None is a choice it comes first, and the rest go from
+        // less to more.
+
         /// <summary>0.4.4 beta 27: one FSR, AMD's (AMD's FSR SDK picks the version; the engine reads the
         /// older "fsr3", "fsr4" and "fsr411" as it).</summary>
         public static readonly Choice[] Upscalers =
         {
+            new(L.T("Off"), "off"),
+            new(L.T("TAA (native anti-aliasing)"), "taa"),
             new("AMD FSR", "fsr"),
             new("DLSS (NVIDIA RTX)", "dlss"),
-            new(L.T("TAA (native anti-aliasing)"), "taa"),
-            new(L.T("Off"), "off"),
         };
 
-        /// <summary>Graphics › Upscaler (0.4.4 beta 27b): the two upscalers, or None, where the game renders
-        /// at the output and Anti-aliasing (AntiAliasing) decides upscaler=taa or off.</summary>
+        /// <summary>Graphics › Upscaler (0.4.4 beta 27b): None, where the game renders at the output and
+        /// Anti-aliasing (AntiAliasing) decides upscaler=taa or off, or one of the two upscalers.</summary>
         public static readonly Choice[] FrameUpscalers =
         {
+            new(L.T("None"), "none"),
             new("AMD FSR", "fsr"),
             new("DLSS (NVIDIA RTX)", "dlss"),
-            new(L.T("None"), "none"),
         };
 
-        /// <summary>Graphics › Anti-aliasing (0.4.4 beta 27b), with Upscaler None: the game's own pass
-        /// (upscaler=off, effect_game_aa=1; the default from beta 28), TAA (upscaler=taa) or none (upscaler=off,
-        /// effect_game_aa=0), in that order (the tester's, beta 28). With an upscaler the upscaler anti-aliases,
-        /// and the engine leaves the game's own pass out.</summary>
+        /// <summary>Graphics › Anti-aliasing (0.4.4 beta 27b), with Upscaler None: none (upscaler=off,
+        /// effect_game_aa=0), the game's own pass (upscaler=off, effect_game_aa=1; the default from beta 28) or
+        /// TAA (upscaler=taa), in that order (the tester's, beta 28). With an upscaler the upscaler
+        /// anti-aliases, and the engine leaves the game's own pass out.</summary>
         public static readonly Choice[] AntiAliasing =
         {
+            new(L.T("Off"), "off"),
             new(L.T("The game's own"), "game", L.T("Applied when the game starts")),
             new("TAA", "taa"),
-            new(L.T("Off"), "off"),
         };
 
         /// <summary>frame_gen (Avalonia's Graphics page only): 0.4.4 beta 28 removed frame generation from the
@@ -269,9 +272,9 @@
         /// <summary>What opens the port's in-game settings menu (BB_OVERLAY_KEYS).</summary>
         public static readonly Choice[] OverlayKeys =
         {
-            new(L.T("Insert or L3 + R3"), "both", L.T("The keyboard's Insert key, or both sticks pressed on a controller")),
-            new(L.T("Insert only"), "insert", L.T("Pressing both sticks in a fight no longer opens it")),
             new(L.T("Off"), "off", L.T("The menu never opens; settings stay in the launcher and the game's PC menus")),
+            new(L.T("Insert only"), "insert", L.T("Pressing both sticks in a fight no longer opens it")),
+            new(L.T("Insert or L3 + R3"), "both", L.T("The keyboard's Insert key, or both sticks pressed on a controller")),
         };
 
         /// <summary>The port's in-game settings menu (Insert / L3+R3).</summary>
@@ -302,9 +305,9 @@
 
         public static readonly Choice[] DrawPipe =
         {
+            new(L.T("Off"), "0", L.T("More stable, but slower")),
             new(L.T("Auto"), "", L.T("On with 8 or more CPU threads")),
             new(L.T("On"), "1"),
-            new(L.T("Off"), "0", L.T("More stable, but slower")),
         };
 
         public static readonly Choice[] GameLanguages =
@@ -369,8 +372,8 @@
 
         public static readonly Choice[] Readbacks =
         {
-            new(L.T("Relaxed"), "", L.T("Default")),
             new(L.T("Off"), "0"),
+            new(L.T("Relaxed"), "", L.T("Default")),
             new(L.T("Precise"), "2"),
         };
 

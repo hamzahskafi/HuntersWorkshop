@@ -1462,7 +1462,7 @@
   "0.20 is light. High values can halo edges and show grain.": "0.20 は控えめです。高い値ではエッジに縁取りや粒状感が出ることがあります。",
   "The game gives no motion for moving characters; this works it out. Off: faster, but moving enemies can trail. After a restart.": "ゲームは動くキャラクターの動きを渡しません。これがそれを求めます。オフ: 速くなりますが、動く敵が尾を引くことがあります。再起動後に適用。",
   "0 is what NVIDIA and AMD advise with an upscaler. Below 0 can shimmer.": "0 はアップスケーラー使用時に NVIDIA と AMD が推奨する値です。0 未満はちらつくことがあります。",
-  "TAA: smooth edges, live. The game's own: its PS4 pass, after a restart. Off: the sharpest, with jagged edges.": "TAA: 滑らかなエッジ、即時反映。ゲーム本来: PS4 と同じ処理、再起動後。オフ: 最もシャープですがギザギザが出ます。",
+  "Off: the sharpest, with jagged edges. The game's own: its PS4 pass, after a restart. TAA: smooth edges, live.": "オフ: 最もシャープですがギザギザが出ます。ゲーム本来: PS4 と同じ処理、再起動後。TAA: 滑らかなエッジ、即時反映。",
   "DLSS needs an NVIDIA RTX card; AMD FSR runs on any GPU. Both anti-alias as they upscale.": "DLSS には NVIDIA RTX が必要です。AMD FSR はどの GPU でも動作します。どちらもアップスケールと同時にアンチエイリアスします。",
   "Newer is usually better. (driver) marks one AMD's graphics driver provides.": "通常は新しいほど良好です。(ドライバー) は AMD のグラフィックドライバーが提供するものです。",
   "Auto: K from DLAA to Balanced, M at Performance, L at Ultra Performance.": "自動: DLAA～バランスは K、パフォーマンスは M、ウルトラパフォーマンスは L。",

@@ -21,7 +21,7 @@ inline bool IsFrameUpscaler(int upscaler) {
     return upscaler == UpscalerFsr || upscaler == UpscalerDlss;
 }
 /// 0.4.4 beta 27b: Upscaler None in the menus (the launcher's too): TAA, or no upscaler when the game's
-/// own anti-aliasing is on (Anti-aliasing: TAA, the game's own, or off).
+/// own anti-aliasing is on (Anti-aliasing: off, the game's own, or TAA).
 inline int NoUpscaling(bool game_aa) { return game_aa ? UpscalerOff : UpscalerTaa; }
 /// The game's own anti-aliasing pass applies (a patch at start) only without an upscaler or TAA:
 /// patches.cpp NoUpscaler leaves it out under them.

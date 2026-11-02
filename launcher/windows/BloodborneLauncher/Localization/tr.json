@@ -1462,7 +1462,7 @@
   "0.20 is light. High values can halo edges and show grain.": "0.20 hafiftir. Yüksek değerler kenarlarda hale ve grenlenme yapabilir.",
   "The game gives no motion for moving characters; this works it out. Off: faster, but moving enemies can trail. After a restart.": "Oyun hareket eden karakterlerin hareketini vermez; bu onu hesaplar. Kapalı: daha hızlı ama hareketli düşmanlar iz bırakabilir. Yeniden başlatınca.",
   "0 is what NVIDIA and AMD advise with an upscaler. Below 0 can shimmer.": "0, NVIDIA ve AMD'nin ölçekleyiciyle önerdiği değerdir. 0'ın altı titreşebilir.",
-  "TAA: smooth edges, live. The game's own: its PS4 pass, after a restart. Off: the sharpest, with jagged edges.": "TAA: yumuşak kenarlar, anında. Oyunun kendi: PS4 geçişi, yeniden başlatınca. Kapalı: en keskin, tırtıklı kenarlarla.",
+  "Off: the sharpest, with jagged edges. The game's own: its PS4 pass, after a restart. TAA: smooth edges, live.": "Kapalı: en keskin, tırtıklı kenarlarla. Oyunun kendi: PS4 geçişi, yeniden başlatınca. TAA: yumuşak kenarlar, anında.",
   "DLSS needs an NVIDIA RTX card; AMD FSR runs on any GPU. Both anti-alias as they upscale.": "DLSS bir NVIDIA RTX kartı ister; AMD FSR her GPU'da çalışır. İkisi de ölçeklerken kenar yumuşatır.",
   "Newer is usually better. (driver) marks one AMD's graphics driver provides.": "Yeni olan genelde daha iyidir. (sürücü), AMD grafik sürücüsünün sağladığı sürümü belirtir.",
   "Auto: K from DLAA to Balanced, M at Performance, L at Ultra Performance.": "Otomatik: DLAA ile Dengeli arası K, Performans için M, Ultra Performans için L.",

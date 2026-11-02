@@ -1462,7 +1462,7 @@
   "0.20 is light. High values can halo edges and show grain.": "0.20은 가벼운 수준입니다. 높은 값은 가장자리에 후광과 입자감이 생길 수 있습니다.",
   "The game gives no motion for moving characters; this works it out. Off: faster, but moving enemies can trail. After a restart.": "게임은 움직이는 캐릭터의 움직임을 주지 않습니다. 이 기능이 계산합니다. 끄면 빨라지지만 움직이는 적에 잔상이 남을 수 있습니다. 재시작 후 적용.",
   "0 is what NVIDIA and AMD advise with an upscaler. Below 0 can shimmer.": "0은 업스케일러 사용 시 NVIDIA와 AMD가 권장하는 값입니다. 0 미만은 깜빡일 수 있습니다.",
-  "TAA: smooth edges, live. The game's own: its PS4 pass, after a restart. Off: the sharpest, with jagged edges.": "TAA: 부드러운 가장자리, 즉시 적용. 게임 자체: PS4의 처리, 재시작 후. 끄기: 가장 선명하지만 계단 현상이 생깁니다.",
+  "Off: the sharpest, with jagged edges. The game's own: its PS4 pass, after a restart. TAA: smooth edges, live.": "끄기: 가장 선명하지만 계단 현상이 생깁니다. 게임 자체: PS4의 처리, 재시작 후. TAA: 부드러운 가장자리, 즉시 적용.",
   "DLSS needs an NVIDIA RTX card; AMD FSR runs on any GPU. Both anti-alias as they upscale.": "DLSS는 NVIDIA RTX 그래픽카드가 필요하고, AMD FSR은 모든 GPU에서 동작합니다. 둘 다 업스케일하며 안티에일리어싱합니다.",
   "Newer is usually better. (driver) marks one AMD's graphics driver provides.": "보통 최신일수록 좋습니다. (드라이버)는 AMD 그래픽 드라이버가 제공하는 버전입니다.",
   "Auto: K from DLAA to Balanced, M at Performance, L at Ultra Performance.": "자동: DLAA~균형: K, 성능: M, 울트라 성능: L.",

@@ -57,7 +57,7 @@ namespace BloodborneLauncher.Views
                     Ini.Set("effect_game_aa", v == "game" ? "1" : "0");
                 }, changed: () => { if (!_syncing) UpdateUpscaler(); });
             _aaRow = LastRow;
-            _aaRow.SetTip(L.T("TAA: smooth edges, live. The game's own: its PS4 pass, after a restart. Off: the sharpest, with jagged edges."));
+            _aaRow.SetTip(L.T("Off: the sharpest, with jagged edges. The game's own: its PS4 pass, after a restart. TAA: smooth edges, live."));
             _aaHint = (TextBlock)_aaRow.Tag;
 
             // The upscalers, or None, where Anti-aliasing above decides (upscaler=taa or off). One FSR,
