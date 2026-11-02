@@ -98,7 +98,6 @@ namespace BloodborneLauncher.Core
             ["shader_capture"] = false,
             ["heap_checks"] = false, // 0.4.4 beta 28: BB_DIAG=heap
             ["overlay_keys"] = "both",
-            ["dlss_preset"] = "k",
             ["legacy_shaders"] = false, // beta 9.8 made legacy the default; beta 4 the native one again (PerfDefaults)
             ["trophy_notifications"] = true,
             ["trophy_sound"] = true,
@@ -135,6 +134,9 @@ namespace BloodborneLauncher.Core
                     // with them, and every log since 0.3.0 ran with both): its own switch and marker go.
                     _data.Remove("exp_frame_timer");
                     _data.Remove("frame_timer_on_044");
+                    // 0.4.4 beta 28: a DLSS model of the launcher's own that nothing read (the DLSS model
+                    // row writes config.ini's dlss_preset).
+                    _data.Remove("dlss_preset");
                     // 0.4.0: a stable launcher over a beta's file (any beta writes frame_stats_beta_on)
                     // switches off once what betas turn on for testing: the frame statistics and the
                     // sharp UI. On again only by choice.

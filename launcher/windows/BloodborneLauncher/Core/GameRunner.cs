@@ -5,9 +5,9 @@ using System.Text;
 namespace BloodborneLauncher.Core
 {
     /// <summary>
-    /// Starts and stops the game and streams its output. The Windows port's run.py does the
-    /// preparation (mods, patches, the linked image) and starts bin\bb-probe.exe; packaged builds
-    /// run it inside Bloodborne.exe (--run). A custom command can replace it.
+    /// Starts and stops the game and streams its output. engine\out\bb-start.exe does the
+    /// preparation (the boot image, mods, patches) and starts bb-probe.exe (Paths.Start). A custom
+    /// command can replace it.
     /// </summary>
     public sealed class GameRunner
     {

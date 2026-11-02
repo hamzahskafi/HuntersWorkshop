@@ -228,6 +228,25 @@ namespace BloodborneLauncher.Core
             return env;
         }
 
+        /// <summary>
+        /// The variable each Engine page setting passes (Build above), so Changed switches can say when
+        /// Extra variables sets it too (0.4.4 beta 28: its value then wins, at the setting's default or not).
+        /// Keep in step with Build.
+        /// </summary>
+        public static readonly IReadOnlyDictionary<string, string> FeatureVariables = new Dictionary<string, string>
+        {
+            ["legacy_shaders"] = "BB_NATIVE_SHADERS", ["exp_vram_cleanup"] = "BB_IMAGE_WRITEBACK_GC",
+            ["exp_frame_pacing"] = "BB_PRECISE_PACING", ["exp_vblank_lock"] = "BB_VBLANK_PACING",
+            ["exp_particle_cap"] = "BB_INDIRECT_CLAMP", ["exp_vram_budget"] = "BB_VRAM_BUDGET",
+            ["exp_thread_priority"] = "BB_GPU_THREAD_PRIORITY", ["exp_sleep_spin"] = "BB_SLEEP_SPIN_US",
+            ["exp_async_pipelines"] = "BB_ASYNC_PIPELINES", ["exp_occlusion"] = "BB_OCCLUSION",
+            ["exp_fast_draws"] = "BB_FAST_DRAWS", ["exp_compile_skip"] = "BB_COMPILE_SKIP",
+            ["exp_fast_loading"] = "BB_FAST_LOADING", ["exp_frame_fixes"] = "BB_FRAME_FIXES",
+            ["exp_hot_pages"] = "BB_HOT_PAGES", ["exp_gx_in_place"] = "BB_GX_IN_PLACE",
+            ["exp_native_calls"] = "BB_NATIVE_CALLS", ["exp_sfx_workaround"] = "BB_SFX_WORKAROUND",
+            ["draw_pipe"] = "BB_DRAW_PIPE", ["readbacks"] = "BB_READBACKS", ["audio_priority"] = "BB_AUDIO_THREAD_PRIORITY",
+        };
+
         /// <summary>Settings › Diagnostics › Extra variables: NAME=value pairs separated by spaces.</summary>
         public static IEnumerable<(string Name, string Value)> ExtraVariables(LauncherSettings s)
         {

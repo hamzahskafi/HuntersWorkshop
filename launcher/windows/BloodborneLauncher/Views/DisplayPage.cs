@@ -104,7 +104,6 @@ namespace BloodborneLauncher.Views
         private void FrameRateRows()
         {
             Group(L.T("Frame rate"));
-            var refresh = Hardware.Detect().RefreshHz;
             var rate = S.Str("fps_mode");
             FrameworkElement sync = null!;
             SettingCombo(SymbolRegular.Gauge24, L.T("Frame rate"), L.T("Every rate above 30 runs on the engine's frame rate corrections, built on Kyo's 60 FPS++ and other community findings. " +
@@ -120,7 +119,7 @@ namespace BloodborneLauncher.Views
                     RefreshNotes();
                 }, noteOf: c => c.Note, line: L.T("30 is the PS4's; higher rates use the engine's corrections"));
             sync = SettingCombo(SymbolRegular.Image24, L.T("V-Sync"), L.T("How finished frames reach the screen"),
-                Choices.PresentModes, "present_mode", noteOf: c => FrameRateSync.Note(S.Str("fps_mode"), c.Value, refresh) ?? c.Note);
+                Choices.PresentModes, "present_mode", noteOf: c => FrameRateSync.Note(S.Str("fps_mode"), c.Value, Hardware.Detect().RefreshHz) ?? c.Note);
         }
 
         public DisplayPage()
@@ -138,6 +137,7 @@ namespace BloodborneLauncher.Views
                 S.Set("display_device", item.Tag as string ?? "");
                 Ws.SaveSoon();
                 ShowHdr(); // HDR is the chosen display's
+                RefreshNotes(); // and so is the refresh rate V-Sync's note gives
             };
             // One choice for what were two switches (Fullscreen, and Borderless fullscreen, which did
             // nothing without it). The same two settings as before: config.ini's fullscreen and the

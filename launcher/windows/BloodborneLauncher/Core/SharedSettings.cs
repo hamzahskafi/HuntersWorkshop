@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
@@ -8,27 +8,41 @@ using System.Text.RegularExpressions;
 namespace BloodborneLauncher.Core
 {
     /// <summary>
-    /// Settings players share: the game and engine options from config.ini and the launcher's
-    /// game options, as a code to paste in a chat (deflated JSON in base64) or a .json file. What
-    /// belongs to this PC or this player stays out: display and HDR, the online account and
-    /// servers, folders, languages. Keys are allowlisted both ways, so an imported code can set
-    /// nothing else (no command, folder or environment variable).
+    /// Settings players share, as a code to paste in a chat (deflated JSON in base64) or a .json file.
+    /// 0.4.4 beta 28 (the tester's call): everything in config.ini except what belongs to this PC or to
+    /// the player (each new game setting is shared without a list to add it to), and the launcher's
+    /// game and engine settings. Out: this PC's monitor, output resolution, window mode, HDR, sound
+    /// device, graphics card, preferred controller, folders and files, and the switches tuned to its
+    /// hardware (fixed-refresh lock, area prefetch, shader compile threads, sound threads first, the
+    /// Intel fixes, the effect trail fix); the player's online account, languages, profiles, launcher
+    /// look and trophy notifications; a session's log options, Extra variables and setup flags.
+    /// The launcher side stays an allowlist (its keys hold commands, folders and variables too), and
+    /// its engine switches must be ones the launcher knows, so an imported code can set no command,
+    /// folder or environment variable.
     /// </summary>
     public static class SharedSettings
     {
         public const string CodePrefix = "BBPC1:";
         private const int MaxChars = 64 * 1024;
 
-        private static readonly string[] IniKeys =
+        /// <summary>config.ini keys that stay on this PC or with the player (prefixes end with _).</summary>
+        private static readonly string[] IniExcluded = { "output_res", "fullscreen", "menu_language", "language", "hdr", "hdr_", "online_", "hd_" };
+        private static readonly string[] LauncherKeys = { "present_mode", "fps_mode", "draw_pipe", "readbacks", "legacy_shaders", "overlay_keys" };
+        private static readonly string[] LauncherPrefixes = { "exp_", "cheat_", "env:" };
+        /// <summary>Launcher keys under those prefixes that are tuned to this PC's hardware or its game files.</summary>
+        private static readonly string[] LauncherExcluded =
         {
-            "upscaler", "fsr_version", "preset", "render_scale", "sharpen", "sharpness", "show_fps", "show_fps_rate", "show_fps_frame_time", "show_fps_upscaler", "live_resolution", "model_lod", "object_motion",
-            "jitter", "reactive", "widescreen", "pc_controls", "camera_controls", "graphics_controls",
-            "change_appearance", "rebirth", "skip_intro",
+            "exp_vblank_lock", "exp_sfx_workaround", "env:BB_GPU_ID", "env:BB_GAMEPAD", "env:BB_FILE_PREFETCH",
+            "env:BB_PIPELINE_THREADS", "env:BB_RED_ZONE_FUNCTIONS", "env:BB_INTEL_TONEMAP_FIX", "env:BB_AUDIO", "env:BB_SKIP_GAME_CHECK",
         };
-        private static readonly string[] IniPrefixes =
-            { "graphics_", "camera_", "effect_", "reactive_", "fsr_", "fsr4_", "cheat_", "bind.", "mouse_", "pad_" };
-        private static readonly string[] LauncherKeys = { "present_mode", "fps_mode", "draw_pipe", "readbacks" };
-        private static readonly string[] LauncherPrefixes = { "exp_", "cheat_" };
+
+        private static bool SharedIni(string key) =>
+            !IniExcluded.Any(x => x.EndsWith('_') ? key.StartsWith(x, StringComparison.Ordinal) : key == x);
+
+        private static bool SharedLauncher(string key) =>
+            (LauncherKeys.Contains(key) || LauncherPrefixes.Any(p => key.StartsWith(p, StringComparison.Ordinal))) &&
+            !LauncherExcluded.Contains(key) &&
+            (!key.StartsWith("env:", StringComparison.Ordinal) || EngineSwitches.All.Any(x => x.Key == key));
 
         /// <summary>What a setting is about: an import can leave the controls and cheats as they are.</summary>
         public enum Part { Settings, Controls, Cheats }
@@ -45,18 +59,16 @@ namespace BloodborneLauncher.Core
               key.StartsWith("pad_", StringComparison.Ordinal) || key == "pc_controls" ? Part.Controls
             : Part.Settings;
 
-        private static bool Shared(string key, string[] keys, string[] prefixes) =>
-            keys.Contains(key) || prefixes.Any(p => key.StartsWith(p, StringComparison.Ordinal));
 
         public static Snapshot Take(IniFile ini, LauncherSettings s)
         {
             var values = new SortedDictionary<string, string>(StringComparer.Ordinal);
             foreach (var (key, value) in ini.Values)
-                if (Shared(key, IniKeys, IniPrefixes))
+                if (SharedIni(key))
                     values[key] = value;
             var launcher = new SortedDictionary<string, JsonNode>(StringComparer.Ordinal);
             foreach (var (key, value) in s.All)
-                if (value is JsonValue && Shared(key, LauncherKeys, LauncherPrefixes))
+                if (value is JsonValue && SharedLauncher(key))
                     launcher[key] = value.DeepClone();
             return new Snapshot(values, launcher, Updater.CurrentLabel);
         }
@@ -107,13 +119,13 @@ namespace BloodborneLauncher.Core
             var ini = new SortedDictionary<string, string>(StringComparer.Ordinal);
             if (root["ini"] is JsonObject iniObject)
                 foreach (var (key, value) in iniObject)
-                    if (ValidKey(key) && Shared(key, IniKeys, IniPrefixes) && value is JsonValue jv &&
+                    if (ValidKey(key) && SharedIni(key) && value is JsonValue jv &&
                         jv.TryGetValue<string>(out var s) && s.Length <= 256 && !s.Any(char.IsControl))
                         ini[key] = s.Trim();
             var launcher = new SortedDictionary<string, JsonNode>(StringComparer.Ordinal);
             if (root["launcher"] is JsonObject launcherObject)
                 foreach (var (key, value) in launcherObject)
-                    if (ValidKey(key) && Shared(key, LauncherKeys, LauncherPrefixes) && value is JsonValue lv &&
+                    if (ValidKey(key) && SharedLauncher(key) && value is JsonValue lv &&
                         (lv.TryGetValue<bool>(out _) || lv.TryGetValue<double>(out _) ||
                          lv.TryGetValue<string>(out var ls) && ls.Length <= 256 && !ls.Any(char.IsControl)))
                         launcher[key] = lv.DeepClone();
@@ -123,7 +135,11 @@ namespace BloodborneLauncher.Core
             return new Snapshot(ini, launcher, from);
         }
 
-        private static bool ValidKey(string key) => key.Length is > 0 and <= 64 && key.All(c => c is >= 'a' and <= 'z' or >= '0' and <= '9' or '_' or '.');
+        /// <summary>A plain key, or an engine switch's ("env:BB_NAME").</summary>
+        private static bool ValidKey(string key) => key.Length is > 0 and <= 64 &&
+            (key.StartsWith("env:", StringComparison.Ordinal)
+                ? key.Length > 4 && key[4..].All(c => c is >= 'A' and <= 'Z' or >= '0' and <= '9' or '_')
+                : key.All(c => c is >= 'a' and <= 'z' or >= '0' and <= '9' or '_' or '.'));
 
         private static string Unpack(string code)
         {

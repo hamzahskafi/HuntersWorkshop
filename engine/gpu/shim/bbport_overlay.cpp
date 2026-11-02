@@ -638,32 +638,16 @@ void PictureSection() {
     ImGui::EndDisabled();
 }
 
-// Game effects switched by patches at start (restart required), and the model detail.
+// Game effects switched by patches at start (restart required): what the game has and a switch leaves
+// out. 0.4.4 beta 28 (the tester's call, as the launcher's Graphics page): model detail and screen-space
+// reflections, which go past the game or below it, in an Enhancements section of their own.
 void EffectsSection() {
     auto& s = BbSettings::Get();
     Section("Game effects (restart required)", "Эффекты игры (после перезапуска)");
-    if (const char* label = Item("Model detail", "Детализация моделей")) {
-        const char* lods[] = {BbSettings::MenuText("Highest (-2)", "Максимальная (-2)"),
-                              BbSettings::MenuText("Game default", "Как в игре"),
-                              BbSettings::MenuText("Lower (1)", "Ниже (1)"),
-                              BbSettings::MenuText("Lowest (2)", "Минимальная (2)")};
-        static constexpr int lod_values[] = {-2, 0, 1, 2};
-        int lod_index = 1;
-        for (int i = 0; i < 4; ++i) {
-            if (lod_values[i] == s.model_lod) lod_index = i;
-        }
-        if (ImGui::BeginCombo(label, lods[lod_index])) {
-            for (int i = 0; i < 4; ++i) {
-                if (ImGui::Selectable(lods[i], i == lod_index)) {
-                    Store(s.model_lod, lod_values[i], true);
-                }
-            }
-            ImGui::EndCombo();
-        }
-    }
     for (int e = 0; e < BbSettings::EffectCount; ++e) {
         // 0.4.4 beta 27b: the game's own anti-aliasing is in Upscaling › Anti-aliasing.
-        if (e == BbSettings::EffectGameAa) {
+        // 0.4.4 beta 28: screen-space reflections are an enhancement (below).
+        if (e == BbSettings::EffectGameAa || std::strcmp(BbSettings::Effects[e].key, "effect_ssr") == 0) {
             continue;
         }
         const auto& effect = BbSettings::Effects[e];
@@ -688,6 +672,36 @@ void EffectsSection() {
                 "в dvdroot_ps4/font из мода Nexus #253. Правый touchpad: Backspace."));
         }
     }
+    Section("Enhancements (restart required)", "Улучшения (после перезапуска)");
+    if (const char* label = Item("Model detail", "Детализация моделей")) {
+        // Lowest first, as the launcher's list (0.4.4 beta 28).
+        const char* lods[] = {BbSettings::MenuText("Lowest (2)", "Минимальная (2)"),
+                              BbSettings::MenuText("Lower (1)", "Ниже (1)"),
+                              BbSettings::MenuText("Game default", "Как в игре"),
+                              BbSettings::MenuText("Highest (-2)", "Максимальная (-2)")};
+        static constexpr int lod_values[] = {2, 1, 0, -2};
+        int lod_index = 2;
+        for (int i = 0; i < 4; ++i) {
+            if (lod_values[i] == s.model_lod) lod_index = i;
+        }
+        if (ImGui::BeginCombo(label, lods[lod_index])) {
+            for (int i = 0; i < 4; ++i) {
+                if (ImGui::Selectable(lods[i], i == lod_index)) {
+                    Store(s.model_lod, lod_values[i], true);
+                }
+            }
+            ImGui::EndCombo();
+        }
+    }
+    for (int e = 0; e < BbSettings::EffectCount; ++e) {
+        const auto& effect = BbSettings::Effects[e];
+        if (std::strcmp(effect.key, "effect_ssr") != 0) {
+            continue;
+        }
+        if (const char* label = Item(effect.label, effect.label_ru)) {
+            Checkbox(label, s.effects[e]);
+        }
+    }
 }
 
 // 0.4.4 beta 27c: the upscaler's quality (Auto first: by the output's height, BbSettings::AutoPreset)
@@ -709,7 +723,7 @@ void QualityRows() {
         }
     };
     const int saved = std::clamp(s.preset.load(), 0, BbSettings::PresetCount - 1);
-    if (const char* label = Item("Quality", "Качество")) {
+    if (const char* label = Item("Upscaling quality", "Качество апскейлинга")) {
         static constexpr int order[] = {BbSettings::PresetAuto,   BbSettings::NativeAA,    BbSettings::Quality,
                                         BbSettings::Balanced,     BbSettings::Performance, BbSettings::UltraPerformance,
                                         BbSettings::PresetCustom};
@@ -1031,7 +1045,7 @@ void UpscalerSection() {
         Hint(hint);
     }
     ImGui::Indent();
-    if (const char* label = Item("Sharpness")) {
+    if (const char* label = Item("Sharpening strength", "Сила резкости")) {
         ImGui::BeginDisabled(!s.sharpen);
         Slider(label, s.sharpness, 0.0f, 2.0f);
         ImGui::EndDisabled();

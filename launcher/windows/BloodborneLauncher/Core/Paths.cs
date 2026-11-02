@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using BloodborneLauncher.Build;
 
 namespace BloodborneLauncher.Core
@@ -6,8 +6,8 @@ namespace BloodborneLauncher.Core
     /// <summary>
     /// Where things live. The package folder (PortDir) holds the launcher, Bloodborne.exe and the
     /// player's files - config.ini, mods.json, patches.json, user, mods, logs (its data folder,
-    /// BB_DATA_DIR) - and the engine in engine\: out\bb-probe.exe, scripts\run_windows.py and a
-    /// bundled Python. Older packages had the engine at the top (EngineDirOf handles both).
+    /// BB_DATA_DIR) - and the engine in engine\: out\bb-start.exe, which starts out\bb-probe.exe.
+    /// Older packages had the engine at the top (EngineDirOf handles both).
     /// Launcher settings are per-user, in %APPDATA%\Hunters Workshop\settings.json.
     /// </summary>
     public static class Paths

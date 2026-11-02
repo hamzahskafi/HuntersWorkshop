@@ -300,8 +300,8 @@ namespace BloodborneLauncher.Views
         private void Refresh()
         {
             SetHint(_portHint, Paths.IsPortDir(Paths.PortDir)
-                ? Paths.PortDir + (Paths.DetectPortDir() == Paths.PortDir ? L.T("  ·  the package this launcher is in") : "") + L.T("\nThe engine that runs your game: out\\bb-probe.exe, its scripts and Python. Your game files stay where they are")
-                : L.T("Not found. It is normally the folder this launcher is in (with bin\\bb-probe.exe and run.py)"));
+                ? Paths.PortDir + (Paths.DetectPortDir() == Paths.PortDir ? L.T("  ·  the package this launcher is in") : "") + L.T("\nThe engine that runs your game: engine\\out\\bb-start.exe. Your game files stay where they are")
+                : L.T("Not found. It is normally the folder this launcher is in"));
             SetHint(_buildHint, BuildStatus());
         }
 
@@ -607,11 +607,11 @@ namespace BloodborneLauncher.Views
 
         private void ChoosePort()
         {
-            var path = PickFolder(L.T("Engine folder (with run.py and bin\\bb-probe.exe)"), Paths.PortDir);
+            var path = PickFolder(L.T("Engine folder (with engine\\out\\bb-start.exe)"), Paths.PortDir);
             if (path == null) return;
             if (!Paths.IsPortDir(path))
             {
-                System.Windows.MessageBox.Show(Application.Current.MainWindow!, L.T("That folder has no run.py with Bloodborne.exe or bin\\bb-probe.exe."),
+                System.Windows.MessageBox.Show(Application.Current.MainWindow!, L.T("That folder has no engine\\out\\bb-start.exe."),
                     L.T("Engine folder"), MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }

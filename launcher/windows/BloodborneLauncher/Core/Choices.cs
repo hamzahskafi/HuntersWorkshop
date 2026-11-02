@@ -191,9 +191,9 @@
                 : (1920, 1080);
         }
 
-        // Chromatic aberration, motion blur and the game's own anti-aliasing start off: the picture is
-        // clearer without them, and the upscalers anti-alias (players' advice). Depth of field on and the
-        // intros skipped (0.4.4).
+        // Chromatic aberration and motion blur start off: the picture is clearer without them (players'
+        // advice). The game's own anti-aliasing is on (0.4.4 beta 28; the upscalers leave it out). Depth of
+        // field on and the intros skipped (0.4.4).
         public static readonly Effect[] Effects =
         {
             new("effect_chromatic_aberration", L.T("Chromatic aberration"), false,
@@ -266,7 +266,7 @@
             new(L.T("Uncapped"), "uncap", L.T("No limit: as fast as your PC can go, up to 480 FPS. Above 240 FPS the game is untested, and the old community uncapped patch froze in boss fights at such rates. For a high frame rate we recommend 240")),
         };
 
-        /// <summary>The DLSS model (BB_DLSS_PRESET): NVIDIA's render presets. The CNN presets E and F are
+        /// <summary>The DLSS model (config.ini's dlss_preset): NVIDIA's render presets. The CNN presets E and F are
         /// deprecated by NVIDIA (DLSS 310.6.0) and not offered from 0.4.4 beta 25b; a saved one reads as
         /// Auto (the engine's settings).</summary>
         public static readonly Choice[] DlssModels =

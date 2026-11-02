@@ -24,6 +24,7 @@ namespace BloodborneLauncher.Views
         private readonly List<(string Key, string Title)> _tracked = new();
         private readonly List<EngineSwitch> _switches = new();
         private readonly TextBlock _changedHint;
+        private SettingRow? _vblankRow;
 
         public EnginePage()
         {
@@ -59,6 +60,8 @@ namespace BloodborneLauncher.Views
             Tracked(SymbolRegular.Desktop24, L.T("Fixed-refresh frame lock"),
                 L.T("Only for monitors without G-Sync or FreeSync (VRR). Each frame is shown right after one of the monitor's refreshes when the FPS limit divides its refresh rate (60 FPS on 60, 120 or 240 Hz). Needs Precise frame pacing. With G-Sync or FreeSync it stutters: leave it off. Off by default"),
                 "exp_vblank_lock", exp);
+            // It needs Precise frame pacing: greyed while that is off, its own value kept (0.4.4 beta 28).
+            _vblankRow = LastRow;
             Tracked(SymbolRegular.Shield24, L.T("Particle work safety cap"),
                 L.T("Checks the size of the game's GPU particle work before the graphics card runs it, and caps it to what the card supports. Only if the game crashes with \"device lost\" in effect-heavy scenes. It costs smoothness in busy scenes. Off by default"),
                 "exp_particle_cap", exp, line: L.T("For \"device lost\" crashes in effect-heavy scenes"));
@@ -209,20 +212,24 @@ namespace BloodborneLauncher.Views
             _ => SymbolRegular.Bug24,
         };
 
-        /// <summary>The summary row: what on this page is not at its default, and what Extra variables override.</summary>
+        /// <summary>
+        /// The summary row: what on this page is not at its default, and every variable of this page's
+        /// switches and features that Extra variables sets, at its default or not (0.4.4 beta 28: one
+        /// set to a switch's default, or a feature's variable, went unmentioned).
+        /// </summary>
         private void ShowChanged()
         {
+            if (_vblankRow != null) _vblankRow.IsEnabled = S.Bool("exp_frame_pacing");
             if (_changedHint == null) return; // rows built before the summary row exists
             var changed = Changed().ToList();
-            var extra = GameEnvironment.ExtraVariables(S).Select(e => e.Name).ToHashSet(StringComparer.Ordinal);
-            var overridden = EngineSwitches.Changed(S).Where(c => _switches.Any(x => x.Env == c.Name) && extra.Contains(c.Name))
-                .Select(c => c.Name).ToList();
-            var text = changed.Count == 0
-                ? L.T("None: the engine runs with its own defaults")
-                : L.F($"{changed.Count} changed: ") + string.Join(", ", changed);
-            if (overridden.Count > 0)
-                text += L.F($"\nExtra variables also set {string.Join(", ", overridden)}: their value is used");
-            SetHint(_changedHint, text);
+            var ours = _switches.Select(x => x.Env)
+                .Concat(_tracked.Select(t => GameEnvironment.FeatureVariables.GetValueOrDefault(t.Key)).OfType<string>())
+                .ToHashSet(StringComparer.Ordinal);
+            var overridden = GameEnvironment.ExtraVariables(S).Select(e => e.Name).Where(ours.Contains).Distinct().ToList();
+            var parts = new List<string>();
+            if (changed.Count > 0) parts.Add(L.F($"{changed.Count} changed: ") + string.Join(", ", changed));
+            if (overridden.Count > 0) parts.Add(L.F($"Extra variables set {string.Join(", ", overridden)}: their value is used"));
+            SetHint(_changedHint, parts.Count == 0 ? L.T("None: the engine runs with its own defaults") : string.Join("\n", parts));
         }
 
         /// <summary>This page's rows not at their default: launcher settings by title, switches with the variable passed.</summary>
