@@ -1,73 +1,32 @@
 # Launcher text review
 
-Windows launcher, every row on every page (207), as of 0.4.4 beta 28 (2026-11-02). Third draft, for the
+Windows launcher, every row on every page (207), as of 0.4.4 beta 28 (2026-11-02). Fourth draft, for the
 tester's review. Nothing has been applied. Each row shows **everything it says today**, taken from the code
 (title, the line Classic shows under the title, the full tooltip, list choices with their notes, the
-default), next to the **proposed** text. Beta 28's text step checks it once more against the launcher as it
-is then, before any text changes.
+default), next to the **proposal**. Beta 28's text step makes it again from the launcher as it is then.
 
-## Style guide
+## How it is written
 
-The launcher is a Fluent (Windows 11 style) app, so its texts follow Windows 11 Settings. Every row is
-written to these rules; a change later is checked against them too.
+Hunter's Workshop is a port, and its texts read like the port's own notes: plain, short, specific. This
+draft keeps that voice and fixes what is wrong or cut, rather than restyling everything.
 
-### The line under the title
-
-One clause, sentence case, no full stop, 60 characters or fewer, no semicolons or colons. It starts with an
-instruction verb chosen by the kind of row:
-
-| Row | Pattern | Example |
-|---|---|---|
-| Switch | What turning it on does | Darken the edges of the screen |
-| List | Choose … | Choose how finished frames reach the screen |
-| Slider | Adjust … | Adjust the glow around bright lights |
-| Button or card | What the action does | Add the game to your Steam library |
-| Folder, file, status | No line; the row shows the path or the state | |
-
-### The tooltip
-
-Complete sentences, in this order: what it does, when to change it, what it costs. Advice is never dropped
-("Recommended", "turn it off if…", "only if…"). The row code adds the last line itself: **Default: …**, with
-**(recommended)** where the default is the advice for everyone. Nothing says when a change applies: the
-launcher's status bar already says "game settings apply at its next start" while the game runs, and every
-launcher setting takes effect at the next start (the engine reads its settings once, when the game starts).
-
-### Lists
-
-Off or None first, then less to more. The recommended choice carries **(recommended)** in the list itself;
-"(default)" in labels goes. A choice's note is one short sentence.
-
-### Words
-
-One word for each thing, everywhere:
-
-| Use | Not |
-|---|---|
-| graphics card (player pages); GPU on Engine switches and Log | GPU / graphics card mixed |
-| video memory | VRAM |
-| controller | gamepad, pad |
-| the in-game menu (Hunter's Workshop's, Insert or L3 + R3) | the port's settings menu, the Insert menu |
-| the game's menus (Bloodborne's own) | the game menu |
-| the engine (Hunter's Workshop's code), the game (Bloodborne) | the port |
-
-### One name per setting
-
-A setting the in-game menu also has gets the same name in both places (today: "Sharpness" and "Sharpening
-strength", "Camera FOV scale" and "Field of view", "Background colour" and "FPS counter background", "Live
-resolution changes" and "Live resolution change", "Quality"). Where the in-game name changes, its 8 menu
-tables are translated again.
-
-### Marks (interface changes, for your decision)
-
-- **In-game menu:** a small icon on every setting the in-game menu also has (about 70), instead of
-  "Also in game: Insert or L3 + R3" written into a few texts.
-- **Performance:** on Graphics' rows, Low / Medium / High. Only where measured or stated by the patch's
-  author today; the rest are marked "to measure" and get measured before the labels ship (frame statistics
-  and GPU time in the log, at a fixed spot).
+- **Today's texts stay** wherever they are right, with their translations (110 descriptions are translated
+  in all 13 languages). Tooltips change in 26 rows: 7 corrected (wrong or out of date), 19 added where
+  today says nothing useful (mostly rows with no tooltip at all, such as the picture sliders).
+- **The line under the title** is new where Classic cuts today's text mid-sentence or it says too little
+  (a variable's name alone, "Relaxed is the default"). A complete phrase of 60 characters or fewer, saying
+  what the setting is or does ("Frees VRAM held by textures the GPU drew"). No instructions ("Choose…",
+  "Adjust…"), no full stop. Folders, files and the FPS counter's items keep no line.
+- **Specifics stay:** VRAM, FSR and DLSS names, `BB_` names on Engine switches and Log, costs ("about 10%
+  FPS"), advice ("Recommended: on", "turn it off if…"), and "Applied when the game starts" where it is said
+  today.
+- **The default:** the row code adds "Default: …" at the end of a tooltip that doesn't say it already.
+- **Lists:** Off or None first. Labels and notes as today.
+- **Words:** the in-game overlay menu (Insert or L3 + R3), not "the port's settings menu".
+- **Renames** only where the name misleads: Quality becomes Upscaling quality; Skip the game files check
+  becomes Allow other game versions. In the in-game menu, Quality and Sharpness take the launcher's names.
 
 ## Reading the tables
 
-- **Now** is the launcher today, word for word. "—" means it shows nothing there.
-- **Proposed**: "Same" keeps today's. *[Default: …]* is the line the row code adds.
-- A heading "New title (now: Old title)" is a rename.
-
+**Today** is the launcher word for word ("—": nothing there). **Same** keeps today's text. In the tooltip
+column, *Default: …* is the line the row code adds.

@@ -415,11 +415,12 @@ From the audit of 27c (four read-only audits, re-checked) and the tester's calls
   shadNet online path and bbnet's NP modules the game never imports (checked first); the GPU-path tracers
   that overlap; `docs/archive/`.
 - **The launcher's texts, last before the version step** (the tester, 2026-11-02): once every part above
-  and every open task is done. Every row gets a line under its title (one complete phrase of 60
-  characters or fewer saying what it does; Classic cuts today's descriptions at 64 characters, 70 of
-  them mid-sentence) and a tooltip (the details, the cost, when it applies, "Default: on/off." at the
-  end, any `BB_` name last); one phrase for when a change applies; Off or None first in every list; plain
-  words, no Lantern version references. Row by row: [launcher-text-review.md](launcher-text-review.md),
+  and every open task is done. In the port's own voice (the tester: not a production game's): today's
+  texts stay where they are right, with their translations; a line under the title (a complete phrase of
+  60 characters or fewer) where Classic cuts today's description mid-sentence or it says too little; a
+  tooltip changed only where it is wrong or missing; "Default: …" added where the text doesn't say it;
+  Off or None first in every list; no Lantern version references. Row by row:
+  [launcher-text-review.md](launcher-text-review.md),
   with its style guide, every row's text today and the proposal beside it; made from the code by
   `launcher/windows/tests/text_review` (extract.py, render.py, the proposals in proposals.py), so the step
   makes it again from the launcher as it is then, checks every fact against the engine, and the tester
