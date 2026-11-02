@@ -22,7 +22,8 @@ namespace BloodborneLauncher.Views
             Body.Children.Add(Text(L.T("1. Turn on Play online. 2. Connect your Hunter's Dream account below (with Discord, or without it). ") +
                 L.T("3. In the game, choose online at the title screen: The Hunter's Dream's welcome message means you are online. ") +
                 L.T("Everyone needs game version 1.09."), "Faint"));
-            // One server now: the bbbridge pool and custom servers are gone (scripts/online.py defaults).
+            // One server: The Hunter's Dream (0.4.4 beta 28: the engine's shadNet path, custom servers with an
+            // account password, went). Their keys are cleared from config.ini.
             foreach (var key in new[] { "online_host", "online_port", "online_webapi", "online_game_api", "online_thd_account" })
                 if (Ini.Get(key).Length > 0) Ini.Set(key, "");
             // With a Hunter's Dream account: its own co-op (the engine's thd backend, with bbhost players).

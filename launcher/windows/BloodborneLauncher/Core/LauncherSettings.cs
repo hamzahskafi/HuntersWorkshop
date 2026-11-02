@@ -41,7 +41,6 @@ namespace BloodborneLauncher.Core
             ["gpu_profile"] = false,
             ["extra_env"] = "",
             ["dlc_enabled"] = true,
-            ["online_password"] = "",
             // This launcher.
             ["port_dir"] = "",
             ["launch_method"] = "windows",
@@ -152,13 +151,6 @@ namespace BloodborneLauncher.Core
                         _data["frame_stats"] = false;
                         _data["exp_sharp_ui"] = false;
                     }
-                    // Older launchers kept the shadNet password in plain text: encrypted now, and
-                    // the file rewritten without it.
-                    if (Str("online_password") is { Length: > 0 } plain && !Secret.IsProtected(plain))
-                    {
-                        OnlinePassword = plain;
-                        Save();
-                    }
                 }
             }
             catch
@@ -185,14 +177,6 @@ namespace BloodborneLauncher.Core
             Directory.CreateDirectory(Paths.ConfigDir);
             File.WriteAllText(Paths.ConfigFile,
                 _data.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
-        }
-
-        /// <summary>The shadNet password, kept encrypted for this Windows user (Core/Secret.cs).</summary>
-        public string OnlinePassword
-        {
-            get => Secret.Unprotect(Str("online_password"));
-            // Should Windows refuse to encrypt it, it stays as typed rather than being lost.
-            set => Set("online_password", Secret.Protect(value) is { Length: > 0 } encrypted ? encrypted : value);
         }
 
         /// <summary>The Hunter's Dream account token (its device link), encrypted like the password.</summary>
