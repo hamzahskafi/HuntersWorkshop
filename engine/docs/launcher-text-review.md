@@ -14,7 +14,7 @@ Each row has a title and one description. The description does two jobs:
 
 ## The main problem
 
-About 185 rows. In Classic:
+About 150 rows, plus rows built from lists (effects, FPS counter items, engine switches). In Classic:
 
 - **70 lines are cut off mid-sentence**, for example "Before every start and every…", "Checks The Hunter's Dream…" and "Off keeps the game's own look…".
 - **About 20 more show only a first sentence that doesn't say what the setting does**, for example "Needs Frame rate corrections.", "Off: the game stays offline" and "Relaxed is the default".
@@ -22,8 +22,10 @@ About 185 rows. In Classic:
 
 **Proposal: every row gets two texts.**
 
-1. **A line under the title:** one complete phrase of 60 characters or fewer, saying what the setting does. No defaults, no conditions, no variable names.
-2. **A tooltip:** the details, when to change it, its cost, its default, and when it applies.
+1. **A line under the title:** one complete phrase of 60 characters or fewer, saying what the setting does (for a performance switch, what it gets you). No defaults, no conditions, no variable names.
+2. **A tooltip:** the details, when to change it, its cost, its default, and when it applies. **Where today's description is still right, it stays the tooltip word for word.**
+
+Why the tooltip keeps today's text: 110 of the 147 descriptions are translated in all 13 languages. A reworded text is a new translation key, so rewriting them would put about 110 rows back to English in 12 languages. Keeping them means the step adds only the new short lines (to translate into all 13 languages), and rewrites a description only where it is wrong or misleading.
 
 Classic shows the line and the tooltip on hover. Modern shows the line in the (i) above the tooltip. Rows that need no tooltip don't get one.
 
@@ -32,16 +34,18 @@ Classic shows the line and the tooltip on hover. Modern shows the line in the (i
 | Rule | Today |
 |---|---|
 | The line says what it does, not "Off: …" or "Needs …" | 20 rows start with a condition |
-| The default, once, at the end of the tooltip, in one form: "Default: on." | 8 rows say "On by default", 3 "Off by default" (some at the start), 1 "Recommended: on", others nothing |
-| When it applies, one phrase: "Applies at the next game start." | 6 wordings today: "Applied when the game starts" (7), "on the next launch" (3), "at the next start", "After a restart", "after a restart", "at its next start" (2) |
+| The default, once, at the end of the tooltip, in one form: "Default: on." Added by the row code from the setting's known default (one translated template), on every page | 8 rows say "On by default", 3 "Off by default" (some at the start), 1 "Recommended: on", others nothing |
+| When it applies, one phrase: "Applies at the next game start." | 5 wordings today: "Applied when the game starts" (7), "on the next launch" (3), "at the next start", "after a restart" (2), "at its next start" (2) |
 | Variable names (BB_…) at the end of the tooltip, never first | The Log page starts 7 lines with them ("BB_GPU_PROFILE: the GPU's…") |
 | Plain words in the line; technical terms only in the tooltip | "port", "raw counts", "288 MiB", "upload heap", "constant cache" |
 | No Lantern or old version references | "the way 0.9.33 did", "crashes before beta 8" |
-| Off or None first, then less to more | Done for 5 lists. Two left: **Texture filtering** (16x … 2x, Game's own) becomes Game's own, 2x, 4x, 8x, 16x. **Model detail** (As in the game, Highest, Lower, Lowest) becomes Lowest, Lower, As in the game, Highest |
+| Off or None first, then less to more | Done for 5 lists. Four left: **V-Sync** (Off is last today) becomes Off, On (latest frame), On (every frame), Adaptive. **Area prefetch** (Auto, On, Off) becomes Off, Auto, On, as Draw pipe. **Texture filtering** (16x … 2x, Game's own) becomes Game's own, 2x, 4x, 8x, 16x. **Model detail** (As in the game, Highest, Lower, Lowest) becomes Lowest, Lower, As in the game, Highest |
 
 ## Page by page
 
 "—" means no text today. Rows not listed are fine as they are.
+
+**Tooltip column:** where it rewords today's description, today's description stays instead, to keep its translations. New tooltips are only for rows that have none today, rows whose text is wrong (marked), and the Log page, whose texts are translated in zh-CN only, so reworking them is cheap.
 
 ### Play
 
@@ -61,16 +65,16 @@ Fine: Game folder, DLC folder, Game language, Saves folder.
 | Row | Under the title now | Proposed line | Tooltip |
 |---|---|---|---|
 | Custom resolution | Your own output size, any shape (5:4, 16:10, 32:9...)… | Any output size and shape | "5:4, 16:10, 32:9…: the camera and UI follow it with Widescreen on." |
-| Frame rate | Every rate above 30 runs on Kyo's 60 FPS++, the engine setting… | 30 is the PS4's; higher rates use Kyo's 60 FPS++ | Keep the rest |
+| Frame rate | Every rate above 30 runs on Kyo's 60 FPS++, the engine setting… | The game's frame-rate cap | Today's text |
 | Monitor | The game opens here from the start, including fullscreen and… | The monitor the game opens on | "Fullscreen and HDR too. If it's disconnected, the Windows primary monitor is used." |
 | Widescreen | Outputs that are not 16:9 (21:9, 32:9, 16:10, 5:4) with the… | Correct view and UI on screens that aren't 16:9 | "21:9, 32:9, 16:10, 5:4: a wider field of view, the UI kept in shape." |
-| HDR source | Native: highlights as bright as they are in the game's scene. | Where HDR's bright highlights come from | Both choices explained (today's text) |
-| UI brightness | Native source only: how bright the HUD, menus and subtitles are… | How bright the HUD, menus and subtitles are | "Against paper white. Native source only." (The row already greys out otherwise.) |
+| HDR source | Native: highlights as bright as they are in the game's scene. | The scene's own highlights, or the SDR picture expanded | Today's text |
+| UI brightness | Native source only: how bright the HUD, menus and subtitles are… | How bright the HUD, menus and subtitles are | Today's text (the row is hidden unless the source is Native) |
 | UI colour | Native source only: Vivid shows the HUD and menus with the… | Vivid or exact (sRGB) colours for the HUD and menus | Today's text |
-| Paper white | How bright the game's white is, in nits. Range: 10–500 | How bright white is, in nits | — (the slider shows the range) |
+| Paper white | How bright the game's white is, in nits. Range: 10–500 | How bright the game's white is, in nits | Today's text |
 | Peak brightness from the display | The peak Windows reports for the display the game is on (the… | Uses the peak brightness Windows reports | "Set by the Windows HDR Calibration app once it has run. Off: the value below." |
 | Peak brightness | Your display's peak brightness, in nits, when it is not taken… | Your display's peak brightness, in nits | "Used when it isn't taken from the display." |
-| Highlight boost | Off keeps the game's own look… | Brighter lamps, fire and sky | "Off keeps the game's own look." |
+| Highlight boost | Off keeps the game's own look… | Brighter lamps, fire and sky | Today's text, then "Default: Low." |
 | Picture tuning (switch) | Applies the settings below, live… | Your own brightness, colour, fog and bloom, live | "Off shows the game's own picture and keeps your values. Also in the game's System menu and the Insert menu." |
 | Fog | — | How thick the fog is | "1 is the game's own." |
 | Bloom | — | The glow around bright lights | "1 is the game's own." |
@@ -85,18 +89,18 @@ Fine: Output resolution, V-Sync, Window mode, Live resolution change, HDR output
 | Row | Under the title now | Proposed line | Tooltip |
 |---|---|---|---|
 | Best settings for this PC | Output resolution, frame rate, upscaler and quality for this… | Recommended settings for this PC | Keep the hardware summary |
-| Quality | How far below the output the game renders… | Lower is faster and softer | Keep the Auto rule |
+| Quality | How far below the output the game renders… | How far below the output the game renders | Today's text |
 | Model detail | — | How far away models keep their full detail | "Highest costs GPU time; Lower and Lowest are for weaker GPUs." Reorder the list |
 | Texture filtering | Anisotropic filtering forced on the game's textures… | Sharper ground and walls seen at an angle | Keep the rest. Reorder the list |
-| Shadows from dynamic lights | — | Shadows from lamps, torches and fire | "Off is faster." |
+| Shadows from dynamic lights | — | Shadows from lamps, torches and fire | "One of the heaviest effects: off gives a large FPS gain." (The patch's note: a ton of heavy draw calls.) |
 | Ambient occlusion (SSAO) | — | Soft shading in corners and creases | — |
-| Screen-space reflections | Not in the original game | Reflections on wet and shiny surfaces | "Not in the original game." |
-| Depth of field | — | Blurs the distance and cutscene backgrounds | — |
-| Motion blur | — (a status line appears) | Blur when the camera turns fast | — |
+| Screen-space reflections | Not in the original game | Reflections on wet and shiny surfaces | "Not in the original game. Costs GPU time." |
+| Depth of field | — | Blurs what is out of focus | — |
+| Motion blur | — (a status line appears) | Blur when the camera turns fast | "Costs GPU time." |
 | Chromatic aberration | — | Colour fringes toward the screen's edges | — |
 | No motion blur smear with upscalers | With an upscaler at an output other than 1920x1080 the game's… | Rename: **Skip motion blur with upscalers**. Line: "Upscalers smear it outside 1080p" | Keep the rest |
 
-The effect lines (shadows, reflections, depth of field and so on) describe how each effect looks. They are worth a quick check in game before they ship.
+The effect lines describe how each effect looks; the costs come from the patches' own notes. Worth a quick look in game before they ship.
 
 Fine: Anti-aliasing, Upscaler, Render resolution, FSR version, DLSS model, Sharpening (RCAS), Sharpening strength, Character motion vectors, Texture mip bias.
 
@@ -120,7 +124,7 @@ Fine: Anti-aliasing, Upscaler, Render resolution, FSR version, DLSS model, Sharp
 | Follow camera | Original keeps the game's camera distance, angle and follow… | How the camera follows you at 60 FPS and above | The two choices' notes cover it |
 | Debug menu | (long) | The game's developer menu (Left touchpad / Tab) | "Needs the adhoc folder from Nexus mod #253…" |
 | Hunter's Dream mirror | The Dream's mirror opens the appearance editor (the game's… | The Dream's mirror opens the appearance editor | "The game's unused Put on Disguise." |
-| Rebirth at the altar | With the Yharnam Stone, the Altar of Despair resets your level… | Reset your level at the Altar of Despair | "With the Yharnam Stone." |
+| Rebirth at the altar | With the Yharnam Stone, the Altar of Despair resets your level… | Reset your level and attributes at the Altar of Despair | Today's text |
 
 Fine: Field of view, Distance, Height, Skip intro videos, Free camera.
 
@@ -128,11 +132,11 @@ Fine: Field of view, Distance, Height, Skip intro videos, Free camera.
 
 | Row | Under the title now | Proposed line | Tooltip |
 |---|---|---|---|
-| PC controls | The keyboard and mouse layout below… | The keyboard and mouse layout below | "Off: the gamepad-style keys." |
+| PC controls | The keyboard and mouse layout below… | Use the keyboard and mouse layout below | Today's text |
 | Mouse camera | The mouse turns the game's own camera by raw counts, at any… | The mouse turns the camera directly | "The same at any frame rate." |
 | Mouse in menus | The mouse becomes a pointer in the game's menus… | A mouse pointer in the game's menus | "Hover and click items." |
 | Move and look in menus | With a menu open in the world, the movement and look keys stay… | Keep moving and looking with a menu open | Keep the rest |
-| Mouse sensitivity | 5 is the default; below 0 for high-DPI mice (each step 20%… | How fast the mouse turns the camera | "Default: 5. Each step is 20%; below 0 for high-DPI mice." |
+| Mouse sensitivity | 5 is the default; below 0 for high-DPI mice (each step 20%… | How fast the mouse turns the camera | Today's text |
 | Invert horizontal / Invert vertical (mouse) | — | Same names as the gamepad's: **Invert left / right**, **Invert up / down** | — |
 | Invert camera left / right, up / down (gamepad) | The camera stick's horizontal direction | Same: **Invert left / right**, **Invert up / down** | — |
 | Hide mouse cursor | Hidden 2 seconds after the mouse stops moving… | After 2 seconds without moving | "Moving the mouse brings it back." |
@@ -141,7 +145,7 @@ Fine: Field of view, Distance, Height, Skip intro videos, Free camera.
 | Controller icons | The controller's buttons in the game's menus and prompts. | PlayStation or Xbox buttons | Today's text |
 | Save and share | Profiles are small JSON files. | Share a profile as a link or a file | Today's text |
 
-The two button rows read almost the same today; the proposed lines tell them apart.
+The two button rows read almost the same today; the proposed lines tell them apart. Settings search shows each row's page and group ("Controls › Gamepad"), so rows with the same title stay distinguishable.
 
 Fine: Camera auto-rotation, Swap sticks, Stick dead zone, Controller, Profile.
 
@@ -177,7 +181,7 @@ Add "Default: on/off." automatically to every row on this page, as the switch ro
 
 | Row | Under the title now | Proposed line | Tooltip |
 |---|---|---|---|
-| CPU reads of GPU data | Relaxed is the default | When the game sees data the GPU computed | "Relaxed (default): at sync points. Precise: as soon as it's read; slower. Off: never; fastest, some effects may break." (Wording to confirm against the engine.) |
+| CPU reads of GPU data | Relaxed is the default | When the game gets back data the GPU wrote | New (checked in the engine): "Off: never. Relaxed: before the game changes that memory. Precise: before it reads it too; slower." |
 | Sound output | If the sound jitters or crackles, try DirectSound. | WASAPI, or DirectSound if sound crackles | Today's text |
 | Sound threads first | For CPUs with many slower cores (older Xeons and similar)… | Against sound stutter on many-core CPUs | Today's text |
 | Shader compile threads | (cut) | Threads that compile new shaders in the background | |
@@ -191,9 +195,9 @@ Add "Default: on/off." automatically to every row on this page, as the switch ro
 | PS4 floating-point mode | (cut) | Physics and cloth as on the PS4 | |
 | Intel effect crash fix (test) | (cut) | Stops the crash and keeps the effects drawn | |
 | Intel black tonemap fix | (cut) | For a black or very dark picture on Intel CPUs | |
-| Skip the game files check | (cut) | Starts an unsupported game version | |
+| Skip the game files check | (cut) | Starts game files that aren't version 1.09 | |
 
-The two Intel crash fixes (Effect trail crash fix under Experimental, Intel effect crash fix under Game fixes) fight the same crashes. Their names don't say how they differ, and they sit in different groups. Proposal: put them next to each other, with the lines above showing the difference.
+The two Intel crash fixes (Effect trail crash fix under Experimental, Intel effect crash fix under Game fixes) fight the same crashes. Their names don't say how they differ, and they sit in different groups. Proposal: put them next to each other, with the lines above showing the difference. Optional: rename them **Intel crash fix: skip effect trails** and **Intel crash fix: keep effect trails (test)** (a rename costs their titles' translations).
 
 Fine: Graphics card, Two-stage GPU pipeline, Changed switches, Extra variables.
 
@@ -232,7 +236,7 @@ Fine: Launcher language, Layout, Navigation, Theme colour, Background, Picture, 
 
 | Row | Under the title now | Proposed line | Tooltip |
 |---|---|---|---|
-| Play online | Off: the game stays offline | Co-op, invasions and messages | "Through The Hunter's Dream. Off: the game stays offline." |
+| Play online | Off: the game stays offline | Co-op, messages and bloodstains | Today's text |
 | Test the connection | Checks The Hunter's Dream… | Checks the server, co-op and the summon relay | — |
 
 Fine: Hunter's Dream account, Website, Local P2P port, Summon sign timeout.
@@ -274,7 +278,7 @@ Fine: Position, Play a sound, Volume, Try it, Trophy log, Reset trophy progress.
 
 ## What changing this involves
 
-- One pass over about 110 texts. Each becomes a short line plus a tooltip; texts that are already right just split in two.
-- The row code takes the two texts as separate fields instead of cutting one at 64 characters.
-- Translations: zh-CN for every changed text (the other 12 tables translate only part of the launcher today). The key check confirms nothing is missing.
+- About 110 new short lines; today's descriptions stay as tooltips except the few listed as wrong.
+- The row code takes the two texts as separate fields instead of cutting one at 64 characters, and adds "Default: …" from each setting's known default.
+- Translations: every new line in all 13 languages (110 of today's 147 descriptions are translated in all 13, so this keeps every page as translated as it is now). The key check confirms nothing is missing.
 - Both layouts benefit: Classic gets whole lines, Modern's (i) gets a clear first line.
