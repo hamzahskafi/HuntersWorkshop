@@ -168,10 +168,8 @@ int runtime_thread_has_record(void) { return current!=NULL; }
 int runtime_thread_is_loader(void) { return current && !strncmp(current->name,"Core.Res.",9); }
 /* bbport: records are never removed (a dozen threads come with every area load), so a found
  * thread moves to the front: the threads the game asks about (priorities, affinity) are not
- * behind every finished one. BB_THREAD_FRONT=0: the list keeps its order, as before. */
+ * behind every finished one. */
 static GuestThread *find_thread(void *handle) {
-    static int front=-1;
-    if (front<0) { const char *e=getenv("BB_THREAD_FRONT"); front=!(e && e[0]=='0'); }
     GuestThread *found=NULL;
     host_lock(&lock);
     ++thread_lookups;
@@ -180,7 +178,7 @@ static GuestThread *find_thread(void *handle) {
         ++thread_lookup_steps;
         if (t!=handle) continue;
         found=t;
-        if (front && link!=&threads) { *link=t->next; t->next=threads; threads=t; }
+        if (link!=&threads) { *link=t->next; t->next=threads; threads=t; }
         break;
     }
     host_unlock(&lock);

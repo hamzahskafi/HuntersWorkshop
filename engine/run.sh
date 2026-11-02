@@ -225,11 +225,6 @@ if [[ ${MANGOHUD:-0} == 1 ]] && pgrep -x mangoapp > /dev/null 2>&1; then
     unset MANGOHUD
     export DISABLE_MANGOHUD=1
 fi
-# Write tracking with userfaultfd write-protection instead of mprotect (no address-space write lock:
-# a streaming burst re-protected thousands of pages, ~10-20 ms); falls back to mprotect when the
-# kernel lacks it. Off by default for now: the Steam Deck crashed 4 times in 9 minutes with it
-# (2026-10-04, PM4 type 0 = zeroed command buffers, heap corruption); 1 turns it on.
-export BB_UFFD=${BB_UFFD:-0}
 # The command buffers of each submission are copied when the game submits them and decoded from
 # the copy: while an area loads the game reused that memory before the GPU thread got to it
 # ("Unimplemented PM4 type 0" a few seconds after loading a save). 0 decodes guest memory.

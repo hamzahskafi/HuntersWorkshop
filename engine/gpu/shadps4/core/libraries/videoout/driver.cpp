@@ -801,7 +801,7 @@ void VideoOutDriver::Flip(const Request& req) {
                         frames ? double(BbStats::scene_draws.exchange(0)) / frames : 0.0);
             // bbport: where host copies and deferred fences were waited for (by call site, mostly
             // the draw recording thread's tasks), and the page protection changes of the draw
-            // recording thread and of the others (BB_DMA_WAITS, BB_FENCE_ORDER, BB_DEFER_PROTECT).
+            // recording thread and of the others (BB_DMA_WAITS, BB_FENCE_ORDER).
             {
                 const double f = frames ? double(frames) : 1.0;
                 const auto per_frame = [&](std::atomic<u64>& counter) {
@@ -843,18 +843,11 @@ void VideoOutDriver::Flip(const Request& req) {
                 }
                 const double other_calls = per_frame(BbStats::other_protect_calls);
                 const double other_ms = ms_per_frame(BbStats::other_protect_ns);
-                const double deferred_pages = per_frame(BbStats::deferred_protect_pages);
-                const double deferred_calls = per_frame(BbStats::deferred_protect_calls);
-                const double deferred_ms = ms_per_frame(BbStats::deferred_protect_ns);
                 std::printf("Stage B protects: %.1f/frame %.3f ms (uploads %.1f, textures %.1f, "
-                            "other %.1f); other threads %.1f/frame %.3f ms; deferred %.0f "
-                            "pages/frame, applied in %.1f calls/frame %.3f ms (bb:Protect or "
-                            "copies), copies that flushed %.1f/frame, cancelled %.0f pages/frame\n",
+                            "other %.1f); other threads %.1f/frame %.3f ms\n",
                             stage_b_calls, stage_b_ms, kind_calls[BbStats::ProtectUpload],
                             kind_calls[BbStats::ProtectTexture], kind_calls[BbStats::ProtectOther],
-                            other_calls, other_ms, deferred_pages, deferred_calls, deferred_ms,
-                            per_frame(BbStats::copy_flushes),
-                            per_frame(BbStats::deferred_cancelled_pages));
+                            other_calls, other_ms);
             }
             // bbport (docs/pipeline_compiles.md): what draws of pipelines still compiling did.
             {
@@ -1157,15 +1150,8 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
     // A flip waits for its slot, a frame period after the one before: on time (within a quarter of a period)
     // the slots keep their cadence, so a sleep's overshoot never adds up. After a late flip they start again from
     // it (after bbport 0.7, deadinside28): a late frame is not followed by an early one (at 30 FPS 48 ms then
-    // 18 ms, a saw in the frame times). BB_PACE_CATCHUP=1: as before, the slots may lag one behind and catch up.
-    static const bool catch_up = [] {
-        const char* env = std::getenv("BB_PACE_CATCHUP");
-        return env && env[0] == '1';
-    }();
+    // 18 ms, a saw in the frame times).
     const auto next_slot = [&](std::chrono::steady_clock::time_point now) {
-        if (catch_up) {
-            return std::max(next_flip + frame_period, now - frame_period);
-        }
         return now - next_flip <= frame_period / 4 ? next_flip + frame_period : now + frame_period;
     };
     std::printf("VideoOut: vblank %u Hz, frame limit %u FPS, precise pacing %s\n",

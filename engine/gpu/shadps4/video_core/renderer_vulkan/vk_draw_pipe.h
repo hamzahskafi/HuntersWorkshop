@@ -125,7 +125,7 @@ public:
     }
 
     /// bbport: whether stage A's waits sleep once they outlast a spin (BB_DRAIN_SLEEP=0: they
-    /// spin and yield to the end, as before), and how long they spin first (BB_DRAIN_SPIN_US).
+    /// spin and yield to the end, as before), and how long they spin first (WaitUntil).
     static bool SleepEnabled() {
         static const bool enabled = [] {
             const char* env = std::getenv("BB_DRAIN_SLEEP");
@@ -267,7 +267,7 @@ private:
     }
 
     /// Stage A: waits until `done()`. bbport: spins (most waits end within microseconds),
-    /// yields for up to BB_DRAIN_SPIN_US (500), then sleeps until stage B has run packet
+    /// yields for up to 500 us (BB_SPIN_US lowers it), then sleeps until stage B has run packet
     /// `target()` (it wakes this thread, Run). A long packet (an image created or uploaded with
     /// memory short, a pipeline compile) kept this thread in SwitchToThread for all of it: ~200
     /// ms of kernel time in a 330 ms stall, a core taken from the threads doing the work.
@@ -279,10 +279,7 @@ private:
             }
             __builtin_ia32_pause();
         }
-        static const auto spin_time = std::chrono::microseconds([] {
-            const char* env = std::getenv("BB_DRAIN_SPIN_US");
-            return env && env[0] ? std::max(0, std::atoi(env)) : 500;
-        }());
+        static const auto spin_time = std::chrono::microseconds(BbThreads::SpinLimitUs(500));
         const auto sleep_after = std::chrono::steady_clock::now() + spin_time;
         while (!done()) {
             if (!SleepEnabled() || std::chrono::steady_clock::now() < sleep_after) {
@@ -329,13 +326,9 @@ private:
             u64 available = published.load(std::memory_order_acquire);
             if (available == at) {
                 // With few hardware threads (Steam Deck: 8) a long spin takes time from the
-                // game's own threads. BB_PIPE_SPIN_US overrides.
-                static const auto spin_time = std::chrono::microseconds([] {
-                    if (const char* env = std::getenv("BB_PIPE_SPIN_US")) {
-                        return std::max(0, std::atoi(env));
-                    }
-                    return int(BbThreads::CapSpinUs(BbThreads::Available() >= 12 ? 200 : 50));
-                }());
+                // game's own threads. BB_SPIN_US lowers it.
+                static const auto spin_time = std::chrono::microseconds(
+                    BbThreads::CapSpinUs(BbThreads::Available() >= 12 ? 200 : 50));
                 const auto spin_until = std::chrono::steady_clock::now() + spin_time;
                 for (u32 spins = 1; available == at; ++spins) {
                     if (stop.stop_requested()) {

@@ -516,14 +516,10 @@ void TextureCache::DumpImagesAt(VAddr address, const char* dir) {
 /// bbport: a hash of guest memory for the refresh checks. From 1 MiB on, 256 KiB chunks are
 /// hashed on the copy threads and then their hashes: a 1080p R32F image the game refreshes every
 /// frame (its own compute copy of the depth buffer) cost ~1 ms of hashing on the draw recording
-/// thread. Only compared with hashes made here. BB_PARALLEL_IMAGE_HASH=0: one XXH3 as before.
+/// thread. Only compared with hashes made here.
 static u64 GuestMemoryHash(const void* data, u64 size) {
-    static const bool parallel = [] {
-        const char* env = std::getenv("BB_PARALLEL_IMAGE_HASH");
-        return !(env && env[0] == '0');
-    }();
     constexpr u64 Chunk = 256 * 1024;
-    if (!parallel || size < 4 * Chunk || !BbCopy::Enabled()) {
+    if (size < 4 * Chunk || !BbCopy::Enabled()) {
         return XXH3_64bits(data, size);
     }
     const auto* bytes = static_cast<const u8*>(data);
@@ -534,15 +530,6 @@ static u64 GuestMemoryHash(const void* data, u64 size) {
         hashes[i] = XXH3_64bits(bytes + offset, std::min(Chunk, size - offset));
     });
     return XXH3_64bits(hashes.data(), count * sizeof(u64));
-}
-
-/// bbport: whether a GPU-dirty refresh may keep the mip hashes (RefreshImage).
-static bool KeepMipHashes() {
-    static const bool keep = [] {
-        const char* env = std::getenv("BB_KEEP_MIP_HASHES");
-        return !(env && env[0] == '0');
-    }();
-    return keep;
 }
 
 /// bbport: the guest memory a MaybeCpuDirty check compares, the same at marking and at
@@ -1132,8 +1119,7 @@ ImageId TextureCache::FindImageLayer(VAddr address, size_t size, u32& layer) {
     return found;
 }
 
-ImageView& TextureCache::FindTexture(ImageId image_id, const ImageDesc& desc, ViewMemo* memo,
-                                     bool refresh) {
+ImageView& TextureCache::FindTexture(ImageId image_id, const ImageDesc& desc, ViewMemo* memo) {
     Image& image = slot_images[image_id];
     if (desc.type == BindingType::Storage) {
         image.flags |= ImageFlagBits::GpuModified;
@@ -1144,9 +1130,7 @@ ImageView& TextureCache::FindTexture(ImageId image_id, const ImageDesc& desc, Vi
             downloads_queued.store(true, std::memory_order_release);
         }
     }
-    if (refresh) {
-        UpdateImage(image_id);
-    }
+    UpdateImage(image_id);
     if (memo && !BbToggle::Disabled(BbToggle::TextureViewMemo)) {
         if (memo->image_id == image_id && memo->backing == image.backing && memo->view_id) {
             return slot_image_views[memo->view_id];
@@ -1266,10 +1250,10 @@ void TextureCache::RefreshImage(Image& image) {
     // hashes record is unchanged unless something wrote it since they were taken (which clears
     // mip_hashes_current): they are kept instead of hashing it again. The game's compute copy of
     // the depth buffer into a 1080p R32F image made that ~1 ms of every frame on the draw
-    // recording thread. BB_KEEP_MIP_HASHES=0: hashed every time.
+    // recording thread.
     constexpr u32 CpuDirtyBits = u32(ImageFlagBits::MaybeCpuDirty) | u32(ImageFlagBits::CpuDirty);
     const bool keep_hashes = is_gpu_dirty && image.mip_hashes_current &&
-                             (entry_flags & CpuDirtyBits) == 0 && KeepMipHashes();
+                             (entry_flags & CpuDirtyBits) == 0;
 
     BbStats::image_upload_bytes.fetch_add(image.info.guest_size, std::memory_order_relaxed);
     boost::container::small_vector<vk::BufferImageCopy, 14> image_copies;

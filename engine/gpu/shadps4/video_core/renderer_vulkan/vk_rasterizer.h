@@ -13,7 +13,6 @@
 #include "common/shared_first_mutex.h"
 #include "video_core/buffer_cache/buffer_cache.h"
 #include "video_core/page_manager.h"
-#include "video_core/renderer_vulkan/vk_bind_helper.h"
 #include "video_core/renderer_vulkan/vk_camera_motion.h"
 #include "video_core/renderer_vulkan/vk_constant_ring.h"
 #include "video_core/renderer_vulkan/vk_scene_resolution.h"
@@ -222,7 +221,7 @@ public:
     /// bbport BB_HONEST_LABELS=1: runs `signal` once the GPU has finished every command recorded
     /// before this call (the submission of the current tick), in call order, on a thread that
     /// waits on the work semaphore: fences the guest sees when the work is done, not when it is
-    /// recorded. `label` and `value`: the fence it writes (PendingSignalValue).
+    /// recorded. `label` and `value`: the fence it writes (PendingSignalWord).
     /// 0.4.4 beta 20: `size`, the bytes it writes (4 or 8): a wait on label+4 is answered from
     /// an 8-byte fence only (the engine map's fence-1). `known` false: it writes a value not
     /// known here (a clock or counter), so waits on its bytes read memory (PendingSignalWord).
@@ -274,9 +273,6 @@ public:
     u64 CurrentTick() const {
         return scheduler.CurrentTick();
     }
-    /// The newest queued value of the fence at `address` (a WaitRegMem in the same stream is met
-    /// by it in stream order).
-    bool PendingSignalValue(VAddr address, u64& value);
     /// 0.4.4 beta 20: the 4 bytes at `address` as the newest queued fence over them writes them
     /// (a 4-byte fence at `address`, or either half of an 8-byte one); false when none does or
     /// that one's value is not known here. `next_to_short`: a 4-byte fence just below was passed
@@ -285,7 +281,6 @@ public:
     static bool HonestLabels();
     /// The GPU command thread or the draw recording thread (fault handling runs inline there).
     bool IsGpuSideThread() const;
-    bool IsGpuSideThreadId(u32 tid) const;
     /// A guest write hit a protected page.
     bool OnWriteFault(VAddr addr, bool assume_locks);
     /// bbport: write faults on pages no tracked image watches skip the texture cache
@@ -444,10 +439,8 @@ private:
     void BindBuffers(const Shader::Info& stage, const PreparedStage* prepared,
                      Shader::Backend::Bindings& binding,
                      Shader::PushData& push_data, u32& write_index);
-    /// `on_helper`: run by the texture binding helper; out-of-date images are not refreshed.
     void BindTextures(const Shader::Info& stage, const PreparedStage* prepared,
-                      Shader::Backend::Bindings& binding, u32& write_index, bool& barrier,
-                      bool on_helper = false);
+                      Shader::Backend::Bindings& binding, u32& write_index, bool& barrier);
     /// BB_SECTIONS: a full texture lookup over 0.3 ms, per texture (BindTextures' timestamps).
     void ReportSlowTextureBind(const Shader::Info& stage, u64 start, std::span<const u64> pass1,
                                std::span<const u64> pass2);
@@ -518,14 +511,6 @@ private:
     /// The same for any prepared draw (the lookahead thread).
     static const PreparedStage* FindPreparedStage(const PreparedDraw* prepared,
                                                   const Shader::Info& stage);
-    /// Whether the helper may bind textures for this pipeline at all (fixed descriptor layout,
-    /// no storage writes that invalidate cached images).
-    bool HelperEligible(const Pipeline* pipeline) const;
-    /// Whether every texture of `stage` takes the memoized path without refreshing, creating or
-    /// redirecting anything that records commands or touches the buffer cache.
-    bool TexturesBindableOnHelper(const Shader::Info& stage, const PreparedStage* prepared);
-    static void RunTextureTask(void* rasterizer);
-    static void JoinBindHelper(void* rasterizer);
 
     /// Display pass: counts the frame (BbStats::gpu_frames) and, with BB_BUFFER_STATS, the lag.
     void NoteFrameStart();
@@ -595,15 +580,11 @@ private:
     };
     boost::container::static_vector<BoundBuffer, Shader::NUM_BUFFERS> bound_buffers;
     /// bbport: uniform buffers bound by BindBuffers outside the constant ring (BB_FRAME_STATS):
-    /// at an aligned offset, with an offset in the push data, or copied by the CPU or the GPU to an
-    /// aligned place
-    /// (Profile::uniform_exact_base). Ring bindings are counted too.
+    /// at an aligned offset, or with an offset in the push data. Ring bindings are counted too.
     struct UboStats {
         u64 ring = 0;
         u64 in_place = 0;
         u64 offset = 0;
-        u64 staged = 0;
-        u64 copied = 0;
     } ubo_stats;
     void ReportUboStats();
 
@@ -706,32 +687,6 @@ private:
         u64 offset;
         vk::IndexType type;
     } index_bind{};
-    /// The direct draw whose vertex/index buffers BindResources may resolve early.
-    struct DrawInputs {
-        const GraphicsPipeline* pipeline;
-        const PreparedDraw* prepared;
-        u32 index_offset;
-        bool is_indexed;
-        bool pending;
-        bool resolved;
-    } draw_inputs{};
-    // bbport: textures of a draw bound on the helper thread while this thread binds buffers.
-    static bool BindHelperWanted();
-    BindHelper bind_helper{BindHelperWanted()};
-    struct TextureTask {
-        struct Stage {
-            const Shader::Info* info;
-            const PreparedStage* prepared;
-            Shader::Backend::Bindings binding;
-            u32 write_index;
-        };
-        std::array<Stage, Shader::MaxStageTypes> stages;
-        u32 count = 0;
-        u32 completed = 0; ///< stages the helper bound; the rest are bound after the join
-        bool barrier = false;
-    } texture_task;
-    /// Draws whose textures the helper bound completely, partly or not at all (BB_FRAME_STATS).
-    u64 helper_full = 0, helper_partial = 0, helper_serial = 0;
     /// The memoized cache entry of each image binding (FindImage memo taken), else null.
     boost::container::static_vector<ImageDescCacheEntry*, Shader::NUM_IMAGES> image_binding_entries;
     bool fault_process_pending{};

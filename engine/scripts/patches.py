@@ -133,9 +133,9 @@ CLOTH_LEFT_OUT=((0xB6FBD4,0xB6FBD8),(0xB73F84,0xB73F8D),(0xB73FA8,0xB73FC1),(0x4
 # it chased, turned and settled 1.5, 2 and 2.4 times as fast. They are converted from a 60 fps
 # frame: a weight w to 1-(1-w)^(60/fps), the pitch return's kept share k (+0x1a8) to k^(60/fps);
 # the direct pitch angle (+0x238) is an angle. Three weights no list tunes are the game's own for
-# a 30 fps frame, converted from it at every rate: the LockCamParam blend (+0x330, an immediate
-# no list writes), the distance ease (0x4D25E68, 0.1; the lists' 0.025 eased at half speed at 60)
-# and the chase-rate ease (0x4D25E94, 1/30). That conversion is BB_CAMERA_FIX=1 (below).
+# a 30 fps frame: the LockCamParam blend (+0x330, an immediate no list writes), the distance ease
+# (0x4D25E68, 0.1; the lists' 0.025 eased at half speed at 60) and the chase-rate ease (0x4D25E94,
+# 1/30).
 #
 # Original (camera_tuning in config.ini, the default) leaves Kyo's retune out: the
 # constructor's defaults, the stores (in place of two blocks of the camera's debug-menu sliders), the wall
@@ -196,11 +196,7 @@ def frame_rate_fixes(writes, fps, elf=None, original_camera=False, sixty_camera=
     engine converts the camera every frame (nothing converted here)."""
     f=lambda v: struct.pack('<f',v)
     per_frame=per_frame and bool(fps)
-    # BB_CAMERA_FIX=1 (the launcher's Extra variables), without the frame timer only: the camera eases as far
-    # in a second as the game does at 30. Off by default: players found it trailing too far behind when running
-    # (#32); the camera keeps the FPS++ list's values, as up to 0.9.24.
-    camera=not per_frame and not original_camera and os.environ.get('BB_CAMERA_FIX','0')=='1'
-    sixty_camera=sixty_camera and not per_frame and not original_camera and not camera and bool(fps) and fps>60
+    sixty_camera=sixty_camera and not per_frame and not original_camera and bool(fps) and fps>60
     original_camera=original_camera and bool(fps)
     out=[]
     for offset,data in writes:
@@ -222,24 +218,23 @@ def frame_rate_fixes(writes, fps, elf=None, original_camera=False, sixty_camera=
                 if a+len(data)>left[1]: raise ValueError(f'frame-rate patch: {a:#x} reaches past {left[1]:#x}')
                 continue
             if a==CLOTH_STIFFNESS: data=f((60/fps)**2)*4
-        if fps and (camera or sixty_camera):
+        if sixty_camera:
             if a in CAMERA_FIELDS:
                 data=f(camera_value(CAMERA_FIELDS[a],struct.unpack('<f',data)[0],60/fps))
             elif any(lo<=a<hi for lo,hi in CAMERA_STORES) and len(data)==11 and data[:3]==bytes.fromhex('41c785'):
                 field,value=struct.unpack('<If',data[3:])
                 data=data[:7]+f(camera_value(field,value,60/fps))
             elif a in CAMERA_EASES:
-                data=(f(camera_value(None,CAMERA_EASES[a],30/fps)) if camera else
-                      f(camera_value(None,struct.unpack('<f',data)[0],60/fps)))
+                data=f(camera_value(None,struct.unpack('<f',data)[0],60/fps))
         out.append((offset,data))
     at,was,now=EFFECT_STEP_SECOND
     if any(offset+EBOOT_BASE==EFFECT_STEP_FIRST for offset,_ in out) and \
             (elf is None or original_bytes(elf,at-EBOOT_BASE,len(was))==was):
         out.append((at-EBOOT_BASE,now))
-    if fps and (camera or sixty_camera):
+    if sixty_camera:
         at,was=CAMERA_PARAM_EASE
         if elf is None or original_bytes(elf,at-EBOOT_BASE,len(was))==was:
-            out.append((at-EBOOT_BASE,f(camera_value(None,struct.unpack('<f',was)[0],(30 if camera else 60)/fps))))
+            out.append((at-EBOOT_BASE,f(camera_value(None,struct.unpack('<f',was)[0],60/fps))))
     return out
 
 

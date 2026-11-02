@@ -161,11 +161,9 @@ static ABI int32_t audio_open(int32_t user, int32_t type, int32_t index, uint32_
         /* bbport: 7.1 on a stereo device is folded down here, the front pair at full level (ITU:
            centre and surrounds at -3 dB, LFE left out). SDL's own 7.1-to-stereo matrix scales
            every channel by about 0.21 so that nothing can clip; with most of the game's sound in
-           the front pair that played it about 13 dB quieter than shadPS4 (#27).
-           BB_AUDIO_SDL_DOWNMIX=1 leaves it to SDL again. */
+           the front pair that played it about 13 dB quieter than shadPS4 (#27). */
         SDL_AudioSpec device; int device_frames=0;
-        const char *sdl_downmix=getenv("BB_AUDIO_SDL_DOWNMIX");
-        if (p->channels==8 && !(sdl_downmix && sdl_downmix[0]=='1') &&
+        if (p->channels==8 &&
             SDL_GetAudioDeviceFormat(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,&device,&device_frames) &&
             device.channels==2)
             p->out_channels=2;

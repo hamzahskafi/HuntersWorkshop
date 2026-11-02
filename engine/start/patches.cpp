@@ -392,8 +392,7 @@ double CameraValue(std::optional<std::uint32_t> field, double value, double fram
 // chase rate (1/30), from a 30 FPS frame for the preset's rate, and nothing else (the other weights stay the
 // game's 30 FPS values every frame). FPS++ above 60 with the frame-rate corrections on: the retune's weights and
 // eases (the constructor's, the stores', the list's distance and chase-rate eases and LockCamParam's blend) are a
-// 60 FPS frame's, converted from it once for the preset's rate (bbhost's camera_tuned_fps). BB_CAMERA_FIX=1
-// converts the eases from the game's 30 instead.
+// 60 FPS frame's, converted from it once for the preset's rate (bbhost's camera_tuned_fps).
 constexpr std::uint64_t kCameraWallEscape = 0x183DCFE;
 // The older camera's jump (its path with Enable New Camera off; the game has it on) past the chase rates' update
 // to 0x183E2F2: the retune points it at 0x183E271, so that path updates them too.
@@ -408,8 +407,7 @@ bool KyoCameraSite(std::uint64_t a, std::size_t size) {
 Writes FrameRateFixes(const Writes& writes, std::optional<int> fps, const Bytes& elf, bool original_camera,
                       bool sixty_camera, bool per_frame) {
     per_frame = per_frame && fps.has_value();
-    const bool camera = !per_frame && !original_camera && Env("BB_CAMERA_FIX", "0") == "1";
-    sixty_camera = sixty_camera && !per_frame && !original_camera && !camera && fps && *fps > 60;
+    sixty_camera = sixty_camera && !per_frame && !original_camera && fps && *fps > 60;
     original_camera = original_camera && fps.has_value();
     Writes out;
     for (const auto& [offset, original] : writes) {
@@ -443,7 +441,7 @@ Writes FrameRateFixes(const Writes& writes, std::optional<int> fps, const Bytes&
                 data = Concat({one, one, one, one});
             }
         }
-        if (fps && (camera || sixty_camera)) {
+        if (sixty_camera) {
             if (const auto field = kCameraFields.find(a); field != kCameraFields.end()) {
                 data = F32(CameraValue(field->second, Load<float>(data.data()), 60.0 / *fps));
             } else if (std::any_of(std::begin(kCameraStores), std::end(kCameraStores),
@@ -453,9 +451,8 @@ Writes FrameRateFixes(const Writes& writes, std::optional<int> fps, const Bytes&
                 const float value = Load<float>(data.data() + 7);
                 const Bytes v = F32(CameraValue(f, value, 60.0 / *fps));
                 std::copy(v.begin(), v.end(), data.begin() + 7);
-            } else if (const auto ease = kCameraEases.find(a); ease != kCameraEases.end()) {
-                data = camera ? F32(CameraValue(std::nullopt, ease->second, 30.0 / *fps))
-                              : F32(CameraValue(std::nullopt, Load<float>(data.data()), 60.0 / *fps));
+            } else if (kCameraEases.count(a)) {
+                data = F32(CameraValue(std::nullopt, Load<float>(data.data()), 60.0 / *fps));
             }
         }
         out.emplace_back(offset, std::move(data));
@@ -463,9 +460,9 @@ Writes FrameRateFixes(const Writes& writes, std::optional<int> fps, const Bytes&
     if (std::any_of(out.begin(), out.end(), [](const Write& w) { return w.first + kBase == kEffectStepFirst; }) &&
         OriginalBytes(elf, kEffectStepSecond - kBase, kEffectStepWas.size()) == kEffectStepWas)
         out.emplace_back(kEffectStepSecond - kBase, kEffectStepNow);
-    if (fps && (camera || sixty_camera) && OriginalBytes(elf, kCameraParamEase - kBase, 4) == kCameraParamWas)
-        out.emplace_back(kCameraParamEase - kBase, F32(CameraValue(std::nullopt, Load<float>(kCameraParamWas.data()),
-                                                                   (camera ? 30.0 : 60.0) / *fps)));
+    if (sixty_camera && OriginalBytes(elf, kCameraParamEase - kBase, 4) == kCameraParamWas)
+        out.emplace_back(kCameraParamEase - kBase,
+                         F32(CameraValue(std::nullopt, Load<float>(kCameraParamWas.data()), 60.0 / *fps)));
     return out;
 }
 

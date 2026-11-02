@@ -383,16 +383,13 @@ std::unique_ptr<RecordChunk> Scheduler::AcquireChunk() {
 }
 
 namespace {
-/// bbport BB_HOST_WAIT_SPIN_US (default 100; 0: the loops as before): the waits for host copies
-/// and deferred signals spin with pause for this long before they yield (Sleep(0) on Windows: a
+/// bbport: the waits for host copies and deferred signals spin with pause for up to 100 us
+/// (BB_SPIN_US lowers it; 0: they yield at once) before they yield (Sleep(0) on Windows: a
 /// system call each, and the core may go to another thread for a while), and help the copy
 /// threads one queued task at a time (BbCopy::HelpOne) instead of BbCopy::WaitAsync, which also
 /// waits for copies issued after the signal.
 u32 HostWaitSpinUs() {
-    static const u32 us = [] {
-        const char* env = std::getenv("BB_HOST_WAIT_SPIN_US");
-        return env && env[0] ? static_cast<u32>(std::max(0, std::atoi(env))) : 100u;
-    }();
+    static const u32 us = BbThreads::SpinLimitUs(100);
     return us;
 }
 
@@ -400,17 +397,8 @@ u32 HostWaitSpinUs() {
 template <typename Done>
 void WaitUntil(Done&& done, bool help) {
     const u32 spin_us = HostWaitSpinUs();
-    if (spin_us == 0) {
-        while (!done()) {
-            if (help) {
-                BbCopy::WaitAsync();
-            }
-            std::this_thread::yield();
-        }
-        return;
-    }
     const auto spin_until = std::chrono::steady_clock::now() + std::chrono::microseconds(spin_us);
-    bool spinning = true;
+    bool spinning = spin_us != 0;
     for (u32 spins = 1; !done(); ++spins) {
         if (help && (spins & 63) == 1 && BbCopy::HelpOne()) {
             continue;
@@ -463,12 +451,7 @@ bool FenceOrderEnv() {
 } // namespace
 
 bool Scheduler::FenceOrderScoped() {
-    return FenceOrderEnv() || BbToggle::Experiment(8);
-}
-
-bool Scheduler::FenceOrderPossible() {
-    static const bool possible = FenceOrderEnv() || std::getenv("BB_TOGGLE_FILE") != nullptr;
-    return possible;
+    return FenceOrderEnv();
 }
 
 void Scheduler::WaitDeferredSignals(u32 site) {
@@ -805,12 +788,8 @@ void Scheduler::EnterDirectMode() {
     // bbport: with submissions going out from the recording threads, the commands recorded
     // here get a segment of their own, from this thread's pool, after the segments handed over:
     // the recording threads go on with those instead of this thread waiting for them (~90 us,
-    // the upscaler's passes every frame). BB_DIRECT_SEGMENT=0: the wait.
-    static const bool own_segment = [] {
-        const char* env = std::getenv("BB_DIRECT_SEGMENT");
-        return !(env && env[0] == '0');
-    }();
-    if (own_segment && async_submit && current_segment + 2 < MaxSegments &&
+    // the upscaler's passes every frame).
+    if (async_submit && current_segment + 2 < MaxSegments &&
         !BbToggle::Disabled(BbToggle::ThreadedRecording)) {
         if (is_rendering) {
             Record([](vk::CommandBuffer cmdbuf) { cmdbuf.endRendering(); });
@@ -882,7 +861,8 @@ void Scheduler::RecorderThread(std::stop_token stoken, u32 index) {
         // The thread of the segment being recorded spins briefly before sleeping: its next
         // chunk usually follows within microseconds, and a sleeping thread costs the producer
         // a wake-up syscall per kick. With few hardware threads (Steam Deck: 8) the spin would
-        // take time from guest threads. The others sleep until a new segment reaches them.
+        // take time from guest threads (BB_SPIN_US lowers it). The others sleep until a new
+        // segment reaches them.
         if (active_worker.load(std::memory_order_relaxed) == index) {
             static const auto spin_time =
                 std::chrono::microseconds(BbThreads::CapSpinUs(BbThreads::Available() >= 12 ? 200 : 20));

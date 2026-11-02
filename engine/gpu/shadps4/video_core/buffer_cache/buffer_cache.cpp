@@ -421,11 +421,6 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
     if (BbGxRing::InPlaceWanted()) {
         gx_state.store(u8(GxState::Waiting), std::memory_order_relaxed);
     }
-    // bbport BB_DEFER_PROTECT: an upload's write protection may wait for its copy only where every
-    // upload is a CPU copy of whole pages (not twins keeping parts) and no read watchers exist
-    // (precise readbacks).
-    tracker.AllowDeferredProtects(!TwinsEnabled() &&
-                                  EmulatorSettings.GetReadbacksMode() != GpuReadbacksMode::Precise);
     const std::array<u32, 2> families = {instance.GetGraphicsQueueFamilyIndex(),
                                          instance.GetReadbackQueueFamilyIndex()};
     const bool shared = bool(instance.GetReadbackQueue()); // as Buffer creates the arenas
@@ -535,9 +530,6 @@ void BufferCache::InvalidateMemory(VAddr device_addr, u64 size, bool assume_lock
 // Item: context = BufferCache, source = guest address, destination = host pointer, size,
 // extra = the Buffer whose mapping holds the destination (flushed after the copy).
 void BufferCache::RunGuestCopy(const BbCopy::Item& item) {
-    // bbport BB_DEFER_PROTECT: the pages an upload copies are write-protected before it reads
-    // them (the protection it deferred to its copy, page_manager.cpp).
-    PageManager::FlushDeferredProtects();
     auto* cache = static_cast<BufferCache*>(item.context);
     auto* dst = reinterpret_cast<u8*>(item.destination);
     cache->memory->CopySparseMemory(item.source, dst, item.size);
@@ -725,7 +717,7 @@ void BufferCache::DownloadMemory(const Buffer* arena, VAddr device_addr, u64 siz
     const bool write_done = write_tick != 0 && scheduler.IsFree(write_tick);
     bool fast = false;
     static FastReadback readback{instance};
-    if (write_tick != 0 && readback.Available() && !BbToggle::Disabled(BbToggle::ReadbackQueue)) {
+    if (write_tick != 0 && readback.Available()) {
         if (!write_done) {
             scheduler.Wait(write_tick);
         }
@@ -1237,7 +1229,6 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBufferForImage(VAddr device_add
         }
         return {staging.buffer, staging.offset};
     }
-    PageManager::FlushDeferredProtects(); // see RunGuestCopy
     memory->CopySparseMemory(device_addr, staging.mapped, staging.size);
     staging.Flush();
     return {staging.buffer, staging.offset};
@@ -2490,7 +2481,6 @@ const Buffer* BufferCache::UploadCopies(const Buffer* arena, std::span<vk::Buffe
         u64 group_bytes = 0;
         const auto launch = [&] {
             BbCopy::Async([group, memory = memory, staging] {
-                PageManager::FlushDeferredProtects(); // see RunGuestCopy
                 for (const auto& copy : *group) {
                     memory->CopySparseMemory(copy.source, copy.destination, copy.size);
                 }
@@ -2520,7 +2510,6 @@ const Buffer* BufferCache::UploadCopies(const Buffer* arena, std::span<vk::Buffe
         memory->CopySparseMemory(copies[i].dstOffset, staging.mapped + copies[i].srcOffset,
                                  copies[i].size);
     };
-    PageManager::FlushDeferredProtects(); // see RunGuestCopy
     if (total_size_bytes >= 2_MB && copies.size() > 1) {
         BbCopy::ParallelFor(copies.size(), copy);
     } else {
@@ -2560,22 +2549,18 @@ bool BufferCache::SynchronizeMemoryFromImage(const Buffer* buffer, u64 offset, V
         miss = {device_addr, size, generation};
         return false;
     }
-    // bbport: the lookups above only read what the texture binding helper leaves alone; the
-    // copy below changes image state, so the helper finishes first.
-    runtime.BeforeImageAccess();
     Image& image = texture_cache.GetImage(image_id);
     ASSERT_MSG(device_addr == image.info.guest_address,
                "Texel buffer aliases image subresources {:x} : {:x}", device_addr,
                image.info.guest_address);
     const u64 arena_offset = offset;
 
-    // bbport (BB_IMAGE_TILE_MEMO): left out when the range already holds the image as it is.
+    // bbport: left out when the range already holds the image as it is.
     // The image: no write access since (Runtime::Transit counts them in write_seq; every GPU
     // write needs a layout change after the fill's transfer read), same backing and flags, no
     // CPU write seen (tracked) and no proxy write pending. The range: no GPU write recorded
     // over it (Runtime::AccessBuffer), no newer in-place write tick, same residency; uploads of
     // CPU writes into a VRAM copy are GPU writes there. Otherwise filled as before.
-    const bool memo_on = Vulkan::GpuSavings::TileMemoOn();
     auto& savings = Vulkan::GpuSavings::Get();
     const u64 watched_size = std::max<u64>(size, image.info.guest_size);
     const bool in_place = IsInPlace(device_addr, size);
@@ -2585,33 +2570,31 @@ bool BufferCache::SynchronizeMemoryFromImage(const Buffer* buffer, u64 offset, V
     const auto memo_flags = static_cast<u32>(image.flags);
     const bool image_clean = False(image.flags & ImageFlagBits::Dirty);
     const bool proxy_stale = runtime.scene_targets && runtime.scene_targets->NativeStale(image);
-    if (memo_on) {
-        for (auto& memo : tile_memos) {
-            if (memo.address != device_addr || memo.size != size || memo.arena != buffer ||
-                memo.arena_offset != arena_offset) {
-                continue;
-            }
-            const bool same_image = memo.image_uid == image.image_uid &&
-                                    memo.backing == image.backing &&
-                                    memo.write_seq == image.write_seq &&
-                                    memo.flags == memo_flags && image_clean;
-            const bool same_buffer = runtime.BufferUnwritten(memo.watch) &&
-                                     memo.write_tick == WriteTicks().Newest(device_addr, watched_size);
-            const bool same_other = cpu_writes_seen && memo.residency == ResidencyGeneration();
-            if (same_image && same_buffer && same_other && !proxy_stale) {
-                savings.tile_skips.fetch_add(1, std::memory_order_relaxed);
-                savings.tile_bytes_skipped.fetch_add(image.info.guest_size,
-                                                     std::memory_order_relaxed);
-                return true;
-            }
-            auto& why = !same_image   ? savings.tile_miss_image
-                        : !same_buffer ? savings.tile_miss_buffer
-                        : proxy_stale  ? savings.tile_miss_proxy
-                                       : savings.tile_miss_other;
-            why.fetch_add(1, std::memory_order_relaxed);
-            memo.address = 0;
-            break;
+    for (auto& memo : tile_memos) {
+        if (memo.address != device_addr || memo.size != size || memo.arena != buffer ||
+            memo.arena_offset != arena_offset) {
+            continue;
         }
+        const bool same_image = memo.image_uid == image.image_uid &&
+                                memo.backing == image.backing &&
+                                memo.write_seq == image.write_seq &&
+                                memo.flags == memo_flags && image_clean;
+        const bool same_buffer = runtime.BufferUnwritten(memo.watch) &&
+                                 memo.write_tick == WriteTicks().Newest(device_addr, watched_size);
+        const bool same_other = cpu_writes_seen && memo.residency == ResidencyGeneration();
+        if (same_image && same_buffer && same_other && !proxy_stale) {
+            savings.tile_skips.fetch_add(1, std::memory_order_relaxed);
+            savings.tile_bytes_skipped.fetch_add(image.info.guest_size,
+                                                 std::memory_order_relaxed);
+            return true;
+        }
+        auto& why = !same_image   ? savings.tile_miss_image
+                    : !same_buffer ? savings.tile_miss_buffer
+                    : proxy_stale  ? savings.tile_miss_proxy
+                                   : savings.tile_miss_other;
+        why.fetch_add(1, std::memory_order_relaxed);
+        memo.address = 0;
+        break;
     }
     savings.tile_fills.fetch_add(1, std::memory_order_relaxed);
 
@@ -2643,24 +2626,22 @@ bool BufferCache::SynchronizeMemoryFromImage(const Buffer* buffer, u64 offset, V
     }
     auto& tile_manager = texture_cache.GetTileManager();
     tile_manager.TileImage(image, buffer_copies, buffer, arena_offset);
-    if (memo_on) {
-        // After the fill: its own writes are not watched, the resolve of a proxy it caused is
-        // in write_seq. Images with CPU writes pending are filled every time.
-        if (False(image.flags & ImageFlagBits::Dirty) && cpu_writes_seen) {
-            tile_memos[tile_memo_next++ % tile_memos.size()] = {
-                .address = device_addr,
-                .size = size,
-                .arena = buffer,
-                .arena_offset = arena_offset,
-                .image_uid = image.image_uid,
-                .backing = image.backing,
-                .write_seq = image.write_seq,
-                .flags = static_cast<u32>(image.flags),
-                .watch = runtime.WatchBufferWrites(buffer, arena_offset, watched_size),
-                .residency = ResidencyGeneration(),
-                .write_tick = WriteTicks().Newest(device_addr, watched_size),
-            };
-        }
+    // After the fill: its own writes are not watched, the resolve of a proxy it caused is in
+    // write_seq. Images with CPU writes pending are filled every time.
+    if (False(image.flags & ImageFlagBits::Dirty) && cpu_writes_seen) {
+        tile_memos[tile_memo_next++ % tile_memos.size()] = {
+            .address = device_addr,
+            .size = size,
+            .arena = buffer,
+            .arena_offset = arena_offset,
+            .image_uid = image.image_uid,
+            .backing = image.backing,
+            .write_seq = image.write_seq,
+            .flags = static_cast<u32>(image.flags),
+            .watch = runtime.WatchBufferWrites(buffer, arena_offset, watched_size),
+            .residency = ResidencyGeneration(),
+            .write_tick = WriteTicks().Newest(device_addr, watched_size),
+        };
     }
     return true;
 }

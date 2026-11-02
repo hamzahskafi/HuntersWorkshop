@@ -70,24 +70,14 @@ void MakeImage(const Instance& instance, VideoCore::UniqueImage& image, vk::Uniq
     }));
 }
 
-/// 0.4.4 beta 21: BB_UPSCALER_EAGER_IMAGES=1: the images only some features use are made with
-/// the context, as before, instead of when a frame first needs them (TemporalUpscaler::EnsureImage).
-bool EagerImages() {
-    static const bool eager = [] {
-        const char* env = std::getenv("BB_UPSCALER_EAGER_IMAGES");
-        return env && env[0] == '1';
-    }();
-    return eager;
-}
-
 /// bbport: with sub-pixel jitter, the game's full-screen passes leave the scene's last row and
 /// column brighter in some phases (a shimmering line at the right and bottom edges once upscaled,
 /// GitHub issue 43). The row and column before them are copied over them before the upscaler
 /// reads the scene: one edge pixel, and jitter keeps its full detail.
 /// 0.4.4 beta 21: whole texels, alpha included. Run clamps the RGB only (ClampEdgesRgb), as the
-/// merge keeps the scene's alpha; this is its BB_EDGE_CLAMP_COPY=1. RunScaled keeps it: its input
-/// is the game's tonemapped 8-bit frame (sRGB formats cannot be storage images), and the
-/// upscaled frame replaces it, alpha and all.
+/// merge keeps the scene's alpha. RunScaled uses this: its input is the game's tonemapped 8-bit
+/// frame (sRGB formats cannot be storage images), and the upscaled frame replaces it, alpha and
+/// all.
 void ClampSceneEdges(Scheduler& scheduler, vk::Image image, u32 width, u32 height) {
     if (width < 2 || height < 2) {
         return;
@@ -419,8 +409,7 @@ bool TemporalUpscaler::ReactiveOn() const {
     // all else works; this one is graded), so neither the mask nor its opaque snapshot is made while
     // DLSS runs. 0.4.4 beta 27: FSR 4 got it blended over its output (fsr4_reactive.comp) before.
     const int upscaler = BbSettings::Get().upscaler;
-    return BbSettings::Get().reactive && !BbToggle::Disabled(1u << 27) &&
-           upscaler == BbSettings::UpscalerFsr;
+    return BbSettings::Get().reactive && upscaler == BbSettings::UpscalerFsr;
 }
 
 void TemporalUpscaler::CheckCameraCut() {
@@ -756,31 +745,18 @@ bool TemporalUpscaler::EnsureResources(u32 w, u32 h, u32 ow, u32 oh, bool hdr) {
     // 0.4.4 beta 21: the images only some features use are made when a frame first needs them
     // (EnsureImage), at this size: the reactive mask's two (opaque scene, mask; the mask is off
     // by default), FSR 4's linear input (it was made for DLSS too, which never decodes) and the
-    // sharpening's RGBA32F copy (only the scaled path and BB_SHARPEN_FUSED=0 use it; made by
-    // ExtraSharpen). They are not part of the key above: a change of it waits for the GPU and
-    // made the images again (history lost), which a menu toggle should not. Released here,
-    // the GPU being idle. BB_UPSCALER_EAGER_IMAGES=1: all made here, as before.
-    if (EagerImages()) {
-        make_image(opaque_image, opaque_view, vk::Format::eR16G16B16A16Sfloat,
-                   vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferDst |
-                       vk::ImageUsageFlagBits::eTransferSrc);
-        make_image(reactive_image, reactive_view, vk::Format::eR8Unorm,
-                   vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled);
-    } else {
-        opaque_view.reset();
-        opaque_image = VideoCore::UniqueImage{};
-        reactive_view.reset();
-        reactive_image = VideoCore::UniqueImage{};
-        extra_sharpen_view.reset();
-        extra_sharpen_image = VideoCore::UniqueImage{};
-        extra_sharpen_width = extra_sharpen_height = 0;
-    }
+    // sharpening's RGBA32F copy (only the scaled path uses it; made by ExtraSharpen). They are
+    // not part of the key above: a change of it waits for the GPU and made the images again
+    // (history lost), which a menu toggle should not. Released here, the GPU being idle.
+    opaque_view.reset();
+    opaque_image = VideoCore::UniqueImage{};
+    reactive_view.reset();
+    reactive_image = VideoCore::UniqueImage{};
+    extra_sharpen_view.reset();
+    extra_sharpen_image = VideoCore::UniqueImage{};
+    extra_sharpen_width = extra_sharpen_height = 0;
     fsr4_linear_view.reset();
     fsr4_linear_image = VideoCore::UniqueImage{};
-    if (use_frame && EagerImages()) {
-        make_image(fsr4_linear_image, fsr4_linear_view, vk::Format::eR16G16B16A16Sfloat,
-                   vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled);
-    }
     for (u32 i = 0; i < taa_history.size(); ++i) {
         taa_history_views[i].reset();
         taa_history[i] = VideoCore::UniqueImage{};
@@ -1003,11 +979,10 @@ void TemporalUpscaler::RecordTaa(vk::CommandBuffer cmdbuf, vk::ImageView color,
     // opaque image, made for it (TAA has no reactive mask) and started in General below (made with
     // the context, it was never moved out of the undefined layout). Otherwise the output stands
     // in: in General, an RGBA16F storage image, never written through that binding.
-    // BB_UPSCALER_EAGER_IMAGES=1: the opaque image always, as before.
     const char* diagnostics_env = std::getenv("BB_TAA_DIAGNOSTICS");
     const u32 diagnostics =
         diagnostics_env ? u32(std::clamp(std::atoi(diagnostics_env), 1, 3)) : 0u;
-    const bool diagnostic_image = diagnostics != 0 && !EagerImages();
+    const bool diagnostic_image = diagnostics != 0;
     if (diagnostic_image) {
         EnsureImage(opaque_image, opaque_view, vk::Format::eR16G16B16A16Sfloat,
                     vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferDst |
@@ -1046,7 +1021,7 @@ void TemporalUpscaler::RecordTaa(vk::CommandBuffer cmdbuf, vk::ImageView color,
     const std::array<vk::ImageView, 7> views{
         color, depth, *motion_view, *taa_history_views[1 - taa_next],
         *output_view, *taa_history_views[taa_next],
-        EagerImages() || diagnostics != 0 ? *opaque_view : *output_view};
+        diagnostics != 0 ? *opaque_view : *output_view};
     std::array<vk::DescriptorImageInfo, 7> infos{};
     std::array<vk::WriteDescriptorSet, 7> writes{};
     for (u32 i = 0; i < infos.size(); ++i) {
@@ -1062,15 +1037,6 @@ void TemporalUpscaler::RecordTaa(vk::CommandBuffer cmdbuf, vk::ImageView color,
         u32 reset, pad;
         std::array<std::array<float, 4>, 3> depth;
     } params{jitter, reset ? 1u : 0u, diagnostics, camera_motion.TaaDepthParameters()};
-    // Optional techniques for A/B in one run (BB_TOGGLE_FILE bits 51-54): tonemapped blending,
-    // YCoCg clipping, variance clipping, 3x3 reconstruction. Measured in game on 2026-10-02
-    // (static and panning camera, interleaved captures): none improved stability beyond run
-    // noise; YCoCg clipping and the reconstruction made it worse. Default: all off.
-    params.pad |= (BbToggle::Disabled(BbToggle::TaaTonemapBlend) ? 1u << 8 : 0u) |
-                  (BbToggle::Disabled(BbToggle::TaaClip) ? 2u << 8 : 0u) |
-                  (BbToggle::Disabled(BbToggle::TaaVariance) ? 4u << 8 : 0u) |
-                  (BbToggle::Disabled(BbToggle::TaaFilter) ? 8u << 8 : 0u) |
-                  (BbToggle::Disabled(BbToggle::TaaKeepNearerHistory) ? 16u << 8 : 0u);
     cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, *taa_pipeline);
     if (params.pad & 0xffu) {
         static u32 diagnostic_frames = 0;
@@ -1272,7 +1238,7 @@ void TemporalUpscaler::DebugView(vk::Image target, u32 w, u32 h, u32 ow, u32 oh,
 
 void TemporalUpscaler::OnBlendedSceneDraw() {
     // The mask is opt-in (menu, reactive=1): on Bloodborne's thin mist it trades trails for
-    // jitter shimmer, which looked worse. Toggle 1 << 27 switches it off.
+    // jitter shimmer, which looked worse.
     if (snapshot_taken || !scene_color || !Active() || !ReactiveOn()) {
         return;
     }
@@ -1529,13 +1495,9 @@ void TemporalUpscaler::Run() {
     // compute pass (ClampEdgesRgb): the barrier that makes the game's writes visible to it is this
     // one, made with the clamp's write (the transition, or the proxy's read when reduced: the
     // image the clamp writes). The scene colour is RGBA16F with storage use (checked above), and
-    // so is its proxy (made like it). BB_EDGE_CLAMP_COPY=1: the whole-texel copies, as before.
-    static const bool edge_clamp_copy = [] {
-        const char* env = std::getenv("BB_EDGE_CLAMP_COPY");
-        return env && env[0] == '1';
-    }();
+    // so is its proxy (made like it).
     const bool clamp_edges = jitter[0] != 0.0f || jitter[1] != 0.0f;
-    const bool clamp_rgb = clamp_edges && !edge_clamp_copy && w >= 2 && h >= 2;
+    const bool clamp_rgb = clamp_edges && w >= 2 && h >= 2;
     const vk::AccessFlags2 input_access =
         vk::AccessFlagBits2::eShaderRead |
         (clamp_rgb ? vk::AccessFlagBits2::eShaderWrite : vk::AccessFlagBits2::eNone);
@@ -1563,19 +1525,8 @@ void TemporalUpscaler::Run() {
         // 0.4.4 beta 20: Run's steps labelled in the GPU profile ("upscaler Run (...)" keeps its
         // setup: transitions, the scene proxies' reads).
         MarkRunStep("upscaler Run: edge clamp");
-        if (edge_clamp_copy) {
-            ClampSceneEdges(scheduler, input_color, w, h);
-        } else {
-            ClampEdgesRgb(input_color_view, w, h);
-        }
+        ClampEdgesRgb(input_color_view, w, h);
     }
-    // 0.4.4 beta 20: the extra sharpening done in the merge (upscale_merge.comp, rcas_extra.glsl):
-    // no RGBA32F copy of the output, no pass of its own and its barriers; the same result.
-    // BB_SHARPEN_FUSED=0: its own pass before the merge, as before.
-    static const bool sharpen_fused = [] {
-        const char* env = std::getenv("BB_SHARPEN_FUSED");
-        return !(env && env[0] == '0');
-    }();
     // The backend the resources were made for (EnsureResources above): read once (a menu change
     // takes effect next frame). TAA, AMD FSR and DLSS record directly on this thread (0.4.4 beta 27:
     // FireBurn's FSR 3.1 could be recorded on a recording thread, BB_FSR3_RECORDER).
@@ -1673,15 +1624,9 @@ void TemporalUpscaler::Run() {
     }
     reset = false;
     dispatched_last_frame = true;
-    float merge_sharpen = 0.0f;
-    if (!taa) {
-        if (sharpen_fused) {
-            merge_sharpen = ExtraSharpenAmount();
-        } else {
-            MarkRunStep("upscaler Run: extra sharpen");
-            ExtraSharpen(vk::Image(output_image), ow, oh);
-        }
-    }
+    // 0.4.4 beta 20: the extra sharpening done in the merge (upscale_merge.comp, rcas_extra.glsl):
+    // no RGBA32F copy of the output, no pass of its own and its barriers; the same result.
+    const float merge_sharpen = taa ? 0.0f : ExtraSharpenAmount();
     // bbport: BB_DUMP_TRIGGER on this (HDR scene color) path too: the upscaler's inputs and
     // its result, for ghosting and history checks (tools/dump_view.py).
     if (const int dump_frame = DumpFrame(); dump_frame >= 0) {
@@ -2276,10 +2221,9 @@ void TemporalUpscaler::RunScaled() {
             } else {
             // bbport: AMD FSR treats its colour as linear light (AMD's docs: "Input resources"); this
             // frame is the game's tonemapped, sRGB-encoded one. Decoded first, the output encoded
-            // again below (written for FSR 4). BB_FSR4_LINEAR=0 or toggle bit 63: the encoded frame
-            // as it is (A/B).
+            // again below (written for FSR 4). BB_FSR_LINEAR=0: the encoded frame as it is (A/B).
             static const bool linear_env = [] {
-                const char* env = std::getenv("BB_FSR4_LINEAR");
+                const char* env = std::getenv("BB_FSR_LINEAR");
                 return !env || env[0] != '0';
             }();
             // An sRGB-format frame is decoded by its view already (and encoded by the blit).
@@ -2288,13 +2232,12 @@ void TemporalUpscaler::RunScaled() {
             // 0.4.4 beta 21: its image, made when a frame is first decoded (it was made with the
             // context whenever FSR 4 or DLSS was selected; DLSS never decodes). The decode below
             // starts it from the undefined layout every frame.
-            if (linear_env && !srgb_format && !BbToggle::Disabled(BbToggle::Fsr4EncodedInput)) {
+            if (linear_env && !srgb_format) {
                 EnsureImage(fsr4_linear_image, fsr4_linear_view, vk::Format::eR16G16B16A16Sfloat,
                             vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled,
                             "AMD FSR linear input");
             }
-            fsr4_linear_frame = linear_env && fsr4_linear_image && !srgb_format &&
-                                !BbToggle::Disabled(BbToggle::Fsr4EncodedInput);
+            fsr4_linear_frame = linear_env && fsr4_linear_image && !srgb_format;
             UpscaleInput::Image input{color_image, color_view, source_width, source_height,
                                       color.info.pixel_format};
             {

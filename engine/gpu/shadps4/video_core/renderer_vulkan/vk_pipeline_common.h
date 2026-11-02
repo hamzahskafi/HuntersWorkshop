@@ -21,16 +21,6 @@ struct PushData;
 
 namespace Vulkan {
 
-/// 0.4.4 beta 20: BB_PUSH_DESC_STRICT=1, push descriptors only below the device's limit (before
-/// beta 20); otherwise up to and including it.
-inline bool PushDescriptorStrict() {
-    static const bool strict = [] {
-        const char* env = std::getenv("BB_PUSH_DESC_STRICT");
-        return env && env[0] == '1';
-    }();
-    return strict;
-}
-
 static constexpr auto AllGraphicsStageBits =
     vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eTessellationControl |
     vk::ShaderStageFlagBits::eTessellationEvaluation | vk::ShaderStageFlagBits::eGeometry |

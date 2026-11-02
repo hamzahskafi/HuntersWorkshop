@@ -194,10 +194,8 @@ public:
     };
 
     /// Retrieves an image view with the properties of the specified image id.
-    /// `refresh` false: an image found out of date is used as is (the texture binding helper
-    /// checked it beforehand; only a guest write racing with the draw can make it so).
     [[nodiscard]] ImageView& FindTexture(ImageId image_id, const ImageDesc& desc,
-                                         ViewMemo* memo = nullptr, bool refresh = true);
+                                         ViewMemo* memo = nullptr);
 
     /// Retrieves the render target with specified properties
     [[nodiscard]] ImageView& FindRenderTarget(ImageId image_id, const ImageDesc& desc);

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// bbport: GPU work left out or merged, with kill switches, and its BB_FRAME_STATS report.
+// bbport: GPU work left out or merged, and its BB_FRAME_STATS report.
 #pragma once
 
 #include <array>
@@ -12,19 +12,6 @@
 #include <string>
 
 namespace Vulkan::GpuSavings {
-
-/// An environment switch on by default: BB_x=0 turns it off.
-inline bool EnvOn(const char* name) {
-    const char* env = std::getenv(name);
-    return !(env && env[0] == '0');
-}
-
-/// BB_IMAGE_TILE_MEMO=0: a texel buffer aliasing an image is filled from the image (download +
-/// tiling) at every binding, as before, also when neither changed since the last fill.
-inline bool TileMemoOn() {
-    static const bool on = EnvOn("BB_IMAGE_TILE_MEMO");
-    return on;
-}
 
 /// What ended a render pass (Scheduler::EndRendering's reason; beta 19: named where it ends;
 /// beta 20: transfers by operation).
@@ -102,7 +89,7 @@ struct Counters {
     // 8 ranges or not whole dwords, by vkCmdCopyBuffer); those dispatches that flushed barriers
     // first.
     std::atomic<std::uint64_t> hle_batches{0}, hle_dispatches{0}, hle_barriers{0};
-    // Lookahead thread: sleeps instead of yields while stage B is stuck (BB_LOOKAHEAD_SLEEP).
+    // Lookahead thread: sleeps instead of yields while stage B is stuck.
     std::atomic<std::uint64_t> lookahead_sleeps{0};
     // Scene proxy resolves by the native access that needed them: transfer (copies, downloads,
     // texel buffer fills), sampled read, storage write, native attachment, other.
@@ -243,9 +230,8 @@ inline void Report() {
     const double depth_upload_mb = take(c.depth_upload_bytes) / s / (1024.0 * 1024.0);
     std::printf("GPU savings per second: image->texel buffer fills %.1f, skipped unchanged %.1f "
                 "(%.1f MB; refilled after image write %.1f, buffer write %.1f, proxy %.1f, other "
-                "%.1f) [BB_IMAGE_TILE_MEMO]; HLE copy %.0f batches, %.0f of them as dispatches "
-                "(%.0f after a barrier flush; the rest vkCmdCopyBuffer); lookahead sleeps %.0f "
-                "[BB_LOOKAHEAD_SLEEP]\n",
+                "%.1f); HLE copy %.0f batches, %.0f of them as dispatches (%.0f after a barrier "
+                "flush; the rest vkCmdCopyBuffer); lookahead sleeps %.0f\n",
                 fills / s, skips / s, skipped_mb / s, mi / s, mb / s, mp / s, mo / s, batches / s,
                 dispatches / s, barriers / s, sleeps / s);
     std::printf("  scene proxy resolves per second by native access: transfer %.1f, sampled %.1f, "

@@ -376,29 +376,9 @@ class FrameRateFixTests(unittest.TestCase):
         self.assertIn(0xB6FBD4, self.fixed(['60 FPS++'], 60))  # 60 keeps its list's cloth
 
     def test_camera_kept_as_the_list_has_it_by_default(self):
-        os.environ.pop('BB_CAMERA_FIX', None)
         at60 = self.fixed(['60 FPS++'], 60)
         plain = {o + EBOOT_BASE: d for o, d in patches.compile_patches(XML, ['60 FPS++'], '01.09', self.WIDE)}
         self.assertEqual(at60.get(0x4D25E68), plain.get(0x4D25E68))
-
-    def test_camera_weights_follow_the_rate(self):
-        os.environ['BB_CAMERA_FIX'] = '1'
-        self.addCleanup(os.environ.pop, 'BB_CAMERA_FIX', None)
-        at60 = self.fixed(['60 FPS++'], 60)
-        self.assertAlmostEqual(self.value(at60, 0x183A4D7), 0.05)  # Kyo's 60 values stay at 60
-        self.assertAlmostEqual(self.value(at60, 0x4D25E68), 1 - 0.9 ** 0.5, places=6)
-        self.assertAlmostEqual(self.value(at60, 0x4D25E94), 1 - (1 - 1 / 30) ** 0.5, places=6)
-        for fps in (90, 120, 144):
-            with self.subTest(fps=fps):
-                image = self.fixed([patches.SCALED_BASE], fps)
-                frames = 60 / fps
-                self.assertAlmostEqual(self.value(image, 0x183A4D7), 1 - 0.95 ** frames, places=6)  # +0x1a4
-                self.assertAlmostEqual(self.value(image, 0x183A4E1), 0.05 ** frames, places=6)  # +0x1a8 kept
-                self.assertAlmostEqual(self.value(image, 0x183A649), 0.698132, places=5)  # an angle
-                store = image[0x183FF29]
-                self.assertEqual(store[:7], bytes.fromhex('41c7859c010000'))
-                self.assertAlmostEqual(struct.unpack('<f', store[7:])[0], 1 - 0.95 ** frames, places=6)
-                self.assertAlmostEqual(self.value(image, patches.CAMERA_PARAM_EASE[0]), 1 - 0.95 ** (30 / fps), places=6)
 
     def test_30_runs_the_game_without_a_frame_rate_patch(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -433,7 +413,6 @@ class FrameRateFixTests(unittest.TestCase):
 
     def test_the_retune_keeps_its_60_fps_feel_above_60(self):
         # FPS++ with the corrections: Kyo's weights are a 60 FPS frame's, converted from it; at 60 as the list.
-        os.environ.pop('BB_CAMERA_FIX', None)
         writes = patches.compile_patches(XML, ['60 FPS++'], '01.09', self.WIDE)
         at60 = {o + EBOOT_BASE: d for o, d in patches.frame_rate_fixes(writes, 60, sixty_camera=True)}
         plain = {o + EBOOT_BASE: d for o, d in writes}
@@ -464,9 +443,7 @@ class FrameRateFixTests(unittest.TestCase):
     def test_the_camera_per_frame_is_the_engines(self):
         # With the frame timer (0.4.4 beta 24) the engine converts the camera every frame: FPS++ keeps Kyo's
         # constructor values, wall escape and jump as the list has them, without his debug-menu stores, and nothing
-        # is converted here (BB_CAMERA_FIX ignored); Original leaves his retune out and the game's eases as they are.
-        os.environ['BB_CAMERA_FIX'] = '1'
-        self.addCleanup(os.environ.pop, 'BB_CAMERA_FIX', None)
+        # is converted here; Original leaves his retune out and the game's eases as they are.
         writes = patches.compile_patches(XML, ['60 FPS++'], '01.09', self.WIDE)
         plain = {o + EBOOT_BASE: d for o, d in writes}
         for fps in (60, 120, 144):

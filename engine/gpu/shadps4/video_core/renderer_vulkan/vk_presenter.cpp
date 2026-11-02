@@ -196,17 +196,14 @@ void Presenter::WaitForSubmittedWork(u64 timeout_ns) {
     // (and never giving it back - the process is ending) stops the guest from queueing more
     // frames while the GPU drains, so the process does not end with fresh work in flight. Only
     // ticks already in the queue are waited for (CurrentTick-1 may never be submitted once the
-    // lock is held; waiting for it just ran into the timeout). BB_EXIT_BLOCK_SUBMIT=0: old wait.
+    // lock is held; waiting for it just ran into the timeout).
     using Clock = std::chrono::steady_clock;
     const auto deadline = Clock::now() + std::chrono::nanoseconds(timeout_ns);
-    const char* block_env = std::getenv("BB_EXIT_BLOCK_SUBMIT");
-    if (!(block_env && block_env[0] == '0')) {
-        while (!Scheduler::submit_mutex.try_lock()) {
-            if (Clock::now() >= deadline) {
-                break;
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    while (!Scheduler::submit_mutex.try_lock()) {
+        if (Clock::now() >= deadline) {
+            break;
         }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     const vk::Device device = instance.GetDevice();
     for (Scheduler* scheduler : {&draw_scheduler, &present_scheduler, &flip_scheduler}) {
@@ -996,16 +993,12 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
         // bbport: the black bars are only needed where the fitted blit leaves part of the image
         // uncovered; a frame of the swapchain's aspect (the usual case: the game renders at the
         // window size) overwrites every pixel, and the full-screen clear plus its barrier were
-        // one more full-resolution write each present. BB_PRESENT_ALWAYS_CLEAR=1: always clear.
-        static const bool always_clear = [] {
-            const char* env = std::getenv("BB_PRESENT_ALWAYS_CLEAR");
-            return env && env[0] == '1';
-        }();
+        // one more full-resolution write each present.
         const vk::Rect2D fit = FitImage(s32(frame->width), s32(frame->height), s32(extent.width),
                                         s32(extent.height));
         const bool covers = fit.offset.x == 0 && fit.offset.y == 0 &&
                             fit.extent.width == extent.width && fit.extent.height == extent.height;
-        if (always_clear || !covers) {
+        if (!covers) {
             const vk::ClearColorValue black{std::array<float, 4>{0.0f, 0.0f, 0.0f, 1.0f}};
             cmdbuf.clearColorImage(swapchain_image, vk::ImageLayout::eTransferDstOptimal, black,
                                    color_range);

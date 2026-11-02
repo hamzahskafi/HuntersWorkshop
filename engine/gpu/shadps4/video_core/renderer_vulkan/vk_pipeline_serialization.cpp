@@ -582,30 +582,27 @@ void PipelineCache::WarmUp() {
     // bbport: a GPU driver that crashes building one cached pipeline (an AMD driver did, at every
     // start) would end every start the same way. The pipelines being built are written to
     // warmup.running, one a line (the OS keeps the write when the process dies); the next start
-    // leaves those pipelines out and builds the others. BB_WARMUP_GUARD=0: not used.
+    // leaves those pipelines out and builds the others.
     std::unordered_set<std::string> crashed;
     std::filesystem::path guard_path;
     if (const auto folder = database.FolderPath(); !folder.empty()) {
-        const char* guard_env = std::getenv("BB_WARMUP_GUARD");
-        if (!(guard_env && guard_env[0] == '0')) {
-            guard_path = folder / "warmup.running";
-            if (std::ifstream last{guard_path}; last) {
-                for (std::string line; std::getline(last, line);) {
-                    while (!line.empty() && (line.back() == ' ' || line.back() == '\r')) {
-                        line.pop_back();
-                    }
-                    if (!line.empty()) {
-                        crashed.insert(line);
-                    }
+        guard_path = folder / "warmup.running";
+        if (std::ifstream last{guard_path}; last) {
+            for (std::string line; std::getline(last, line);) {
+                while (!line.empty() && (line.back() == ' ' || line.back() == '\r')) {
+                    line.pop_back();
+                }
+                if (!line.empty()) {
+                    crashed.insert(line);
                 }
             }
-            for (const auto& name : crashed) {
-                database.Remove(Storage::BlobType::PipelineKey, name);
-                std::printf("GPU cache: the GPU driver crashed building cached pipeline %s at the last "
-                            "start (or one built beside it); it is left out (it compiles again when a "
-                            "draw needs it)\n",
-                            name.c_str());
-            }
+        }
+        for (const auto& name : crashed) {
+            database.Remove(Storage::BlobType::PipelineKey, name);
+            std::printf("GPU cache: the GPU driver crashed building cached pipeline %s at the last "
+                        "start (or one built beside it); it is left out (it compiles again when a "
+                        "draw needs it)\n",
+                        name.c_str());
         }
     }
     // bbport: a driver that crashes in the warm-up may do so on many cached pipelines: on an

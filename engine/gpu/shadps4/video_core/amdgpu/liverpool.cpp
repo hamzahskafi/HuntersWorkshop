@@ -233,13 +233,9 @@ void Liverpool::Process(std::stop_token stoken) {
             BbTimeline::Note(BbTimeline::DecoderIdleBegin);
             // bbport: the game submits a frame in ~20 parts: waking from the condition variable for
             // each took tens of microseconds on the way to the GPU. Spins first, with cores to spare
-            // (BB_GPU_SPIN_US, default 200 with 12+ hardware threads, else 0).
-            static const auto spin_time = std::chrono::microseconds([] {
-                if (const char* env = std::getenv("BB_GPU_SPIN_US")) {
-                    return std::max(0, std::atoi(env));
-                }
-                return int(BbThreads::CapSpinUs(BbThreads::Available() >= 12 ? 200 : 0));
-            }());
+            // (200 us with 12+ hardware threads, else 0; BB_SPIN_US lowers it).
+            static const auto spin_time = std::chrono::microseconds(
+                BbThreads::CapSpinUs(BbThreads::Available() >= 12 ? 200 : 0));
             decoder_idle.store(true, std::memory_order_release);
             if (spin_time.count() > 0) {
                 const auto spin_until = idle_start + spin_time;
@@ -515,23 +511,6 @@ bool PipelinedOpcode(PM4ItOpcode opcode) {
 }
 } // namespace
 
-// 0.4.4 beta 20: BB_HONEST_LABELS fences queued with the bytes they write and whether their value
-// is known (PendingFenceValue; the engine map's fence-1). BB_FENCE_HALF_CHECK=0: as before.
-// 0.4.4 beta 21: said once when off, the first time it is asked (a static's initializer runs on
-// one thread; the others wait for it).
-static bool FenceSizes() {
-    static const bool on = [] {
-        const char* env = std::getenv("BB_FENCE_HALF_CHECK");
-        const bool enabled = !(env && env[0] == '0');
-        if (!enabled) {
-            std::printf("GPU: pending fences queued without their size and whether their value "
-                        "is known, as before 0.4.4 beta 20 (BB_FENCE_HALF_CHECK=0)\n");
-        }
-        return enabled;
-    }();
-    return on;
-}
-
 namespace {
 // bbport: a label written straight into guest memory (no backing view): one store. A memcpy of a
 // variable 4 or 8 bytes is two overlapping stores in glibc; a thread preempted between them
@@ -593,8 +572,7 @@ void RunEventWriteEop(Vulkan::Rasterizer& rasterizer, const u8* data) {
         const u64 value = sel == DataSelect::Data32Low ? eop.DataDWord() : eop.DataQWord();
         rasterizer.SignalAfterGpu([eop, seq] { SignalEop(eop, seq); },
                                   writes ? reinterpret_cast<VAddr>(eop.Address<u8>()) : 0, value,
-                                  sel == DataSelect::Data32Low ? 4u : 8u,
-                                  known || !FenceSizes());
+                                  sel == DataSelect::Data32Low ? 4u : 8u, known);
         return;
     }
     // Guest memory copies on the copy threads precede the fence the guest sees.
@@ -861,7 +839,7 @@ void Liverpool::NotePendingWrite(const PM4CmdWriteData& write_data, u32 num_byte
 bool Liverpool::PendingFenceValue(VAddr address, u32& value) {
     for (auto it = pending_fences.rbegin(); it != pending_fences.rend(); ++it) {
         if (rasterizer->DrawPipeReached(it->position) && rasterizer->SignalsPublished(it->position)) {
-            break; // written already, or a queued GPU signal (PendingSignalValue below)
+            break; // written already, or a queued GPU signal (PendingSignalWord below)
         }
         if (address >= it->address && address + sizeof(u32) <= it->address + it->num_bytes) {
             u64 data = it->data;
@@ -872,29 +850,17 @@ bool Liverpool::PendingFenceValue(VAddr address, u32& value) {
     // BB_HONEST_LABELS: past the recording thread, a fence waits for the GPU to finish the work
     // before it; in stream order it is met already.
     if (Vulkan::Rasterizer::HonestLabels() && rasterizer) {
-        if (FenceSizes()) {
-            // 0.4.4 beta 20: the newest fence that writes these 4 bytes answers (the engine map's
-            // fence-1). Only an 8-byte fence writes label+4: a 4-byte one leaves it as it is in
-            // memory, polled as such (before, its "high half" read 0); a clock or counter there
-            // is read in memory too; and a newer 8-byte fence at label-4 wins over an older
-            // 4-byte one at label (before, the fence at the address itself was asked first).
-            bool next_to_short = false;
-            if (rasterizer->PendingSignalWord(address, value, next_to_short)) {
-                return true;
-            }
-            if (next_to_short) {
-                fence_high_half_refused.fetch_add(1, std::memory_order_relaxed);
-            }
-            return false;
-        }
-        u64 data = 0;
-        if (rasterizer->PendingSignalValue(address, data)) {
-            value = static_cast<u32>(data);
+        // 0.4.4 beta 20: the newest fence that writes these 4 bytes answers (the engine map's
+        // fence-1). Only an 8-byte fence writes label+4: a 4-byte one leaves it as it is in
+        // memory, polled as such (before, its "high half" read 0); a clock or counter there
+        // is read in memory too; and a newer 8-byte fence at label-4 wins over an older
+        // 4-byte one at label (before, the fence at the address itself was asked first).
+        bool next_to_short = false;
+        if (rasterizer->PendingSignalWord(address, value, next_to_short)) {
             return true;
         }
-        if ((address & 7) == 4 && rasterizer->PendingSignalValue(address - 4, data)) {
-            value = static_cast<u32>(data >> 32); // the high half of a 64-bit fence
-            return true;
+        if (next_to_short) {
+            fence_high_half_refused.fetch_add(1, std::memory_order_relaxed);
         }
     }
     return false;
@@ -2409,7 +2375,6 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
                 const u32 pipe_id = queue.pipe_id;
                 // 0.4.4 beta 20: value and size by its data select, as EOP's.
                 const auto sel = release.data_sel.Value();
-                const bool sizes = FenceSizes();
                 const bool known = sel == DataSelect::Data32Low || sel == DataSelect::Data64;
                 rasterizer->SignalAfterGpu(
                     [release, pipe_id] {
@@ -2421,9 +2386,8 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
                             [](VAddr, u16, u16) {});
                     },
                     sel != DataSelect::None ? release.Address<VAddr>() : 0,
-                    sel == DataSelect::Data32Low && sizes ? release.DataDWord()
-                                                          : release.DataQWord(),
-                    sel == DataSelect::Data32Low ? 4u : 8u, known || !sizes);
+                    sel == DataSelect::Data32Low ? release.DataDWord() : release.DataQWord(),
+                    sel == DataSelect::Data32Low ? 4u : 8u, known);
                 break;
             }
             // bbport: copies deferred to the recording thread precede writes the guest sees, and

@@ -198,21 +198,9 @@ bool WriteFile(const std::filesystem::path& path, const RuntimeInfo& runtime_inf
 /// the cache folder (the user's sits in a cloud-synced Desktop; the virus scanner reads each new
 /// file at close) inside the compile time a new shader costs the frame. What a file holds is
 /// collected at once (it is read from guest memory); only the writing waits.
-/// BB_SHADER_FILE_ASYNC=0: written at once, as before.
-bool AsyncFiles() {
-    static const bool enabled = [] {
-        const char* env = std::getenv("BB_SHADER_FILE_ASYNC");
-        return !(env && env[0] == '0');
-    }();
-    return enabled;
-}
 class FileWriter {
 public:
     static void Run(std::function<void()> job) {
-        if (!AsyncFiles()) {
-            job();
-            return;
-        }
         static FileWriter* writer = new FileWriter(); // never stopped: pending files at exit are lost
         {
             std::scoped_lock lk{writer->lock};
@@ -348,14 +336,6 @@ void StoreState(const Info& info, const RuntimeInfo& runtime_info, std::span<con
                         "compiler rebuilds it before the game starts (BB_SHADER_STATES=0 turns it off)\n");
         }
     };
-    if (!AsyncFiles()) {
-        std::error_code error;
-        if (std::filesystem::exists(path, error)) {
-            return;
-        }
-        write(Collect(info, runtime_info, code));
-        return;
-    }
     // The existence check goes with the write: a state already stored costs a collect here
     // (copies of a few KiB) instead of a file system query on this thread.
     auto c = std::make_shared<const Collected>(Collect(info, runtime_info, code));

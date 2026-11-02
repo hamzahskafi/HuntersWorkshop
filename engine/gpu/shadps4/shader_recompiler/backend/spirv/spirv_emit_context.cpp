@@ -246,10 +246,6 @@ void EmitContext::DefineBufferProperties() {
         if (buffer.buffer_type != BufferType::Guest) {
             continue;
         }
-        // bbport: bound at the guest's address itself (Rasterizer::BindBuffers): no offset.
-        if (desc.is_uniform && profile.uniform_exact_base) {
-            continue;
-        }
 
         const u32 half = PushData::BufOffsetIndex + (binding >> 4);
         const u32 comp = (binding & 0xf) >> 2;

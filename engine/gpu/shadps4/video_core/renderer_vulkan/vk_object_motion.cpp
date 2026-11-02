@@ -285,7 +285,7 @@ void ObjectMotion::OnFrameStart() {
 }
 
 u32 ObjectMotion::PrepareDraw(const DrawInfo& draw, Motion::Anchor anchor, Motion::StoreReason reason) {
-    if (!enabled || BbToggle::Disabled(1u << 29) || params_used >= ParamsPerFrame) {
+    if (!enabled || params_used >= ParamsPerFrame) {
         return 0;
     }
     const auto allocation = history.Prepare(draw, anchor, reason);
@@ -293,15 +293,6 @@ u32 ObjectMotion::PrepareDraw(const DrawInfo& draw, Motion::Anchor anchor, Motio
                 (allocation.load ? Shader::MotionVectors::FlagLoad : 0);
     if (!flags) {
         return 0;
-    }
-    // 0.4.4 beta 15: BB_MOTION_STORE=exchange stores with atomic exchanges, as before, to compare
-    // (EmitVertexMotion: relaxed atomic stores otherwise). A flag, so no shader is compiled again.
-    static const bool exchange_stores = [] {
-        const char* value = std::getenv("BB_MOTION_STORE");
-        return value && std::strcmp(value, "exchange") == 0;
-    }();
-    if (exchange_stores && allocation.store) {
-        flags |= Shader::MotionVectors::FlagExchange;
     }
     const u32 slot = u32(frame % FrameSlots);
     const u32 index = 1 + slot * ParamsPerFrame + params_used++;

@@ -676,7 +676,7 @@ void *runtime_low_map(size_t size, int prot) {
  * 4096 resource sharps read by the draw-preparation workers,
  * 8192 prepared draws from the draw-preparation workers,
  * 16384 small read-only buffer copies on the recording thread,
- * 32768 hot pages (opt-in with BB_HOT_PAGES=1),
+ * 32768 hot pages (on unless BB_HOT_PAGES=0),
  * 65536 unprotect the 256 KiB window around a guest write fault (BB_FAULT_WINDOW KiB),
  * 131072 large guest memory copies split across copy threads (BB_COPY_THREADS),
  * 262144 unused (was BB_ASYNC_FENCES, removed in 0.4.4 beta 21),

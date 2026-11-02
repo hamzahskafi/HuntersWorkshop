@@ -123,7 +123,6 @@ static void EmitVertexMotion(EmitContext& ctx) {
     };
     const Id do_store = flag(MotionVectors::FlagStore);
     const Id do_load = flag(MotionVectors::FlagLoad);
-    const Id do_exchange = flag(MotionVectors::FlagExchange);
     const Id store_label = ctx.OpLabel();
     const Id store_merge = ctx.OpLabel();
     ctx.OpSelectionMerge(store_merge, spv::SelectionControlMask::MaskNone);
@@ -135,35 +134,15 @@ static void EmitVertexMotion(EmitContext& ctx) {
     // avoid write/write races; all these invocations produce the same clip position.
     // 0.4.4 beta 15: relaxed atomic stores (a plain store on NVIDIA and AMD) instead of atomic
     // exchanges, which read each value back: the same race freedom for ~6.5 M vertices a frame
-    // facing the lamps of the dense area. FlagExchange (BB_MOTION_STORE=exchange) keeps the
-    // exchanges, to compare.
+    // facing the lamps of the dense area.
     const Id scalar_ptr = ctx.TypePointer(spv::StorageClass::PhysicalStorageBuffer, u32_type);
     const Id scope = ctx.ConstU32(static_cast<u32>(spv::Scope::Device));
-    const auto store_components = [&](bool exchange) {
-        for (u32 i = 0; i < 4; ++i) {
-            const Id ptr = ctx.OpConvertUToPtr(scalar_ptr,
-                ctx.OpIAdd(ctx.U64, store_address, ctx.Constant(ctx.U64, u64(i * 4))));
-            const Id bits =
-                ctx.OpBitcast(u32_type, ctx.OpCompositeExtract(ctx.F32[1], position, i));
-            if (exchange) {
-                ctx.OpAtomicExchange(u32_type, ptr, scope, ctx.u32_zero_value, bits);
-            } else {
-                ctx.OpAtomicStore(ptr, scope, ctx.u32_zero_value, bits);
-            }
-        }
-    };
-    const Id exchange_label = ctx.OpLabel();
-    const Id plain_label = ctx.OpLabel();
-    const Id stores_merge = ctx.OpLabel();
-    ctx.OpSelectionMerge(stores_merge, spv::SelectionControlMask::MaskNone);
-    ctx.OpBranchConditional(do_exchange, exchange_label, plain_label);
-    ctx.AddLabel(exchange_label);
-    store_components(true);
-    ctx.OpBranch(stores_merge);
-    ctx.AddLabel(plain_label);
-    store_components(false);
-    ctx.OpBranch(stores_merge);
-    ctx.AddLabel(stores_merge);
+    for (u32 i = 0; i < 4; ++i) {
+        const Id ptr = ctx.OpConvertUToPtr(scalar_ptr,
+            ctx.OpIAdd(ctx.U64, store_address, ctx.Constant(ctx.U64, u64(i * 4))));
+        const Id bits = ctx.OpBitcast(u32_type, ctx.OpCompositeExtract(ctx.F32[1], position, i));
+        ctx.OpAtomicStore(ptr, scope, ctx.u32_zero_value, bits);
+    }
     ctx.OpBranch(store_merge);
     ctx.AddLabel(store_merge);
 

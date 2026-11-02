@@ -79,17 +79,14 @@ static int32_t error(int e) {
 /* All helpers ending in _locked require registry_lock.
  * bbport: a found rwlock moves to the front of the registry. New ones went in front, so the
  * game's busiest locks, made at boot, sat behind every one made since: each area load made the
- * walk under registry_lock longer for every lock and unlock of every guest thread.
- * BB_RWLOCK_FRONT=0: the list keeps its order, as before. */
+ * walk under registry_lock longer for every lock and unlock of every guest thread. */
 static Rwlock *find_locked(Rwlock *handle) {
-    static int front=-1;
-    if (front<0) { const char *e=getenv("BB_RWLOCK_FRONT"); front=!(e && e[0]=='0'); }
     ++lookups;
     Rwlock **link=&registry;
     for (Rwlock *r=registry; r; link=&r->next, r=r->next) {
         ++lookup_steps;
         if (r!=handle) continue;
-        if (front && link!=&registry) { *link=r->next; r->next=registry; registry=r; }
+        if (link!=&registry) { *link=r->next; r->next=registry; registry=r; }
         return r;
     }
     return NULL;

@@ -6,6 +6,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cstdlib>
 #include <thread>
 #ifndef _WIN32
 #include <sched.h>
@@ -14,6 +15,18 @@
 #endif
 
 namespace BbThreads {
+
+/// bbport BB_SPIN_US=N: every idle spin of the render chain (the GPU command thread's wait for
+/// submissions, the draw pipe's stage A and stage B waits, the Vulkan recording thread's wait,
+/// the waits for host copies) lasts at most N microseconds (0: none spins); unset, each keeps
+/// its own default. `wanted`: that default.
+inline unsigned SpinLimitUs(unsigned wanted) {
+    static const unsigned limit = [] {
+        const char* env = std::getenv("BB_SPIN_US");
+        return env && env[0] ? static_cast<unsigned>(std::max(0, std::atoi(env))) : ~0u;
+    }();
+    return std::min(wanted, limit);
+}
 
 #ifdef _WIN32
 // Windows (bbport_platform.cpp): the process affinity mask; THREAD_PRIORITY_IDLE.
@@ -26,12 +39,14 @@ void MakeBackground();
 /// threads needed exactly then.
 void MakeCritical(bool bulk = false);
 /// An idle spin of a raised thread before it sleeps, in microseconds: `wanted`, at most 50
-/// with fewer than 16 hardware threads (a raised thread spinning keeps a game thread waiting).
+/// with fewer than 16 hardware threads (a raised thread spinning keeps a game thread waiting),
+/// and at most BB_SPIN_US (SpinLimitUs).
 unsigned CapSpinUs(unsigned wanted);
 #else
 /// Linux: unchanged (normal priority; raising it needs privileges).
 inline void MakeCritical(bool = false) {}
-inline unsigned CapSpinUs(unsigned wanted) { return wanted; }
+/// No cap for the priority; BB_SPIN_US still applies (SpinLimitUs).
+inline unsigned CapSpinUs(unsigned wanted) { return SpinLimitUs(wanted); }
 /// Hardware threads available to the process.
 inline unsigned Available() {
     cpu_set_t set;

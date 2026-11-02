@@ -128,8 +128,9 @@ public:
     bool IsBufferAccessed(const VideoCore::Buffer* handle, u64 offset, u64 size,
                           bool check_read_access = false);
 
-    /// bbport (BB_IMAGE_TILE_MEMO): notes GPU writes (AccessBuffer with a write access) over the
-    /// range from now on; the token asks BufferUnwritten. A few ranges at a time, oldest dropped.
+    /// bbport (texel buffer fills, BufferCache::tile_memos): notes GPU writes (AccessBuffer with a
+    /// write access) over the range from now on; the token asks BufferUnwritten. A few ranges at
+    /// a time, oldest dropped.
     u64 WatchBufferWrites(const VideoCore::Buffer* handle, u64 offset, u64 size);
     /// Nothing recorded since WatchBufferWrites wrote the range (false once the watch was dropped).
     [[nodiscard]] bool BufferUnwritten(u64 token) const;
@@ -144,21 +145,7 @@ public:
 
     void FlushBarriers();
 
-    /// bbport: runs before this thread changes image state (layouts, pending image
-    /// barriers): the rasterizer joins its texture binding helper there (BindHelper).
-    void SetImageAccessHook(void (*hook)(void*), void* context) {
-        image_access_hook = hook;
-        image_access_context = context;
-    }
-    void BeforeImageAccess() {
-        if (image_access_hook) {
-            image_access_hook(image_access_context);
-        }
-    }
-
 private:
-    void (*image_access_hook)(void*) = nullptr;
-    void* image_access_context = nullptr;
     const Instance& instance;
     Scheduler& scheduler;
     std::unique_ptr<VideoCore::BlitHelper> blit_helper;

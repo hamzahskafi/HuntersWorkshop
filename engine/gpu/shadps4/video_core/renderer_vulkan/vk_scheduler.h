@@ -1026,7 +1026,7 @@ public:
     /// `site`: the caller (BbStats::WaitSite).
     void WaitDeferredSignals(u32 site = BbStats::WaitOther);
 
-    /// bbport BB_FENCE_ORDER=ordered (or experiment bit 8; default all: WaitDeferredSignals): a
+    /// bbport BB_FENCE_ORDER=ordered (the default; =all: WaitDeferredSignals): a
     /// CPU write of the command processor (WriteData, DMA) into [address, address + size),
     /// reading [src, src + src_size), waits only for the deferred signals the hardware would
     /// have written before it: those issued before the last point the command processor waited
@@ -1044,11 +1044,9 @@ public:
                              std::memory_order_relaxed);
     }
 
-    /// BB_FENCE_ORDER=ordered or experiment bit 8: WaitDeferredSignalsFor waits only for what it
-    /// must. FenceOrderPossible: it may be switched on while the game runs (BB_TOGGLE_FILE), so the
-    /// barriers are recorded all along.
+    /// BB_FENCE_ORDER=ordered (the default): WaitDeferredSignalsFor waits only for what it must,
+    /// and the barriers it needs are recorded (Rasterizer::NoteFenceBarrier).
     [[nodiscard]] static bool FenceOrderScoped();
-    [[nodiscard]] static bool FenceOrderPossible();
 
     /// Whether a render pass with exactly this state is open.
     [[nodiscard]] bool IsRenderingWith(const RenderState& state) const {

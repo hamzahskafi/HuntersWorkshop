@@ -188,9 +188,8 @@ private:
     bool EnsureResources(u32 width, u32 height, u32 out_width, u32 out_height, bool hdr);
     /// 0.4.4 beta 21: makes `image` (render size) if it has none: the images only some features
     /// use (reactive mask, FSR 4's linear input, TAA's diagnostics) are made on first need, not
-    /// by EnsureResources, which drops them with the rest (BB_UPSCALER_EAGER_IMAGES=1: made
-    /// there, as before). Unwritten; each use starts it from the undefined layout. `what`: for the
-    /// log.
+    /// by EnsureResources, which drops them with the rest. Unwritten; each use starts it from the
+    /// undefined layout. `what`: for the log.
     void EnsureImage(VideoCore::UniqueImage& image, vk::UniqueImageView& view, vk::Format format,
                      vk::ImageUsageFlags usage, const char* what);
     /// 0.4.4 beta 21: the reactive mask's view for the bindings that read it only when this frame

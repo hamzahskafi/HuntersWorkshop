@@ -83,7 +83,8 @@ static void CheckMotionInterface(const std::vector<u32>& code, bool vertex_motio
             // This minimal shader needs only small offsets/strides, never allocation addresses.
             assert(count == 5 && code[i + 4] == 0 && code[i + 3] <= 32);
         }
-        atomic_stores += op == spv::Op::OpAtomicExchange;
+        // The vertex positions are stored with relaxed atomic stores (0.4.4 beta 15).
+        atomic_stores += op == spv::Op::OpAtomicStore;
         i += count;
     }
     unsigned motion_descriptors = 0;

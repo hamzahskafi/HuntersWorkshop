@@ -163,7 +163,7 @@ public:
     mutable u64 lru_touched_tick = ~0ULL;
     u64 tick_accessed_last{};
     /// bbport: counts accesses that may write the image (Runtime::Transit with a write access,
-    /// backing swaps): unchanged, the image holds what it held (BB_IMAGE_TILE_MEMO).
+    /// backing swaps): unchanged, the image holds what it held (BufferCache::tile_memos).
     u64 write_seq = 0;
     /// Hunter's Workshop (StoreTiledImage): the collector does not try storing this image again
     /// before this tick; each failure doubles the wait (store_failures).

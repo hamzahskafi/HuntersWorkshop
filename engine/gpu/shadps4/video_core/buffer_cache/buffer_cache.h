@@ -325,7 +325,7 @@ private:
         u64 generation = ~0ULL;
     };
     std::array<ImageMiss, 256> image_miss_cache{};
-    // bbport (BB_IMAGE_TILE_MEMO): the last fills of texel buffer ranges from the image over
+    // bbport: the last fills of texel buffer ranges from the image over
     // them. A fill is left out while the image, its scene proxy, the buffer range and its
     // residency are all as they were after the previous one.
     struct TileMemo {

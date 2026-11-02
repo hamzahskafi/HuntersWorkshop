@@ -225,13 +225,13 @@ void SceneTargets::Copy(Entry& e, VideoCore::Image& original, bool to_native) {
     // bbport: a resolve of color is a bilinear upscale where the format filters linearly (never
     // integer formats): native-size passes after the upscaler read these images (effects,
     // post-processing), and nearest made them blocky. Fills to the proxy and depth/stencil stay
-    // nearest. BB_SCENE_LINEAR_RESOLVE=0 (or experiment bit 1): nearest throughout, as before.
+    // nearest. BB_SCENE_LINEAR_RESOLVE=0: nearest throughout, as before.
     static const bool linear_resolve = [] {
         const char* env = std::getenv("BB_SCENE_LINEAR_RESOLVE");
         return !(env && env[0] == '0');
     }();
     const bool linear =
-        linear_resolve && !BbToggle::Experiment(2) && to_native && !e.depth_values &&
+        linear_resolve && to_native && !e.depth_values &&
         original.aspect_mask == vk::ImageAspectFlags{vk::ImageAspectFlagBits::eColor} &&
         bool(Features(original.backing->image.image_ci.format) &
              vk::FormatFeatureFlagBits::eSampledImageFilterLinear);

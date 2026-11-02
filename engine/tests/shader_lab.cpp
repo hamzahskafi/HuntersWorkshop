@@ -391,7 +391,6 @@ bool ApplyLabProfile(Profile& profile) {
         {"needs_manual_interpolation", &profile.needs_manual_interpolation},
         {"uniform_constant_buffers", &profile.uniform_constant_buffers},
         {"uniform_dword_layout", &profile.uniform_dword_layout},
-        {"uniform_exact_base", &profile.uniform_exact_base},
         {"flatbuf_storage", &profile.flatbuf_storage},
         {"early_fragment_tests", &profile.early_fragment_tests},
         {"supports_fragment_shader_barycentric", &profile.supports_fragment_shader_barycentric},
@@ -432,7 +431,6 @@ int RunOne(const fs::path& file, const fs::path& profile_file) {
     profile.uniform_constant_buffers = g_native;
     // bbport: the engine's default native layout (dwords, offsets in the push data).
     profile.uniform_dword_layout = g_native;
-    profile.uniform_exact_base = false;
     if (!ApplyLabProfile(profile)) {
         return 2;
     }
@@ -2036,7 +2034,6 @@ Profile CaptureProfile(const fs::path& file) {
     }
     profile.uniform_constant_buffers = g_native;
     profile.uniform_dword_layout = g_native;
-    profile.uniform_exact_base = false;
     return profile;
 }
 

@@ -262,7 +262,6 @@ void Runtime::InlineData(VideoCore::Buffer* dst, u64 offset, u32 value) {
 bool Runtime::Transit(VideoCore::Image* image, vk::ImageLayout dst_layout,
                       vk::PipelineStageFlags2 dst_stage, vk::AccessFlags2 dst_access,
                       std::optional<VideoCore::SubresourceRange> subres_range) {
-    BeforeImageAccess();
     if (scene_targets) scene_targets->NativeAccess(*image, dst_access);
     constexpr vk::AccessFlags2 ImageWrites =
         vk::AccessFlagBits2::eShaderWrite | vk::AccessFlagBits2::eShaderStorageWrite |
@@ -1237,7 +1236,6 @@ void Runtime::ClearImage(VideoCore::Image* dst, const VideoCore::SubresourceRang
 }
 
 void Runtime::SetBackingSamples(VideoCore::Image* image, u32 num_samples, bool copy_backing) {
-    BeforeImageAccess();
     auto& backing = image->backing;
     auto& backing_images = image->backing_images;
     const auto& info = image->info;
@@ -1312,7 +1310,7 @@ void Runtime::SetBackingSamples(VideoCore::Image* image, u32 num_samples, bool c
     }
 
     backing = new_backing;
-    ++image->write_seq; // other contents from here on (BB_IMAGE_TILE_MEMO)
+    ++image->write_seq; // other contents from here on (BufferCache::tile_memos)
 }
 
 bool Runtime::IsBufferAccessed(const VideoCore::Buffer* handle, u64 offset, u64 size,
@@ -1428,7 +1426,6 @@ void Runtime::AccessBuffer(const VideoCore::Buffer* handle, u64 offset, u64 size
 }
 
 void Runtime::FlushBarriers() {
-    BeforeImageAccess();
     // bbport BB_GX_IN_PLACE: an aliased access is done with once this barrier follows it (or
     // after a few barriers without it: a binding taken for residency only is never accessed).
     if (aliased && (aliased->recorded || ++aliased->flushes > 4)) {
