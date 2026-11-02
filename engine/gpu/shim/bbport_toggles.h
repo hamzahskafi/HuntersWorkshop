@@ -125,9 +125,9 @@ namespace BbStats {
 inline std::atomic<std::uint64_t> tracker_faults{0};
 /// Writes the GPU side heard of from the writers (libc copies over watched pages, no write tracking).
 inline std::atomic<std::uint64_t> cpu_write_notes{0}, cpu_write_note_bytes{0};
-/// Ranges the game's GPU memory allocator handed out (guest hook, BB_GUEST_IN_PLACE).
+/// Ranges the game's GPU memory allocator handed out.
 inline std::atomic<std::uint64_t> gpu_range_allocs{0}, gpu_range_alloc_bytes{0};
-/// Buffer bindings (BB_GUEST_IN_PLACE): bytes bound where the game's memory is (read over PCIe on a
+/// Buffer bindings: bytes bound where the game's memory is (BB_GX_IN_PLACE; read over PCIe on a
 /// discrete GPU) and bytes bound to VRAM copies.
 inline std::atomic<std::uint64_t> bound_in_place_bytes{0}, bound_vram_bytes{0};
 inline std::atomic<std::uint64_t> bound_in_place_written_bytes{0};

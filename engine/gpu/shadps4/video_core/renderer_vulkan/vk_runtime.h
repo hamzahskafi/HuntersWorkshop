@@ -50,10 +50,6 @@ public:
     void FillBuffer(const VideoCore::Buffer* dst, u64 offset, u64 size, u32 value);
 
     void InlineData(VideoCore::Buffer* dst, u64 offset, u32 value);
-    /// bbport BB_GUEST_IN_PLACE: copies from the game's memory itself (a guest memory chunk's
-    /// buffer, host memory the CPU writes) into `dst`: uploads without a CPU copy.
-    void CopyFromGuestChunk(vk::Buffer src, const VideoCore::Buffer* dst,
-                            std::span<const vk::BufferCopy> copies);
     /// bbport: `data` written into `dst` by the GPU in stream order (vkCmdUpdateBuffer pieces).
     void UpdateBuffer(const VideoCore::Buffer* dst, u64 offset, std::span<const u8> data);
 
@@ -138,9 +134,10 @@ public:
     /// Nothing recorded since WatchBufferWrites wrote the range (false once the watch was dropped).
     [[nodiscard]] bool BufferUnwritten(u64 token) const;
 
-    /// bbport BB_CHUNK_BUFFERS: the range is the game's memory that other commands reach through
-    /// a guest memory chunk's own buffer. Accesses are tracked per buffer, so the two do not see
-    /// each other: until the access through this one is recorded and a barrier follows it, every
+    /// bbport BB_GX_IN_PLACE: the range is the game's memory that other commands reach through
+    /// another buffer (the arena over the GX region, bound to its import as the region's own
+    /// buffer is: GxArenaBound). Accesses are tracked per buffer, so the two do not see each other:
+    /// until the access through this one is recorded and a barrier follows it, every
     /// IsBufferAccessed answers yes (a barrier before it and one after), and the image fill
     /// watches count as written.
     void NoteAliasedAccess(const VideoCore::Buffer* handle, u64 offset, u64 size);

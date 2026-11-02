@@ -63,7 +63,6 @@ uint64_t runtime_tsc_frequency(void);
 int32_t* runtime_errno(void);
 void runtime_memory_set_gpu_hooks(RuntimeGpuRange map, RuntimeGpuRange unmap, RuntimeGpuRange invalidate);
 void runtime_memory_set_note_write_hook(RuntimeGpuRange note);
-void runtime_memory_set_cpu_write_hook(RuntimeGpuRange hook);
 int runtime_memory_restore_access(void* context, uintptr_t address, int repeated);
 }
 namespace Shader { void RegisterSrtFaultHandler(); }
@@ -156,14 +155,10 @@ void MemoryManager::SetRasterizer(Vulkan::Rasterizer* rasterizer_) {
         [](uintptr_t address, uint64_t size) {
             Memory::Instance()->GetRasterizer()->InvalidateMemory(address, size);
         });
-    // bbport: data written into GPU memory by a path the GPU side hears of (file reads, the game's
-    // resource loaders): invalidated, and an asset (it may keep a VRAM copy).
+    // bbport: data written into GPU memory by a path the GPU side hears of (file reads):
+    // invalidated.
     runtime_memory_set_note_write_hook([](uintptr_t address, uint64_t size) {
         Memory::Instance()->GetRasterizer()->NoteAssetWrite(address, size);
-    });
-    // bbport: the game's libc copies (memcpy, memset, memmove) over pages the caches watch.
-    runtime_memory_set_cpu_write_hook([](uintptr_t address, uint64_t size) {
-        Memory::Instance()->GetRasterizer()->OnCpuWrite(address, size);
     });
 }
 void MemoryManager::InvalidateMemory(VAddr address, u64 size) {

@@ -309,32 +309,6 @@ void TextureCache::DownloadImageMemory(ImageId image_id, bool sync) {
                               image.info.resources.layers * (image.info.num_bits / 8);
     ASSERT(download_size <= image.info.guest_size);
     image.mip_hashes_current = false; // its data lands in guest memory
-    vk::BufferImageCopy image_copy = {
-        .bufferOffset = 0,
-        .bufferRowLength = image.info.pitch,
-        .bufferImageHeight = image.info.size.height,
-        .imageSubresource =
-            {
-                .aspectMask = image.info.props.is_depth ? vk::ImageAspectFlagBits::eDepth
-                                                        : vk::ImageAspectFlagBits::eColor,
-                .mipLevel = 0,
-                .baseArrayLayer = 0,
-                .layerCount = image.info.resources.layers,
-            },
-        .imageOffset = {0, 0, 0},
-        .imageExtent = {image.info.size.width, image.info.size.height, image.info.size.depth},
-    };
-    // bbport BB_GUEST_IN_PLACE: the GPU copies the image into the game's memory itself, in stream
-    // order: before the fences that follow, no wait here and no CPU copy afterwards.
-    if (GuestInPlace() && image.info.guest_address != 0) {
-        const auto [arena, offset] =
-            buffer_cache.ObtainBuffer(image.info.guest_address, download_size, true);
-        if (buffer_cache.IsInPlace(image.info.guest_address, download_size)) {
-            image_copy.bufferOffset = offset;
-            runtime.DownloadImage(&image, arena, std::span{&image_copy, 1});
-            return;
-        }
-    }
     const auto download =
         runtime.GetStagingPool().Request(download_size, MemoryType::HostCached, 16, !sync);
     const vk::BufferImageCopy image_download = {
@@ -360,12 +334,6 @@ void TextureCache::DownloadImageMemory(ImageId image_id, bool sync) {
                            BbFreeCheck::ImageDownload);
         Core::Memory::Instance()->TryWriteBacking(std::bit_cast<u8*>(image.info.guest_address),
                                                   download.mapped, download_size);
-        if (!WriteTracking()) {
-            // bbport: the caches' own thread (stage A drained, or the draw recording thread):
-            // a readback the range needs runs here. Sent to the GPU command thread, it waited
-            // for that thread, or for this one, which never came back to run it.
-            buffer_cache.InvalidateMemory(image.info.guest_address, download_size, true);
-        }
     } else {
         scheduler.DeferPriorityOperation(
             [this, device_addr = image.info.guest_address, download, download_size] {
@@ -374,9 +342,6 @@ void TextureCache::DownloadImageMemory(ImageId image_id, bool sync) {
                                    BbFreeCheck::ImageDownload);
                 Core::Memory::Instance()->TryWriteBacking(std::bit_cast<u8*>(device_addr),
                                                           download.mapped, download_size);
-                if (!WriteTracking()) {
-                    buffer_cache.InvalidateMemory(device_addr, download_size);
-                }
                 runtime.GetStagingPool().FreeDeferred(download);
             });
     }
@@ -491,10 +456,6 @@ bool TextureCache::StoreTiledImage(ImageId image_id) {
     BbFreeCheck::Check(address, size, host.mapped, BbFreeCheck::ImageDownload);
     const bool stored = memory->TryWriteBacking(std::bit_cast<u8*>(address), host.mapped, size);
     image.mip_hashes_current = false;
-    // Guest memory changed under the copies made of it (also by a partial store).
-    if (!WriteTracking()) {
-        buffer_cache.InvalidateMemory(address, size, true);
-    }
     // The other images over the range read guest memory again at their next use.
     for (const ImageId other_id : others) {
         Image& other = slot_images[other_id];

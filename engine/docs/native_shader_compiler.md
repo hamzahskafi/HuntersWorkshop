@@ -130,11 +130,10 @@ the CPU anyway. What changes is how the tables are read:
   walker; none does.
 
 Later (with "descriptors on the GPU", step 3 of the emulation plan) the shader could read
-constants straight from the game's memory, which the PC memory model already maps for the GPU;
-the plan then shrinks to the descriptors the CPU must bind. That needs the GPU to survive null
-and stale pointers itself, so it comes after this. (Not built. The PC memory model has been off by
-default since 0.4.0 beta 4 and is to be removed before 0.4.4 ships; what the GPU reads in place by
-default is the game's GX region, on Windows, `BB_GX_IN_PLACE`.)
+constants straight from the game's memory, mapped for the GPU (the PC memory model did that; it was
+removed in 0.4.4 beta 28); the plan then shrinks to the descriptors the CPU must bind. That needs the
+GPU to survive null and stale pointers itself, so it comes after this. (Not built. What the GPU reads
+in place is the game's GX region, on Windows, `BB_GX_IN_PLACE`.)
 
 ### 2. Structured control flow without goto variables
 

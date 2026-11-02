@@ -16,7 +16,6 @@
 #include "common/thread.h"
 #include "core/emulator_settings.h"
 #include "core/memory.h"
-#include "video_core/buffer_cache/buffer.h"
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -61,8 +60,6 @@
 #else
 #include "common/spin_lock.h"
 #endif
-
-extern "C" void runtime_memory_set_write_watch(uintptr_t address, uint64_t size, int watch);
 
 namespace VideoCore {
 
@@ -461,9 +458,8 @@ struct PageManager::Impl {
     //   writable: no fault, but the copy queued for that page has not read it yet (it flushes
     //   before it reads), so it takes the stored bytes along, as it took a store that faulted.
     //   WriteData and DMA wait for copies reading their range first (WaitHostCopiesFor).
-    // - Not deferred: BB_GUEST_IN_PLACE (the GPU reads guest memory chunks itself:
-    //   CopyFromGuestChunk), BB_GPU_WRITE_TWINS (copies of kept parts are dropped), precise
-    //   readbacks (read watchers): BufferCache allows deferral only without them.
+    // - Not deferred: BB_GPU_WRITE_TWINS (copies of kept parts are dropped), precise readbacks
+    //   (read watchers): BufferCache allows deferral only without them.
     //
     // A set bit in `deferred` means: the count says watched, the page is still writable. Only
     // write revocations are deferred, so such a page has a count of at least one. The immediate
@@ -490,7 +486,7 @@ struct PageManager::Impl {
         return on;
     }
 
-    /// Set by the buffer cache: deferral allowed in this memory model; starts bb:Protect when it
+    /// Set by the buffer cache: deferral allowed with its settings; starts bb:Protect when it
     /// may be used (BB_DEFER_PROTECT=1, or BB_TOGGLE_FILE for experiment bit 4).
     void AllowDeferral(bool allowed) {
         deferral_allowed = allowed;
@@ -723,9 +719,7 @@ struct PageManager::Impl {
         }
         if (Common::IsWriteError(context)) {
             BbStats::Timer timer{BbStats::t_write_faults};
-            const bool handled = rasterizer->OnWriteFault(
-                addr, is_gpu_thread,
-                reinterpret_cast<u64>(Common::GetRip(context)));
+            const bool handled = rasterizer->OnWriteFault(addr, is_gpu_thread);
             current_fault_rip = 0;
             return handled;
         } else {
@@ -1088,14 +1082,6 @@ struct SignalImpl : public PageManager::Impl {
 
     void Protect(VAddr address, size_t size, Core::MemoryPermission perms) override {
         RENDERER_TRACE;
-        // bbport BB_GUEST_IN_PLACE: no page protection; the pages are marked in the runtime's write
-        // watch instead, and the writers that check it tell the GPU side (WriteTracking).
-        if (!VideoCore::WriteTracking()) {
-            runtime_memory_set_write_watch(address, size, !True(perms & Core::MemoryPermission::Write));
-            if (!VideoCore::WriteVerify()) {
-                return;
-            }
-        }
         auto* memory = Core::Memory::Instance();
         auto& impl = memory->GetAddressSpace();
         // bbport: write-only (a read watcher on a page without write watchers, BB_READBACKS=2)
@@ -1110,13 +1096,7 @@ struct SignalImpl : public PageManager::Impl {
 
 PageManager::PageManager(Vulkan::Rasterizer* rasterizer_) {
 #ifdef __linux__
-    // bbport: dma-buf guest memory (BB_GUEST_GPU_MEMORY=1) cannot be write-protected by userfaultfd
-    // (anonymous and shmem only): its registration would fail and writes go unseen.
-    const char* guest_gpu_memory = std::getenv("BB_GUEST_GPU_MEMORY");
-    const bool dma_buf_guest = guest_gpu_memory && guest_gpu_memory[0] == '1';
-    if (std::getenv("BB_UFFD") && std::getenv("BB_UFFD")[0] == '1' && dma_buf_guest) {
-        std::printf("GPU: userfaultfd off with BB_GUEST_GPU_MEMORY=1 (dma-buf memory)\n");
-    } else if (std::getenv("BB_UFFD") && std::getenv("BB_UFFD")[0] == '1') {
+    if (std::getenv("BB_UFFD") && std::getenv("BB_UFFD")[0] == '1') {
         try {
             impl = std::make_unique<UffdImpl>(rasterizer_);
             LOG_INFO(Config, "Memory tracking method: userfaultfd");

@@ -382,10 +382,9 @@ Across the edge, part in the buffer and part outside: read-only bindings up to 8
 when bound (the stream path,
 `GxEdgeCopied`, `GxTailCopied`); anything else that needs the arena there (a GPU write across the
 edge, a shader's page fault there) binds the arena's blocks to the import as before
-(`GxArenaBound`, logged once, with aliasing barriers as `BB_CHUNK_BUFFERS` has:
-`Runtime::NoteAliasedAccess`). `BB_GX_OWN_BUFFER=0` is beta 8's way, for comparison. The arena's
-out-of-spec note at start is now printed only with the PC memory model (`GxArenaBound`'s line says
-so where it applies).
+(`GxArenaBound`, logged once, with aliasing barriers: `Runtime::NoteAliasedAccess`).
+`BB_GX_OWN_BUFFER=0` is beta 8's way, for comparison. `GxArenaBound`'s line says where the arena
+takes no imports (outside the Vulkan spec on that GPU).
 
 ### Step 4: verify, then decide the default
 

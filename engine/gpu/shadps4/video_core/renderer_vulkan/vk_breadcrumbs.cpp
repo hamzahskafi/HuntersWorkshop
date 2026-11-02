@@ -461,8 +461,9 @@ void ReportDeviceLost(const char* where) {
     if (enabled) {
         Report("at device lost", where);
     }
-    // The game's GPU range allocators (BB_FRAME_STATS, bbport_guest_hooks): Ebrietas' rock effect
-    // took one from ~165 MB free to under 1 MB right before its device losses.
+    // The game's GPU range allocators (BbStats::range_allocators, where a hook reports them):
+    // Ebrietas' rock effect took one from ~165 MB free to under 1 MB right before its device
+    // losses.
     for (std::size_t i = 0; i < BbStats::range_allocators.size(); ++i) {
         if (const u64 allocator = BbStats::range_allocators[i].load()) {
             std::printf("GPU range allocator %#llx at device lost: %llu live, %.1f MB free\n",

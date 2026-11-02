@@ -480,14 +480,10 @@ bool Instance::CreateDevice() {
     }
     image_view_min_lod = add_extension(VK_EXT_IMAGE_VIEW_MIN_LOD_EXTENSION_NAME);
     supports_memory_budget = add_extension(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
-    // bbport: guest direct memory allocated here and mapped by the runtime (BbGuestMemory).
-    guest_memory_export = add_extension(VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME) &&
-                          add_extension(VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME);
-    // bbport: on Windows the GPU imports the game's memory itself (BbGuestMemory): all of it with
-    // the PC memory model, the game's GX region otherwise (BB_GX_IN_PLACE, default on; the buffer
-    // cache's upload heap). Not asked for when neither is on, so that path keeps the device as it was.
-    const char* in_place = std::getenv("BB_GUEST_IN_PLACE");
-    if ((in_place && in_place[0] == '1') || BbGxRing::InPlaceWanted()) {
+    // bbport: on Windows the GPU imports the game's GX region itself (BbGuestMemory::ImportRange,
+    // BB_GX_IN_PLACE, default on; the buffer cache's upload heap). Not asked for when it is off,
+    // so that path keeps the device as it was.
+    if (BbGxRing::InPlaceWanted()) {
         guest_memory_import = add_extension(VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME);
     }
     // bbport: derivatives in compute shaders. 0.4.4 beta 27: AMD's FSR SDK sample enables it (and the

@@ -190,12 +190,11 @@ file(GLOB AVPLAYER CONFIGURE_DEPENDS shadps4/core/libraries/avplayer/*.cpp)
 pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET libavformat libavcodec libavutil libswscale libswresample)
 file(GLOB SHIM_SOURCES CONFIGURE_DEPENDS shim/*.cpp shim/*/*.cpp)
 if (WIN32)
-    # These optional experiments use Linux dma-buf mappings and SIGTRAP hooks (the libGnm entry
-    # hooks, bbport_gnm_hooks.cpp, are inline patches and build on Windows too). Keep the
-    # section-backed Win32 memory and its vectored crash diagnostics; do not emulate dma-buf.
-    list(FILTER SHIM_SOURCES EXCLUDE REGEX "/bbport_(guest_memory|guest_hooks|free_check|heap_sites)\\.cpp$")
-    # The PC memory model has Windows files of its own (_win.cpp: host memory import, a vectored
-    # exception handler for the guest hooks).
+    # These optional experiments use Linux SIGTRAP hooks (the libGnm entry hooks,
+    # bbport_gnm_hooks.cpp, are inline patches and build on Windows too). Keep the section-backed
+    # Win32 memory and its vectored crash diagnostics. The guest memory import has a Windows file
+    # of its own (bbport_guest_memory_win.cpp: the GX region's host memory import).
+    list(FILTER SHIM_SOURCES EXCLUDE REGEX "/bbport_(guest_memory|free_check|heap_sites)\\.cpp$")
     set(BBGPU_LIBRARY_TYPE STATIC)
 else()
     list(FILTER SHIM_SOURCES EXCLUDE REGEX "_win\\.cpp$")

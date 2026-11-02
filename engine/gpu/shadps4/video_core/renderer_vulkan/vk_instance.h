@@ -98,11 +98,7 @@ public:
     u32 GetReadbackQueueFamilyIndex() const {
         return readback_family_index;
     }
-    /// bbport: memory can be exported as a dma-buf (guest memory, BbGuestMemory).
-    bool IsGuestMemoryExportSupported() const {
-        return guest_memory_export;
-    }
-    /// bbport: host memory can be imported (VK_EXT_external_memory_host; Windows PC memory model).
+    /// bbport: host memory can be imported (VK_EXT_external_memory_host; the GX region on Windows).
     bool IsGuestMemoryImportSupported() const {
         return guest_memory_import;
     }
@@ -584,7 +580,6 @@ private:
     vk::Queue present_queue;
     vk::Queue graphics_queue;
     vk::Queue readback_queue;
-    bool guest_memory_export{};
     bool guest_memory_import{};
     u32 readback_family_index = NoFamily;
     std::vector<vk::PhysicalDevice> physical_devices;

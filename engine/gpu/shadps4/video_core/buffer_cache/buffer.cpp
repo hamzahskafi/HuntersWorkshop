@@ -107,26 +107,7 @@ void UniqueBuffer::Create(vk::BufferCreateInfo& buffer_ci, MemoryType mem_type,
     } else {
         buffer_ci.flags |=
             vk::BufferCreateFlagBits::eSparseBinding | vk::BufferCreateFlagBits::eSparseResidency;
-        // Bound to exported guest memory chunks (BB_GUEST_IN_PLACE) as well as VRAM blocks.
-        const vk::ExternalMemoryBufferCreateInfo external{
-            .handleTypes = vk::ExternalMemoryHandleTypeFlagBits::eDmaBufEXT,
-        };
-        if (GuestInPlace()) {
-            buffer_ci.pNext = &external;
-            if (const auto [result, created] = device.createBuffer(buffer_ci);
-                result == vk::Result::eSuccess) {
-                buffer = created;
-            } else {
-                std::printf("Guest memory: the arena cannot take exported memory (%s); the GPU "
-                            "uses copies in VRAM as before\n",
-                            vk::to_string(result).c_str());
-                DisableGuestInPlace();
-            }
-            buffer_ci.pNext = nullptr;
-        }
-        if (!buffer) {
-            buffer = Vulkan::Check(device.createBuffer(buffer_ci));
-        }
+        buffer = Vulkan::Check(device.createBuffer(buffer_ci));
     }
 
     if (with_bda) {
@@ -137,32 +118,6 @@ void UniqueBuffer::Create(vk::BufferCreateInfo& buffer_ci, MemoryType mem_type,
         ASSERT_MSG(bda_result != 0, "Failed to get buffer device address");
         bda_addr = bda_result;
     }
-}
-
-Buffer::Buffer(const Vulkan::Instance& instance, u64 size_bytes_, vk::DeviceMemory memory,
-               vk::ExternalMemoryHandleTypeFlagBits handle_type, vk::BufferUsageFlags usage,
-               std::string_view debug_name)
-    : size_bytes{size_bytes_}, mem_type{MemoryType::HostCached},
-      buffer{instance.GetDevice(), instance.GetAllocator()} {
-    // bbport: the handle type the memory came with (it was the dma-buf type on Windows too, where
-    // the memory is a host import: outside the spec), and the usage of the chunk's own buffer:
-    // vertex, index and indirect too, no texel usage (no buffer views are made).
-    const vk::ExternalMemoryBufferCreateInfo external{
-        .handleTypes = handle_type,
-    };
-    const vk::BufferCreateInfo buffer_ci = {
-        .pNext = &external,
-        .size = size_bytes,
-        .usage = usage,
-        .sharingMode = vk::SharingMode::eExclusive,
-    };
-    const auto device = instance.GetDevice();
-    buffer.buffer = Vulkan::Check(device.createBuffer(buffer_ci));
-    const auto result = device.bindBufferMemory(buffer.buffer, memory, 0);
-    ASSERT_MSG(result == vk::Result::eSuccess, "Binding a guest memory chunk failed: {}",
-               vk::to_string(result));
-    Vulkan::SetObjectName(device, Handle(), debug_name);
-    is_coherent = true;
 }
 
 Buffer::Buffer(const Vulkan::Instance& instance, VAddr cpu_addr_, u64 size_bytes_,

@@ -562,10 +562,6 @@ void SignalEop(const PM4CmdEventWriteEop& eop, u64 seq) {
                 StoreLabel(address, data, num_bytes);
             }
             BbStats::eop_written.fetch_add(1, std::memory_order_relaxed);
-            // bbport: a VRAM copy of the label gets it too (the backing mapping is not watched).
-            if (auto* rasterizer = memory->GetRasterizer()) {
-                rasterizer->NoteLateCommandWrite(reinterpret_cast<VAddr>(address), &data, num_bytes);
-            }
             BbFreeCheck::NoteFenceWritten(
                 reinterpret_cast<u64>(address),
                 u64(std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -644,12 +640,11 @@ void RunDmaData(Vulkan::Rasterizer& rasterizer, const u8* data) {
     // GPU has not modified the range. Like WriteData, it must not overtake the copies and the
     // fences deferred to the recording thread: the guest, seeing it, frees objects whose labels
     // an earlier fence still writes (a corrupted guest heap free list, guest offset 0x263b8e7).
-    // With the new memory model, recorded as a GPU fill or copy (memory used in place, or
-    // written by the GPU) it lands after the submission goes out, which is after those copies
-    // and signals: no wait (~16 us each, ~900 a second of 4-byte counter copies).
-    // bbport (BB_DMA_WAITS, default: as needed; =all: before every DMA into memory): the same
-    // holds for the GPU fill or copy of the old model (GPU-modified memory): only a CPU store
-    // waits (Rasterizer::DmaWritesOnCpu). Should the store end up on the CPU after all,
+    // Recorded as a GPU fill or copy (memory used in place, the GX region, or written by the GPU)
+    // it lands after the submission goes out, which is after those copies and signals: no wait
+    // (~16 us each, ~900 a second of 4-byte counter copies).
+    // bbport (BB_DMA_WAITS, default: as needed; =all: before every DMA into memory): only a CPU
+    // store waits (Rasterizer::DmaWritesOnCpu). Should the store end up on the CPU after all,
     // FillBuffer/CopyBuffer wait first (`waited` false).
     const bool to_memory =
         dma_data->dst_sel == DmaDataDst::Memory || dma_data->dst_sel == DmaDataDst::MemoryUsingL2;
@@ -707,10 +702,10 @@ void SignalFlip(Vulkan::Rasterizer& rasterizer, const u8*) {
 void RunWriteData(Vulkan::Rasterizer& rasterizer, const u8* data) {
     const auto* header = reinterpret_cast<const PM4Header*>(data);
     const auto* write_data = reinterpret_cast<const PM4CmdWriteData*>(data);
-    // bbport BB_GUEST_IN_PLACE: the GPU writes it in stream order, as the command processor
-    // does. A CPU store here lands before the GPU has run the work recorded before it, which may
-    // still read the old value (the game orders such writes after its own fences and
-    // WAIT_REG_MEMs, which this thread takes as met in stream order).
+    // bbport BB_GX_IN_PLACE: memory read in place is written by the GPU in stream order, as the
+    // command processor does. A CPU store here lands before the GPU has run the work recorded
+    // before it, which may still read the old value (the game orders such writes after its own
+    // fences and WAIT_REG_MEMs, which this thread takes as met in stream order).
     if (rasterizer.WriteDataOnGpu(write_data->Address<VAddr>(), write_data->data,
                                   (header->type3.count.Value() - 2) * sizeof(u32))) {
         return;
@@ -730,8 +725,6 @@ void RunWriteData(Vulkan::Rasterizer& rasterizer, const u8* data) {
                      (header->type3.count.Value() - 2) * sizeof(u32), BbWriteLog::WriteData);
     std::memcpy(write_data->Address<u64*>(), write_data->data,
                 (header->type3.count.Value() - 2) * sizeof(u32));
-    rasterizer.NoteCommandWrite(write_data->Address<VAddr>(), write_data->data,
-                                (header->type3.count.Value() - 2) * sizeof(u32), true);
 }
 
 // bbport: the stand-in occlusion counts (BB_OCCLUSION=0) in stream order. The game starts every
@@ -768,9 +761,6 @@ void WriteZpassCounters(Vulkan::Rasterizer* rasterizer, const ZpassDump& dump, b
         const VAddr address = reinterpret_cast<VAddr>(results);
         if (!in_order || !rasterizer) {
             *results = dump.value;
-            if (rasterizer) {
-                rasterizer->NoteLateCommandWrite(address, results, sizeof(*results));
-            }
             continue;
         }
         // As a WRITE_DATA: after the DMA before it, wherever that DMA wrote.
@@ -783,7 +773,6 @@ void WriteZpassCounters(Vulkan::Rasterizer* rasterizer, const ZpassDump& dump, b
             waited = true;
         }
         StoreLabel(results, dump.value, sizeof(dump.value));
-        rasterizer->NoteCommandWrite(address, &dump.value, sizeof(dump.value), true);
     }
 }
 
@@ -800,10 +789,6 @@ void WriteEosLabel(void* address, u64 value, u32 num_bytes) {
     BbWriteLog::Note(reinterpret_cast<u64>(address), &value, num_bytes, BbWriteLog::Fence);
     if (!memory->TryWriteBacking(address, &value, num_bytes)) {
         StoreLabel(address, value, num_bytes);
-    }
-    // bbport: a VRAM copy of the label gets it too (the backing mapping is not watched).
-    if (auto* rasterizer = memory->GetRasterizer()) {
-        rasterizer->NoteLateCommandWrite(reinterpret_cast<VAddr>(address), &value, num_bytes);
     }
     BbFreeCheck::NoteFenceWritten(reinterpret_cast<u64>(address));
 }
@@ -956,13 +941,6 @@ Liverpool::Task Liverpool::ProcessCeUpdate(std::span<const u32> ccb) {
                                BbFreeCheck::ConstRam);
             memcpy(dump_const->Address<void*>(),
                    cblock.constants_heap.data() + dump_const->Offset(), dump_const->Size());
-            // bbport: no write tracking (BB_GUEST_IN_PLACE): the caches hear of it (in order, on the
-            // recording thread).
-            if (rasterizer && !VideoCore::WriteTracking()) {
-                rasterizer->NoteCommandWriteInOrder(dump_const->Address<VAddr>(),
-                                                    cblock.constants_heap.data() + dump_const->Offset(),
-                                                    dump_const->Size());
-            }
             break;
         }
         case PM4ItOpcode::IncrementCeCounter: {
@@ -2390,10 +2368,6 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
                 BbFreeCheck::Check(write_data->Address<u64>(), data_size, write_data->data,
                                    BbFreeCheck::ComputeWriteData);
                 std::memcpy(write_data->Address<void*>(), write_data->data, data_size);
-                if (rasterizer) {
-                    rasterizer->NoteCommandWrite(write_data->Address<VAddr>(), write_data->data,
-                                                 data_size, true);
-                }
             } else {
                 UNREACHABLE();
             }
@@ -2657,8 +2631,8 @@ void Liverpool::CheckSubmittedCopy(const SubmittedCopy& copy, u64 seq) {
         for (std::size_t at = 0; at < dwords; at += buf.size()) {
             const std::size_t n = std::min(buf.size(), dwords - at);
             if (!BbPlatform::ReadProcessMemory(guest + at, buf.data(), n * 4)) {
-                // bbport BB_GUEST_IN_PLACE: dma-buf guest memory is not readable that way; still
-                // mapped, it is read directly.
+                // bbport: memory that cannot be read that way but is still mapped is read
+                // directly.
                 int prot = 0, type = -1;
                 uintptr_t end = 0;
                 const auto from = reinterpret_cast<uintptr_t>(guest + at);

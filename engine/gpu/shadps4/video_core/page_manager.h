@@ -36,7 +36,7 @@ public:
     /// stats): which game functions write GPU memory, to replace tracking by explicit hooks.
     static void ReportFaultSites();
     /// bbport: the write fault being handled on this thread hit an image (diagnostics: which guest
-    /// code writes textures, BB_WRITE_TRACKING=1).
+    /// code writes textures).
     static void NoteImageFault(VAddr image_address, u64 image_size, u32 width, u32 height,
                                u32 format, u32 tiling);
 
@@ -64,8 +64,8 @@ public:
     /// Before an upload copy reads guest memory (BufferCache::RunGuestCopy, UploadCopies): applies
     /// the deferred write protections. Any thread; one atomic load when none is pending.
     static void FlushDeferredProtects();
-    /// Set by the buffer cache: whether its memory model allows deferral (page protection, no
-    /// in-place guest memory, no GPU write twins, readbacks not precise).
+    /// Set by the buffer cache: whether its settings allow deferral (no GPU write twins, readbacks
+    /// not precise).
     void AllowDeferredProtects(bool allowed);
 
     /// Returns page aligned address.

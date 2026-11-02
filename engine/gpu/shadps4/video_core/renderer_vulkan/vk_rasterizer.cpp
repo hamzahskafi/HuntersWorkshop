@@ -24,7 +24,6 @@
 #include "bbport_free_check.h"
 #include "bbport_gx_ring.h"
 #include "video_core/renderer_vulkan/motion_copy_sources.h"
-#include "bbport_guest_memory.h"
 #include "video_core/renderer_vulkan/vk_frame_capture.h"
 #include "common/hash.h"
 #include "common/debug.h"
@@ -123,7 +122,6 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_, Runtime
     if (!EmulatorSettings.IsNullGPU()) {
         liverpool->BindRasterizer(this);
     }
-    BbGuestMemory::Install(instance); // bbport: before the runtime maps direct memory
     // bbport: copy threads working for the GPU command or draw recording thread handle their
     // faults as it would (BbCopy::ForGpuSide).
     static Rasterizer* gpu_side_rasterizer = nullptr;
@@ -132,7 +130,7 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_, Runtime
     memory->SetRasterizer(this);
 
     GpuProfiler::Init(instance, scheduler);
-    occlusion = Occlusion::Create(instance, scheduler, *this);
+    occlusion = Occlusion::Create(instance, scheduler);
     if (DrawPipeWanted()) {
         constant_ring = std::make_unique<ConstantRing>(instance, scheduler);
         draw_pipe = std::make_unique<DrawPipe>(&RunDrawPacket, this);
@@ -170,14 +168,14 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_, Runtime
 Rasterizer::~Rasterizer() = default;
 
 bool Rasterizer::HonestLabels() {
-    // On whenever the GPU reads game memory in place (the PC memory model, the GX region): the
-    // game reuses that memory once a fence says the GPU is done with it, so a fence written when
-    // the work is only recorded lets the game overwrite data the GPU has yet to read (the GX
-    // range allocator's collector, 0x26aa860, returns a range once the state it keeps for it
-    // reads done). BB_HONEST_LABELS=0 turns it off for testing only.
+    // On whenever the GPU reads game memory in place (the GX region): the game reuses that memory
+    // once a fence says the GPU is done with it, so a fence written when the work is only
+    // recorded lets the game overwrite data the GPU has yet to read (the GX range allocator's
+    // collector, 0x26aa860, returns a range once the state it keeps for it reads done).
+    // BB_HONEST_LABELS=0 turns it off for testing only.
     static const bool on = [] {
         const char* env = std::getenv("BB_HONEST_LABELS");
-        const bool in_place = VideoCore::GuestInPlace() || BbGxRing::InPlaceWanted();
+        const bool in_place = BbGxRing::InPlaceWanted();
         const bool enabled = env ? env[0] == '1' || (env[0] != '0' && in_place) : in_place;
         if (enabled) {
             std::printf("GPU: fences written when the GPU has finished the work before them "
@@ -306,25 +304,13 @@ bool Rasterizer::HasUnsubmittedSignals() {
     return !gpu_signals.empty() && gpu_signals.back().tick >= scheduler.CurrentTick();
 }
 
-bool Rasterizer::WriteGuestMemory(VAddr address, const void* data, u32 size) {
-    if (!buffer_cache.InPlaceActive() || size == 0 || (address | size) % 4 != 0) {
-        return false;
-    }
-    const auto [buffer, offset] = buffer_cache.ObtainBuffer(address, size, true);
-    if (!buffer_cache.IsInPlace(address, size)) {
-        return false;
-    }
-    runtime.UpdateBuffer(buffer, offset, {static_cast<const u8*>(data), size});
-    return true;
-}
-
 bool Rasterizer::WriteDataOnGpu(VAddr address, const void* data, u32 size) {
     static const bool enabled = [] {
         const char* env = std::getenv("BB_GPU_COMMAND_WRITES");
         return !env || env[0] != '0';
     }();
-    // bbport: with the PC memory model, or inside the game's GX region in place (BB_GX_IN_PLACE):
-    // the GPU reads that memory as it is, so a write must land in stream order too.
+    // bbport: inside the game's GX region in place (BB_GX_IN_PLACE) the GPU reads that memory as
+    // it is, so a write must land in stream order too.
     if (!enabled || !buffer_cache.InPlaceActive() || size == 0 || (address | size) % 4 != 0) {
         return false;
     }
@@ -1020,39 +1006,6 @@ void Rasterizer::WaitForPendingReads(VAddr address, u64 size) {
         return;
     }
     draw_pipe->WaitForPacket(packet, DrawPipe::ReasonConstRam);
-}
-
-void Rasterizer::NoteCommandWriteInOrder(VAddr addr, const void* data, u64 size) {
-    static const bool enabled = [] {
-        const char* env = std::getenv("BB_CONSTRAM_PIPE");
-        return !env || env[0] != '0';
-    }();
-    if (VideoCore::WriteTracking() || !IsMapped(addr, size)) {
-        return;
-    }
-    if (!enabled || !UseDrawPipe() || !OnStageA() || size > 1_MB) {
-        NoteCommandWrite(addr, data, size, false);
-        return;
-    }
-    // The caches belong to the recording thread while it has packets: it updates them in order
-    // (later packets see the new bytes there; the memory already holds them for this thread).
-    struct Header {
-        VAddr addr;
-        u64 size;
-    };
-    thread_local std::vector<u8> payload;
-    payload.resize(sizeof(Header) + size);
-    const Header header{addr, size};
-    std::memcpy(payload.data(), &header, sizeof(header));
-    std::memcpy(payload.data() + sizeof(header), data, size);
-    RunInOrder(
-        [](Rasterizer& self, const u8* bytes) {
-            Header write;
-            std::memcpy(&write, bytes, sizeof(write));
-            self.NoteCommandWrite(write.addr, bytes + sizeof(write), write.size, true);
-        },
-        payload.data(), static_cast<u32>(payload.size()), BbToggle::PipelinedTasks, false,
-        "CommandWrite");
 }
 
 bool Rasterizer::PendingWriteOverlaps(VAddr address, u64 size) {
@@ -5658,7 +5611,7 @@ void Rasterizer::FillBuffer(VAddr address, u32 num_bytes, u32 value, bool is_gds
                "FillBuffer address and size must be a multiple of 4 bytes");
     if (!is_gds) {
         texture_cache.ClearMeta(address);
-        // bbport BB_GUEST_IN_PLACE: memory the GPU uses in place is filled by the GPU in stream order
+        // bbport BB_GX_IN_PLACE: memory the GPU uses in place is filled by the GPU in stream order
         // (a fill on the CPU now would land before earlier draws read the old data). Elsewhere
         // (VRAM copies, unbound memory: shader code, descriptors this thread reads) on the CPU in
         // decode order, as before; the VRAM copy follows through write tracking.
@@ -5671,9 +5624,6 @@ void Rasterizer::FillBuffer(VAddr address, u32 num_bytes, u32 value, bool is_gds
             u32* buffer = std::bit_cast<u32*>(address);
             std::fill(buffer, buffer + (num_bytes / sizeof(u32)), value);
             BbWriteLog::Note(address, buffer, num_bytes, BbWriteLog::Dma);
-            if (!VideoCore::WriteTracking()) {
-                NoteAssetWrite(address, num_bytes);
-            }
             return;
         }
     }
@@ -5687,9 +5637,8 @@ void Rasterizer::FillBuffer(VAddr address, u32 num_bytes, u32 value, bool is_gds
 }
 
 bool Rasterizer::DmaMayWriteOnCpu(VAddr dst, u32 num_bytes) {
-    // The first condition of both: false only where they record a GPU fill or copy. The model
-    // of 0.3 keeps its waits (the new memory and translation model, or memory in place: the
-    // game's GX region, BB_GX_IN_PLACE).
+    // The first condition of both: false only where they record a GPU fill or copy. Without
+    // memory in place (the game's GX region, BB_GX_IN_PLACE) every DMA keeps its waits.
     if (!buffer_cache.InPlaceActive()) {
         return true;
     }
@@ -5724,7 +5673,7 @@ void Rasterizer::WaitBeforeDmaStore(VAddr dst, u32 num_bytes, VAddr src, u32 src
 void Rasterizer::CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, bool src_gds,
                             bool waited) {
     DrainDrawPipe();
-    // bbport BB_GUEST_IN_PLACE: see FillBuffer (in place: the GPU, in stream order).
+    // bbport BB_GX_IN_PLACE: see FillBuffer (in place: the GPU, in stream order).
     if (!dst_gds && !buffer_cache.IsAnyInPlace(dst, num_bytes) &&
         !buffer_cache.IsRegionGpuModified(dst, num_bytes)) {
         if (!src_gds && !buffer_cache.IsRegionGpuModified(src, num_bytes) &&
@@ -5736,9 +5685,6 @@ void Rasterizer::CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, b
             BbFreeCheck::Check(dst, num_bytes, std::bit_cast<const void*>(src), BbFreeCheck::DmaCopy);
             std::memcpy(std::bit_cast<void*>(dst), std::bit_cast<void*>(src), num_bytes);
             BbWriteLog::Note(dst, std::bit_cast<const void*>(dst), num_bytes, BbWriteLog::Dma);
-            if (!VideoCore::WriteTracking()) {
-                NoteAssetWrite(dst, num_bytes);
-            }
             return;
         }
     }
@@ -5788,46 +5734,7 @@ bool Rasterizer::InvalidateMemory(VAddr addr, u64 size, bool assume_locks) {
 
 void Rasterizer::NoteAssetWrite(VAddr addr, u64 size) {
     const VideoCore::InvalidateReason reason{"asset or DMA"};
-    buffer_cache.NoteAssetWrite(addr, size);
-    InvalidateAfterWrite(addr, size);
-}
-
-void Rasterizer::InvalidateAfterWrite(VAddr addr, u64 size) {
-    if (VideoCore::WriteTracking() || !buffer_cache.IsRegionGpuModified(addr, size)) {
-        InvalidateMemory(addr, size);
-        return;
-    }
-    // GPU data beside the bytes the CPU wrote lives in VRAM: an invalidation would read it back
-    // (a 512 KiB window, whole pages) and upload pages over what the GPU writes meanwhile.
-    // Exactly the CPU's bytes go into VRAM instead; images over them are refreshed.
-    DrainDrawPipe();
-    buffer_cache.NotePreciseUpload(addr, size);
-    texture_cache.InvalidateMemory(addr, size);
-}
-
-void Rasterizer::NoteCommandWrite(VAddr addr, const void* data, u64 size, bool recording_thread) {
-    const VideoCore::InvalidateReason reason{"command"};
-    if (VideoCore::WriteTracking() || !IsMapped(addr, size)) {
-        return; // tracking catches it, or the GPU does not use it
-    }
-    if (!recording_thread) {
-        DrainDrawPipe();
-    }
-    // An invalidation would read the GPU's data back over these bytes first (a readback).
-    if (!buffer_cache.UpdateGpuWritten(addr, std::span{static_cast<const u8*>(data), size})) {
-        buffer_cache.InvalidateMemory(addr, size, recording_thread);
-    }
-    texture_cache.InvalidateMemory(addr, size);
-}
-
-void Rasterizer::OnCpuWrite(VAddr addr, u64 size) {
-    const VideoCore::InvalidateReason reason{"CPU note"};
-    BbStats::cpu_write_notes.fetch_add(1, std::memory_order_relaxed);
-    BbStats::cpu_write_note_bytes.fetch_add(size, std::memory_order_relaxed);
-    if (IsMapped(addr, size)) {
-        InvalidateAfterWrite(addr, size);
-        buffer_cache.NoteCpuWriteRange(addr, size);
-    }
+    InvalidateMemory(addr, size);
 }
 
 bool Rasterizer::FaultSkipsTextureCache() {
@@ -5838,7 +5745,7 @@ bool Rasterizer::FaultSkipsTextureCache() {
     return enabled;
 }
 
-bool Rasterizer::OnWriteFault(VAddr addr, bool assume_locks, u64 guest_rip) {
+bool Rasterizer::OnWriteFault(VAddr addr, bool assume_locks) {
     const VideoCore::InvalidateReason reason{"page fault"};
     DrainDrawPipe();
     // bbport: within the faulting page. 8 bytes from a write to the last bytes of a mapping
@@ -5857,7 +5764,7 @@ bool Rasterizer::OnWriteFault(VAddr addr, bool assume_locks, u64 guest_rip) {
     } else if (!InvalidateMemory(addr, size, assume_locks)) {
         return false;
     }
-    buffer_cache.ExtendWriteFault(addr, guest_rip);
+    buffer_cache.ExtendWriteFault(addr);
     return true;
 }
 

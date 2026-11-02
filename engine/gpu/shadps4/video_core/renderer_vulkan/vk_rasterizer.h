@@ -127,32 +127,12 @@ public:
     void WaitBeforeDmaStore(VAddr dst, u32 num_bytes, VAddr src, u32 src_size);
     u32 ReadDataFromGds(u32 gsd_offset);
     bool InvalidateMemory(VAddr addr, u64 size, bool assume_locks = false);
-    /// bbport: data written into GPU memory by a path we hear of (file reads, the game's resource
-    /// loaders, DMA on the CPU): invalidated, and an asset for the buffer cache.
+    /// bbport: data written into GPU memory by a path we hear of (file reads into it): invalidated.
     void NoteAssetWrite(VAddr addr, u64 size);
-    /// bbport: the CPU has written [addr, addr + size): invalidated, its bytes kept over GPU data that
-    /// is read back first.
-    void InvalidateAfterWrite(VAddr addr, u64 size);
-    /// bbport (any thread): the command processor wrote these bytes outside the command stream
-    /// (labels, timestamps, occlusion results): VRAM copies of them get them too.
-    void NoteLateCommandWrite(VAddr addr, const void* data, u64 size) {
-        buffer_cache.NoteLateCommandWrite(addr, data, size);
-    }
-    /// bbport: the command processor wrote `size` bytes of `data` at addr with the CPU in decode order
-    /// (WriteData, a constant RAM dump; the decoder reads them there). Where the GPU's own data there
-    /// is in VRAM the bytes go into it in stream order, else the caches are invalidated (no write
-    /// tracking). `recording_thread`: the draw recording thread, which owns the caches (no drain).
-    void NoteCommandWrite(VAddr addr, const void* data, u64 size, bool recording_thread);
     /// bbport (stage A, BB_CONSTRAM_PIPE, default on): before the command processor writes guest
     /// memory with the CPU (a constant RAM dump), waits until the recording thread has run the
     /// queued packets that read those bytes (their buffer bindings, DMA), not all of them.
     void WaitForPendingReads(VAddr address, u64 size);
-    /// NoteCommandWrite for a write made on stage A: handed to the recording thread in order (a copy
-    /// of the bytes) instead of draining it first.
-    void NoteCommandWriteInOrder(VAddr addr, const void* data, u64 size);
-    /// bbport: a guest thread wrote [addr, addr + size) with a libc import (memcpy, memset, memmove)
-    /// over pages the caches watch (no write tracking): what a write fault did.
-    void OnCpuWrite(VAddr addr, u64 size);
     /// GPU thread, before a write the guest can observe (see Scheduler::WaitHostCopies).
     /// `site`: the caller (BbStats::WaitSite, frame statistics).
     void WaitHostCopies(u32 site = BbStats::WaitOther) {
@@ -251,12 +231,8 @@ public:
     /// Whether signals wait for work not submitted yet (the GPU command thread submits it when
     /// it runs out of work, or the guest could wait for them forever).
     bool HasUnsubmittedSignals();
-    /// bbport BB_GUEST_IN_PLACE (draw recording thread): `data` written into the game's memory by the
-    /// GPU in stream order, like the command processor's writes; false when the range is not
-    /// bound in place (the caller writes it with the CPU).
-    bool WriteGuestMemory(VAddr address, const void* data, u32 size);
-    /// bbport BB_GUEST_IN_PLACE (in stream order: the recording thread): a WRITE_DATA performed by
-    /// the GPU, as the command processor does, instead of a CPU store now (ahead of the GPU work
+    /// bbport BB_GX_IN_PLACE (in stream order: the recording thread): a WRITE_DATA performed by the
+    /// GPU, as the command processor does, instead of a CPU store now (ahead of the GPU work
     /// recorded before it). Values of up to 8 bytes are registered for WAIT_REG_MEM until the GPU
     /// has written them. False: not in place (or BB_GPU_COMMAND_WRITES=0), the caller stores it.
     bool WriteDataOnGpu(VAddr address, const void* data, u32 size);
@@ -311,8 +287,7 @@ public:
     bool IsGpuSideThread() const;
     bool IsGpuSideThreadId(u32 tid) const;
     /// A guest write hit a protected page.
-    /// `guest_rip`: the guest instruction that wrote (0: unknown), see BufferCache::NoteCpuWrite.
-    bool OnWriteFault(VAddr addr, bool assume_locks, u64 guest_rip = 0);
+    bool OnWriteFault(VAddr addr, bool assume_locks);
     /// bbport: write faults on pages no tracked image watches skip the texture cache
     /// (BB_FAULT_SKIP_TEXTURES=0: they take its lock as before).
     static bool FaultSkipsTextureCache();

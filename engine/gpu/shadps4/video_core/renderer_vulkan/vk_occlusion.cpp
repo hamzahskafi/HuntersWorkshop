@@ -54,7 +54,6 @@ struct Occlusion::Shared {
     bool alive = true;
     vk::Device device;
     vk::QueryPool pool;
-    Rasterizer* rasterizer = nullptr;
     bool precise = false;
     u64 max_lag = 6;
 
@@ -115,16 +114,15 @@ bool Occlusion::Wanted() {
     return on;
 }
 
-Occlusion::Occlusion(const Instance& instance_, Scheduler& scheduler_, Rasterizer& rasterizer_)
-    : instance{instance_}, scheduler{scheduler_}, rasterizer{rasterizer_} {}
+Occlusion::Occlusion(const Instance& instance_, Scheduler& scheduler_)
+    : instance{instance_}, scheduler{scheduler_} {}
 
-std::unique_ptr<Occlusion> Occlusion::Create(const Instance& instance, Scheduler& scheduler,
-                                             Rasterizer& rasterizer) {
+std::unique_ptr<Occlusion> Occlusion::Create(const Instance& instance, Scheduler& scheduler) {
     if (!Wanted()) {
         std::printf("Occlusion: off (BB_OCCLUSION=0): every query the game makes reads visible\n");
         return nullptr;
     }
-    std::unique_ptr<Occlusion> occlusion{new Occlusion(instance, scheduler, rasterizer)};
+    std::unique_ptr<Occlusion> occlusion{new Occlusion(instance, scheduler)};
     if (!occlusion->Init()) {
         return nullptr;
     }
@@ -157,7 +155,6 @@ bool Occlusion::Init() {
     shared = std::make_shared<Shared>();
     shared->device = device;
     shared->pool = pool;
-    shared->rasterizer = &rasterizer;
     shared->precise = precise;
     shared->max_lag = EnvU64("BB_OCCLUSION_MAX_LAG", 6);
     shared->results.resize(2ull * PoolSize);
@@ -412,7 +409,6 @@ bool Occlusion::Shared::WriteBlock(const Pending& dump) {
             ++unbacked;
             return false;
         }
-        rasterizer->NoteLateCommandWrite(dump.va + 16ull * k, &value, sizeof(value));
     }
     ++written_dumps;
     if (written.size() > 262144) {

@@ -224,29 +224,6 @@ void Runtime::FillBuffer(const VideoCore::Buffer* dst, u64 offset, u64 size, u32
                  vk::AccessFlagBits2::eTransferWrite);
 }
 
-void Runtime::CopyFromGuestChunk(vk::Buffer src, const VideoCore::Buffer* dst,
-                                 std::span<const vk::BufferCopy> copies) {
-    if (copies.empty()) {
-        return;
-    }
-    scheduler.EndRendering(GpuSavings::PassBreak::BufferUpload);
-    bool needs_flush = false;
-    for (const auto& copy : copies) {
-        needs_flush |= IsBufferAccessed(dst, copy.dstOffset, copy.size, true);
-    }
-    if (needs_flush) {
-        FlushBarriers();
-    }
-    scheduler.Record([src, dst_handle = dst->Handle(),
-                      regions = scheduler.RecordData(copies)](vk::CommandBuffer cmdbuf) {
-        cmdbuf.copyBuffer(src, dst_handle, regions.size(), regions.data());
-    });
-    for (const auto& copy : copies) {
-        AccessBuffer(dst, copy.dstOffset, copy.size, vk::PipelineStageFlagBits2::eCopy,
-                     vk::AccessFlagBits2::eTransferWrite);
-    }
-}
-
 void Runtime::UpdateBuffer(const VideoCore::Buffer* dst, u64 offset, std::span<const u8> data) {
     if (data.empty()) {
         return;
@@ -1452,7 +1429,7 @@ void Runtime::AccessBuffer(const VideoCore::Buffer* handle, u64 offset, u64 size
 
 void Runtime::FlushBarriers() {
     BeforeImageAccess();
-    // bbport BB_CHUNK_BUFFERS: an aliased access is done with once this barrier follows it (or
+    // bbport BB_GX_IN_PLACE: an aliased access is done with once this barrier follows it (or
     // after a few barriers without it: a binding taken for residency only is never accessed).
     if (aliased && (aliased->recorded || ++aliased->flushes > 4)) {
         aliased.reset();

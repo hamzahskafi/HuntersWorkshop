@@ -63,7 +63,6 @@ namespace Vulkan {
 
 class Instance;
 class Scheduler;
-class Rasterizer;
 
 class Occlusion {
 public:
@@ -71,8 +70,7 @@ public:
     static bool Wanted();
 
     /// Null when the device cannot do it (no host query reset, no query pool): the fake then.
-    static std::unique_ptr<Occlusion> Create(const Instance& instance, Scheduler& scheduler,
-                                             Rasterizer& rasterizer);
+    static std::unique_ptr<Occlusion> Create(const Instance& instance, Scheduler& scheduler);
     ~Occlusion();
 
     /// Stage A (GPU command thread): a draw packet decoded (direct or indirect).
@@ -137,7 +135,7 @@ public:
     }
 
 private:
-    Occlusion(const Instance& instance, Scheduler& scheduler, Rasterizer& rasterizer);
+    Occlusion(const Instance& instance, Scheduler& scheduler);
     bool Init();
     DrawQuery AllocateQuery(u32 scene_size) noexcept;
     bool SkipPredicated() noexcept;
@@ -146,7 +144,6 @@ private:
 
     const Instance& instance;
     Scheduler& scheduler;
-    Rasterizer& rasterizer;
     bool precise = false;
     u32 cap = 64;
     u32 pipes = 8; ///< DBs of the last dump (a Neo has 16)
