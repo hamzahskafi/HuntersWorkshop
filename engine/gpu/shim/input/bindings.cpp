@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Adapted from bbhost db5457cbd447f4ef129b58df0a78e0a8819c7033.
-#define BBHOST_HAVE_SDL3 1
 #include "compat.h"
 #include "bindings.h"
 
@@ -11,9 +10,7 @@
 #include <cstring>
 #include <string>
 
-#if defined(BBHOST_HAVE_SDL3)
 #include <SDL3/SDL.h>
-#endif
 
 namespace {
 
@@ -74,11 +71,8 @@ const BindingInfo kInfo[kBindCount] = {
     {"back", "Menu Back", "Return, in menus.", 0, "Backspace", 0},
 
     {"l3", "Left Stick Press", "L3.", kL3, "Left Ctrl", 0},
-    // The developers' debug menu: not a pad press at all. The patch opens it
-    // on the touchpad's left side, which is also Gestures; this key toggles
-    // the menu itself (engine/debug_menu.h), when the Debug Menu plugin is
-    // on. The Key Bindings screen lists it only then.
-    {"debug_menu", "Debug Menu", "Opens and closes the developers' debug menu (the Debug Menu plugin).", 0, "`", 0},
+    // 0.4.4 beta 28: bbhost's Debug Menu key went (its menu, a plugin, was never in this engine; the
+    // game's own debug menu opens from the touchpad, Extras › Debug menu).
 };
 
 // Earlier names a bbhost.toml may still use.
@@ -108,17 +102,6 @@ std::atomic<std::uint32_t> g_mods_now{0};
 std::atomic<int> g_capture_modifier{0};
 
 std::atomic<int> g_capture{-1};
-// The Debug Menu key: held per device (keyboard, mouse), since each device's
-// actions are read on their own, and a press queued for the pad read.
-std::atomic<bool> g_debug_held[2], g_debug_toggle{false};
-
-void note_debug_key(int device, bool down) {
-    if (!down) {
-        g_debug_held[device].store(false, std::memory_order_relaxed);
-    } else if (!g_debug_held[device].exchange(true) && debug_menu_active()) {
-        g_debug_toggle.store(true);
-    }
-}
 std::atomic<int> g_capture_done{-1};
 std::atomic<bool> g_hold{false};  // after a capture: blocked until nothing is held
 std::atomic<std::int64_t> g_hold_ms{0};  // when that hold began
@@ -130,22 +113,12 @@ std::int64_t now_ms() {
 }
 
 int scancode_from_name(const std::string& name) {
-#if defined(BBHOST_HAVE_SDL3)
     return static_cast<int>(SDL_GetScancodeFromName(name.c_str()));
-#else
-    (void)name;
-    return 0;
-#endif
 }
 
 const char* scancode_name(int sc) {
-#if defined(BBHOST_HAVE_SDL3)
     const char* n = SDL_GetScancodeName(static_cast<SDL_Scancode>(sc));
     return n && *n ? n : nullptr;
-#else
-    (void)sc;
-    return nullptr;
-#endif
 }
 
 // Mouse 1..5 are the buttons in SDL's numbering, as input.cpp reads them (1 left, 2 middle,
@@ -154,8 +127,6 @@ const char* scancode_name(int sc) {
 constexpr int kMouseInputs = 7;
 const char* const kMouseNames[kMouseInputs + 1] = {nullptr,  "Left Button", "Middle Button", "Right Button",
                                                    "Button 4", "Button 5", "Wheel Up", "Wheel Down"};
-// The same where the name has to fit in a sentence.
-const char* const kMouseShort[kMouseInputs + 1] = {nullptr, "L Mouse", "M Mouse", "R Mouse", "Mouse 4", "Mouse 5", "Wheel Up", "Wheel Down"};
 // Their names in [keys]: Mouse1..Mouse5, WheelUp, WheelDown.
 std::string mouse_token(int m) { return m == 6 ? "WheelUp" : m == 7 ? "WheelDown" : "Mouse" + std::to_string(m); }
 
@@ -181,27 +152,17 @@ int action_named(const char* name) {
 std::atomic<std::uint64_t> g_serial{1};
 
 bool is_modifier(int sc) {
-#if defined(BBHOST_HAVE_SDL3)
     return sc == SDL_SCANCODE_LCTRL || sc == SDL_SCANCODE_RCTRL || sc == SDL_SCANCODE_LSHIFT ||
            sc == SDL_SCANCODE_RSHIFT || sc == SDL_SCANCODE_LALT || sc == SDL_SCANCODE_RALT;
-#else
-    (void)sc;
-    return false;
-#endif
 }
 
 // The modifiers held, from SDL's key state (either side's key).
 std::uint32_t mods_held(const bool* keys, int nkeys) {
     std::uint32_t mods = 0;
-#if defined(BBHOST_HAVE_SDL3)
     const auto down = [&](int sc) { return sc < nkeys && keys[sc]; };
     if (down(SDL_SCANCODE_LCTRL) || down(SDL_SCANCODE_RCTRL)) mods |= kModCtrl;
     if (down(SDL_SCANCODE_LSHIFT) || down(SDL_SCANCODE_RSHIFT)) mods |= kModShift;
     if (down(SDL_SCANCODE_LALT) || down(SDL_SCANCODE_RALT)) mods |= kModAlt;
-#else
-    (void)keys;
-    (void)nkeys;
-#endif
     return mods;
 }
 
@@ -324,13 +285,6 @@ bool host_bindings_parse(const char* name, const char* value) {
     return true;
 }
 
-void host_bindings_save(std::FILE* f) {
-
-    for (int a = 0; a < kBindCount; ++a) {
-        std::fprintf(f, "bind.%s=%s\n", kInfo[a].key, host_binding_ini_value(a).c_str());
-    }
-}
-
 std::string host_binding_ini_value(int a) {
     std::uint32_t chords[2 + kMore];
     std::string value;
@@ -368,21 +322,6 @@ void host_binding_describe(int action, char* out, std::size_t n) {
         text += mods_text(chords[i]) + name;
     }
     std::snprintf(out, n, "%s", text.empty() ? "Unbound" : text.c_str());
-}
-
-void host_binding_prompt(int action, char* out, std::size_t n) {
-    if (!n) return;
-    out[0] = '\0';
-    if (action < 0 || action >= kBindCount) return;
-    const char* k = scancode_name(host_binding_key(action));
-    const int m = host_binding_mouse(action);
-    // The key first: a player who bound both reads the key in a sentence more
-    // easily than "Left Button", and the prompt has room for one.
-    if (k) {
-        std::snprintf(out, n, "%s%s", mods_text(g_key_mods[action].load(std::memory_order_relaxed)).c_str(), k);
-    } else if (m >= 1 && m <= kMouseInputs) {
-        std::snprintf(out, n, "%s", kMouseShort[m]);
-    }
 }
 
 namespace {
@@ -450,7 +389,6 @@ void host_bindings_keys_held(const bool* keys, int nkeys, bool held[kBindCount])
         if (held[pair[0]] && held[pair[1]]) held[pair[0]] = held[pair[1]] = false;
     }
     held[kBindWalk] = held[kBindWalk] || g_walk_on_mouse.load(std::memory_order_relaxed);
-    note_debug_key(0, held[kBindDebugMenu]);
 }
 
 void host_bindings_mouse_held(std::uint32_t buttons, bool held[kBindCount]) {
@@ -458,7 +396,6 @@ void host_bindings_mouse_held(std::uint32_t buttons, bool held[kBindCount]) {
         true, [&](std::uint32_t m) { return m >= 1 && m <= std::uint32_t(kMouseInputs) && (buttons & (1u << (m - 1))); },
         g_mods_now.load(std::memory_order_relaxed), held);
     g_walk_on_mouse.store(held[kBindWalk], std::memory_order_relaxed);
-    note_debug_key(1, held[kBindDebugMenu]);
 }
 
 bool KeyTurn::Step(int x, int y, std::uint64_t now, float& out_x, float& out_y) {
@@ -501,10 +438,7 @@ void host_bindings_apply(const bool held[kBindCount], bool strong, PadState& p, 
     bool any = false;
     int menu = -1;  // menu_pointer_in_menu, asked only when Confirm or Back is held
     for (int a = 0; a < kBindCount; ++a) {
-        // The Debug Menu key sets no pad bit: its press was queued when it was
-        // read, and the pad read toggles the menu on the game's thread
-        // (host_bind_take_debug_toggle).
-        if (!held[a] || a == kBindDebugMenu) continue;
+        if (!held[a]) continue;
         // Menu Confirm and Menu Back are the menus' keys only (Lantern 0.9.38,
         // Awaken): in the world their buttons are Interact and Dodge (Cross and
         // Circle, the region decides which way round), so Enter or Backspace
@@ -628,7 +562,6 @@ void bind_key(int a, int scancode, std::uint32_t mods) {
 bool host_bind_capture_key(int scancode, unsigned sdl_mods) {
     const int a = g_capture.load(std::memory_order_relaxed);
     if (a < 0) return false;
-#if defined(BBHOST_HAVE_SDL3)
     if (scancode == SDL_SCANCODE_ESCAPE) {
         g_capture_modifier.store(0, std::memory_order_relaxed);
         finish(a, "unchanged");
@@ -640,7 +573,6 @@ bool host_bind_capture_key(int scancode, unsigned sdl_mods) {
         finish(a, "unbound");
         return true;
     }
-#endif
     // A modifier waits: it is the modifier of the next key or button, or bound alone when it is
     // let go first (host_bind_capture_key_up).
     if (is_modifier(scancode)) {
@@ -648,13 +580,9 @@ bool host_bind_capture_key(int scancode, unsigned sdl_mods) {
         return true;
     }
     std::uint32_t mods = 0;
-#if defined(BBHOST_HAVE_SDL3)
     if (sdl_mods & SDL_KMOD_CTRL) mods |= kModCtrl;
     if (sdl_mods & SDL_KMOD_SHIFT) mods |= kModShift;
     if (sdl_mods & SDL_KMOD_ALT) mods |= kModAlt;
-#else
-    (void)sdl_mods;
-#endif
     bind_key(a, scancode, mods);
     return true;
 }
@@ -679,12 +607,10 @@ bool host_bind_capture_mouse(int button) {
         return true;
     }
     std::uint32_t mods = 0;
-#if defined(BBHOST_HAVE_SDL3)
     const SDL_Keymod held = SDL_GetModState();
     if (held & SDL_KMOD_CTRL) mods |= kModCtrl;
     if (held & SDL_KMOD_SHIFT) mods |= kModShift;
     if (held & SDL_KMOD_ALT) mods |= kModAlt;
-#endif
     g_capture_modifier.store(0, std::memory_order_relaxed);
     const std::uint32_t chord = kChordMouse | std::uint32_t(button) | mods;
     take_chord(a, chord);
@@ -710,7 +636,6 @@ bool host_bind_capture_mouse(int button) {
 
 int host_bind_capture_take_done() { return g_capture_done.exchange(-1); }
 
-bool host_bind_take_debug_toggle() { return g_debug_toggle.exchange(false); }
 
 bool host_bind_capture_blocking() {
     return g_capture.load(std::memory_order_relaxed) >= 0 || g_hold.load(std::memory_order_relaxed);

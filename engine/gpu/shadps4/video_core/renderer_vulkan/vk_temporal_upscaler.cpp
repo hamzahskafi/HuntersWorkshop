@@ -22,12 +22,10 @@
 #include "bbport_toggles.h"
 #include "video_core/host_shaders/upscale_merge_comp.h"
 #include "video_core/host_shaders/upscale_debug_comp.h"
-#include "video_core/host_shaders/upscale_debug_ldr_comp.h"
 #include "video_core/host_shaders/upscale_reactive_comp.h"
 #include "video_core/host_shaders/edge_clamp_comp.h"
 #include "video_core/host_shaders/taa_comp.h"
 #include "video_core/host_shaders/taa_sharpen_comp.h"
-#include "video_core/host_shaders/taa_sharpen_ldr_comp.h"
 #include "video_core/host_shaders/fsr4_decode_comp.h"
 #include "video_core/host_shaders/fsr4_encode_comp.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
@@ -527,9 +525,6 @@ bool TemporalUpscaler::OnFrameStart() {
     const float preset_scale = BbSettings::PresetScale(preset);
     const bool scale_changed = applied_scale != preset_scale;
     if (applied_preset != preset || scale_changed || settings.upscaler == BbSettings::UpscalerOff) failed = false;
-    if (dispatch_failed.exchange(false, std::memory_order_relaxed)) {
-        failed = true;
-    }
     // 0.4.4 beta 27: an upscaler chosen in the menu that cannot run here gives way as at start
     // (ConfigureUpscalerSupport): DLSS to AMD FSR, AMD FSR to TAA.
     if (settings.upscaler == BbSettings::UpscalerDlss && !(dlss && dlss->Available())) {
@@ -930,7 +925,6 @@ void TemporalUpscaler::CreatePipelines() {
     edge_clamp_pipeline = compute(EDGE_CLAMP_COMP, *edge_clamp_pipeline_layout);
     storage_layout(2, taa_sharpen_desc_layout, taa_sharpen_pipeline_layout, sizeof(float));
     taa_sharpen_pipeline = compute(TAA_SHARPEN_COMP, *taa_sharpen_pipeline_layout);
-    taa_sharpen_ldr_pipeline = compute(TAA_SHARPEN_LDR_COMP, *taa_sharpen_pipeline_layout);
     storage_layout(1, fsr4_encode_desc_layout, fsr4_encode_pipeline_layout, sizeof(u32));
     {
         // Debug view: the target (storage), then the mask, motion and object motion (sampled).
@@ -950,7 +944,6 @@ void TemporalUpscaler::CreatePipelines() {
             .setLayoutCount = 1, .pSetLayouts = &*debug_desc_layout,
             .pushConstantRangeCount = 1, .pPushConstantRanges = &push}));
         debug_pipeline = compute(UPSCALE_DEBUG_COMP, *debug_pipeline_layout);
-        debug_ldr_pipeline = compute(UPSCALE_DEBUG_LDR_COMP, *debug_pipeline_layout);
     }
     fsr4_encode_pipeline = compute(FSR4_ENCODE_COMP, *fsr4_encode_pipeline_layout);
     {
@@ -1132,7 +1125,7 @@ void TemporalUpscaler::MarkRunStep(const char* label) {
     }
 }
 
-void TemporalUpscaler::ExtraSharpen(vk::Image target, bool ldr, u32 w, u32 h) {
+void TemporalUpscaler::ExtraSharpen(vk::Image target, u32 w, u32 h) {
     const float extra = ExtraSharpenAmount();
     if (extra <= 0.0f) {
         return;
@@ -1164,11 +1157,11 @@ void TemporalUpscaler::ExtraSharpen(vk::Image target, bool ldr, u32 w, u32 h) {
         extra_sharpen_width = w;
         extra_sharpen_height = h;
     }
-    const vk::ImageView target_view = ldr ? UiStorageView(target) : *output_view;
-    // bbport: the commands are recorded through the scheduler (a recording thread for FSR 3).
+    const vk::ImageView target_view = *output_view;
+    // bbport: the commands are recorded through the scheduler.
     scheduler.RecordCrumb({.name = "TAA extra sharpen"}, [target, copy = vk::Image(extra_sharpen_image),
                       copy_view = *extra_sharpen_view, target_view, extra, w, h,
-                      pipeline = ldr ? *taa_sharpen_ldr_pipeline : *taa_sharpen_pipeline,
+                      pipeline = *taa_sharpen_pipeline,
                       layout = *taa_sharpen_pipeline_layout](vk::CommandBuffer cmdbuf) {
         const auto image_barrier = [&](vk::Image image, vk::ImageLayout old_layout,
                                        vk::PipelineStageFlags2 src, vk::AccessFlags2 src_access,
@@ -1219,20 +1212,7 @@ void TemporalUpscaler::ExtraSharpen(vk::Image target, bool ldr, u32 w, u32 h) {
     });
 }
 
-vk::ImageView TemporalUpscaler::UiStorageView(vk::Image target) {
-    if (!ui_storage_view) {
-        // The UI image's own format may be sRGB; FSR 3 writes it through a UNORM view too.
-        ui_storage_view = Check(instance.GetDevice().createImageViewUnique({
-            .image = target, .viewType = vk::ImageViewType::e2D,
-            .format = vk::Format::eR8G8B8A8Unorm,
-            .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
-        }));
-    }
-    return *ui_storage_view;
-}
-
-void TemporalUpscaler::DebugView(vk::Image target, bool ldr, u32 w, u32 h, u32 ow, u32 oh,
-                                 bool reactive) {
+void TemporalUpscaler::DebugView(vk::Image target, u32 w, u32 h, u32 ow, u32 oh, bool reactive) {
     // As the 1080p path's merge (Run): the mask (menu or toggle 1 << 28) or the motion vectors.
     const int debug_view = BbSettings::Get().debug_view;
     const u32 mode = reactive && (debug_view == BbSettings::DebugReactive || BbToggle::Disabled(1u << 28))
@@ -1242,7 +1222,7 @@ void TemporalUpscaler::DebugView(vk::Image target, bool ldr, u32 w, u32 h, u32 o
     if (mode == 0) {
         return;
     }
-    const vk::ImageView target_view = ldr ? UiStorageView(target) : *output_view;
+    const vk::ImageView target_view = *output_view;
     const vk::ImageView objects = camera_motion.ObjectMotionView();
     // 0.4.4 beta 21: a stand-in while the mask has no image (read in mode 1 only, with a mask).
     const vk::ImageView mask_view = MaskBinding();
@@ -1251,7 +1231,7 @@ void TemporalUpscaler::DebugView(vk::Image target, bool ldr, u32 w, u32 h, u32 o
     scheduler.RecordCrumb({.name = "TAA debug view"}, [target, target_view, mask = mask_view,
                       motion = *motion_view, objects = objects ? objects : *motion_view,
                       push = std::array<u32, 3>{mode | (objects ? 4u : 0u), w, h}, ow, oh,
-                      pipeline = ldr ? *debug_ldr_pipeline : *debug_pipeline,
+                      pipeline = *debug_pipeline,
                       layout = *debug_pipeline_layout](vk::CommandBuffer cmdbuf) {
         constexpr auto all = vk::PipelineStageFlagBits2::eAllCommands;
         const vk::ImageMemoryBarrier2 before{
@@ -1699,7 +1679,7 @@ void TemporalUpscaler::Run() {
             merge_sharpen = ExtraSharpenAmount();
         } else {
             MarkRunStep("upscaler Run: extra sharpen");
-            ExtraSharpen(vk::Image(output_image), false, ow, oh);
+            ExtraSharpen(vk::Image(output_image), ow, oh);
         }
     }
     // bbport: BB_DUMP_TRIGGER on this (HDR scene color) path too: the upscaler's inputs and
@@ -1973,7 +1953,6 @@ void TemporalUpscaler::EnsureUiResources(u32 w, u32 h, vk::Format color, vk::For
     if (new_color) {
         ui_views.clear();
         ui_view.reset();
-        ui_storage_view.reset();
         ui_image = VideoCore::UniqueImage(device, allocator);
         ui_image.Create(vk::ImageCreateInfo{
             .flags = vk::ImageCreateFlagBits::eMutableFormat | vk::ImageCreateFlagBits::eExtendedUsage,
@@ -2401,9 +2380,9 @@ void TemporalUpscaler::RunScaled() {
         }
         if (ok4) {
             if (BbSettings::Get().upscaler != BbSettings::UpscalerTaa) {
-                ExtraSharpen(vk::Image(output_image), false, ow, oh);
+                ExtraSharpen(vk::Image(output_image), ow, oh);
             }
-            DebugView(vk::Image(output_image), false, w, h, ow, oh, mask_ready && ReactiveOn());
+            DebugView(vk::Image(output_image), w, h, ow, oh, mask_ready && ReactiveOn());
             barrier(vk::Image(output_image), vk::ImageAspectFlagBits::eColor,
                     vk::ImageLayout::eGeneral, all, rw, vk::ImageLayout::eGeneral,
                     vk::PipelineStageFlagBits2::eBlit, vk::AccessFlagBits2::eTransferRead);

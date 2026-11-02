@@ -598,20 +598,6 @@ int* PS4_SYSV_ABI __Error() {
 }
 } // namespace Libraries::Kernel
 
-// RenderDoc capture hooks: not used by the port.
-namespace VideoCore {
-void LoadRenderDoc() {}
-void StartCapture() {}
-void EndCapture() {}
-void TriggerCapture() {}
-void SetOutputDir(const std::filesystem::path&, const std::string&) {}
-bool IsRenderDocLoaded() { return false; }
-void RequestScreenshot(ScreenshotRequest) {}
-u32 ConsumeGameOnlyScreenshotRequests() { return 0; }
-u32 ConsumeWithOverlaysScreenshotRequests() { return 0; }
-ScreenshotRequests ConsumeScreenshotRequests() { return {}; }
-} // namespace VideoCore
-
 extern "C" int bbgpu_overlay_captures_input(void) {
     return BbOverlay::CapturesInput() ? 1 : 0;
 }

@@ -2,18 +2,14 @@
 // bbport: the menu's debug views over an upscaled output in place, for the scaled path (an output
 // other than 1080p: TemporalUpscaler::RunScaled), where upscale_merge.comp does not run. The same
 // modes: 1 the reactive mask in red over a darkened frame, 2 the motion vectors (red/green:
-// |x|/|y|, 8 render pixels = full; blue: an object motion vector). LDR_OUTPUT: the 8-bit UI image
-// (FSR 3.1), else the RGBA16F output (FSR 4, DLSS, TAA), encoded like the UI image by then.
+// |x|/|y|, 8 render pixels = full; blue: an object motion vector), over the RGBA16F output
+// (AMD FSR, DLSS, TAA), encoded like the UI image by then.
 #version 450
 #extension GL_EXT_samplerless_texture_functions : require
 
 layout(local_size_x = 8, local_size_y = 8) in;
 
-#ifdef LDR_OUTPUT
-layout(binding = 0, rgba8) uniform image2D target;
-#else
 layout(binding = 0, rgba16f) uniform image2D target;
-#endif
 layout(binding = 1) uniform texture2D reactive; // R8, render size
 layout(binding = 2) uniform texture2D motion;   // render size, pixels
 // Render size, R32G32_UINT: y's sign bit = object vector written (0.4.4 beta 15). Bound only

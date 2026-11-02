@@ -10,7 +10,6 @@
 #include <cstring>
 extern "C" {std::uint8_t bb_mouse_camera_free_now=0;}
 void host_log(const char*,...) {}
-bool debug_menu_active(){return false;}
 uint32_t menu_confirm_button(){return 0x4000;}
 uint32_t menu_back_button(){return 0x2000;}
 static bool in_menu=false;

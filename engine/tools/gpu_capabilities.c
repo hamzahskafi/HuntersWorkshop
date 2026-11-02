@@ -45,36 +45,6 @@ static int better_device(VkPhysicalDevice candidate, VkPhysicalDevice current) {
     return largest_local_heap(candidate) > largest_local_heap(current);
 }
 
-/* --live-resolution: prints 1 when live resolution changes suit the GPU (run.sh, setting
- * live_resolution=auto), else 0. Live scaling keeps the game's post-processing at 1080p and
- * copies scene targets every frame: fine on a strong discrete GPU, 7-8 FPS on the Steam Deck
- * and a GTX 1060. Rule: discrete, at least 8 GB of device memory, and not an NVIDIA GPU older
- * than Turing (no fragment shader barycentrics; its depth/stencil copies take nine draws). */
-static int has_extension(VkPhysicalDevice device, const char *name) {
-    uint32_t count = 0;
-    if (vkEnumerateDeviceExtensionProperties(device, NULL, &count, NULL) != VK_SUCCESS) return 0;
-    VkExtensionProperties *list = calloc(count ? count : 1, sizeof(*list));
-    int found = 0;
-    if (list && vkEnumerateDeviceExtensionProperties(device, NULL, &count, list) == VK_SUCCESS)
-        for (uint32_t i = 0; i < count && !found; ++i) found = !strcmp(list[i].extensionName, name);
-    free(list);
-    return found;
-}
-
-static int live_resolution_suits(VkPhysicalDevice device) {
-    VkPhysicalDeviceProperties props;
-    vkGetPhysicalDeviceProperties(device, &props);
-    const int discrete = props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
-    const VkDeviceSize memory = largest_local_heap(device);
-    const int old_nvidia = props.vendorID == 0x10de &&
-                           !has_extension(device, "VK_KHR_fragment_shader_barycentric");
-    const int suits = discrete && memory >= (VkDeviceSize)7680 << 20 && !old_nvidia;
-    fprintf(stderr, "GPU: %s, %s, %llu MiB: live resolution changes %s\n", props.deviceName,
-            discrete ? "discrete" : "integrated or other", (unsigned long long)(memory >> 20),
-            suits ? "on" : "off (startup resolution patch)");
-    return suits;
-}
-
 static int list_gamepads(void) {
     if (!SDL_Init(SDL_INIT_GAMEPAD)) {
         fprintf(stderr, "gamepads: %s\n", SDL_GetError());
@@ -263,7 +233,6 @@ int main(int argc, char **argv) {
     if (argc > 1 && !strcmp(argv[1], "--gamepads")) {
         return list_gamepads();
     }
-    const int live_mode = argc > 1 && !strcmp(argv[1], "--live-resolution");
     const int fsr_mode = argc > 1 && !strcmp(argv[1], "--fsr-versions");
     const VkApplicationInfo app = {
         .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
@@ -313,12 +282,6 @@ int main(int argc, char **argv) {
         free(devices);
         vkDestroyInstance(instance, NULL);
         return result;
-    }
-    if (live_mode) {
-        printf("%d\n", live_resolution_suits(selected));
-        free(devices);
-        vkDestroyInstance(instance, NULL);
-        return 0;
     }
     VkPhysicalDeviceProperties props;
     vkGetPhysicalDeviceProperties(selected, &props);

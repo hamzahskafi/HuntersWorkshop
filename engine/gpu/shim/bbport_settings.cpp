@@ -858,11 +858,8 @@ std::string FsrVersion() {
 }
 
 void SetFsrVersion(const std::string& version) {
-    {
-        std::lock_guard lock{fsr_version_mutex};
-        fsr_version_wanted = FsrVersionKey(version);
-    }
-    Get().fsr_version_serial.fetch_add(1, std::memory_order_relaxed);
+    std::lock_guard lock{fsr_version_mutex};
+    fsr_version_wanted = FsrVersionKey(version);
 }
 
 std::vector<std::string> FsrVersionsOffered() {

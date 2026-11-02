@@ -228,18 +228,15 @@ private:
                      const char* input_format, bool input_alone, vk::Image depth, u32 sw, u32 sh,
                      u32 w, u32 h, u32 ow, u32 oh, bool taa_diagnostics);
     /// Additional RCAS sharpening; DLSS applies the whole requested range here.
-    void ExtraSharpen(vk::Image target, bool ldr, u32 w, u32 h);
+    void ExtraSharpen(vk::Image target, u32 w, u32 h);
     /// The strength ExtraSharpen applies (0: none): the menu's 0..2, less what the backend's own
     /// RCAS already did (FSR 3 and 4 up to 1; DLSS none).
     [[nodiscard]] float ExtraSharpenAmount() const;
     /// 0.4.4 beta 20: Run's profiler label for one of its steps (GPU profile).
     void MarkRunStep(const char* label);
-    /// bbport: the menu's mask / motion debug view over the scaled path's output (ldr: the 8-bit
-    /// UI image), in place; upscale_merge.comp draws it on the 1080p path. `reactive`: a mask
-    /// was made this frame.
-    void DebugView(vk::Image target, bool ldr, u32 w, u32 h, u32 ow, u32 oh, bool reactive);
-    /// The UI image as a UNORM storage view (its own format may be sRGB).
-    vk::ImageView UiStorageView(vk::Image target);
+    /// bbport: the menu's mask / motion debug view over the scaled path's output, in place;
+    /// upscale_merge.comp draws it on the 1080p path. `reactive`: a mask was made this frame.
+    void DebugView(vk::Image target, u32 w, u32 h, u32 ow, u32 oh, bool reactive);
 
     const Instance& instance;
     Scheduler& scheduler;
@@ -259,8 +256,6 @@ private:
 
     bool enabled = false;
     bool failed = false;
-    /// An FSR 3 dispatch recorded on a recording thread failed; `failed` at the next frame.
-    std::atomic<bool> dispatch_failed{false};
     u64 trigger_hash = 0x9a9cf8a9;
     VideoCore::ImageId scene_color{};
     bool done_this_frame = false;
@@ -358,10 +353,9 @@ private:
     vk::UniqueDescriptorSetLayout taa_sharpen_desc_layout;
     vk::UniquePipelineLayout taa_sharpen_pipeline_layout;
     vk::UniquePipeline taa_sharpen_pipeline;
-    vk::UniquePipeline taa_sharpen_ldr_pipeline;
     vk::UniqueDescriptorSetLayout debug_desc_layout;
     vk::UniquePipelineLayout debug_pipeline_layout;
-    vk::UniquePipeline debug_pipeline, debug_ldr_pipeline;
+    vk::UniquePipeline debug_pipeline;
     // bbport: AMD FSR in linear light on the scaled presets (fsr4_decode.comp, fsr4_encode.comp,
     // written for FSR 4): the decoded input and the passes that decode it and encode the output again.
     VideoCore::UniqueImage fsr4_linear_image;
@@ -373,12 +367,11 @@ private:
     vk::UniqueDescriptorSetLayout fsr4_encode_desc_layout;
     vk::UniquePipelineLayout fsr4_encode_pipeline_layout;
     vk::UniquePipeline fsr4_encode_pipeline;
-    // ExtraSharpen: a copy of the upscaled frame (RCAS reads neighbours) and the target views.
+    // ExtraSharpen: a copy of the upscaled frame (RCAS reads neighbours).
     // 0.4.4 beta 21: the copy is released by EnsureResources (made again when next needed).
     VideoCore::UniqueImage extra_sharpen_image;
     vk::UniqueImageView extra_sharpen_view;
     u32 extra_sharpen_width = 0, extra_sharpen_height = 0;
-    vk::UniqueImageView ui_storage_view;
 };
 
 } // namespace Vulkan

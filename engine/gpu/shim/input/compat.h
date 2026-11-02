@@ -50,14 +50,11 @@ void host_mouse_describe(char*,size_t);
 bool host_options_open();
 bool ingame_menu_open();
 bool host_text_entry_open();
-bool debug_menu_open();
-bool debug_menu_active();
 void menu_pointer_install(ElfImage*);
 void menu_pointer_click();
 uint32_t menu_pointer_take_press();
 // A value is being dragged (input.cpp): the pointer leaves the cursor on its row meanwhile.
 void menu_pointer_hold_row(bool hold);
-uint64_t menu_pointer_tick();
 bool menu_pointer_in_menu();
 bool menu_pointer_navigating();
 bool menu_pointer_front_end();

@@ -2,11 +2,9 @@
 // Adapted from bbhost db5457cbd447f4ef129b58df0a78e0a8819c7033.
 #pragma once
 
-// The mouse's part of the follow camera's step (engine/mouse_camera.h), shared
-// by both ways the step runs: our source of NS_SPRJ::ChrExFollowCam::Update
-// (decomp/camera/follow_camera.cpp), a leaf on the game's thread as the game
-// left it, and the hooks on the game's own update where ours is not in
-// place. Everything here is lock-free and calls nothing of the host's, so a
+// The mouse's part of the follow camera's step (engine/mouse_camera.h), run by
+// the hooks on the game's own update (NS_SPRJ::ChrExFollowCam::Update), a leaf
+// on the game's thread. Everything here is lock-free and calls nothing of the host's, so a
 // leaf can use it: the window adds the counts, the pad read publishes the
 // settings and the input device, the camera takes the counts at the start
 // of its update and turns by them after the stick.
@@ -91,8 +89,8 @@ inline Frame g_frame;
 inline std::atomic<std::uint64_t> g_flick_counts{0};
 inline std::atomic<std::uint32_t> g_flick_updates{0};
 
-// The exit report's.
-inline std::atomic<std::uint64_t> g_updates{0}, g_turns{0}, g_stick_frames{0}, g_held{0};
+// For the log lines: camera updates, and those the mouse turned.
+inline std::atomic<std::uint64_t> g_updates{0}, g_turns{0};
 
 // The camera's own turns as the character moves: the four stores the
 // community patch "Disable Camera Auto Rotation via Movement" (Imedved, Kyo)
@@ -126,7 +124,6 @@ inline void begin_update() {
     g_frame.dx = dx;
     g_frame.dy = dy;
     g_frame.hold = (g_flags.load(std::memory_order_relaxed) & kHoldAutoRotation) != 0;
-    if (g_frame.hold) g_held.fetch_add(1, std::memory_order_relaxed);
     g_frame.free_before = __atomic_load_n(&bb_mouse_camera_free_now, __ATOMIC_RELAXED) != 0;
     __atomic_store_n(&bb_mouse_camera_free_now, 0, __ATOMIC_RELAXED);
     if (!g_frame.free_before) {
@@ -150,7 +147,6 @@ inline bool held() { return g_frame.hold; }
 inline bool turn(float stick_pitch, float stick_yaw, float& pitch, float& yaw, float pitch_min, float pitch_max) {
     const float dx = g_frame.dx, dy = g_frame.dy;
     if (stick_pitch != 0.0f || stick_yaw != 0.0f) {
-        if (dx != 0.0f || dy != 0.0f) g_stick_frames.fetch_add(1, std::memory_order_relaxed);
         return false;
     }
     if (dx == 0.0f && dy == 0.0f) return false;

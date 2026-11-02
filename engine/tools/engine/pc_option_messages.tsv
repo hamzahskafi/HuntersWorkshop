@@ -173,7 +173,6 @@
 119126	Menu Confirm	OK, in menus.	菜单确认	在菜单中确认。
 119127	Menu Back	Return, in menus.	菜单返回	在菜单中返回。
 119128	Left Stick Press	L3.	按下左摇杆	L3。
-119129	Debug Menu	Opens and closes the developers' debug menu (its plugin).	调试菜单	打开或关闭开发者调试菜单（调试菜单插件）。
 
 # Dynamic Key Bindings pages and status text.
 119200	Movement		移动

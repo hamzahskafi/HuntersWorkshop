@@ -166,8 +166,6 @@ static_assert(sizeof(PadIconsNames) / sizeof(PadIconsNames[0]) == PadIconsCount)
 struct Values {
     std::atomic<MenuLanguage> menu_language{MenuLanguage::English};
     std::atomic<int> upscaler{UpscalerFsr};
-    /// fsr_version: FsrVersion() / SetFsrVersion() (a name); counts its changes, for the renderer.
-    std::atomic<unsigned> fsr_version_serial{0};
     std::atomic<int> preset{PresetAuto};
     std::atomic<bool> sharpen{true};
     std::atomic<float> sharpness{0.2f};

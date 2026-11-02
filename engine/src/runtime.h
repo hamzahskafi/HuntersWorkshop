@@ -115,12 +115,6 @@ int runtime_file_translate(const char *guest, char *out, size_t size);
 int64_t runtime_file_open(const char *path, int flags, int mode);
 int64_t runtime_file_close(int fd);
 int64_t runtime_file_read(int fd, void *buffer, uint64_t size);
-int64_t runtime_file_pread(int fd, void *buffer, uint64_t size, int64_t offset);
-int64_t runtime_file_write(int fd, const void *buffer, uint64_t size);
-int64_t runtime_file_lseek(int fd, int64_t offset, int whence);
-int64_t runtime_file_stat(const char *path, void *guest_stat);
-int64_t runtime_file_fstat(int fd, void *guest_stat);
-int64_t runtime_file_getdents(int fd, char *buffer, uint64_t size, int64_t *base);
 void runtime_thread_keys_cleanup(void);
 /* Guest-visible errno values are FreeBSD's. */
 int32_t runtime_guest_errno(int host_errno);

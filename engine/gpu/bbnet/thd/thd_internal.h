@@ -56,7 +56,6 @@ long long IntOf(const Json& o, const char* key, long long dflt = 0);
 std::string NpBase();
 bool NpPost(const std::string& path, const Json& body, Json& out, std::string& error,
             int timeout_ms = 8000);
-bool NpGet(const std::string& path, Json& out, std::string& error, int timeout_ms = 8000);
 
 // ---- the dispatcher: one guest thread, so the callbacks run where the game expects them.
 enum class Prio { Context = 0, Request = 1, Signaling = 2, RoomEvent = 3 };

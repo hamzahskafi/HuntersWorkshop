@@ -8,7 +8,6 @@
 #include "menu_memory.h"
 #include "graphics.h"
 #include "../input/bindings.h"
-extern bool debug_menu_active();
 extern std::uint32_t menu_confirm_button();
 extern std::uint32_t menu_back_button();
 extern std::uint32_t input_delivered_buttons();
@@ -39,7 +38,6 @@ constexpr std::uint64_t kListRedraw=0x1ed06e0,kLayoutRows=0x1f28de0,kMsgReposito
 constexpr std::uint32_t kDefaultsRowId=0x9d8a,kMsgMenuText=200,kMsgLineHelp=201;
 constexpr std::uint64_t kAddCommandRow=0x1f4e2a0,kSystemFinalize=0x1fea630;
 constexpr std::uint64_t kOpenSectionFlow=0x1fb4c70,kRowFunctorVTable=0x573d120,kOpenerFunctorVTable=0x5743880;
-constexpr int kSectionSlots=6;
 char g_open_name[32]="PCCamera";
 std::uint64_t guest(std::uint64_t bn) { return g_slide+(bn-kPreferredGuestSlide); }
 void* guest_fn(std::uint64_t bn) { return reinterpret_cast<void*>(guest(bn)); }
@@ -307,17 +305,15 @@ void key_message(char16_t (&out)[N], std::uint32_t id, const char* fallback, boo
     else to_utf16(out, fallback);  // an older/modded message bundle
 }
 constexpr std::uint32_t kKeyActionText = 119100, kKeyPageText = 119200;
-static_assert(kBindCount == 30 && kBindPages == 5, "Update pc_option_messages.tsv for new binding rows");
+static_assert(kBindCount == 29 && kBindPages == 5, "Update pc_option_messages.tsv for new binding rows");
 
 // The page names, as the tabs read. Plain ASCII: the line help and values
 // are drawn as HTML text, where an ampersand is not a character.
 const char* const kKeyPageNames[kBindPages] = {"Movement", "Combat", "Items and Gestures", "Camera and Menus",
                                                "Other"};
 
-// The actions listed: the Debug Menu key only when the menu is there (the
-// Debug Menu plugin, engine/debug_menu.h); it is the last.
-static_assert(kBindDebugMenu == kBindCount - 1, "the Debug Menu key is the last action");
-int keys_listed() { return debug_menu_active() ? kBindCount : kBindDebugMenu; }
+// The actions listed: all of them (0.4.4 beta 28: bbhost's Debug Menu key, hidden here, went).
+int keys_listed() { return kBindCount; }
 
 // The row's action; keys_listed() or more for a row the last, short page
 // leaves blank, which shows nothing and takes no capture.
