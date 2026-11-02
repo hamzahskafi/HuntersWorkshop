@@ -1,284 +1,306 @@
-# Launcher settings review: titles, lines and tooltips
+# Launcher text review
 
-Windows launcher, every page, as of 0.4.4 beta 28 commit 67e6040 (2026-11-02). This is the first
-draft for beta 28's last step before the version (community-fixes-plan.md › Beta 28). The step makes
-it again from the launcher as it is then; the tester goes through that version, then the texts are
-changed as agreed. Nothing here has been applied yet.
+Windows launcher, every page, as of 0.4.4 beta 28 (2026-11-02, after commit 21971be). Second draft,
+for the tester's review. Nothing here has been applied yet. Beta 28's text step (community-fixes-plan.md
+› Beta 28) checks it again against the launcher as it is then, before any text changes.
 
-## How a row shows its text today
+## What changes
 
-Each row has a title and one description. The description does two jobs:
+Today each row has one description. Classic (the default layout) shows its first sentence under the
+title, cut at 64 characters: 70 lines end mid-sentence ("Before every start and every…") and about
+20 more show a first sentence that doesn't say what the setting does ("Relaxed is the default").
 
-- **Classic layout (the default):** the description's first sentence goes under the title, cut at 64 characters with "…". Hovering shows the rest plus any extra advice.
-- **Modern layout:** nothing goes under the title. The (i) mark shows the whole description plus the advice.
+Each row gets two texts instead:
 
-## The main problem
+- **A line under the title** (60 characters or fewer). It answers the player's two questions: what
+  is this for, and what should I pick? When there is a best choice, the line says so.
+- **A tooltip** with the details. Where today's description is right, it stays the tooltip word for
+  word: 110 of the 147 descriptions are translated in all 13 languages, and a reworded text loses its
+  translations. A description is rewritten only where it is wrong (marked **Rewrite**).
 
-About 150 rows, plus rows built from lists (effects, FPS counter items, engine switches). In Classic:
+Classic shows the line, and the tooltip on hover. Modern's (i) shows both.
 
-- **70 lines are cut off mid-sentence**, for example "Before every start and every…", "Checks The Hunter's Dream…" and "Off keeps the game's own look…".
-- **About 20 more show only a first sentence that doesn't say what the setting does**, for example "Needs Frame rate corrections.", "Off: the game stays offline" and "Relaxed is the default".
-- **About 50 rows have no text at all.** Most of these are fine (folders, sliders whose name says it all). A few need one (listed per page).
+## How the texts were written
 
-**Proposal: every row gets two texts.**
+1. Every claim is checked in the code, not copied from today's text. (Frame rate: above 30 the game
+   runs on the engine's own corrections, not on Kyo's patch as today's text says.)
+2. When the title itself is unclear, the title changes (marked **Rename**).
+3. A line names the choices only when choosing is the point (HDR source).
+4. "Default: …" is added to the tooltip by the row code from each setting's default, one translated
+   phrase for all rows. "Applies at the next game start." is one phrase too (today: 5 wordings).
+5. Off or None first in every list, then less to more.
 
-1. **A line under the title:** one complete phrase of 60 characters or fewer, saying what the setting does (for a performance switch, what it gets you). No defaults, no conditions, no variable names.
-2. **A tooltip:** the details, when to change it, its cost, its default, and when it applies. **Where today's description is still right, it stays the tooltip word for word.**
+## Reading the tables
 
-Why the tooltip keeps today's text: 110 of the 147 descriptions are translated in all 13 languages. A reworded text is a new translation key, so rewriting them would put about 110 rows back to English in 12 languages. Keeping them means the step adds only the new short lines (to translate into all 13 languages), and rewrites a description only where it is wrong or misleading.
+- **Line:** the proposed line. "Today's" means today's description already fits and stays as it is.
+  "—" means no line (the title says it all).
+- **Tooltip:** "Today's" keeps today's description. Otherwise the new text.
 
-Classic shows the line and the tooltip on hover. Modern shows the line in the (i) above the tooltip. Rows that need no tooltip don't get one.
+## Play
 
-## Rules for every row
-
-| Rule | Today |
-|---|---|
-| The line says what it does, not "Off: …" or "Needs …" | 20 rows start with a condition |
-| The default, once, at the end of the tooltip, in one form: "Default: on." Added by the row code from the setting's known default (one translated template), on every page | 8 rows say "On by default", 3 "Off by default" (some at the start), 1 "Recommended: on", others nothing |
-| When it applies, one phrase: "Applies at the next game start." | 5 wordings today: "Applied when the game starts" (7), "on the next launch" (3), "at the next start", "after a restart" (2), "at its next start" (2) |
-| Variable names (BB_…) at the end of the tooltip, never first | The Log page starts 7 lines with them ("BB_GPU_PROFILE: the GPU's…") |
-| Plain words in the line; technical terms only in the tooltip | "port", "raw counts", "288 MiB", "upload heap", "constant cache" |
-| No Lantern or old version references | "the way 0.9.33 did", "crashes before beta 8" |
-| Off or None first, then less to more | Done for 5 lists. Four left: **V-Sync** (Off is last today) becomes Off, On (latest frame), On (every frame), Adaptive. **Area prefetch** (Auto, On, Off) becomes Off, Auto, On, as Draw pipe. **Texture filtering** (16x … 2x, Game's own) becomes Game's own, 2x, 4x, 8x, 16x. **Model detail** (As in the game, Highest, Lower, Lowest) becomes Lowest, Lower, As in the game, Highest |
-
-## Page by page
-
-"—" means no text today. Rows not listed are fine as they are.
-
-**Tooltip column:** where it rewords today's description, today's description stays instead, to keep its translations. New tooltips are only for rows that have none today, rows whose text is wrong (marked), and the Log page, whose texts are translated in zh-CN only, so reworking them is cheap.
-
-### Play
-
-| Row | Under the title now | Proposed line | Tooltip |
+| Row | Line | Tooltip | Notes |
 |---|---|---|---|
-| Engine update available | This package has an older engine than this launcher… | This package's engine is older than the launcher | Keep the rest |
-| The Old Hunters (DLC) | Off: the game starts without its DLC. | The DLC's areas, bosses and items | "Off: the game starts without it. The Game of the Year edition (CUSA03173) always has it." |
-| Add to Steam | Bloodborne as a non-Steam game in your Steam library… | Adds the game to your Steam library | "As a non-Steam game: Steam Input, the overlay and Big Picture work with it." |
-| Player profile | Each profile has its own save files and trophies, so several… | Separate saves and trophies for each player | Keep the rest |
-| Save backups | Before every start and every… | Automatic backups of this profile's saves | Keep the timing details |
-| Import saves | From shadPS4, another Bloodborne port, or a PS4 save exported… | From shadPS4, another port or a decrypted PS4 save | Tools named; "This profile's saves are backed up first." |
+| Engine update available | This package's engine is older than the launcher | Today's | Shown only then |
+| Game folder | — | — | Shows the path |
+| The Old Hunters (DLC) | The DLC's areas, bosses, weapons and attire | Today's | |
+| DLC folder | — | — | Shows the path |
+| Add to Steam | Adds the game to your Steam library | Today's | |
+| Game language | Today's: "The game's own text and voices" | — | |
+| Player profile | Separate saves and trophies for each player | Today's | |
+| Saves folder | — | — | Shows the path |
+| Save backups | Automatic backups of this profile's saves | Today's | |
+| Import saves | From shadPS4, another port or a decrypted PS4 save | Today's | |
 
-Fine: Game folder, DLC folder, Game language, Saves folder.
+## Display
 
-### Display
-
-| Row | Under the title now | Proposed line | Tooltip |
+| Row | Line | Tooltip | Notes |
 |---|---|---|---|
-| Custom resolution | Your own output size, any shape (5:4, 16:10, 32:9...)… | Any output size and shape | "5:4, 16:10, 32:9…: the camera and UI follow it with Widescreen on." |
-| Frame rate | Every rate above 30 runs on Kyo's 60 FPS++, the engine setting… | The game's frame-rate cap | Today's text |
-| Monitor | The game opens here from the start, including fullscreen and… | The monitor the game opens on | "Fullscreen and HDR too. If it's disconnected, the Windows primary monitor is used." |
-| Widescreen | Outputs that are not 16:9 (21:9, 32:9, 16:10, 5:4) with the… | Correct view and UI on screens that aren't 16:9 | "21:9, 32:9, 16:10, 5:4: a wider field of view, the UI kept in shape." |
-| HDR source | Native: highlights as bright as they are in the game's scene. | The scene's own highlights, or the SDR picture expanded | Today's text |
-| UI brightness | Native source only: how bright the HUD, menus and subtitles are… | How bright the HUD, menus and subtitles are | Today's text (the row is hidden unless the source is Native) |
-| UI colour | Native source only: Vivid shows the HUD and menus with the… | Vivid or exact (sRGB) colours for the HUD and menus | Today's text |
-| Paper white | How bright the game's white is, in nits. Range: 10–500 | How bright the game's white is, in nits | Today's text |
-| Peak brightness from the display | The peak Windows reports for the display the game is on (the… | Uses the peak brightness Windows reports | "Set by the Windows HDR Calibration app once it has run. Off: the value below." |
-| Peak brightness | Your display's peak brightness, in nits, when it is not taken… | Your display's peak brightness, in nits | "Used when it isn't taken from the display." |
-| Highlight boost | Off keeps the game's own look… | Brighter lamps, fire and sky | Today's text, then "Default: Low." |
-| Picture tuning (switch) | Applies the settings below, live… | Your own brightness, colour, fog and bloom, live | "Off shows the game's own picture and keeps your values. Also in the game's System menu and the Insert menu." |
-| Fog | — | How thick the fog is | "1 is the game's own." |
-| Bloom | — | The glow around bright lights | "1 is the game's own." |
-| Vignette | — | The darkened screen edges | — |
-| Ambient occlusion strength | — | How dark the shading in corners is | "1 is the game's own." |
-| Shadow distance | — | How far away shadows are drawn | "1 is the game's own; higher costs GPU time." |
+| Output resolution | The resolution the game is shown at | Today's | Today's line spoke of the upscaler, which is off by default now |
+| Custom resolution | Any output size and shape | Today's | |
+| Frame rate | 30 is the PS4's; higher rates get the engine's corrections | **Rewrite:** "30: the game as on the PS4. Above 30 the engine runs the game at that rate with its own frame-rate corrections, built on Kyo's 60 FPS++ and other community findings (Engine switches › Frame rate corrections). With the corrections off, the community FPS++ patches run instead." | The per-rate notes in the list ("Kyo's 60 FPS++ with the engine's values for 60 FPS…") get the same correction |
+| V-Sync | Today's: "How finished frames reach the screen" | — | **Order:** Off, On (latest frame), On (every frame), Adaptive |
+| Monitor | The monitor the game opens on | Today's | |
+| Window mode | Today's: "How the game's window fills the screen" | — | |
+| Widescreen | Correct view and UI on screens that aren't 16:9 | Today's | |
+| Live resolution change | Change the resolution in game without restarting | Today's | |
+| HDR output | Brighter highlights on an HDR screen | Today's | |
+| HDR source | Where highlights come from: the scene, or SDR expanded | Today's | |
+| UI brightness | How bright the HUD, menus and subtitles are | Today's | Shown only with the Native source |
+| UI colour | Vivid or exact (sRGB) colours for the HUD and menus | Today's | Shown only with the Native source |
+| Paper white | How bright the game's white is, in nits | Today's | |
+| Peak brightness from the display | Uses the peak brightness Windows reports | Today's | |
+| Peak brightness | Your display's peak brightness, in nits | Today's | |
+| Highlight boost | Brighter lamps, fire and sky | Today's | |
+| Picture tuning | Your own brightness, colour, fog and bloom, live | Today's | |
+| Brightness, Contrast, Saturation | — | "1.00 is the game's own." | One shared phrase |
+| Hue | — | "0 is the game's own." | |
+| Fog | How thick the fog is | "1.00 is the game's own." | |
+| Bloom | The glow around bright lights | "1.00 is the game's own." | |
+| Vignette | The darkened screen edges | — | |
+| Ambient occlusion strength | Strength of the shading in corners | "Needs Ambient occlusion (Graphics › Detail). 1.00 is the game's own." | It scales the SSAO pass, which runs only with that effect on |
+| Shadow distance | How far away shadows are drawn | "1.00 is the game's own." | |
+| Game's own picture | Today's: "Puts the settings above back to the game's own values" | — | |
 
-Fine: Output resolution, V-Sync, Window mode, Live resolution change, HDR output, Game's own picture. Brightness, Contrast, Saturation and Hue need no line.
+## Graphics
 
-### Graphics
-
-| Row | Under the title now | Proposed line | Tooltip |
+| Row | Line | Tooltip | Notes |
 |---|---|---|---|
-| Best settings for this PC | Output resolution, frame rate, upscaler and quality for this… | Recommended settings for this PC | Keep the hardware summary |
-| Quality | How far below the output the game renders… | How far below the output the game renders | Today's text |
-| Model detail | — | How far away models keep their full detail | "Highest costs GPU time; Lower and Lowest are for weaker GPUs." Reorder the list |
-| Texture filtering | Anisotropic filtering forced on the game's textures… | Sharper ground and walls seen at an angle | Keep the rest. Reorder the list |
-| Shadows from dynamic lights | — | Shadows from lamps, torches and fire | "One of the heaviest effects: off gives a large FPS gain." (The patch's note: a ton of heavy draw calls.) |
-| Ambient occlusion (SSAO) | — | Soft shading in corners and creases | — |
-| Screen-space reflections | Not in the original game | Reflections on wet and shiny surfaces | "Not in the original game. Costs GPU time." |
-| Depth of field | — | Blurs what is out of focus | — |
-| Motion blur | — (a status line appears) | Blur when the camera turns fast | "Costs GPU time." |
-| Chromatic aberration | — | Colour fringes toward the screen's edges | — |
-| No motion blur smear with upscalers | With an upscaler at an output other than 1920x1080 the game's… | Rename: **Skip motion blur with upscalers**. Line: "Upscalers smear it outside 1080p" | Keep the rest |
+| Best settings for this PC | Recommended settings for this PC | Today's, with the hardware summary | |
+| Anti-aliasing | Today's: "Smooths edges when no upscaler runs" | Today's advice | |
+| Upscaler | Renders below the output and fills it in: faster | Today's advice ("DLSS needs an NVIDIA RTX card; AMD FSR runs on any GPU…") | |
+| Quality | Higher looks sharper; lower runs faster | Today's | **Rename: Upscaling quality.** Shown only with FSR or DLSS: how far below the output the game renders |
+| Render resolution | The share of the output the game renders at | Today's | |
+| FSR version | Automatic runs the newest AMD offers here | Today's advice | |
+| DLSS model | Which NVIDIA model DLSS runs | Today's, with its advice | |
+| Sharpening (RCAS) | Says where it runs for the chosen upscaler (as today) | Today's advice | |
+| Sharpening strength | As today, by upscaler | Today's advice | |
+| Character motion vectors | Today's: "Less ghosting on characters; costs about 10% FPS" | Today's advice | |
+| Texture mip bias | Today's: "Below 0 sharper textures, above 0 softer" | Today's advice | |
+| Model detail | How far away models keep their full detail | "Highest costs GPU time; Lower and Lowest help weaker GPUs." | **Order:** Lowest, Lower, As in the game, Highest |
+| Texture filtering | Sharper ground and walls seen at an angle | Today's | **Order:** Game's own, 2x, 4x, 8x, 16x |
+| Shadows from dynamic lights | Shadows from lamps, torches and fire | "One of the heaviest effects: off gives a large FPS gain." | The patch's note: "a ton of heavy draw calls" |
+| Ambient occlusion (SSAO) | Soft shading in corners and creases | — | |
+| Screen-space reflections | Reflections on wet and shiny surfaces | "Not in the original game. Costs GPU time." | The patch's note: lowers performance |
+| Depth of field | Blurs what is out of focus | — | |
+| Motion blur | Blur when the camera turns fast | "Costs GPU time." | Its status line stays |
+| Skip motion blur with upscalers | Upscalers smear it outside 1080p | Today's | **Rename** (was "No motion blur smear with upscalers") |
+| Chromatic aberration | Colour fringes toward the screen's edges | — | |
 
-The effect lines describe how each effect looks; the costs come from the patches' own notes. Worth a quick look in game before they ship.
+The effect lines describe how each looks; worth a quick look in game before they ship.
 
-Fine: Anti-aliasing, Upscaler, Render resolution, FSR version, DLSS model, Sharpening (RCAS), Sharpening strength, Character motion vectors, Texture mip bias.
+## Interface
 
-### Interface
-
-| Row | Under the title now | Proposed line | Tooltip |
+| Row | Line | Tooltip | Notes |
 |---|---|---|---|
-| In-game menu shortcut | What opens the port's settings menu while playing. | The keys that open the in-game menu | Applies-at-start phrase |
-| In-game menu language | The port's settings menu (Insert or L3 + R3) | The in-game menu's language | — |
-| Sharp UI | Menus, HUD and text drawn at the output resolution instead of… | Menus and HUD at the full output resolution | "Much sharper at 1440p and 4K. On by default in betas while it's tested." |
-| Note while shaders build | "Building shaders" in a corner while the game builds shaders… | Shows "Building shaders" in a corner | "When the game builds shaders for a place it shows for the first time. Also in game." |
-| FPS counter (switch) | Also in game: Insert or L3 + R3 | Frame rate and timings in a corner | "Also in game: Insert or L3 + R3." |
-| Frame rate, Frame time, Upscaler, CPU usage, GPU usage | "Shown in the FPS counter" five times | No line (they're inside the FPS counter fold) | — |
-| FPS counter position, size, text colour, … (7 rows) | — | Drop the "FPS counter" prefix inside its fold: **Position, Size, Text colour, Text opacity, Background, Background opacity, Border** | — |
+| In-game menu shortcut | The keys that open the in-game menu | Today's | |
+| In-game menu language | The in-game menu's language | — | |
+| Sharp UI | Menus and HUD at the full output resolution | Today's | |
+| Note while shaders build | Shows "Building shaders" in a corner | Today's | |
+| FPS counter | Frame rate and timings in a corner | Today's ("Also in game…") | |
+| Frame rate, Frame time, Upscaler, CPU usage, GPU usage | — | — | "Shown in the FPS counter" five times goes: they sit in its fold |
+| FPS counter position, size, text colour, text opacity, background, background opacity, border | — | Today's where there is one | **Rename:** Position, Size, Text colour, Text opacity, Background, Background opacity, Border (inside the FPS counter fold; search shows "Interface › FPS counter") |
 
-### Gameplay
+## Gameplay
 
-| Row | Under the title now | Proposed line | Tooltip |
+| Row | Line | Tooltip | Notes |
 |---|---|---|---|
-| Camera tuning (switch) | Applies the three settings below… | Your own field of view, distance and height | "Also in the game's System menu (Camera Tuning)." |
-| Follow camera | Original keeps the game's camera distance, angle and follow… | How the camera follows you at 60 FPS and above | The two choices' notes cover it |
-| Debug menu | (long) | The game's developer menu (Left touchpad / Tab) | "Needs the adhoc folder from Nexus mod #253…" |
-| Hunter's Dream mirror | The Dream's mirror opens the appearance editor (the game's… | The Dream's mirror opens the appearance editor | "The game's unused Put on Disguise." |
-| Rebirth at the altar | With the Yharnam Stone, the Altar of Despair resets your level… | Reset your level and attributes at the Altar of Despair | Today's text |
+| Camera tuning | Your own field of view, distance and height | Today's | |
+| Follow camera | How the camera follows you at 60 FPS and above | — | Its two choices' notes stay |
+| Field of view, Distance, Height | — | — | |
+| Skip intro videos | — | — | |
+| Free camera | Fly the camera freely: Cross + L3 / Space + Z | — | |
+| Debug menu | The game's developer menu (Left touchpad / Tab) | Today's | |
+| Hunter's Dream mirror | The Dream's mirror opens the appearance editor | Today's | |
+| Rebirth at the altar | Reset your level and attributes at the Altar of Despair | Today's | |
 
-Fine: Field of view, Distance, Height, Skip intro videos, Free camera.
+## Controls
 
-### Controls
-
-| Row | Under the title now | Proposed line | Tooltip |
+| Row | Line | Tooltip | Notes |
 |---|---|---|---|
-| PC controls | The keyboard and mouse layout below… | Use the keyboard and mouse layout below | Today's text |
-| Mouse camera | The mouse turns the game's own camera by raw counts, at any… | The mouse turns the camera directly | "The same at any frame rate." |
-| Mouse in menus | The mouse becomes a pointer in the game's menus… | A mouse pointer in the game's menus | "Hover and click items." |
-| Move and look in menus | With a menu open in the world, the movement and look keys stay… | Keep moving and looking with a menu open | Keep the rest |
-| Mouse sensitivity | 5 is the default; below 0 for high-DPI mice (each step 20%… | How fast the mouse turns the camera | Today's text |
-| Invert horizontal / Invert vertical (mouse) | — | Same names as the gamepad's: **Invert left / right**, **Invert up / down** | — |
-| Invert camera left / right, up / down (gamepad) | The camera stick's horizontal direction | Same: **Invert left / right**, **Invert up / down** | — |
-| Hide mouse cursor | Hidden 2 seconds after the mouse stops moving… | After 2 seconds without moving | "Moving the mouse brings it back." |
-| Preferred gamepad | (long, cut) | The controller to use when several are connected | Today's text |
-| Button prompts | The button icons in the game's menus and prompts. | Keyboard keys or controller buttons in prompts | Today's text |
-| Controller icons | The controller's buttons in the game's menus and prompts. | PlayStation or Xbox buttons | Today's text |
-| Save and share | Profiles are small JSON files. | Share a profile as a link or a file | Today's text |
+| PC controls | Use the keyboard and mouse layout below | Today's | |
+| Mouse camera | The mouse turns the camera directly | Today's | |
+| Mouse in menus | A mouse pointer in the game's menus | Today's | |
+| Move and look in menus | Keep moving and looking with a menu open | Today's | |
+| Mouse sensitivity | How fast the mouse turns the camera | Today's | |
+| Invert horizontal, Invert vertical (mouse) | — | — | **Rename:** Invert left / right, Invert up / down |
+| Camera auto-rotation | The camera turns by itself as you move | Today's | |
+| Hide mouse cursor | After 2 seconds without moving | Today's | |
+| Controller | — | — | Shows the controller |
+| Preferred gamepad | The controller to use when several are connected | Today's | |
+| Swap sticks | Today's: "Move with the right stick and look with the left" | — | |
+| Invert camera left / right, up / down (gamepad) | Today's ("The camera stick's horizontal direction", …) | — | **Rename:** Invert left / right, Invert up / down, as the mouse's (search shows "Controls › Gamepad") |
+| Stick dead zone | Ignores small stick movement, for drifting sticks | Today's | |
+| Button prompts | Keyboard keys or controller buttons in prompts | Today's | |
+| Controller icons | PlayStation or Xbox buttons | Today's | Today the two button rows read almost the same |
+| Profile | — | — | |
+| Save and share | Share a profile as a link or a file | Today's | |
 
-The two button rows read almost the same today; the proposed lines tell them apart. Settings search shows each row's page and group ("Controls › Gamepad"), so rows with the same title stay distinguishable.
+## Engine switches
 
-Fine: Camera auto-rotation, Swap sticks, Stick dead zone, Controller, Profile.
-
-### Engine switches
-
-**Experimental engine features.** All 17 lines are cut. Several start with "Off by default:", which takes up the whole line.
-
-| Row | Proposed line | Tooltip changes |
-|---|---|---|
-| Legacy shader compiler | Compiles shaders the old way, if something draws wrong | "The way 0.9.33 did" becomes "the way earlier versions did" |
-| VRAM cleanup | Frees video memory from old GPU-drawn textures | "Default: on" instead of "Recommended: on" |
-| Precise frame pacing | Steadier frame times and less VRR flicker | |
-| Fixed-refresh frame lock | Smoother on monitors without G-Sync or FreeSync | |
-| Particle work safety cap | Against "device lost" crashes in heavy effects | "Only for games that crash" becomes "Only if the game crashes" |
-| Use more VRAM for textures | Textures kept in up to 80% of VRAM, not 40% | Add its default |
-| Graphics threads first | Graphics threads at a higher CPU priority | |
-| Shorter sleep spin | More CPU time for the graphics threads | |
-| Background shader compiling | Shorter hitches when new shaders compile | |
-| Occlusion culling | Skips hidden objects: more FPS, some pop-in | Default moved to the end |
-| Faster draw thread | Higher FPS in busy areas | |
-| No shader freezes | Objects appear late instead of the game freezing | |
-| Fast loading | Faster loading screens above 60 FPS | |
-| Frame rate corrections | Physics, cloth and timers right at any frame rate | Shorter |
-| Unified frame time | Catches up at once after a stutter | "Needs Frame rate corrections" moves here |
-| Fewer memory write checks | Up to 2 ms less a frame in busy areas | |
-| Per-frame GPU data in place | Less CPU and GPU time a frame | "288 MiB", "upload heap" go |
-| Native draw calls | Draw calls reach the engine directly | |
-| Effect trail crash fix | For effect trail crashes on newer Intel CPUs | |
-
-Add "Default: on/off." automatically to every row on this page, as the switch rows already get it.
-
-**Other rows on this page**
-
-| Row | Under the title now | Proposed line | Tooltip |
+| Row | Line | Tooltip | Notes |
 |---|---|---|---|
-| CPU reads of GPU data | Relaxed is the default | When the game gets back data the GPU wrote | New (checked in the engine): "Off: never. Relaxed: before the game changes that memory. Precise: before it reads it too; slower." |
-| Sound output | If the sound jitters or crackles, try DirectSound. | WASAPI, or DirectSound if sound crackles | Today's text |
-| Sound threads first | For CPUs with many slower cores (older Xeons and similar)… | Against sound stutter on many-core CPUs | Today's text |
-| Shader compile threads | (cut) | Threads that compile new shaders in the background | |
-| Area prefetch (hard disks) | (cut) | Reads an area's files ahead on hard disks | |
-| Frame rate in the background | (cut) | The FPS limit while the game is in the background | |
-| Run without sound | (cut) | Starts silent, to test a sound driver problem | |
-| No minimum loading time after death | (cut) | Skips the 12-second loading screen after dying | |
-| Weapon sound save fix | (cut) | Fixes weapon sounds that never play | |
-| OptiScaler compatibility | (cut) | Keeps OptiScaler from crashing the game | |
-| Ebrietas effect fix | (cut) | Stops Ebrietas' rocks from piling up | Drop "crashes before beta 8" |
-| PS4 floating-point mode | (cut) | Physics and cloth as on the PS4 | |
-| Intel effect crash fix (test) | (cut) | Stops the crash and keeps the effects drawn | |
-| Intel black tonemap fix | (cut) | For a black or very dark picture on Intel CPUs | |
-| Skip the game files check | (cut) | Starts game files that aren't version 1.09 | |
+| Changed switches | Today's: "Every switch on this page that is not at its default" | — | |
+| Extra variables | Engine variables this page doesn't list | Today's | |
+| Legacy shader compiler | The old shader compiler, if something draws wrong | **Rewrite:** "the way 0.9.33 did" becomes "the way earlier versions did" | |
+| VRAM cleanup | Frees video memory from old GPU-drawn textures | Today's, without "Recommended: on" | Default shown by the row code |
+| Precise frame pacing | Steadier frame times and less VRR flicker | Today's | |
+| Fixed-refresh frame lock | Smoother on monitors without G-Sync or FreeSync | Today's | |
+| Particle work safety cap | Against "device lost" crashes in heavy effects | **Rewrite:** "Only for games that crash" becomes "Only if the game crashes" | |
+| Use more VRAM for textures | Fewer texture reloads: less stutter on 8 GB cards | Today's | |
+| Graphics threads first | Graphics threads at a higher CPU priority | Today's | |
+| Shorter sleep spin | More CPU time for the graphics threads | Today's | |
+| Background shader compiling | Shorter hitches when new shaders compile | Today's | |
+| Occlusion culling | Skips hidden objects: more FPS, some pop-in | Today's | |
+| Faster draw thread | Higher FPS in busy areas | Today's | |
+| No shader freezes | Objects appear late instead of the game freezing | Today's | |
+| Fast loading | Faster loading screens above 60 FPS | Today's | |
+| Frame rate corrections | Physics, cloth and timers right at 60 FPS and above | Today's | |
+| Unified frame time | Catches up at once after a stutter | Today's | |
+| Fewer memory write checks | Up to 2 ms less a frame in busy areas | Today's | |
+| Per-frame GPU data in place | Less CPU and GPU time a frame | Today's | |
+| Native draw calls | Draw calls reach the engine directly | Today's | |
+| Effect trail crash fix | For effect trail crashes on newer Intel CPUs | Today's | Optional **Rename:** Intel crash fix: skip effect trails |
+| Two-stage GPU pipeline | Today's: "20–30% faster; turn off if the game is unstable" | — | |
+| CPU reads of GPU data | When the game gets back data the GPU wrote | New (checked in the engine): "Off: never. Relaxed: before the game changes that memory. Precise: before it reads it too; slower." | Today's line was only "Relaxed is the default" |
+| Sound output | WASAPI, or DirectSound if sound crackles | Today's | |
+| Sound threads first | Against sound stutter on many-core CPUs | Today's | |
+| Graphics card | Which GPU to use on PCs with two | Today's | |
+| Shader compile threads | Threads that compile new shaders in the background | Today's | |
+| Area prefetch (hard disks) | Reads an area's files ahead on hard disks | Today's | **Order:** Off, Auto, On |
+| Frame rate in the background | The FPS limit while the game is in the background | Today's | |
+| Run without sound | Starts silent, to test a sound driver problem | Today's | |
+| No minimum loading time after death | Skips the 12-second loading screen after dying | Today's | |
+| Weapon sound save fix | Fixes weapon sounds that never play | Today's | |
+| OptiScaler compatibility | Keeps OptiScaler from crashing the game | Today's | |
+| Ebrietas effect fix | Stops Ebrietas' rocks from piling up | **Rewrite:** without "(crashes before beta 8)" | |
+| PS4 floating-point mode | Physics and cloth as on the PS4 | Today's | |
+| Intel effect crash fix (test) | Stops the crash and keeps the effects drawn | Today's | Optional **Rename:** Intel crash fix: keep effect trails (test) |
+| Intel black tonemap fix | For a black or very dark picture on Intel CPUs | Today's | |
+| Skip the game files check | Lets other game versions start; 1.09 works best | Today's | **Rename:** Allow other game versions |
 
-The two Intel crash fixes (Effect trail crash fix under Experimental, Intel effect crash fix under Game fixes) fight the same crashes. Their names don't say how they differ, and they sit in different groups. Proposal: put them next to each other, with the lines above showing the difference. Optional: rename them **Intel crash fix: skip effect trails** and **Intel crash fix: keep effect trails (test)** (a rename costs their titles' translations).
+The two Intel crash fixes fight the same crashes from two groups (Experimental features, Game fixes).
+Proposal: put them next to each other. Their lines (and the optional renames) say how they differ.
 
-Fine: Graphics card, Two-stage GPU pipeline, Changed switches, Extra variables.
+## Log
 
-### Log
+These texts are translated in zh-CN only, so the tooltips can be reworked: the variable name moves to
+the end.
 
-| Row | Under the title now | Proposed line | Tooltip |
+| Row | Line | Tooltip | Notes |
 |---|---|---|---|
-| Log level | How much the game writes into its log… | How much the game writes in its log | Today's text |
-| Frame statistics in the log | BB_FRAME_STATS (nothing else) | Frame times and engine counters every 5 seconds | Variable name at the end |
-| Hitch reports | A frame slower than this puts every thread's wait and stack in… | What held up slow frames, in the log | Today's text |
-| GPU time in the log | BB_GPU_PROFILE: the GPU's time a frame by render pass, dispatch… | GPU time a frame by pass, every 5 seconds | "Costs a little GPU time. BB_GPU_PROFILE." |
-| Render stage timings in the log | BB_SECTIONS: where each frame's CPU time goes (with frame… | Where each frame's CPU time goes | Variable at the end |
-| Loading profile in the log | BB_SAMPLE_THREADS: where the game's main, render and file… | Where loading time goes, every 5 seconds | Variable at the end |
-| Audio statistics in the log | BB_AUDIO_STATS (nothing else) | Sound buffers, gaps and dropouts every 5 seconds | Variable at the end |
-| Controller details in the log | BB_PAD_LOG: each controller's USB ids, connection and rumble… | Controller ids, connections and rumble | Variable at the end |
-| Heap corruption checks | BB_WRITE_LOG: the GPU side's last writes into the game's memory… | The GPU's last writes into game memory, for crashes | Variable at the end |
-| Capture shaders | BB_SHADER_CAPTURE: every shader the game uses is saved once to… | Saves every shader the game uses to logs\shaders | **Bug: this text isn't translated (it's missing L.T).** |
+| Show this page when the game starts | — | — | |
+| Log level | How much the game writes in its log | Today's | |
+| Frame statistics in the log | Frame times and engine counters every 5 seconds | "On in betas, so crash logs carry them. BB_FRAME_STATS." | Today it says only the variable's name |
+| Hitch reports | What held up slow frames, in the log | Today's | |
+| GPU time in the log | GPU time a frame by pass, every 5 seconds | "Costs a little GPU time. BB_GPU_PROFILE." | |
+| Render stage timings in the log | Where each frame's CPU time goes | Today's, the variable last | |
+| Loading profile in the log | Where loading time goes, every 5 seconds | Today's, the variable last | |
+| Audio statistics in the log | Sound buffers, gaps and dropouts every 5 seconds | "For crackling or late sound. BB_AUDIO_STATS." | Today it says only the variable's name |
+| Controller details in the log | Controller ids, connections and rumble | Today's, the variable last | |
+| Heap corruption checks | The GPU's last writes into game memory, for crashes | Today's, the variable last | |
+| Capture shaders | Saves every shader the game uses to logs\shaders | Today's, the variable last | **Bug:** today's text is not translated (no L.T) |
 
-Fine: Show this page when the game starts.
+## Settings
 
-### Settings
-
-| Row | Under the title now | Proposed line | Tooltip |
+| Row | Line | Tooltip | Notes |
 |---|---|---|---|
-| Theme | The accent colour, and a faint tint of it in the launcher's… | The accent colour | "And a faint tint of it in the launcher's surfaces." |
-| Engine folder | — | The Hunter's Workshop folder | "The folder with engine\out\bb-start.exe." |
-| Shader cache | The game's compiled shaders, kept between starts (a new engine… | The game's compiled shaders | "Clear them if something draws wrong in every save…" |
-| Shader catalog | Save your shaders as a catalog file, or add someone else's… | Share shaders so areas don't stutter the first time | Today's text |
-| Share your settings | Graphics, effects, camera, controls, cheats and engine options… | Your settings as a code or a file | What's included and what isn't |
-| Update channel | Stable: releases that have been tested. | Stable or beta releases | Today's text |
-| Version | Every published release, stable and beta, newest first. | Install any release, older ones too | Today's text |
+| Launcher language | Today's: "Restart the launcher to apply the language." | — | |
+| Layout | Classic cards or compact Modern rows | Today's | |
+| Navigation | Today's: "Tabs across the top, or a sidebar with the pages in groups" | — | |
+| Theme | The accent colour | Today's | |
+| Theme colour, Background, Picture, Icon picture, Window buttons | Today's | — | Already short |
+| Background blur, Window buttons side | — | — | |
+| App icon | The launcher's and the game window's icon | Today's | |
+| Engine folder | The Hunter's Workshop folder | "The folder with engine\out\bb-start.exe." | |
+| Start the game with | — | — | Its choices' notes stay |
+| Launcher settings, Game settings (config.ini) | — | — | Show the paths |
+| Shader cache | The game's compiled shaders | Today's | |
+| Shader catalog | Share shaders so areas don't stutter the first time | Today's | |
+| Share your settings | Your settings as a code or a file | Today's | |
+| Import settings | Today's: "Someone's code or file." | Today's | |
+| Launcher updates, Build | — | — | |
+| Update channel | Stable or beta releases | Today's | |
+| Check for updates at start | Today's | — | |
+| Version | Install any release, older ones too | Today's | |
 
-Fine: Launcher language, Layout, Navigation, Theme colour, Background, Picture, Background blur, App icon, Icon picture, Window buttons, Window buttons side, Start the game with, the two settings files, Import settings, Check for updates at start, Build.
+## Online
 
-### Online
-
-| Row | Under the title now | Proposed line | Tooltip |
+| Row | Line | Tooltip | Notes |
 |---|---|---|---|
-| Play online | Off: the game stays offline | Co-op, messages and bloodstains | Today's text |
-| Test the connection | Checks The Hunter's Dream… | Checks the server, co-op and the summon relay | — |
+| Play online | Co-op, messages and bloodstains | Today's | |
+| Hunter's Dream account | — | — | |
+| Website | Today's: "Players online, the map and your hunter's profile" | — | |
+| Local P2P port | The port co-op connects through | Today's ("Empty: 3658, the PS4's") | |
+| Summon sign timeout | How long a touched sign waits for its host | Today's | |
+| Test the connection | Checks the server, co-op and the summon relay | — | |
 
-Fine: Hunter's Dream account, Website, Local P2P port, Summon sign timeout.
+## Mods
 
-### Mods
-
-| Row | Under the title now | Proposed line | Tooltip |
+| Row | Line | Tooltip | Notes |
 |---|---|---|---|
-| Load mods | When two mods replace the same file, the one lower in the list… | Loads the mods in the list below | "When two mods change the same file, the lower one wins." |
+| Load mods | Loads the mods in the list below | Today's ("When two mods replace the same file, the one lower in the list wins") | |
+| Mods folder, Patches folder | — | — | |
+| Each mod | Today's: "Load order N" | — | |
 
-Fine: Mods folder, Patches folder, each mod and patch.
+## Cheats
 
-### Cheats
-
-| Row | Under the title now | Proposed line | Tooltip |
+| Row | Line | Tooltip | Notes |
 |---|---|---|---|
-| Blood Vials, Quicksilver Bullets | — | Never run out, or keep a set number | — |
-| Infinite consumables | Molotovs, throwing knives, pebbles, antidotes, papers and the… | Molotovs, knives, pebbles and the like last forever | "Not Blood Vials or Bullets (above), nor insight items." |
-| Firearm range | How far firearm bullets travel (pistols, rifles, blunderbuss… | How far bullets travel | The weapon list |
-| Keep Blood Echoes on death | Dying never drops your Blood Echoes, so there is nothing to pick… | Dying never drops your Blood Echoes | — |
-| Blood Echo multiplier | Enemies already loaded give the new amount after you rest at a… | More Blood Echoes from each kill | "Enemies already loaded change after you rest at a lamp or reload." |
-| Add echoes or insight | In the in-game menu (Insert or L3 + R3)… | Echoes or insight from the in-game menu | Today's text |
+| Blood Vials, Quicksilver Bullets | Never run out, or keep a set number | — | Their choices' notes stay |
+| Infinite consumables | Molotovs, knives, pebbles and the like last forever | Today's | |
+| Infinite stamina, Stealth, No weapon wear | Today's | — | Already short |
+| Firearm range | How far bullets travel | Today's | |
+| Keep Blood Echoes on death | Dying never drops your Blood Echoes | Today's | |
+| Blood Echo multiplier | More Blood Echoes from each kill | Today's | |
+| Add echoes or insight | Echoes or insight from the in-game menu | Today's | |
+| Amount | Today's: "How many … to keep" | — | |
 
-Fine: Infinite stamina, Stealth, No weapon wear, Amount.
+## Trophies
 
-### Trophies
-
-| Row | Under the title now | Proposed line | Tooltip |
+| Row | Line | Tooltip | Notes |
 |---|---|---|---|
-| Show in game | A small banner in a corner of the game's screen, without taking… | A banner in a corner when you earn a trophy | "In fullscreen it needs Borderless fullscreen." |
-| Sound file | A sound of your own (WAV, MP3, MP4/M4A)… | Your own sound; empty plays the built-in chime | "WAV, MP3 or MP4/M4A." |
-
-Fine: Position, Play a sound, Volume, Try it, Trophy log, Reset trophy progress.
+| Show in game | A banner in a corner when you earn a trophy | Today's | |
+| Position, Play a sound, Volume | — | — | |
+| Sound file | Your own sound; empty plays the built-in chime | Today's | |
+| Try it | Today's: "Shows a sample notification and plays the sound" | — | |
+| Trophy log | — | — | |
+| Reset trophy progress | Today's: "Starts trophies and completion over, for a fresh run." | Today's | |
 
 ## Also found
 
-- **Capture shaders** (Log page): its description is not translated (no `L.T`).
-- **Stale code comment:** `Choices.Effects` says the game's own anti-aliasing "starts off"; it's on by default since this beta. Code only, not visible.
+- **Capture shaders** (Log): its text is not translated (no `L.T`).
+- **A dead launcher setting:** `dlss_preset` in `LauncherSettings` (default "k"). The DLSS model row
+  writes config.ini's `dlss_preset` (default Auto); nothing reads the launcher's.
+- **Stale comments:** `Choices.DlssModels` names `BB_DLSS_PRESET` (now config.ini's `dlss_preset`);
+  `Choices.Effects` says the game's own anti-aliasing starts off (on since this beta).
 
-## What changing this involves
+## What the step involves
 
-- About 110 new short lines; today's descriptions stay as tooltips except the few listed as wrong.
-- The row code takes the two texts as separate fields instead of cutting one at 64 characters, and adds "Default: …" from each setting's known default.
-- Translations: every new line in all 13 languages (110 of today's 147 descriptions are translated in all 13, so this keeps every page as translated as it is now). The key check confirms nothing is missing.
-- Both layouts benefit: Classic gets whole lines, Modern's (i) gets a clear first line.
+- About 120 new lines and 15 new or rewritten tooltips, each in all 13 languages; today's descriptions
+  stay as tooltips elsewhere, so every page stays as translated as it is now.
+- About 15 renamed titles (Upscaling quality, the FPS counter rows, the invert rows, Allow other game
+  versions, Skip motion blur with upscalers; the two Intel fixes if wanted).
+- The row code: the line and the tooltip as separate fields (no more cutting at 64 characters), and
+  "Default: …" from each setting's default.
+- Four list orders (V-Sync, Area prefetch, Texture filtering, Model detail).
+- Both launchers built, the translation key check clean.
