@@ -27,7 +27,11 @@ Classic shows the line, and the tooltip on hover. Modern's (i) shows both.
 2. When the title itself is unclear, the title changes (marked **Rename**).
 3. A line names the choices only when choosing is the point (HDR source).
 4. "Default: …" is added to the tooltip by the row code from each setting's default, one translated
-   phrase for all rows. "Applies at the next game start." is one phrase too (today: 5 wordings).
+   phrase for all rows. Where the default is the advice for everyone it reads "Default: on
+   (recommended)": a default says what is set, a recommendation what to choose (most of Engine
+   switches' experimental features). Advice that depends on the PC stays in the row's own text ("only
+   for monitors without G-Sync or FreeSync"). "Applies at the next game start." is one phrase too
+   (today: 5 wordings).
 5. Off or None first in every list, then less to more.
 
 ## Reading the tables
@@ -76,7 +80,7 @@ Classic shows the line, and the tooltip on hover. Modern's (i) shows both.
 | Hue | — | "0 is the game's own." | |
 | Fog | How thick the fog is | "1.00 is the game's own." | |
 | Bloom | The glow around bright lights | "1.00 is the game's own." | |
-| Vignette | The darkened screen edges | — | |
+| Vignette | Darkens the picture toward its edges, as the game does | "Off: the picture stays even to the edges." | Off sets the game's vignette strength to 0 |
 | Ambient occlusion strength | Strength of the shading in corners | "Needs Ambient occlusion (Graphics › Detail). 1.00 is the game's own." | It scales the SSAO pass, which runs only with that effect on |
 | Shadow distance | How far away shadows are drawn | "1.00 is the game's own." | |
 | Game's own picture | Today's: "Puts the settings above back to the game's own values" | — | |
@@ -162,7 +166,7 @@ The effect lines describe how each looks; worth a quick look in game before they
 | Changed switches | Today's: "Every switch on this page that is not at its default" | — | |
 | Extra variables | Engine variables this page doesn't list | Today's | |
 | Legacy shader compiler | The old shader compiler, if something draws wrong | **Rewrite:** "the way 0.9.33 did" becomes "the way earlier versions did" | |
-| VRAM cleanup | Frees video memory from old GPU-drawn textures | Today's, without "Recommended: on" | Default shown by the row code |
+| VRAM cleanup | Frees video memory from old GPU-drawn textures | Today's, with its "Recommended: on" | |
 | Precise frame pacing | Steadier frame times and less VRR flicker | Today's | |
 | Fixed-refresh frame lock | Smoother on monitors without G-Sync or FreeSync | Today's | |
 | Particle work safety cap | Against "device lost" crashes in heavy effects | **Rewrite:** "Only for games that crash" becomes "Only if the game crashes" | |
