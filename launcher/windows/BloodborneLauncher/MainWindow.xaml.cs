@@ -239,11 +239,11 @@ namespace BloodborneLauncher
             var changes = hw.Recommend(ws.Settings, ws.Ini);
             if (changes.Count == 0)
             {
-                if (!firstRun) Prompt.Tell(L.T("Best settings for this PC"), L.F($"{hw.Summary}\n\nYour settings already suit this PC."));
+                if (!firstRun) Prompt.Tell(L.T("Suggested settings for this PC"), L.F($"{hw.Summary}\n\nYour settings already suit this PC."));
                 return;
             }
             var list = string.Join("\n", changes.Select(c => $"{c.Label}: {c.From} → {c.To}"));
-            if (!Prompt.Confirm(firstRun ? L.T("Settings for this PC") : L.T("Best settings for this PC"),
+            if (!Prompt.Confirm(firstRun ? L.T("Settings for this PC") : L.T("Suggested settings for this PC"),
                     L.F($"{hw.Summary}\n\n{list}\n\nYou can change any of them later."), L.T("Apply")))
                 return;
             foreach (var change in changes) change.Apply();

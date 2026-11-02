@@ -3,7 +3,11 @@
     /// <summary>A drop-down entry. Note is shown under the row while this entry is selected.</summary>
     public sealed record Choice(string Label, string Value, string? Note = null);
 
-    public sealed record Effect(string Key, string Title, bool Default, string? Hint = null);
+    public sealed record Effect(string Key, string Title, bool Default, string? Hint = null)
+    {
+        /// <summary>The line under its title (Classic); the hint is the hover text (0.4.4 beta 28's text pass).</summary>
+        public string? Line { get; init; }
+    }
 
     /// <summary>Every list the launcher offers, in English, with the values bbport expects.</summary>
     public static class Choices
@@ -192,17 +196,23 @@
         // intros skipped (0.4.4).
         public static readonly Effect[] Effects =
         {
-            new("effect_chromatic_aberration", L.T("Chromatic aberration"), false),
-            new("effect_dof", L.T("Depth of field"), true),
-            new("effect_motion_blur", L.T("Motion blur"), false),
-            new("effect_ssao", L.T("Ambient occlusion (SSAO)"), true),
+            new("effect_chromatic_aberration", L.T("Chromatic aberration"), false,
+                L.T("On in the original game; off here by default, for a clearer picture")) { Line = L.T("Colour fringes toward the screen's edges") },
+            new("effect_dof", L.T("Depth of field"), true) { Line = L.T("Blur on the parts of the picture out of focus") },
+            new("effect_motion_blur", L.T("Motion blur"), false,
+                L.T("On in the original game; off here by default, for a clearer picture. Costs GPU time")) { Line = L.T("Blur when the camera turns fast") },
+            new("effect_ssao", L.T("Ambient occlusion (SSAO)"), true) { Line = L.T("Soft shading in corners and creases") },
             new("effect_game_aa", L.T("Game's own anti-aliasing"), true),
-            new("effect_dynamic_shadows", L.T("Shadows from dynamic lights"), true),
-            new("effect_ssr", L.T("Screen-space reflections"), false, L.T("Not in the original game")),
+            new("effect_dynamic_shadows", L.T("Shadows from dynamic lights"), true,
+                L.T("One of the heaviest effects: off gives a large FPS gain")) { Line = L.T("Shadows cast by lamps and other point lights; heavy") },
+            new("effect_ssr", L.T("Screen-space reflections"), false,
+                L.T("Not in the original game: Kyo's patch turns on reflections the game has only in its debug functions. Costs GPU time"))
+                { Line = L.T("Adds reflections on wet and shiny surfaces") },
             new("skip_intro", L.T("Skip intro videos"), true),
             new("debug_camera", L.T("Free camera"), false, L.T("Toggle with Cross + L3 / Space + Z")),
             new("debug_menu", L.T("Debug menu"), false,
-                L.T("Left touchpad / Tab. Needs the adhoc folder from Nexus mod #253 (adhoc/font) in the game's dvdroot_ps4 or as a mod; without it the patch is not applied")),
+                L.T("Left touchpad / Tab. Needs the adhoc folder from Nexus mod #253 (adhoc/font) in the game's dvdroot_ps4 or as a mod; without it the patch is not applied"))
+                { Line = L.T("The game's developer menu (Left touchpad / Tab)") },
         };
 
         /// <summary>log_level (BB_LOG_LEVEL): how much the game writes into its log.</summary>
@@ -234,10 +244,10 @@
 
         public static readonly Choice[] ModelLod =
         {
+            new(L.T("Lowest (2)"), "2"),
+            new(L.T("Lower (1)"), "1"),
             new(L.T("As in the game"), "0"),
             new(L.T("Highest (-2)"), "-2"),
-            new(L.T("Lower (1)"), "1"),
-            new(L.T("Lowest (2)"), "2"),
         };
 
         public static readonly Choice[] FpsModes =
@@ -248,11 +258,11 @@
             // last, no longer held to the display's refresh rate (the V-Sync below says how frames
             // reach the screen; FrameRateSync).
             new(L.T("30 FPS (as on PS4)"), "30"),
-            new("60 FPS", "60", L.F($"Kyo's 60 FPS++ with the engine's values for {60} FPS (Frame rate corrections). On a slower display the extra frames are drawn but never shown")),
-            new("90 FPS", "90", L.F($"Kyo's 60 FPS++ with the engine's values for {90} FPS (Frame rate corrections). On a slower display the extra frames are drawn but never shown")),
-            new("120 FPS", "120", L.F($"Kyo's 60 FPS++ with the engine's values for {120} FPS (Frame rate corrections). On a slower display the extra frames are drawn but never shown")),
-            new("144 FPS", "144", L.F($"Kyo's 60 FPS++ with the engine's values for {144} FPS (Frame rate corrections). On a slower display the extra frames are drawn but never shown")),
-            new("240 FPS", "240", L.F($"Kyo's 60 FPS++ with the engine's values for {240} FPS. Needs Frame rate corrections (Engine switches): without them the game runs at {144}. On a slower display the extra frames are drawn but never shown")),
+            new("60 FPS", "60", L.F($"With the engine's frame rate corrections for {60} FPS")),
+            new("90 FPS", "90", L.F($"With the engine's frame rate corrections for {90} FPS")),
+            new("120 FPS", "120", L.F($"With the engine's frame rate corrections for {120} FPS")),
+            new("144 FPS", "144", L.F($"With the engine's frame rate corrections for {144} FPS")),
+            new("240 FPS", "240", L.F($"With the engine's frame rate corrections for {240} FPS. Needs Frame rate corrections (Engine switches): without them the game runs at {144}")),
             new(L.T("Uncapped"), "uncap", L.T("No limit: as fast as your PC can go, up to 480 FPS. Above 240 FPS the game is untested, and the old community uncapped patch froze in boss fights at such rates. For a high frame rate we recommend 240")),
         };
 
@@ -297,10 +307,10 @@
         /// plain names; the values, and so settings files, are as before).</summary>
         public static readonly Choice[] PresentModes =
         {
+            new(L.T("Off"), FrameRateSync.Off, L.T("Frames go out the moment they're ready: lowest latency, may tear (Immediate)")),
             new(L.T("On (latest frame)"), FrameRateSync.Latest, L.T("No tearing, low latency: each refresh shows the newest finished frame. Default (Mailbox)")),
             new(L.T("On (every frame)"), "Fifo", L.T("Classic V-Sync: every frame shown in order, no tearing, a little more latency. The game can't run faster than the screen (FIFO)")),
             new(L.T("Adaptive"), "FifoRelaxed", L.T("Like On (every frame), but tears instead of stuttering when a frame is late (FIFO Relaxed)")),
-            new(L.T("Off"), FrameRateSync.Off, L.T("Frames go out the moment they're ready: lowest latency, may tear (Immediate)")),
         };
 
         public static readonly Choice[] DrawPipe =

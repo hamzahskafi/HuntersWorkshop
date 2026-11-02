@@ -77,7 +77,6 @@ namespace BloodborneLauncher.Core
             ["exp_async_pipelines"] = true,
             ["exp_fast_loading"] = true, // does nothing at 30 or 60 FPS (loading.cpp)
             ["exp_frame_fixes"] = true, // the frame-rate corrections at 60 FPS and above (frame_rate.cpp)
-            ["exp_frame_timer"] = true, // one frame time for the game and every correction (frame_rate.cpp Step)
             ["exp_hot_pages"] = true,
             // 0.4.4: the game's per-frame GPU memory (its GX region) read in place (BB_GX_IN_PLACE).
             ["exp_gx_in_place"] = true,
@@ -132,10 +131,10 @@ namespace BloodborneLauncher.Core
                     // them (the game's GPU range allocator nearly empty); most reports came without.
                     if (Updater.CurrentBeta > 0 && !saved.ContainsKey("frame_stats_beta_on"))
                         _data["frame_stats"] = true;
-                    // 0.4.4: the unified frame time on once (every test log from 0.3.0 to 0.4.3 ran with it,
-                    // the default since); off again only by choice.
-                    if (!saved.ContainsKey(FrameTimerOnMarker))
-                        _data["exp_frame_timer"] = true;
+                    // 0.4.4 beta 28: the unified frame time is part of Frame rate corrections (it works only
+                    // with them, and every log since 0.3.0 ran with both): its own switch and marker go.
+                    _data.Remove("exp_frame_timer");
+                    _data.Remove("frame_timer_on_044");
                     // 0.4.0: a stable launcher over a beta's file (any beta writes frame_stats_beta_on)
                     // switches off once what betas turn on for testing: the frame statistics and the
                     // sharp UI. On again only by choice.
@@ -157,11 +156,9 @@ namespace BloodborneLauncher.Core
                 _data["vram_budget_beta_on"] = true;
                 _data["frame_stats_beta_on"] = true;
             }
-            _data[FrameTimerOnMarker] = true;
             if (Updater.CurrentBeta == 0) _data[BetaTestingOffMarker] = true;
         }
 
-        private const string FrameTimerOnMarker = "frame_timer_on_044";
         private const string BetaTestingOffMarker = "beta_testing_off_040";
 
         public void Save()

@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using BloodborneLauncher.Core;
 using Wpf.Ui.Controls;
@@ -20,7 +20,7 @@ namespace BloodborneLauncher.Views
             Body.Children.Add(Text(L.T("Extract each mod into its own folder (with dvdroot_ps4, or straight chr/, parts/ and so on). Applied when the game starts."), "Faint"));
             Group(L.T("Mods"));
             SettingToggle(SymbolRegular.PuzzlePiece24, L.T("Load mods"), L.T("When two mods replace the same file, the one lower in the list wins"),
-                "mods_enabled");
+                "mods_enabled", line: L.T("Loads the mods in the list below"));
             Add(Card(SymbolRegular.Folder24, L.T("Mods folder"), "", Row(
                 SmallButton(L.T("Browse"), SymbolRegular.FolderOpen24, (_, _) =>
                 {

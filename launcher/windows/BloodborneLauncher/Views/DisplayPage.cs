@@ -74,7 +74,8 @@ namespace BloodborneLauncher.Views
                 Ws.SaveSoon();
             }
 
-            ComboRow(SymbolRegular.ResizeLarge24, L.T("Output resolution"), L.T("The upscaler renders below this and fills it in"),
+            ComboRow(SymbolRegular.ResizeLarge24, L.T("Output resolution"),
+                L.T("The resolution the game is shown at. An upscaler renders at it (Native AA) or below it, and fills in the rest"),
                 Choices.OutputResolutions,
                 () => { var v = Ini.Get("output_res", "1920x1080"); return Named(v) ? v : Choices.Custom; },
                 v =>
@@ -82,7 +83,7 @@ namespace BloodborneLauncher.Views
                     customRow.Visibility = v == Choices.Custom ? Visibility.Visible : Visibility.Collapsed;
                     if (v == Choices.Custom) ApplyCustom();
                     else Ini.Set("output_res", v);
-                });
+                }, line: L.T("The resolution the game is shown at"), defaultValue: "1920x1080");
 
             foreach (var box in new[] { widthBox, heightBox })
             {
@@ -92,7 +93,7 @@ namespace BloodborneLauncher.Views
             customRow = Add(Card(SymbolRegular.Ruler24, L.T("Custom resolution"),
                 L.T("Your own output size, any shape (5:4, 16:10, 32:9...): the camera and UI follow it with Widescreen on"),
                 Row(widthBox, new System.Windows.Controls.TextBlock { Text = "×", Margin = new Thickness(8, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center }, heightBox),
-                out customNote));
+                out customNote, line: L.T("Any width and height, in any shape")));
             customRow.Visibility = Named(Ini.Get("output_res", "1920x1080")) ? Visibility.Collapsed : Visibility.Visible;
         }
 
@@ -106,7 +107,10 @@ namespace BloodborneLauncher.Views
             var refresh = Hardware.Detect().RefreshHz;
             var rate = S.Str("fps_mode");
             FrameworkElement sync = null!;
-            SettingCombo(SymbolRegular.Gauge24, L.T("Frame rate"), L.T("Every rate above 30 runs on Kyo's 60 FPS++, the engine setting the game's values for the rate (Engine switches › Frame rate corrections). 30 is the game as on the PS4"),
+            SettingCombo(SymbolRegular.Gauge24, L.T("Frame rate"), L.T("Every rate above 30 runs on the engine's frame rate corrections, built on Kyo's 60 FPS++ and other community findings. " +
+                    "With the corrections off (Engine switches › Frame rate corrections), the community FPS++ patches run instead, and 240 runs at 144. " +
+                    "Above the display's refresh rate, V-Sync On (latest frame) and Off draw frames the display never shows; " +
+                    "On (every frame) and Adaptive hold the game to the display's rate. 30 is the game as on the PS4"),
                 Choices.FpsModes, "fps_mode", changed: () =>
                 {
                     var now = S.Str("fps_mode");
@@ -114,7 +118,7 @@ namespace BloodborneLauncher.Views
                     rate = now;
                     if (after != null) Pick(sync, Choices.IndexOf(Choices.PresentModes, after));
                     RefreshNotes();
-                }, noteOf: c => c.Note);
+                }, noteOf: c => c.Note, line: L.T("30 is the PS4's; higher rates use the engine's corrections"));
             sync = SettingCombo(SymbolRegular.Image24, L.T("V-Sync"), L.T("How finished frames reach the screen"),
                 Choices.PresentModes, "present_mode", noteOf: c => FrameRateSync.Note(S.Str("fps_mode"), c.Value, refresh) ?? c.Note);
         }
@@ -126,7 +130,7 @@ namespace BloodborneLauncher.Views
             Group(L.T("Screen"));
             Add(Card(SymbolRegular.Desktop24, L.T("Monitor"),
                 L.T("The game opens here from the start, including fullscreen and HDR. If this monitor is disconnected, the Windows primary monitor is used. Applied on the next launch."),
-                _monitor, out _));
+                _monitor, out _, line: L.T("The monitor the game opens on")));
             RefreshMonitors();
             _monitor.SelectionChanged += (_, _) =>
             {
@@ -148,10 +152,10 @@ namespace BloodborneLauncher.Views
                 });
             OutputResolutionRows();
             ToggleRow(SymbolRegular.RatioOneToOne24, L.T("Widescreen"), L.T("Outputs that are not 16:9 (21:9, 32:9, 16:10, 5:4) with the right field of view and the UI kept in shape"),
-                () => Ini.Get("widescreen", "1") != "0", v => Ini.Set("widescreen", v ? "1" : "0"));
+                () => Ini.Get("widescreen", "1") != "0", v => Ini.Set("widescreen", v ? "1" : "0"), line: L.T("Right field of view and UI on screens that aren't 16:9"), defaultOn: true);
             var screenMore = Advanced();
             IniCombo(SymbolRegular.ArrowSync24, L.T("Live resolution change"),
-                L.T("Change the resolution in the game menu without restarting. Off is faster; turn on only if you switch resolutions in game"), Choices.LiveResolution, "live_resolution", into: screenMore);
+                L.T("Lets the in-game overlay menu change the resolution without restarting. Off is faster; turn it on only if you switch resolutions in game"), Choices.LiveResolution, "live_resolution", into: screenMore, line: L.T("Change the resolution in game, without restarting"));
 
             FrameRateRows();
             HdrRows();
@@ -173,33 +177,33 @@ namespace BloodborneLauncher.Views
         {
             Group("HDR");
             _hdr = FoldToggle(SymbolRegular.Hdr24, L.T("HDR output"), HdrHint,
-                () => Ini.Flag("hdr"), v => Ini.Set("hdr", v ? "1" : "0"), out _hdrSwitch, out _hdrRow, changed: ShowHdr);
+                () => Ini.Flag("hdr"), v => Ini.Set("hdr", v ? "1" : "0"), out _hdrSwitch, out _hdrRow, changed: ShowHdr, line: L.T("The game in HDR, with brighter highlights"));
             ComboRow(SymbolRegular.Lightbulb24, L.T("HDR source"),
                 L.T("Native: highlights as bright as they are in the game's scene. Expanded: the SDR picture's bright parts made brighter"),
-                Choices.HdrMode, () => Ini.Get("hdr_mode", "native"), v => Ini.Set("hdr_mode", v), _hdr, changed: ShowHdr);
+                Choices.HdrMode, () => Ini.Get("hdr_mode", "native"), v => Ini.Set("hdr_mode", v), _hdr, changed: ShowHdr, line: L.T("The scene's own highlights, or the SDR picture expanded"));
             // The UI's brightness and colour apply to the Native source only (the in-game menu hides them
             // otherwise): under it (0.4.4 beta 27b).
             ComboRow(SymbolRegular.TextFont24, L.T("UI brightness"), L.T("Native source only: how bright the HUD, menus and subtitles are, against paper white"),
-                Choices.HdrUiBrightness, () => Ini.Get("hdr_ui_brightness", "1"), v => Ini.Set("hdr_ui_brightness", v), _hdrNative);
+                Choices.HdrUiBrightness, () => Ini.Get("hdr_ui_brightness", "1"), v => Ini.Set("hdr_ui_brightness", v), _hdrNative, line: L.T("How bright the HUD, menus and subtitles are"));
             Nest();
             ComboRow(SymbolRegular.Color24, L.T("UI colour"), L.T("Native source only: Vivid shows the HUD and menus with the colours a wide-gamut monitor gives SDR; Exact keeps sRGB's"),
-                Choices.HdrUiColor, () => Ini.Get("hdr_ui_color", "1"), v => Ini.Set("hdr_ui_color", v), _hdrNative);
+                Choices.HdrUiColor, () => Ini.Get("hdr_ui_color", "1"), v => Ini.Set("hdr_ui_color", v), _hdrNative, line: L.T("Vivid or exact (sRGB) colours for the HUD and menus"));
             Nest();
             _hdr.Children.Add(_hdrNative);
             SliderRow(SymbolRegular.BrightnessHigh24, L.T("Paper white"), L.T("How bright the game's white is, in nits. Range: 10–500"),
                 10, 500, 1, () => ParseDouble(Ini.Get("hdr_paper_white", "200"), 200),
                 v => Ini.Set("hdr_paper_white", v.ToString("0", System.Globalization.CultureInfo.InvariantCulture)),
-                format: L.T("0' nits'"), into: _hdr, valueWidth: 82);
+                format: L.T("0' nits'"), into: _hdr, valueWidth: 82, defaultValue: 200);
             ToggleRow(SymbolRegular.Desktop24, L.T("Peak brightness from the display"),
                 L.T("The peak Windows reports for the display the game is on (the Windows HDR Calibration app's, once it has run). Off: the value below"),
-                () => Ini.Get("hdr_peak_auto", "1") != "0", v => Ini.Set("hdr_peak_auto", v ? "1" : "0"), _hdr, ShowHdr);
+                () => Ini.Get("hdr_peak_auto", "1") != "0", v => Ini.Set("hdr_peak_auto", v ? "1" : "0"), _hdr, ShowHdr, line: L.T("Takes the peak brightness Windows reports"), defaultOn: true);
             SliderRow(SymbolRegular.WeatherSunny24, L.T("Peak brightness"), L.T("Your display's peak brightness, in nits, when it is not taken from the display. Range: 10–4000"),
                 10, 4000, 10, () => ParseDouble(Ini.Get("hdr_peak", "1000"), 1000),
                 v => Ini.Set("hdr_peak", v.ToString("0", System.Globalization.CultureInfo.InvariantCulture)),
-                format: L.T("0' nits'"), into: _hdr, valueWidth: 82);
+                format: L.T("0' nits'"), into: _hdr, valueWidth: 82, line: L.T("Your display's peak brightness, in nits"), defaultValue: 1000);
             _peakRow = Nest();
             ComboRow(SymbolRegular.Sparkle24, L.T("Highlight boost"), L.T("Off keeps the game's own look; higher makes lamps, fire and the sky brighter"),
-                Choices.HdrBoost, () => Ini.Get("hdr_boost", "0.25"), v => Ini.Set("hdr_boost", v), _hdr);
+                Choices.HdrBoost, () => Ini.Get("hdr_boost", "0.25"), v => Ini.Set("hdr_boost", v), _hdr, line: L.T("How much brighter lamps, fire and the sky get"));
             Body.Children.Add(_hdr);
             ShowHdr();
         }
@@ -218,24 +222,26 @@ namespace BloodborneLauncher.Views
         {
             Group(L.T("Picture"));
             _picture = FoldToggle(SymbolRegular.Color24, L.T("Picture tuning"),
-                L.T("Applies the settings below, live; off shows the game's own picture and keeps your values. Also in the game's System menu (Graphics, Effects, Colour) and the Insert menu"),
-                () => Ini.Flag("graphics_controls"), v => Ini.Set("graphics_controls", v ? "1" : "0"), out _, out _);
+                L.T("Applies the settings below, live; off shows the game's own picture and keeps your values. Also in the game's System menu (Graphics, Effects, Colour) and the in-game overlay menu"),
+                () => Ini.Flag("graphics_controls"), v => Ini.Set("graphics_controls", v ? "1" : "0"), out _, out _, line: L.T("Your own brightness, colour, fog and bloom, live"));
             TuningSlider(SymbolRegular.BrightnessHigh24, L.T("Brightness"), 0, 3, "graphics_brightness");
             TuningSlider(SymbolRegular.DarkTheme24, L.T("Contrast"), 0.8, 1.2, "graphics_contrast", step: 0.01);
             TuningSlider(SymbolRegular.Color24, L.T("Saturation"), 0, 3, "graphics_saturation");
-            TuningSlider(SymbolRegular.Color24, L.T("Hue"), -180, 180, "graphics_hue", step: 1, fallback: 0);
-            TuningSlider(SymbolRegular.WeatherFog24, L.T("Fog"), 0, 3, "graphics_fog");
-            TuningSlider(SymbolRegular.Lightbulb24, L.T("Bloom"), 0, 3, "graphics_bloom");
+            TuningSlider(SymbolRegular.Color24, L.T("Hue"), -180, 180, "graphics_hue", step: 1, fallback: 0, tip: L.T("0 is the game's own"));
+            TuningSlider(SymbolRegular.WeatherFog24, L.T("Fog"), 0, 3, "graphics_fog", line: L.T("How thick the fog is"));
+            TuningSlider(SymbolRegular.Lightbulb24, L.T("Bloom"), 0, 3, "graphics_bloom", line: L.T("How strong the glow around bright lights is"));
             // On unless turned off: the engine's default (bbport_settings.h).
-            var vignette = ToggleRow(SymbolRegular.CircleHalfFill24, L.T("Vignette"), null,
-                () => Ini.Get("graphics_vignette", "1") != "0", v => Ini.Set("graphics_vignette", v ? "1" : "0"), _picture);
+            var vignette = ToggleRow(SymbolRegular.CircleHalfFill24, L.T("Vignette"), L.T("Off: the picture stays even to the edges"),
+                () => Ini.Get("graphics_vignette", "1") != "0", v => Ini.Set("graphics_vignette", v ? "1" : "0"), _picture,
+                line: L.T("Darkens the edges of the screen, as the game does"), defaultOn: true);
             _gameOwnPicture.Add(() =>
             {
                 vignette.IsChecked = true;
                 Ini.Set("graphics_vignette", "1");
             });
-            TuningSlider(SymbolRegular.DarkTheme24, L.T("Ambient occlusion strength"), 0, 3, "graphics_ao_strength");
-            TuningSlider(SymbolRegular.WeatherSunny24, L.T("Shadow distance"), 0.5, 4, "graphics_shadow_scale");
+            TuningSlider(SymbolRegular.DarkTheme24, L.T("Ambient occlusion strength"), 0, 3, "graphics_ao_strength",
+                line: L.T("How dark the shading in corners is"), tip: L.T("Needs Ambient occlusion on (Graphics › Game effects). 1.00 is the game's own"));
+            TuningSlider(SymbolRegular.WeatherSunny24, L.T("Shadow distance"), 0.5, 4, "graphics_shadow_scale", line: L.T("How far away shadows are drawn"));
             Add(Card(SymbolRegular.ArrowReset24, L.T("Game's own picture"), L.T("Puts the settings above back to the game's own values"),
                 SmallButton(L.T("Reset"), SymbolRegular.ArrowUndo24, (_, _) =>
                 {
@@ -245,11 +251,14 @@ namespace BloodborneLauncher.Views
             Body.Children.Add(_picture);
         }
 
-        /// <summary>A picture tuning slider; the "Game's own picture" button puts it back to <paramref name="fallback"/>.</summary>
-        private void TuningSlider(SymbolRegular icon, string title, double min, double max, string key, double step = 0.05, double fallback = 1.0)
+        /// <summary>A picture tuning slider; the "Game's own picture" button puts it back to <paramref name="fallback"/>.
+        /// Its hover text says which value is the game's own (<paramref name="tip"/>, "1.00 is the game's own" when null).</summary>
+        private void TuningSlider(SymbolRegular icon, string title, double min, double max, string key, double step = 0.05, double fallback = 1.0,
+            string? line = null, string? tip = null)
         {
             var slider = SliderRow(icon, title, null, min, max, step, () => ParseDouble(Ini.Get(key, Fmt(fallback)), fallback),
-                v => Ini.Set(key, Fmt(v)), into: _picture);
+                v => Ini.Set(key, Fmt(v)), into: _picture, line: line);
+            LastRow.SetTip(tip ?? L.T("1.00 is the game's own"));
             _gameOwnPicture.Add(() =>
             {
                 slider.Value = fallback; // saves through the slider

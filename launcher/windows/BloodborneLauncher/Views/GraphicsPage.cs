@@ -18,10 +18,11 @@ namespace BloodborneLauncher.Views
     /// </summary>
     public sealed class GraphicsPage : LauncherPage
     {
-        /// <summary>The game's effects in Detail: what costs frames or sets detail.</summary>
-        public static readonly string[] DetailEffects = { "effect_dynamic_shadows", "effect_ssao", "effect_ssr" };
-        /// <summary>The game's effects in Effects: the lens and camera effects people turn off or on by taste.</summary>
-        public static readonly string[] LookEffects = { "effect_dof", "effect_motion_blur", "effect_chromatic_aberration" };
+        /// <summary>Game effects (0.4.4 beta 28, the tester's call): what the game has and a switch leaves out,
+        /// in this order. Enhancements, what goes past the game or below it, are texture filtering, model
+        /// detail and screen-space reflections.</summary>
+        public static readonly string[] GameEffects =
+            { "effect_dof", "effect_motion_blur", "effect_chromatic_aberration", "effect_ssao", "effect_dynamic_shadows" };
 
         private readonly FrameworkElement _aa;
         private readonly SettingRow _aaRow, _qualityRow, _scaleRow, _fsrRow, _dlssModel;
@@ -41,9 +42,12 @@ namespace BloodborneLauncher.Views
         public GraphicsPage()
         {
             // Sets the Display page's resolution and frame rate and this page's upscaler and quality.
-            Add(Card(SymbolRegular.Gauge24, L.T("Best settings for this PC"),
-                L.T("Output resolution, frame rate, upscaler and quality for this PC") + "\n\n" + Hardware.Detect().Summary,
-                SmallButton(L.T("Recommend…"), SymbolRegular.Sparkle24, (_, _) => MainWindow.Instance!.OfferBestSettings(firstRun: false)), out _));
+            // 0.4.4 beta 28: "Suggested" (was Best settings): a rule of thumb from the hardware, not a measured best.
+            Add(Card(SymbolRegular.Gauge24, L.T("Suggested settings for this PC"),
+                L.T("Output resolution, frame rate, upscaler and quality worked out from this PC's graphics card, processor and the game's monitor: " +
+                    "a starting point, not a measurement. Every change is listed before it applies") + "\n\n" + Hardware.Detect().Summary,
+                SmallButton(L.T("Suggest…"), SymbolRegular.Sparkle24, (_, _) => MainWindow.Instance!.OfferBestSettings(firstRun: false)), out _,
+                line: L.T("Resolution, frame rate and upscaler from this PC's hardware")));
 
             Group(L.T("Upscaling and anti-aliasing"));
             // 0.4.4 beta 27c: first (the tester's order). The anti-aliasing without an upscaler, the game's
@@ -71,9 +75,9 @@ namespace BloodborneLauncher.Views
             // Its quality: plain names, Auto first with what it picks for the output (ShowQuality).
             foreach (var _ in Choices.Presets) _quality.Items.Add(new ComboBoxItem());
             ComboSearch.Attach(_quality);
-            _qualityRow = Add(Card(SymbolRegular.ZoomIn24, L.T("Quality"),
+            _qualityRow = Add(Card(SymbolRegular.ZoomIn24, L.T("Upscaling quality"),
                 L.T("How far below the output the game renders: lower is faster and softer. Auto: Native AA up to 1200 lines, Quality up to 1600, Performance above"),
-                _quality, out _));
+                _quality, out _, line: L.T("How far below the output the game renders")));
             _qualityRow.Choices = string.Join(" · ", Choices.Presets.Select(c => c.Label));
             Nest();
             _quality.SelectionChanged += (_, _) =>
@@ -126,7 +130,7 @@ namespace BloodborneLauncher.Views
             _sharpenCard = LastRow;
             _sharpenCard.SetTip(L.T("AMD's RCAS. Brings back detail that upscaling softens."));
             SliderRow(SymbolRegular.SlideSize24, L.T("Sharpening strength"), null, 0, 2, 0.05,
-                () => ParseDouble(Ini.Get("sharpness"), 0.2), v => Ini.Set("sharpness", Fmt(v)));
+                () => ParseDouble(Ini.Get("sharpness"), 0.2), v => Ini.Set("sharpness", Fmt(v)), defaultValue: 0.2);
             _sharpnessCard = Nest();
             _sharpnessCard.SetTip(L.T("0.20 is light. High values can halo edges and show grain."));
 
@@ -137,27 +141,20 @@ namespace BloodborneLauncher.Views
             _motionVectors = LastRow;
             _motionVectors.SetTip(L.T("The game gives no motion for moving characters; this works it out. Off: faster, but moving enemies can trail. After a restart."));
             SliderRow(SymbolRegular.Image24, L.T("Texture mip bias"), L.T("Below 0 sharper textures, above 0 softer"),
-                -2, 1, 0.05, () => ParseDouble(Ini.Get("mip_bias", "0"), 0), v => Ini.Set("mip_bias", Fmt(v)), format: "+0.00;-0.00;0.00", into: fine, valueWidth: 56);
+                -2, 1, 0.05, () => ParseDouble(Ini.Get("mip_bias", "0"), 0), v => Ini.Set("mip_bias", Fmt(v)), format: "+0.00;-0.00;0.00", into: fine, valueWidth: 56, defaultValue: 0);
             _mipBiasCard = LastRow;
             _mipBiasCard.SetTip(L.T("0 is what NVIDIA and AMD advise with an upscaler. Below 0 can shimmer."));
 
-            // ==================== Detail ====================
-            Group(L.T("Detail"));
-            Body.Children.Add(Text(L.T("Patches to the game, applied when it starts."), "Faint"));
-            IniCombo(SymbolRegular.Cube24, L.T("Model detail"), null, Choices.ModelLod, "model_lod");
-            SwitchRow(EngineSwitches.All.Single(s => s.Env == "BB_ANISO"), SymbolRegular.Image24);
-            foreach (var effect in Choices.Effects.Where(e => DetailEffects.Contains(e.Key)))
-                IniToggle(SymbolRegular.Color24, effect.Title, effect.Hint, effect.Key);
-
-            // ==================== Effects ====================
-            // 0.4.4 beta 27b: from the Look page, which went (the tester: they belong with the detail).
-            Group(L.T("Effects"));
-            Body.Children.Add(Text(L.T("Patches to the game, applied when it starts."), "Faint"));
+            // ==================== Game effects ====================
+            // 0.4.4 beta 28 (the tester's call; were Detail and Effects): grouped by where each setting
+            // comes from, as in the in-game overlay menu. First what the game has and a switch leaves out.
+            Group(L.T("Game effects"));
+            Body.Children.Add(Text(L.T("The game's own effects. Off leaves one out; applied when the game starts"), "Faint"));
             TextBlock? blurHint = null;
-            foreach (var effect in Choices.Effects.Where(e => LookEffects.Contains(e.Key)))
+            foreach (var effect in GameEffects.Select(key => Choices.Effects.Single(e => e.Key == key)))
             {
                 var motionBlur = effect.Key == "effect_motion_blur";
-                IniToggle(SymbolRegular.Color24, effect.Title, effect.Hint, effect.Key, changed: motionBlur ? ShowMotionBlur : null);
+                IniToggle(SymbolRegular.Color24, effect.Title, effect.Hint, effect.Key, changed: motionBlur ? ShowMotionBlur : null, line: effect.Line);
                 if (!motionBlur) continue;
                 blurHint = LastRow.Hint;
                 // Beside the blur it is about, under it (was among the engine switches).
@@ -165,6 +162,16 @@ namespace BloodborneLauncher.Views
                 Nest();
             }
             _motionBlurHint = blurHint!;
+
+            // ==================== Enhancements ====================
+            // What goes past the game, or below it for weaker GPUs.
+            Group(L.T("Enhancements"));
+            Body.Children.Add(Text(L.T("Model detail and texture filtering above or below the game's, and reflections it doesn't have. Applied when the game starts"), "Faint"));
+            SwitchRow(EngineSwitches.All.Single(s => s.Env == "BB_ANISO"), SymbolRegular.Image24);
+            IniCombo(SymbolRegular.Cube24, L.T("Model detail"), L.T("Highest costs GPU time; Lower and Lowest help weaker GPUs"), Choices.ModelLod, "model_lod",
+                line: L.T("How far away models keep their full detail"));
+            var reflections = Choices.Effects.Single(e => e.Key == "effect_ssr");
+            IniToggle(SymbolRegular.Color24, reflections.Title, reflections.Hint, reflections.Key, line: reflections.Line);
 
             Ws.PortChanged += UpdateUpscaler;
             // AMD's list arrives on a worker thread: shown again here, and kept for the next start.

@@ -194,8 +194,6 @@ namespace BloodborneLauncher.Core
             if (output == "directsound_large") env["SDL_AUDIO_DEVICE_SAMPLE_FRAMES"] = "2048";
             if (!s.Bool("exp_fast_loading")) env["BB_FAST_LOADING"] = "0";
             if (!s.Bool("exp_frame_fixes")) env["BB_FRAME_FIXES"] = "0";
-            // The unified frame time off: the frame timer and the camera's per-frame eases left out.
-            if (!s.Bool("exp_frame_timer")) env["BB_FRAME_FIXES_SKIP"] = "timer,camera";
             if (!s.Bool("exp_hot_pages")) env["BB_HOT_PAGES"] = "0";
             // The game's per-frame GPU memory read in place (on unless 0; safe mode sets 0 below).
             if (!s.Bool("exp_gx_in_place")) env["BB_GX_IN_PLACE"] = "0";

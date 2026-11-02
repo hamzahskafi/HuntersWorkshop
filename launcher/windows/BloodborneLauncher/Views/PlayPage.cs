@@ -83,7 +83,7 @@ namespace BloodborneLauncher.Views
                 L.T("This package has an older engine than this launcher: the crash fixes since then are missing. ") +
                 L.T("Updating downloads the latest package and keeps your settings, saves and mods."),
                 SmallButton(L.T("Update engine"), SymbolRegular.ArrowDownload24, async (_, _) => await MainWindow.Instance!.UpdateEngineAsync(),
-                    ControlAppearance.Primary), out _);
+                    ControlAppearance.Primary), out _, line: L.T("The launcher was updated, but the engine wasn't"));
             _engineCard.Margin = new Thickness(0, 12, 0, 0);
             Body.Children.Add(_engineCard);
 
@@ -111,7 +111,7 @@ namespace BloodborneLauncher.Views
                     S.Set("dlc_enabled", v);
                     Ws.SaveSoon();
                     Refresh();
-                });
+                }, line: L.T("Starts the game with The Old Hunters expansion"), defaultOn: LauncherOn("dlc_enabled"));
             Add(Card(SymbolRegular.FolderOpen24, L.T("DLC folder"), "", Row(
                 SmallButton(L.T("Browse"), SymbolRegular.FolderOpen24, (_, _) => ChooseDlc()),
                 IconButton(SymbolRegular.Open24, L.T("Open in Explorer"), (_, _) => Paths.OpenFolder(GameEnvironment.DlcDir(S))),
@@ -120,7 +120,7 @@ namespace BloodborneLauncher.Views
             // Steam: Bloodborne.exe as a non-Steam game (Core/SteamShortcut.cs).
             Add(Card(SymbolRegular.Games24, L.T("Add to Steam"),
                 L.T("Bloodborne as a non-Steam game in your Steam library: Steam Input, the overlay and Big Picture work with it"),
-                SmallButton(L.T("Add to Steam"), SymbolRegular.Add24, (_, _) => AddToSteam()), out _));
+                SmallButton(L.T("Add to Steam"), SymbolRegular.Add24, (_, _) => AddToSteam()), out _, line: L.T("Adds Bloodborne to Steam as a non-Steam game")));
             // 0.4.4 beta 26: from the Display page, beside the game it is about.
             SettingCombo(SymbolRegular.Translate24, L.T("Game language"), L.T("The game's own text and voices"), Choices.GameLanguages, "language");
 
@@ -135,7 +135,7 @@ namespace BloodborneLauncher.Views
                 SmallButton(L.T("New…"), SymbolRegular.PersonAdd24, (_, _) => NewProfile()),
                 IconButton(SymbolRegular.Rename24, L.T("Rename this profile"), (_, _) => RenameProfile()),
                 IconButton(SymbolRegular.PersonDelete24, L.T("Remove this profile from the list (its saves stay on disk)"), (_, _) => RemoveProfile())),
-                out _profileHint));
+                out _profileHint, line: L.T("Each player gets their own saves and trophies")));
 
             _resetUser = IconButton(SymbolRegular.ArrowUndo24, L.T("Back to the default folder"), (_, _) =>
             {
@@ -165,10 +165,10 @@ namespace BloodborneLauncher.Views
                     Directory.CreateDirectory(SaveBackups.Folder(S));
                     Paths.OpenFolder(SaveBackups.Folder(S));
                 }),
-                backupToggle), out _backupHint));
+                backupToggle), out _backupHint, line: L.T("This profile's saves, backed up automatically")));
             Add(Card(SymbolRegular.ArrowImport24, L.T("Import saves"),
                 L.T("From shadPS4, another Bloodborne port, or a PS4 save exported decrypted (Apollo Save Tool, Save Wizard). This profile's saves are backed up first"),
-                SmallButton(L.T("Import…"), SymbolRegular.FolderArrowRight24, (_, _) => ImportSaves()), out _));
+                SmallButton(L.T("Import…"), SymbolRegular.FolderArrowRight24, (_, _) => ImportSaves()), out _, line: L.T("From shadPS4, another port or a decrypted PS4 save")));
 
             _clock = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
             _clock.Tick += (_, _) => UpdateRunning();

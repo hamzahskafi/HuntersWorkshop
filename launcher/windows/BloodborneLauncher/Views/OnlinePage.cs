@@ -37,7 +37,7 @@ namespace BloodborneLauncher.Views
             // choice with nothing else to choose).
             Group(L.T("The Hunter's Dream"));
             _online = ToggleRow(SymbolRegular.Globe24, L.T("Play online"), L.T("Off: the game stays offline"),
-                () => Ini.Get("online_enabled") == "1", v => Ini.Set("online_enabled", v ? "1" : "0"));
+                () => Ini.Get("online_enabled") == "1", v => Ini.Set("online_enabled", v ? "1" : "0"), line: L.T("Co-op, messages and bloodstains on The Hunter's Dream"));
             _hdButton = SmallButton(L.T("Connect"), SymbolRegular.Person24, async (_, _) => await LinkAsync());
             Add(Card(SymbolRegular.PersonAccounts24, L.T("Hunter's Dream account"), null, _hdButton, out _hdHint));
             ShowLink();
@@ -47,11 +47,12 @@ namespace BloodborneLauncher.Views
                 out _));
 
             Group(L.T("Connection"));
-            IniText(SymbolRegular.Router24, L.T("Local P2P port"), L.T("Empty: 3658, the PS4's"), "3658", "online_p2p_port", 120);
+            IniText(SymbolRegular.Router24, L.T("Local P2P port"), L.T("Empty: 3658, the PS4's"), "3658", "online_p2p_port", 120,
+                line: L.T("The port co-op connects through"));
             ComboRow(SymbolRegular.Timer24, L.T("Summon sign timeout"), L.T("How long a sign you touched waits for its host before giving up"),
-                Choices.SignTimeout, () => Ini.Get("online_sign_timeout", "30"), v => Ini.Set("online_sign_timeout", v));
+                Choices.SignTimeout, () => Ini.Get("online_sign_timeout", "30"), v => Ini.Set("online_sign_timeout", v), line: L.T("How long a touched sign waits for its host"));
             _test = SmallButton(L.T("Test"), SymbolRegular.PlayCircle24, async (_, _) => await TestAsync());
-            Add(Card(SymbolRegular.Pulse24, L.T("Test the connection"), L.T("Checks The Hunter's Dream: game server, co-op sessions and the relay summons use"), _test, out _));
+            Add(Card(SymbolRegular.Pulse24, L.T("Test the connection"), L.T("Checks The Hunter's Dream: game server, co-op sessions and the relay summons use"), _test, out _, line: L.T("Checks that the game server and summon relay answer")));
             Body.Children.Add(_results);
         }
 
@@ -172,8 +173,8 @@ namespace BloodborneLauncher.Views
             }
         }
 
-        private void IniText(SymbolRegular icon, string title, string? hint, string placeholder, string key, double width = 300) =>
-            TextRow(icon, title, hint, placeholder, () => Ini.Get(key), v => Ini.Set(key, v.Trim()), width: width);
+        private void IniText(SymbolRegular icon, string title, string? hint, string placeholder, string key, double width = 300, string? line = null) =>
+            TextRow(icon, title, hint, placeholder, () => Ini.Get(key), v => Ini.Set(key, v.Trim()), width: width, line: line);
 
         public override void OnShown()
         {

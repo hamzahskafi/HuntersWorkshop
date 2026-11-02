@@ -37,7 +37,7 @@ namespace BloodborneLauncher.Views
                 {
                     Ws.SaveNow();
                     if (Prompt.Confirm(L.T("Change language"), L.T("Restart the launcher to apply the language."), L.T("Restart now"))) Restart();
-                });
+                }, defaultValue: "en");
             FrameworkElement layout = null!;
             var reverting = false;
             layout = ComboRow(SymbolRegular.PanelLeft24, L.T("Layout"), L.T("Classic: the sidebar and one card per setting. Modern: tabs and compact rows"),
@@ -54,21 +54,21 @@ namespace BloodborneLauncher.Views
                     if (layout is Segmented segmented) segmented.Select(index, notify: false);
                     else if (layout is ComboBox box) box.SelectedIndex = index;
                     reverting = false;
-                });
+                }, line: L.T("Classic: sidebar and cards; Modern: tabs and compact rows"), defaultValue: "classic");
 
             // The Modern layout's pages: tabs across the top, or a sidebar in groups (live).
             if (!SettingRow.Classic)
                 ComboRow(SymbolRegular.TextBulletListSquare24, L.T("Navigation"), L.T("Tabs across the top, or a sidebar with the pages in groups"),
                     new[] { new Choice(L.T("Tabs"), "tabs"), new Choice(L.T("Sidebar"), "sidebar") },
                     () => S.Str("ui_navigation") == "sidebar" ? "sidebar" : "tabs", v => S.Set("ui_navigation", v),
-                    changed: () => MainWindow.Instance?.ApplyNavigation());
+                    changed: () => MainWindow.Instance?.ApplyNavigation(), defaultValue: "tabs");
 
             SettingCombo(SymbolRegular.PaintBrush24, L.T("Theme"), L.T("The accent colour, and a faint tint of it in the launcher's surfaces"),
                 LauncherTheme.Themes, "ui_theme", changed: () =>
                 {
                     ShowAppearance();
                     MainWindow.Instance?.ApplyTheme();
-                });
+                }, line: L.T("The accent colour, and a faint tint of it"));
             var swatch = new Border
             {
                 Width = 22, Height = 22, CornerRadius = new CornerRadius(11), BorderThickness = new Thickness(1),
@@ -113,7 +113,7 @@ namespace BloodborneLauncher.Views
             if (!SettingRow.Classic)
             {
                 SettingCombo(SymbolRegular.ImageEdit24, L.T("Background"), L.T("The picture behind the glass panes"),
-                    new[] { new Choice(L.T("Game artwork"), "game"), new Choice(L.T("Your picture"), "custom"), new Choice(L.T("None"), "none") },
+                    new[] { new Choice(L.T("None"), "none"), new Choice(L.T("Game artwork"), "game"), new Choice(L.T("Your picture"), "custom") },
                     "ui_background", changed: () =>
                     {
                         ShowAppearance();
@@ -123,7 +123,7 @@ namespace BloodborneLauncher.Views
                     SmallButton(L.T("Choose"), SymbolRegular.FolderOpen24, (_, _) => ChoosePicture()), out _pictureHint), _picture);
                 Body.Children.Add(_picture);
                 SettingCombo(SymbolRegular.Blur24, L.T("Background blur"), null,
-                    new[] { new Choice(L.T("Strong"), "strong"), new Choice(L.T("Light"), "light"), new Choice(L.T("Off"), "off") },
+                    new[] { new Choice(L.T("Off"), "off"), new Choice(L.T("Light"), "light"), new Choice(L.T("Strong"), "strong") },
                     "ui_background_blur", changed: () => MainWindow.Instance?.ApplyBackdrop(), into: _blur);
                 Body.Children.Add(_blur);
             }
@@ -159,8 +159,9 @@ namespace BloodborneLauncher.Views
                 })), out _portHint));
             SettingCombo(SymbolRegular.Rocket24, L.T("Start the game with"), null, Choices.LaunchMethods, "launch_method", changed: () => { ShowMethod(); Ws.SaveSoon(); });
 
-            TextRow(SymbolRegular.Code24, L.T("Command"), L.T("A program to run instead of Bloodborne.exe --run, with the settings as environment variables"),
-                @"C:\path\to\game.exe", () => S.Str("custom_command"), v => S.Set("custom_command", v), _customRows, 380);
+            TextRow(SymbolRegular.Code24, L.T("Command"), L.T("A program to run instead of bb-start.exe, with the settings as environment variables"),
+                @"C:\path\to\game.exe", () => S.Str("custom_command"), v => S.Set("custom_command", v), _customRows, 380,
+                line: L.T("A program to run instead of bb-start.exe"));
             TextRow(SymbolRegular.TextDescription24, L.T("Arguments"), null, L.T("Optional"),
                 () => S.Str("custom_args"), v => S.Set("custom_args", v), _customRows, 380);
             Body.Children.Add(_customRows);
@@ -173,19 +174,21 @@ namespace BloodborneLauncher.Views
             Add(Card(SymbolRegular.Broom24, L.T("Shader cache"),
                 L.T("The game's compiled shaders, kept between starts (a new engine version clears them itself). Clear them if ") +
                 L.T("something draws wrong in every save, such as missing skin or hair; the next start compiles them again and stutters for a while"),
-                SmallButton(L.T("Clear"), SymbolRegular.Broom24, (_, _) => ClearShaderCache()), out _));
+                SmallButton(L.T("Clear"), SymbolRegular.Broom24, (_, _) => ClearShaderCache()), out _, line: L.T("The game's compiled shaders, kept between starts")));
             Add(Card(SymbolRegular.Share24, L.T("Shader catalog"),
-                L.T("Save your shaders as a catalog file, or add someone else's: areas they have played don't pop in or stutter for you. ") +
+                L.T("Save your shaders as a catalog file, or add someone else's: areas they have played need fewer new shaders the first time, so less pop-in and stutter. ") +
                 L.T("It works with the same kind of graphics card; a catalog adds to your shaders, it never replaces them"),
                 Row(SmallButton(L.T("Export catalog"), SymbolRegular.Save24, (_, _) => ExportShaderCache()),
-                    SmallButton(L.T("Add catalog"), SymbolRegular.FolderOpen24, (_, _) => ImportShaderCache())), out _));
+                    SmallButton(L.T("Add catalog"), SymbolRegular.FolderOpen24, (_, _) => ImportShaderCache())), out _, line: L.T("Shares shader catalogs to reduce first-visit stutter")));
 
             Group(L.T("Share settings"));
             Add(Card(SymbolRegular.Share24, L.T("Share your settings"),
-                L.T("Graphics, effects, camera, controls, cheats and engine options, as a code to paste in Discord or a file. ") +
-                L.T("Not included: display and HDR, the online account, folders and languages"),
+                L.T("Everything that sets how the game looks, runs and plays, as a code to paste in Discord or a file. ") +
+                L.T("Not included: what belongs to this PC (folders, monitor, output resolution, window mode, HDR, graphics card, sound device, " +
+                    "preferred controller, and fixes or tuning for its hardware), to you (the online account, languages, profiles, the launcher's look, " +
+                    "trophy notifications) or to one session (log options, Extra variables)"),
                 Row(SmallButton(L.T("Copy code"), SymbolRegular.Copy24, (_, _) => CopySettingsCode()),
-                    SmallButton(L.T("Save as file"), SymbolRegular.Save24, (_, _) => SaveSettingsFile())), out _));
+                    SmallButton(L.T("Save as file"), SymbolRegular.Save24, (_, _) => SaveSettingsFile())), out _, line: L.T("Your settings as a code for Discord, or a file")));
             Add(Card(SymbolRegular.ArrowImport24, L.T("Import settings"), L.T("Someone's code or file. You see what changes before anything is applied"),
                 Row(SmallButton(L.T("Paste code"), SymbolRegular.ClipboardPaste24, (_, _) => ImportSettingsCode()),
                     SmallButton(L.T("Open file"), SymbolRegular.FolderOpen24, (_, _) => ImportSettingsFile())), out _));
@@ -209,7 +212,7 @@ namespace BloodborneLauncher.Views
                     Ws.SaveSoon();
                     Ws.Log(v == "beta" ? L.T("Update channel: beta.") : L.T("Update channel: stable."), LogLevel.Step);
                     _ = Ws.CheckForUpdatesAsync(quiet: false);
-                });
+                }, line: L.T("Tested releases (Stable), or every change (Beta)"));
             SettingToggle(SymbolRegular.Alert24, L.T("Check for updates at start"), L.F($"Looks at github.com/{Updater.Repository}/releases"), "check_updates");
             _installVersion = SmallButton(L.T("Install"), SymbolRegular.ArrowDownload24, async (_, _) => await InstallChosenVersionAsync());
             _installVersion.IsEnabled = false;

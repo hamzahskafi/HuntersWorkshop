@@ -92,16 +92,17 @@ namespace BloodborneLauncher.Views
             }
             SettingToggle(SymbolRegular.Alert24, L.T("Show in game"),
                 L.T("A small banner in a corner of the game's screen, without taking focus. In fullscreen it needs Display › Window mode › Borderless fullscreen"),
-                "trophy_notifications", changed: ShowParts);
+                "trophy_notifications", changed: ShowParts, line: L.T("A banner in a corner when you earn a trophy"));
             ComboRow(SymbolRegular.Pin24, L.T("Position"), null, new[]
             {
                 new Choice(L.T("Top right"), "top-right"), new Choice(L.T("Top left"), "top-left"),
                 new Choice(L.T("Bottom right"), "bottom-right"), new Choice(L.T("Bottom left"), "bottom-left"),
-            }, () => S.Str("trophy_position"), v => S.Set("trophy_position", v), banner);
+            }, () => S.Str("trophy_position"), v => S.Set("trophy_position", v), banner, defaultValue: LauncherDefault("trophy_position"));
             Body.Children.Add(banner);
             SettingToggle(SymbolRegular.Speaker224, L.T("Play a sound"), null, "trophy_sound", changed: ShowParts);
             SliderRow(SymbolRegular.Speaker124, L.T("Volume"), null, 0, 100, 5, () => S.Int("trophy_volume"),
-                v => S.Set("trophy_volume", (int)v), "0", sound);
+                v => S.Set("trophy_volume", (int)v), "0", sound,
+                defaultValue: double.TryParse(LauncherDefault("trophy_volume"), out var volume) ? volume : null);
             Add(Card(SymbolRegular.MusicNote224, L.T("Sound file"), L.T("A sound of your own (WAV, MP3, MP4/M4A); empty uses the built-in chime"), Row(
                 SmallButton(L.T("Choose…"), SymbolRegular.FolderOpen24, (_, _) => ChooseSound()),
                 IconButton(SymbolRegular.ArrowUndo24, L.T("Use the built-in chime"), (_, _) =>
@@ -109,7 +110,7 @@ namespace BloodborneLauncher.Views
                     S.Set("trophy_sound_file", "");
                     Ws.SaveSoon();
                     Ws.Log(L.T("Trophy sound: built-in chime."), LogLevel.Step);
-                })), out _), sound);
+                })), out _, line: L.T("A sound of your own; empty uses the built-in chime")), sound);
             Body.Children.Add(sound);
             ShowParts();
             Add(Card(SymbolRegular.PlayCircle24, L.T("Try it"), L.T("Shows a sample notification and plays the sound"),

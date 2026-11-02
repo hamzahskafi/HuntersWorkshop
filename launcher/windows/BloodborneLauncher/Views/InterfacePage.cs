@@ -1,4 +1,4 @@
-using System.Windows.Controls;
+﻿using System.Windows.Controls;
 using BloodborneLauncher.Core;
 using Wpf.Ui.Controls;
 
@@ -17,19 +17,21 @@ namespace BloodborneLauncher.Views
         {
             Group(L.T("Menus and HUD"));
             SettingCombo(SymbolRegular.Keyboard24, L.T("In-game menu shortcut"),
-                L.T("What opens the port's settings menu while playing. Applied on the next launch"), Choices.OverlayKeys, "overlay_keys");
-            ComboRow(SymbolRegular.LocalLanguage24, L.T("In-game menu language"), L.T("The port's settings menu (Insert or L3 + R3)"),
-                Choices.MenuLanguages, () => Ini.Get("menu_language", "en"), v => Ini.Set("menu_language", v));
+                L.T("What opens the in-game overlay menu while playing. Applied on the next launch"), Choices.OverlayKeys, "overlay_keys",
+                line: L.T("What opens the in-game overlay menu"));
+            ComboRow(SymbolRegular.LocalLanguage24, L.T("In-game menu language"), null,
+                Choices.MenuLanguages, () => Ini.Get("menu_language", "en"), v => Ini.Set("menu_language", v),
+                line: L.T("The in-game overlay menu's language"), defaultValue: "en");
             SettingToggle(SymbolRegular.TextFont24, L.T("Sharp UI"),
                 L.T("Menus, HUD and text drawn at the output resolution instead of 1080p stretched up: much sharper at 1440p and 4K. New: on by default in betas while it is tested. Applied on the next launch"),
-                "exp_sharp_ui");
+                "exp_sharp_ui", line: L.T("Menus, HUD and text drawn at the output resolution"));
             IniToggle(SymbolRegular.Wrench24, L.T("Note while shaders build"),
                 L.T("\"Building shaders\" in a corner while the game builds shaders for a place it shows for the first time. Also in game: Insert or L3 + R3"),
-                "compile_note");
+                "compile_note", line: L.T("Shows \"Building shaders\" while new shaders compile"));
 
             Group(L.T("FPS counter"));
             _counter = FoldToggle(SymbolRegular.DataUsage24, L.T("FPS counter"), L.T("Also in game: Insert or L3 + R3"),
-                () => Ini.Flag("show_fps"), v => Ini.Set("show_fps", v ? "1" : "0"), out _, out _);
+                () => Ini.Flag("show_fps"), v => Ini.Set("show_fps", v ? "1" : "0"), out _, out _, line: L.T("Frame rate and timings in a corner of the game"), defaultOn: IniOn("show_fps") ?? false);
             // What the counter shows (on unless turned off).
             foreach (var (icon, key, title) in new[]
                      {
@@ -42,7 +44,7 @@ namespace BloodborneLauncher.Views
             {
                 // CPU and GPU use are off unless chosen (the engine's defaults, bbport_settings.h).
                 var fallback = key is "show_fps_cpu" or "show_fps_gpu" ? "0" : "1";
-                ToggleRow(icon, title, L.T("Shown in the FPS counter"), () => Ini.Get(key, fallback) == "1", v => Ini.Set(key, v ? "1" : "0"), _counter);
+                ToggleRow(icon, title, null, () => Ini.Get(key, fallback) == "1", v => Ini.Set(key, v ? "1" : "0"), _counter, defaultOn: fallback == "1");
             }
             var look = _counter; // one list under the switch (26b: its look was folded once more)
             IniCombo(SymbolRegular.PositionToFront24, L.T("FPS counter position"), null, new Choice[]
@@ -66,6 +68,7 @@ namespace BloodborneLauncher.Views
         }
 
         private void IniSlider(SymbolRegular icon, string title, double min, double max, string key, Panel into, double fallback = 1.0) =>
-            SliderRow(icon, title, null, min, max, 0.05, () => ParseDouble(Ini.Get(key, Fmt(fallback)), fallback), v => Ini.Set(key, Fmt(v)), into: into);
+            SliderRow(icon, title, null, min, max, 0.05, () => ParseDouble(Ini.Get(key, Fmt(fallback)), fallback), v => Ini.Set(key, Fmt(v)), into: into,
+                defaultValue: fallback);
     }
 }
