@@ -63,11 +63,6 @@ if [[ -z $pgo ]]; then
         pgo=off
     fi
 fi
-# Submodules (git clone --recursive, or: git submodule update --init). 0.4.4 beta 27: FSR-Vulkan
-# (FireBurn's FSR 3.1 and FSR 4) and its patches went for AMD's FSR SDK (tools/fetch_amd_fsr.sh).
-if [[ ! -f gpu/third_party/imgui/imgui.h ]]; then
-    git submodule update --init --recursive
-fi
 # Line tables only (not full debug info): crash offsets still resolve to function and
 # file:line with llvm-symbolizer, and compiling and linking take much less time.
 gpu_config=(-G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBB_PGO="$pgo" -DBB_LTO="${BB_LTO:-ON}"

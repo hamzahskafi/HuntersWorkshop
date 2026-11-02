@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Linux build environment of the Hunter's Workshop on Ubuntu 24.04 (WSL, a VM, a CI runner): the same
-# packages and libraries as packaging/linux/Dockerfile, installed directly. Run as root once;
+# Linux build environment of the Hunter's Workshop on Ubuntu 24.04 (WSL, a VM, a CI runner, a
+# container): the packages and libraries the engine builds with. Run as root once;
 # packaging/linux/build.sh then builds and packages the engine.
 #
 # The libraries the Windows build takes from MSYS2 are built at the same versions into /opt/deps,

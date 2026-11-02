@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Linux package of Hunter's Workshop: builds the engine (engine/build.sh) in the Ubuntu 24.04
-# environment of setup-ubuntu.sh (or the Dockerfile) and writes
+# environment of setup-ubuntu.sh and writes
 # engine/out/package/HuntersWorkshop-v<version>-linux-x64.tar.gz.
 #
 #   packaging/linux/build.sh <version> [package-template folder] [launcher folder]

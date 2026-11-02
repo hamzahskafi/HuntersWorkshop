@@ -26,7 +26,7 @@ def differing_chunks(image):
     """How many 64 KiB pieces of `image` differ from the 1.09 image; None when its size differs or
     the list is missing."""
     try:
-        lines = (Path(__file__).with_name('image_109_hashes.txt')).read_text(encoding='utf-8').split()
+        lines = (Path(__file__).resolve().parent.parent / 'data' / 'image_109_hashes.txt').read_text(encoding='utf-8').split()
     except OSError:
         return None
     expected = [line for line in lines if len(line) == 16]
