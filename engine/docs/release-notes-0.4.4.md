@@ -6,18 +6,19 @@ What changed since 0.4.3, for the release page. The engine work behind each line
 ## Defaults
 
 - **The project's tested settings are the defaults:** depth of field on, the intro skipped,
-  sharpness 0.20, the FPS counter off, picture tuning off, and the unified frame time on (Engine
-  switches). The follow camera stays Original and model detail As in the game.
-  Settings files from earlier versions get the unified frame time turned on once; everything else in
-  them stays as it was.
-- **A new install starts on AMD FSR with Auto quality and DLSS's Auto model**, the engine's own
-  defaults, which run on any graphics card (the launcher used to start it on FSR 4 at Ultra
-  Performance). **Auto quality** goes by the output's height: Native AA up to 1200 lines (1080p),
+  sharpness 0.20, the FPS counter off, picture tuning off, and Frame rate corrections on (Engine
+  switches), the unified frame time with them: it is part of the corrections now, no longer a switch
+  of its own (it works only with them, and every log since 0.3.0 ran with both). The follow camera
+  stays Original and model detail As in the game. A settings file that had the unified frame time off
+  gets it back with the corrections; everything else in it stays as it was.
+- **A new install starts without an upscaler, on the game's own anti-aliasing** (the tester's call;
+  the launcher used to start it on FSR 4 at Ultra Performance, then AMD FSR). With an upscaler chosen,
+  **Auto quality** goes by the output's height: Native AA up to 1200 lines (1080p),
   Quality up to 1600 (1440p), Performance above (4K renders 1920 × 1080), so by default the game never
   renders much more than native 1080p, and it follows the output when you change it. **DLSS's Auto
   model** is NVIDIA's pairing: K for DLAA, Quality and Balanced, M for Performance, L for Ultra
-  Performance. The first start's Best settings for this PC still offers DLSS on an RTX card and a
-  lower quality for weaker cards. A settings file that has its own choices keeps them.
+  Performance. The first start's Suggested settings for this PC still offers DLSS on an RTX card and
+  a lower quality for weaker cards. A settings file that has its own choices keeps them.
 - **The shipped settings file matches:** a new install's settings came from a file that still said
   FSR 4.1.1 at Quality after the defaults changed. It now holds the same defaults as the launcher and
   the engine, and two tests keep the three in step.
@@ -36,12 +37,13 @@ behind its tabs, Visuals holding Display to Interface; the Linux launchers are u
   switches; it keeps the same settings. **HDR** is checked on the monitor the game opens on: its
   switch greys out when that monitor shows no HDR, and says so when Windows' Use HDR is off. The
   **Steam Deck** output is its screen's 1280 × 800 (the list had 1280 × 720 under its name).
-- **Graphics:** everything about how the game is drawn, in one place. Best settings for this PC at
-  the top, then **Upscaling and anti-aliasing:**
-  - **Anti-aliasing:** TAA, the game's own or Off, for Upscaler None. With an upscaler it is greyed
+- **Graphics:** everything about how the game is drawn, in one place. **Suggested settings for this
+  PC** at the top (was Best settings: a rule of thumb from the hardware, not a measured best; it reads
+  the monitor the game opens on, not the primary one), then **Upscaling and anti-aliasing:**
+  - **Anti-aliasing:** Off, the game's own or TAA, for Upscaler None. With an upscaler it is greyed
     and its box says so ("Upscaler (DLSS)").
-  - **Upscaler:** AMD FSR, DLSS or None, with what belongs to it under it:
-    - **Quality** (was Quality preset): Auto (the default; it says what it picks, e.g. "Auto
+  - **Upscaler:** None, AMD FSR or DLSS, with what belongs to it under it:
+    - **Upscaling quality** (was Quality preset): Auto (the default; it says what it picks, e.g. "Auto
       (Quality)"), Native AA (DLAA with DLSS), Quality, Balanced, Performance, Ultra Performance,
       Custom.
     - **Render resolution**, beside it: a slider showing the share of the output the game renders at
@@ -60,9 +62,10 @@ behind its tabs, Visuals holding Display to Interface; the Linux launchers are u
 
   The upscaling rows have tooltips with advice (hover a row's text, or the ⓘ in the Modern layout).
 
-  Then **Detail** (model detail, texture filtering, shadows from dynamic lights, ambient occlusion,
-  screen-space reflections) and **Effects** (depth of field, motion blur with its switch for
-  upscalers under it, chromatic aberration).
+  Then **Game effects**, what the game has and a switch leaves out (depth of field, motion blur with
+  its switch for upscalers under it, chromatic aberration, ambient occlusion, shadows from dynamic
+  lights), and **Enhancements**, what goes past the game or below it for weaker GPUs (texture
+  filtering, model detail, screen-space reflections). The in-game menu has the same two sections.
 - **Interface:** the in-game menu's shortcut and language, Sharp UI, the shader note and the FPS
   counter.
 - **Gameplay:** the camera (Follow camera, Camera tuning) and the extras (Skip intro videos, Free
@@ -72,8 +75,11 @@ behind its tabs, Visuals holding Display to Interface; the Linux launchers are u
   them: turning one off folds them away, turning it on opens them, and the arrow beside the switch
   opens or folds them by hand. The search still finds a row inside and opens its fold.
 - **Engine switches** also holds the performance and sound settings that were under Settings, and
-  Extra variables; **Reset all** puts back every setting on the page (it used to skip the engine
-  preset and the experimental features). **Log** (was Game output) has the log options.
+  Extra variables; **Reset all** puts back every setting on the page. The Engine preset row went:
+  each engine feature has its own switch. **Changed switches** also lists every switch or feature
+  that Extra variables sets, at its default or not. **Fixed-refresh frame lock** greys out while
+  Precise frame pacing is off (it needs it). **Log** (was Game output) has one Log options fold: the
+  log level first, then the diagnostics, among them the new heap corruption checks.
 - **Settings** is the launcher's own: its look, the engine folder and how the game starts, files,
   shared settings and updates. The Background rows show in the Modern layout only, where they do
   something.
@@ -86,32 +92,40 @@ behind its tabs, Visuals holding Display to Interface; the Linux launchers are u
 - Every setting is in one place (the in-game menu's language was on two pages), labels match the
   in-game menu's (Character motion vectors, FPS counter, HDR source, Blood Echo multiplier, Camera
   tuning, Render resolution, Anti-aliasing), and every hint names the page as both layouts call it.
-  Settings files and shared codes from earlier versions work as before (shared codes now carry the
-  FSR version and the render scale too).
+  Settings files and shared codes from earlier versions work as before. **Share your settings**
+  shares everything except what belongs to this PC (folders, monitor, output resolution, window mode,
+  HDR, graphics card, sound device, preferred controller, and fixes or tuning for its hardware), to
+  you (online account, languages, profiles, the launcher's look, trophy notifications) or to one
+  session (log options, Extra variables); an imported code still sets no command, folder or variable.
 - **The game's own anti-aliasing applies only without an upscaler** (Upscaler None, Anti-aliasing
   The game's own). Under AMD FSR, DLSS or TAA it only softened the picture they work from; a
   settings file that has it on keeps it for when the upscaler is None. The game's System menu shows
-  its Anti-Aliasing as Off then (it showed On with DLAA), and its help line says why.
+  its Anti-Aliasing as Off then (it showed On with DLAA), and its help line says why. Its pass also
+  no longer runs under DLSS or AMD FSR when it is the choice kept for Upscaler None (119 FPS at the
+  lamps against 122 without it, in the tester's report).
 - **The launcher and the game no longer overwrite each other's settings.** The game reads its
   settings when it starts and writes its own when you change them in game, so a change made in the
   launcher while the game ran was lost. The launcher now keeps those changes until the game exits
   (the status line says "game settings apply at its next start"), then writes them over what the
   game saved, and its pages show what was changed in game.
 - **Save backups while playing every 10 minutes** (was 15), when the saves changed.
-- **Frame generation and NVIDIA Reflex are not offered** (the launcher's rows and the in-game items
-  are gone; a saved frame generation choice runs off and the log says so). The code stays.
+- **Frame generation and NVIDIA Reflex are not offered**, and their code went with Streamline's
+  (a saved choice loads with no effect). NVIDIA's clock boost stays, on unless `BB_NV_BOOST=0`.
 - **The in-game menu (Insert or L3 + R3) matches Graphics:** Anti-aliasing, then the Upscaler with its
-  Quality and locked render resolution slider, the FSR version (every version AMD offers here) or
-  DLSS's model under it, Sharpening with its strength under it, and Advanced (character motion
+  Upscaling quality and locked render resolution slider, the FSR version (every version AMD offers here) or
+  DLSS's model under it, Sharpening with its strength (Sharpening strength) under it, and Advanced (character motion
   vectors, texture mip bias). With an upscaler, Anti-aliasing names it. The FSR and DLSS checks
   (auto exposure, the jitter sign, sub-pixel jitter) are no longer in the menu. The DLSS section went:
   its rows are in those places. It shows what runs: "Running: FSR 3.1.6" (marked when AMD's driver
   provides it) and "Running: DLSS 310.9.16, model K". The FPS counter's upscaler item shows the same
   ("FSR 3.1.6", "DLSS K"). The game's own anti-aliasing moved from the game effects to
   Anti-aliasing; FSR 3.1's tuning presets are called Tuning.
-- **Shorter texts:** every launcher row shows one short line under its name (the rest when you hover
-  it), the Graphics page's descriptions were rewritten short, and the game's System menu help lines
-  fit the window (Output resolution's was cut off).
+- **Texts:** every launcher row shows a short line under its name that wraps instead of being cut,
+  the full text when you hover it (or behind the ⓘ in the Modern layout) only where it adds to the line,
+  and the setting's default ("Default: …") unless the text says it. 124 lines and 36 tooltips were
+  rewritten or corrected (`docs/launcher-text-review.md`), in all 13 languages (machine-made: players'
+  corrections are welcome). Every list has Off or None first. The game's System menu help lines fit
+  the window (Output resolution's was cut off).
 
 ## AMD FSR
 
@@ -224,7 +238,7 @@ behind its tabs, Visuals holding Display to Interface; the Linux launchers are u
   he only halved for 60 now come from the game, converted (at 60 up to 14.5% quicker than his halving),
   and the settings' blend and the chase rates' change, which he left as the game's, move at the game's
   speed (the blend over 1.5 s instead of 0.75); the aimed-for point keeps his share of each frame's move
-  unconverted, as that share is the same at any rate. Without the frame timer (`BB_FRAME_TIMER=0`) the
+  unconverted, as that share is the same at any rate. Without the frame timer (`BB_FRAME_FIXES_SKIP=timer,camera`) the
   camera is as in earlier versions; should the engine fail to place its conversion, it converts the camera
   once for the chosen rate instead, as before.
 - **The upscalers start fresh at a camera cut.** DLSS, FSR and TAA build each frame on the frames
@@ -324,8 +338,7 @@ behind its tabs, Visuals holding Display to Interface; the Linux launchers are u
   share of frames drawn and never shown with Mailbox), or that FIFO holds the game to the display.
 - The log says the follow camera is converted every frame (`Frame rate fixes: the follow camera's
   weights every frame, 14 sites`), and `camera` among the corrections in `Frame rate fixes: on`.
-  `BB_FRAME_FIXES_SKIP=camera` leaves it out (the camera as before). `BB_CAMERA_FIX` applies only
-  without the frame timer.
+  `BB_FRAME_FIXES_SKIP=camera` leaves it out (the camera as before).
 - The log names each camera cut that starts the upscaler's history over (`Upscaler: camera cut
   (turned ... degrees, moved ... m in one frame, ... m of it along the view ...)`, the first 100). With frame statistics, every
   600 upscaled frames: the history resets by cause and the largest turn and move in one frame of the
@@ -341,8 +354,24 @@ behind its tabs, Visuals holding Display to Interface; the Linux launchers are u
   dispatch. `BB_BREADCRUMBS=both` puts back the hang marker before each draw.
 - Experiments removed: `BB_ASYNC_FENCES`, `BB_FENCE_DELAY_TEST`, `BB_SUBMIT_LOCK=ahead`,
   `BB_SHADOWS` and `BB_HLE_COPY_MERGE` (measured slower, unused, or never safe to turn on).
+- **Beta 28, the cleanup:** the switches settled by measurement went, each keeping the path that was
+  the default (`BB_DEFER_PROTECT`, `BB_UFFD`, `BB_TEXTURE_HELPER`, `BB_UBO_EXACT`, `BB_CAMERA_FIX`,
+  `BB_CAMERA_INVERSE`, TAA's experiment bits, and 16 Lantern 0.9.x "as before" switches among them),
+  with the PC memory model (`BB_GUEST_IN_PLACE`). config.ini decides the settings: their environment
+  aliases (`BB_HDR*`, `BB_DLSS_PRESET`, ...) went; `BB_UPSCALER` stays for A/B runs.
+  `BB_FRAME_FIXES_SKIP=timer,camera` is the frame timer off (was `BB_FRAME_TIMER=0`) and `=clothstep`
+  the cloth's last substep (was `BB_CLOTH_STEP`); `BB_GPU_LOG` follows `BB_LOG_LEVEL`.
+- The diagnostics are one list, `BB_DIAG=frame,hitch=40,gpu,sections,load,audio,pad,heap,shaders`
+  (the Log options fold passes it; bb-start and run.sh expand it, and a switch set on its own wins).
+- Occlusion culling and hot pages default as the launcher always set them, in the engine too, so
+  bb-start, run.sh and test runs behave as the launcher.
 
 ## Good to know
+
+- **Online play is The Hunter's Dream's.** The shadNet path (a server and password typed in by hand)
+  went; such settings now start the game offline.
+- **A Lantern 0.9.x folder updated in place is no longer supported** (`run.bat`, the Python start and
+  the 0.9.x settings migrations went): install the Hunter's Workshop package instead.
 
 - **The first start after updating rebuilds part of the GPU cache.** The motion vectors' shaders
   and a few compute shaders changed, so they compile again the first time something draws them:

@@ -442,6 +442,9 @@ From the audit of 27c (four read-only audits, re-checked) and the tester's calls
   diagnostics after it (part 12 had put the log level above a Diagnostics fold).
 - **Then the version step:** 0.4.4-beta.28, engine id 64, release notes (their Defaults section: a new
   install starts without an upscaler, on the game's own anti-aliasing), this document, every check.
+  **Done** (2026-11-02): the three launcher projects at 0.4.4-beta.28, `Updater.EngineId`
+  hunters-workshop-64; the release notes have beta 28's defaults, the launcher's changes and the
+  cleanup (switches settled, folds, `BB_DIAG`, the shadNet path, Lantern 0.9.x installs).
 - **After the launcher: Streamline's slowdown** (the tester, 2026-11-02). Not the 120 FPS cap (beta 23,
   above), which stays: the lower frame rate with Streamline loaded was probably the game's own
   anti-aliasing still running under an upscaler, which 27b fixed (`NoUpscaler`). To be checked again
