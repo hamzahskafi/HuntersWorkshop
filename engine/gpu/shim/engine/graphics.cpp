@@ -106,12 +106,17 @@ void MotionBlur(std::uint64_t r) {
     }
 }
 // SSAO and AA are effects with their own settings (Picture tuning doesn't gate them): written
-// every view, so switching Picture tuning off leaves nothing forced behind.
+// every view, so switching Picture tuning off leaves nothing forced behind. 0.4.4 beta 28: the game's
+// AA only without an upscaler, as at start (patches.cpp NoUpscaler, BbSettings::GameAaApplies). The
+// flag followed the Anti-aliasing choice alone, so with "the game's own" kept for Upscaler None its
+// pass ran under DLSS and AMD FSR too (the tester: 119 FPS at the lamps against 122 without it).
 GUEST_ABI std::int64_t RenderView(std::uint64_t,const std::uint64_t* saved) {
     const auto r=saved[0];std::uint64_t caps=0;
     if (!r || !Read(r+kCapabilities,&caps)) return 0;
-    const std::uint8_t ssao=BbSettings::Get().effects[3].load() && (caps&kSsaoCapability);
-    const std::uint8_t aa=BbSettings::Get().effects[4].load() && (caps&kAaCapability);
+    const auto& s=BbSettings::Get();
+    const std::uint8_t ssao=s.effects[3].load() && (caps&kSsaoCapability);
+    const std::uint8_t aa=BbSettings::GameAaApplies(s.effects[BbSettings::EffectGameAa].load(), s.upscaler.load()) &&
+                          (caps&kAaCapability);
     Write(r+kSsaoFlag,ssao);Write(r+kAaFlag,aa);
     if (caps&kMotionBlurCapability) MotionBlur(r);
     return 0;
