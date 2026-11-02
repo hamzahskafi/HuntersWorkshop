@@ -192,7 +192,7 @@
             new("effect_dof", L.T("Depth of field"), true),
             new("effect_motion_blur", L.T("Motion blur"), false),
             new("effect_ssao", L.T("Ambient occlusion (SSAO)"), true),
-            new("effect_game_aa", L.T("Game's own anti-aliasing"), false),
+            new("effect_game_aa", L.T("Game's own anti-aliasing"), true),
             new("effect_dynamic_shadows", L.T("Shadows from dynamic lights"), true),
             new("effect_ssr", L.T("Screen-space reflections"), false, L.T("Not in the original game")),
             new("skip_intro", L.T("Skip intro videos"), true),

@@ -365,14 +365,14 @@ def validate_patch_requirements(names, game):
 
 # A key config.ini doesn't have takes the engine's default (bbport_settings.h Effects): these start off, and
 # the intro videos are skipped (0.4.4).
-DEFAULT_OFF=('effect_chromatic_aberration','effect_motion_blur','effect_game_aa')
+DEFAULT_OFF=('effect_chromatic_aberration','effect_motion_blur')
 DEFAULT_ON=('skip_intro',)
 def no_upscaler(settings):
     """0.4.4 beta 27b: the game's own anti-aliasing applies only without an upscaler (upscaler=off): AMD FSR,
     DLSS and TAA anti-alias themselves (patches.cpp NoUpscaler). BB_UPSCALER decides as in the engine."""
     env=os.environ.get('BB_UPSCALER')
     if env: return env not in FSR_NAMES+('dlss','taa')
-    return settings.get('upscaler','fsr')=='off'
+    return settings.get('upscaler','off')=='off'
 def effect_patches(settings):
     names=[]
     upscaled=not no_upscaler(settings)
@@ -409,7 +409,7 @@ def render_size(settings,override=''):
     if override:
         w,h=(int(v) for v in override.lower().split('x'))
         return (w,h)
-    if settings.get('upscaler','fsr')=='off': return None
+    if settings.get('upscaler','off')=='off': return None
     scale=preset_scale(settings)
     if scale==1.0: return None
     # Even sizes (the game has half-resolution buffers).
@@ -445,7 +445,7 @@ def start_settings(settings):
     """The settings the start's render size follows: without AMD's FSR files (or on Linux) the engine
     runs TAA instead of AMD FSR (BbSettings::ConfigureUpscalerSupport), at the output size, as bb-start
     decides (start/main.cpp)."""
-    if settings.get('upscaler','fsr') in FSR_NAMES and not amd_fsr_files():
+    if settings.get('upscaler','off') in FSR_NAMES and not amd_fsr_files():
         return {**settings,'upscaler':'taa'}
     return settings
 
@@ -457,7 +457,7 @@ def scaled_sizes(settings):
     out=output_size(settings)
     if out==OUTPUT_SIZE or settings.get('upscaler')=='taa': return None
     scale=1.0
-    if settings.get('upscaler','fsr')!='off':
+    if settings.get('upscaler','off')!='off':
         scale=preset_scale(settings,out)
     # A scene of at least 640x360 (start/patches.cpp ScaledSizes): 428x240 (Ultra Performance at a
     # 720p output) showed the world in half the picture on a ROG Ally.

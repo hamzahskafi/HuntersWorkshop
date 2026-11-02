@@ -574,7 +574,7 @@ int Main(std::vector<std::wstring> arguments) {
             // 0.4.4 beta 27: without AMD's FSR files the engine runs TAA instead of AMD FSR
             // (BbSettings::ConfigureUpscalerSupport), which renders at the output size: no patch.
             auto start_settings = ReadSettings(config);
-            const std::string upscaler = Setting(start_settings, "upscaler").value_or("fsr");
+            const std::string upscaler = Setting(start_settings, "upscaler").value_or("off");
             if (!amd_fsr_files && (upscaler == "fsr" || upscaler == "fsr3" || upscaler == "fsr4" || upscaler == "fsr411")) {
                 Log("Upscaler: AMD FSR's files are not in %s: TAA, at the output size", Utf8(amd_fsr_dir).c_str());
                 start_settings["upscaler"] = "taa";

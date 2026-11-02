@@ -43,7 +43,7 @@ namespace BloodborneLauncher.Core
         private static bool LargeScene(IniFile ini)
         {
             var (w, h) = Choices.OutputSize(ini.Get("output_res", "1920x1080"));
-            var upscaler = ini.Get("upscaler", "fsr");
+            var upscaler = ini.Get("upscaler", "off");
             if ((w, h) == (1920, 1080) || upscaler == "taa") return false;
             var scale = 1.0;
             if (upscaler != "off")

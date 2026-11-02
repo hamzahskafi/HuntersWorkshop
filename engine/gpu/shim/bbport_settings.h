@@ -80,7 +80,7 @@ inline constexpr Effect Effects[] = {
     {"effect_dof", "Depth of field (DoF)", "Глубина резкости (DoF)", true},
     {"effect_motion_blur", "Motion blur", "Размытие в движении", false},
     {"effect_ssao", "Ambient occlusion (SSAO)", "Затенение SSAO", true},
-    {"effect_game_aa", "Game's own anti-aliasing", "Собственное сглаживание игры", false},
+    {"effect_game_aa", "Game's own anti-aliasing", "Собственное сглаживание игры", true},
     {"effect_dynamic_shadows", "Shadows from dynamic lights", "Тени от динамических источников", true},
     {"effect_ssr", "Screen-space reflections (not in original game)", "Отражения SSR (не было в игре)", false},
     {"skip_intro", "Skip startup intros", "Пропуск заставок при запуске", true},
@@ -161,7 +161,7 @@ static_assert(sizeof(PadIconsNames) / sizeof(PadIconsNames[0]) == PadIconsCount)
 
 struct Values {
     std::atomic<MenuLanguage> menu_language{MenuLanguage::English};
-    std::atomic<int> upscaler{UpscalerFsr};
+    std::atomic<int> upscaler{UpscalerOff}; // 0.4.4 beta 28 (the tester): the game's own AA by default
     std::atomic<int> preset{PresetAuto};
     std::atomic<bool> sharpen{true};
     std::atomic<float> sharpness{0.2f};

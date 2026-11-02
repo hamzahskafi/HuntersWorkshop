@@ -84,14 +84,16 @@ class NativeUiTests(unittest.TestCase):
         self.assertIsNone(render_size({'upscaler': 'off', 'preset': '3'}))
 
     def test_output_other_than_1080p_scales_the_scene(self):
-        self.assertIsNone(scaled_sizes({'output_res': '1920x1080', 'preset': '2'}))
+        self.assertIsNone(scaled_sizes({'output_res': '1920x1080', 'upscaler': 'fsr', 'preset': '2'}))
+        # No upscaler (0.4.4 beta 28: the default): the scene at the output, whatever the preset.
+        self.assertEqual(scaled_sizes({'output_res': '1280x720', 'preset': '2'}), ((1280, 720), (1280, 720)))
         # Steam Deck: below 1080p the scene is still the preset's fraction of the output, down to
         # 640x360 (Ultra Performance at 720p would be 428x240).
         for preset, expected in [(0, (1280, 720)), (2, (752, 424)), (4, (640, 360))]:
             with self.subTest(preset=preset):
-                self.assertEqual(scaled_sizes({'output_res': '1280x720', 'preset': str(preset)}),
+                self.assertEqual(scaled_sizes({'output_res': '1280x720', 'upscaler': 'fsr', 'preset': str(preset)}),
                                  (expected, (1280, 720)))
-        self.assertEqual(scaled_sizes({'output_res': '3840x2160', 'preset': '3'}),
+        self.assertEqual(scaled_sizes({'output_res': '3840x2160', 'upscaler': 'fsr', 'preset': '3'}),
                          ((1916, 1076), (3840, 2160)))
         # TAA is native-only and uses the live host targets.
         self.assertIsNone(scaled_sizes({'output_res': '1280x720', 'upscaler': 'taa', 'preset': '3'}))
@@ -102,11 +104,11 @@ class NativeUiTests(unittest.TestCase):
         for preset in ({}, {'preset': 'auto'}, {'preset': 'Auto'}):
             with self.subTest(preset=preset):
                 self.assertIsNone(render_size(preset))
-                self.assertEqual(scaled_sizes({'output_res': '1280x800', **preset}), ((1280, 800), (1280, 800)))
-                self.assertEqual(scaled_sizes({'output_res': '1920x1200', **preset}), ((1920, 1200), (1920, 1200)))
-                self.assertEqual(scaled_sizes({'output_res': '2560x1440', **preset}), ((1708, 960), (2560, 1440)))
-                self.assertEqual(scaled_sizes({'output_res': '3440x1440', **preset}), ((2292, 960), (3440, 1440)))
-                self.assertEqual(scaled_sizes({'output_res': '3840x2160', **preset}), ((1916, 1076), (3840, 2160)))
+                self.assertEqual(scaled_sizes({'upscaler': 'fsr', 'output_res': '1280x800', **preset}), ((1280, 800), (1280, 800)))
+                self.assertEqual(scaled_sizes({'upscaler': 'fsr', 'output_res': '1920x1200', **preset}), ((1920, 1200), (1920, 1200)))
+                self.assertEqual(scaled_sizes({'upscaler': 'fsr', 'output_res': '2560x1440', **preset}), ((1708, 960), (2560, 1440)))
+                self.assertEqual(scaled_sizes({'upscaler': 'fsr', 'output_res': '3440x1440', **preset}), ((2292, 960), (3440, 1440)))
+                self.assertEqual(scaled_sizes({'upscaler': 'fsr', 'output_res': '3840x2160', **preset}), ((1916, 1076), (3840, 2160)))
 
 
 class DebugPatchTests(unittest.TestCase):
@@ -125,16 +127,18 @@ class DebugPatchTests(unittest.TestCase):
                         self.assertEqual(camera_bytes[offset+i], byte, patch)
 
     def test_missing_effect_keys_follow_the_engine_defaults(self):
+        # 0.4.4 beta 28: no upscaler and the game's own anti-aliasing by default.
         self.assertEqual(effect_patches({}), ['Disable Chromatic Aberration',
-                                              'Disable Motion Blur (perf increase)', 'Disable AA', 'Skip Intro'])
+                                              'Disable Motion Blur (perf increase)', 'Skip Intro'])
         self.assertIn('Disable DoF', effect_patches({'effect_dof': '0'}))
         self.assertNotIn('Skip Intro', effect_patches({'skip_intro': '0'}))
 
     def test_game_anti_aliasing_only_without_an_upscaler(self):
         # 0.4.4 beta 27b: AMD FSR, DLSS and TAA anti-alias themselves; the game's pass is left out under them.
-        for upscaler in ('fsr', 'fsr4', 'dlss', 'taa', None):
-            settings = {'effect_game_aa': '1', **({'upscaler': upscaler} if upscaler else {})}
-            self.assertIn('Disable AA', effect_patches(settings), upscaler)
+        for upscaler in ('fsr', 'fsr4', 'dlss', 'taa'):
+            self.assertIn('Disable AA', effect_patches({'effect_game_aa': '1', 'upscaler': upscaler}), upscaler)
+        # 0.4.4 beta 28: no upscaler is the default, so the game's pass applies without one.
+        self.assertNotIn('Disable AA', effect_patches({'effect_game_aa': '1'}))
         self.assertNotIn('Disable AA', effect_patches({'effect_game_aa': '1', 'upscaler': 'off'}))
         self.assertIn('Disable AA', effect_patches({'effect_game_aa': '0', 'upscaler': 'off'}))
         with mock.patch.dict(os.environ, {'BB_UPSCALER': 'none'}):

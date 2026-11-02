@@ -114,7 +114,7 @@ const std::map<std::string, std::string> kModelLod{
     {"-2", "Model LOD -2 (Highest)"}, {"1", "Model LOD 1 (Lower)"}, {"2", "Model LOD 2 (Lowest)"}};
 // A key config.ini doesn't have takes the engine's default (bbport_settings.h Effects): these start off, and
 // the intro videos are skipped (0.4.4: the defaults the project's own tests run with).
-const std::set<std::string> kDefaultOff{"effect_chromatic_aberration", "effect_motion_blur", "effect_game_aa"};
+const std::set<std::string> kDefaultOff{"effect_chromatic_aberration", "effect_motion_blur"};
 const std::set<std::string> kDefaultOn{"skip_intro"};
 const std::set<std::string> kBloodborneIds{"CUSA00207", "CUSA00208", "CUSA00299", "CUSA00900", "CUSA01363",
                                            "CUSA03014", "CUSA03023", "CUSA03173", "CUSA03179"};
@@ -507,7 +507,7 @@ std::optional<Size> RenderSize(const std::map<std::string, std::string>& setting
         if (!size) throw Error("invalid render resolution " + override_size);
         return size;
     }
-    if (Setting(settings, "upscaler").value_or("fsr") == "off") return std::nullopt;
+    if (Setting(settings, "upscaler").value_or("off") == "off") return std::nullopt;
     const double scale = PresetScale(settings, kOutput);
     if (scale == 1.0) return std::nullopt;
     // Multiples of 4, as ScaledSizes: the game pads its targets to them (undrawn edge columns).
@@ -548,7 +548,7 @@ Size UiSize(const std::map<std::string, std::string>& settings, Size out) {
 bool NoUpscaler(const std::map<std::string, std::string>& settings) {
     if (const auto env = Env("BB_UPSCALER"); env && !env->empty())
         return !(*env == "fsr" || *env == "fsr3" || *env == "fsr4" || *env == "fsr411" || *env == "dlss" || *env == "taa");
-    return Setting(settings, "upscaler").value_or("fsr") == "off";
+    return Setting(settings, "upscaler").value_or("off") == "off";
 }
 
 std::vector<std::string> EffectPatches(const std::map<std::string, std::string>& settings) {
@@ -821,7 +821,7 @@ std::optional<std::pair<Size, Size>> ScaledSizes(const std::map<std::string, std
     const Size out = OutputSize(settings);
     if (out == kOutput || Setting(settings, "upscaler") == "taa") return std::nullopt;
     double scale = 1.0;
-    if (Setting(settings, "upscaler").value_or("fsr") != "off") scale = PresetScale(settings, out);
+    if (Setting(settings, "upscaler").value_or("off") != "off") scale = PresetScale(settings, out);
     // A scene of at least 640x360, a third of 1080p: Ultra Performance at a 720p output made 428x240,
     // where a ROG Ally showed the world in half the picture (0.9.37 beta 7), and the upscaler has
     // little to work from below it.

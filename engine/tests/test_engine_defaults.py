@@ -36,8 +36,9 @@ class ShippedDefaultsTests(unittest.TestCase):
                 self.assertEqual(ours[key], theirs[key])
 
     def test_the_upscaling_defaults_are_written_out(self):
-        # The upscaler, its quality, AMD FSR's version and DLSS's model: Auto (0.4.4 beta 27c).
-        expected = {'upscaler': 'fsr', 'preset': 'auto', 'fsr_version': 'auto', 'dlss_preset': 'auto'}
+        # No upscaler (the game's own anti-aliasing, 0.4.4 beta 28), and for when one is chosen its quality,
+        # AMD FSR's version and DLSS's model: Auto (beta 27c).
+        expected = {'upscaler': 'off', 'preset': 'auto', 'fsr_version': 'auto', 'dlss_preset': 'auto'}
         for source, values in (('config.default.ini', shipped()), ('IniFile.cs', launcher())):
             for key, value in expected.items():
                 with self.subTest(source=source, key=key):

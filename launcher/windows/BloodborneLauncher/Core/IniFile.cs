@@ -18,7 +18,7 @@ namespace BloodborneLauncher.Core
         /// and the engine's defaults agree (tests/test_engine_defaults.py).</summary>
         public static readonly (string Key, string Value)[] Defaults =
         {
-            ("upscaler", "fsr"),
+            ("upscaler", "off"), // 0.4.4 beta 28 (the tester): the game's own AA by default
             ("fsr_version", "auto"),
             ("preset", "auto"),
             ("sharpen", "1"),
