@@ -958,7 +958,6 @@ void UpscalerSection() {
         // 0.4.4 beta 28 (the tester): None first.
         const char* upscalers[] = {BbSettings::MenuText("None", "Нет"), "AMD FSR", "DLSS (NVIDIA)"};
         const int kinds[] = {BbSettings::UpscalerOff, BbSettings::UpscalerFsr, BbSettings::UpscalerDlss};
-        static const char* later[] = {"XeSS"};
         const int upscaler = s.upscaler;
         const int shown = upscaler == BbSettings::UpscalerFsr ? 1 : upscaler == BbSettings::UpscalerDlss ? 2 : 0;
         if (ImGui::BeginCombo(label, upscalers[shown])) {
@@ -982,13 +981,6 @@ void UpscalerSection() {
                                                   : BbSettings::MenuText("— not supported by this GPU",
                                                                          "— не поддерживается видеокартой"));
                 }
-            }
-            for (const char* name : later) {
-                ImGui::BeginDisabled();
-                ImGui::Selectable(name, false);
-                ImGui::EndDisabled();
-                ImGui::SameLine();
-                ImGui::TextDisabled("%s", BbSettings::MenuText("— in development", "— в работе"));
             }
             ImGui::EndCombo();
         }
