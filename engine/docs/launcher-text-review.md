@@ -1,35 +1,62 @@
 # Launcher text review
 
-Windows launcher, every row on every page (207), as of 0.4.4 beta 28 (2026-11-02). Fourth draft, for the
-tester's review. Nothing has been applied. Each row shows **everything it says today**, taken from the code
-(title, the line Classic shows under the title, the full tooltip, list choices with their notes, the
-default), next to the **proposal**. Beta 28's text step makes it again from the launcher as it is then.
+Every row of the Windows launcher (208 rows on 13 pages), its text today beside the proposed text, as of
+Hunter's Workshop 0.4.4 beta 28 (2026-11-02). Fifth draft: the fourth draft, corrected after an outside review
+and with the tester's decisions on it. Nothing here has been applied yet: beta 28's text step applies it,
+after it is made again from the launcher as it is then (`launcher/windows/tests/text_review`).
+
+## How to review
+
+- Each page has one table. **Today** is the launcher word for word ("Line" is what the Classic layout shows
+  under a title, cut at 64 characters today; "Tooltip" is the full text on hover and behind Modern's (i)).
+- **Same** keeps today's text and its translations. In the tooltip column, *Default: …* is the line the
+  launcher adds from the setting's own default.
+- Edit a proposed cell or comment on it. Rows left alone are taken as approved.
+- Decisions already taken are listed below with their reasons; changes to how settings behave (not only what
+  they say) are in "Changes outside the texts", after the pages.
 
 ## How it is written
 
-Hunter's Workshop is a port, and its texts read like the port's own notes: plain, short, specific. This
-draft keeps that voice and fixes what is wrong or cut, rather than restyling everything.
+Hunter's Workshop is a port, and its texts read like the port's own notes: plain, short and specific. This
+draft keeps that voice and fixes what is wrong, cut or out of date, rather than restyling everything.
 
 - **Today's texts stay** wherever they are right, with their translations (110 descriptions are translated
-  in all 13 languages). Tooltips change in 27 rows: 7 corrected (wrong or out of date), 20 added where
-  today says nothing useful (mostly rows with no tooltip at all, such as the picture sliders).
-- **The line under the title** is new where Classic cuts today's text mid-sentence or it says too little
-  (a variable's name alone, "Relaxed is the default"). A complete phrase of 60 characters or fewer, saying
-  what the setting is or does ("Frees VRAM held by textures the GPU drew"). No instructions ("Choose…",
-  "Adjust…"), no full stop. Folders, files and the FPS counter's items keep no line.
+  in all 13 languages). Tooltips change in 35 rows: 15 corrected (wrong, overpromising or out of date), 20
+  added where today says nothing useful, mostly rows with no tooltip at all, such as the picture sliders.
+- **The line under the title** is new in 122 rows, where Classic cuts today's text mid-sentence or it says
+  too little (a variable's name alone, "Relaxed is the default"). It is a complete phrase saying what the
+  setting is or does ("Frees VRAM held by textures the GPU drew"), with no instruction ("Choose…") and no
+  full stop. 60 characters is the English target; a translated line wraps instead of being cut. Folders,
+  files and the FPS counter's items keep no line.
 - **Specifics stay:** VRAM, FSR and DLSS names, `BB_` names on Engine switches and Log, costs ("about 10%
-  FPS"), advice ("Recommended: on", "turn it off if…"), and "Applied when the game starts" where it is said
-  today.
-- **The default:** the row code adds "Default: …" at the end of a tooltip that doesn't say it already.
-- **Lists:** Off or None first. Labels and notes as today.
-- **Words:** the in-game overlay menu (Insert or L3 + R3), not "the port's settings menu".
-- **Renames** only where the name misleads: Quality becomes Upscaling quality; Skip the game files check
-  becomes Allow other game versions. In the in-game menu, Quality and Sharpness take the launcher's names.
+  FPS", measured), advice ("Recommended: on", "turn it off if…"), and "Applied when the game starts" where
+  it is said today.
+- **No promise past what the code does.** Each claim was checked against the code (the outside review
+  found five that went too far; they are corrected).
+- **Defaults:** the launcher adds "Default: …" from the setting itself, except where the tooltip already
+  says it ("On by default").
+- **Lists:** Off or None first where Off or None is a choice; Automatic and numeric lists keep their order.
+  Only the order and labels change, never the value a choice stores.
+- **Words:** "the in-game overlay menu (Insert or L3 + R3)" for Hunter's Workshop's own menu, not "the
+  port's settings menu", "the Insert menu" or "the game menu"; "the game's menus" for Bloodborne's own.
 
-## Reading the tables
+## Decisions taken
 
-**Today** is the launcher word for word ("—": nothing there). **Same** keeps today's text. In the tooltip
-column, *Default: …* is the line the row code adds.
+| Decision | Why | Where |
+| --- | --- | --- |
+| Off or None first in every list where it is a choice | The usual order; the tester's call | V-Sync, Area prefetch, Texture filtering, Model detail, Background, Background blur, In-game menu shortcut |
+| Anti-aliasing: Off, The game's own, TAA; "The game's own" keeps its name | The tester's call | Graphics (applied) |
+| XeSS is not offered | Not implemented | Graphics (applied) |
+| One Log options fold with the log level first | The tester's call | Log (applied) |
+| The port's own voice: today's texts stay where right | The tester: the third draft read like a production game's | Every page |
+| Engine update available says why it shows | It shows when the launcher updated itself and the engine package is older | Play |
+| Frame rate's line names the PS4's 30 and the engine's corrections | The tester's call | Display |
+| Renames: Upscaling quality (was Quality), Allow other game versions (was Skip the game files check), Suggested settings for this PC (was Best settings for this PC), Reduce shader stalls (was No shader freezes) | Each old name misleads: overall quality; a check you skip; a measured best; a promise of no freezes | Graphics, Engine switches; Quality and Sharpness also in the in-game overlay menu |
+| Graphics' Detail and Effects become Game effects and Enhancements | Five switches leave out what the game has; reflections, texture filtering and model detail go past it | Graphics and the in-game overlay menu |
+| Unified frame time joins Frame rate corrections | It works only with the corrections on, and every log since 0.3.0 ran with both | Engine switches |
+| Fixed-refresh frame lock greys while Precise frame pacing is off | It needs it; its own value is kept | Engine switches |
+| Share your settings shares everything except what belongs to this PC, to the player or to one session | The tester's call | Settings |
+| Suggested settings read the game's monitor; Changed switches lists what Extra variables override | Two bugs the outside review found | Graphics, Engine switches |
 
 ## Play
 
@@ -50,23 +77,23 @@ column, *Default: …* is the line the row code adds.
 
 | Setting | Today | Proposed line | Proposed tooltip | Proposed choices | Notes |
 | --- | --- | --- | --- | --- | --- |
-| **Output resolution** | Line: The upscaler renders below this and fills it in · Tooltip: same text · Choices: 1280 × 720; 1600 × 900; 1920 × 1080; 2560 × 1440; 3840 × 2160; 2560 × 1080 (21:9); 3440 × 1440 (21:9); 3840 × 1600 (24:10); 5120 × 2160 (21:9); 3840 × 1080 (32:9); 5120 × 1440 (32:9); 7680 × 2160 (32:9); 1280 × 1024 (5:4); 1280 × 800 (Steam Deck); 1680 × 1050 (16:10); 1920 × 1200 (16:10); 2560 × 1600 (16:10); Display (auto) (Your display's own resolution, whatever its shape: the picture fills the screen); Custom (Any width and height: set them below) · Default: 1920 × 1080 | The resolution the game is shown at | Same + *Default: 1920 × 1080* | Same | In-game menu: Output resolution. |
+| **Output resolution** | Line: The upscaler renders below this and fills it in · Tooltip: same text · Choices: 1280 × 720; 1600 × 900; 1920 × 1080; 2560 × 1440; 3840 × 2160; 2560 × 1080 (21:9); 3440 × 1440 (21:9); 3840 × 1600 (24:10); 5120 × 2160 (21:9); 3840 × 1080 (32:9); 5120 × 1440 (32:9); 7680 × 2160 (32:9); 1280 × 1024 (5:4); 1280 × 800 (Steam Deck); 1680 × 1050 (16:10); 1920 × 1200 (16:10); 2560 × 1600 (16:10); Display (auto) (Your display's own resolution, whatever its shape: the picture fills the screen); Custom (Any width and height: set them below) · Default: 1920 × 1080 | The resolution the game is shown at | The resolution the game is shown at. An upscaler renders at it (Native AA) or below it, and fills in the rest + *Default: 1920 × 1080* | Same | Tooltip corrected. In-game menu: Output resolution. Today's text says the upscaler always renders below the output; Native AA renders at it. |
 | **Custom resolution** | Line: Your own output size, any shape (5:4, 16:10, 32:9...)… · Tooltip: Your own output size, any shape (5:4, 16:10, 32:9...): the camera and UI follow it with Widescreen on | Any width and height, in any shape | Same | — |  |
-| **Frame rate** · Frame rate | Line: Every rate above 30 runs on Kyo's 60 FPS++, the engine setting… · Tooltip: Every rate above 30 runs on Kyo's 60 FPS++, the engine setting the game's values for the rate (Engine switches › Frame rate corrections). 30 is the game as on the PS4 · Choices: 30 FPS (as on PS4); 60 FPS (Kyo's 60 FPS++ with the engine's values for 60 FPS (Frame rate corrections). On a slower display the extra frames are drawn but never shown); 90 FPS (Kyo's 60 FPS++ with the engine's values for 90 FPS (Frame rate corrections). On a slower display the extra frames are drawn but never shown); 120 FPS (Kyo's 60 FPS++ with the engine's values for 120 FPS (Frame rate corrections). On a slower display the extra frames are drawn but never shown); 144 FPS (Kyo's 60 FPS++ with the engine's values for 144 FPS (Frame rate corrections). On a slower display the extra frames are drawn but never shown); 240 FPS (Kyo's 60 FPS++ with the engine's values for 240 FPS. Needs Frame rate corrections (Engine switches): without them the game runs at 144. On a slower display the extra frames are drawn but never shown); Uncapped (No limit: as fast as your PC can go, up to 480 FPS. Above 240 FPS the game is untested, and the old community uncapped patch froze in boss fights at such rates. For a high frame rate we recommend 240) · Default: 60 FPS | 30 is the PS4's; higher rates use the engine's corrections | Every rate above 30 runs on the engine's frame rate corrections, built on Kyo's 60 FPS++ and other community findings. With the corrections off (Engine switches › Frame rate corrections), the community FPS++ patches run instead. 30 is the game as on the PS4 + *Default: 60 FPS* | Same order. The 60 to 240 notes read "The engine's corrections for 60 FPS…" instead of "Kyo's 60 FPS++ with the engine's values for 60 FPS…"; the rest of each note stays | Tooltip corrected. Today's texts credit Kyo's patch for what the engine's corrections do; with the corrections off, the community FPS++ patches run. |
-| **V-Sync** · Frame rate | Line: How finished frames reach the screen · Tooltip: same text · Choices: On (latest frame) (No tearing, low latency: each refresh shows the newest finished frame. Default (Mailbox)); On (every frame) (Classic V-Sync: every frame shown in order, no tearing, a little more latency. The game can't run faster than the screen (FIFO)); Adaptive (Like On (every frame), but tears instead of stuttering when a frame is late (FIFO Relaxed)); Off (Frames go out the moment they're ready: lowest latency, may tear (Immediate)) · Default: On (latest frame) | Same | Same + *Default: On (latest frame)* | Off first: Off; On (latest frame); On (every frame); Adaptive (notes as today) |  |
+| **Frame rate** · Frame rate | Line: Every rate above 30 runs on Kyo's 60 FPS++, the engine setting… · Tooltip: Every rate above 30 runs on Kyo's 60 FPS++, the engine setting the game's values for the rate (Engine switches › Frame rate corrections). 30 is the game as on the PS4 · Choices: 30 FPS (as on PS4); 60 FPS (Kyo's 60 FPS++ with the engine's values for 60 FPS (Frame rate corrections). On a slower display the extra frames are drawn but never shown); 90 FPS (Kyo's 60 FPS++ with the engine's values for 90 FPS (Frame rate corrections). On a slower display the extra frames are drawn but never shown); 120 FPS (Kyo's 60 FPS++ with the engine's values for 120 FPS (Frame rate corrections). On a slower display the extra frames are drawn but never shown); 144 FPS (Kyo's 60 FPS++ with the engine's values for 144 FPS (Frame rate corrections). On a slower display the extra frames are drawn but never shown); 240 FPS (Kyo's 60 FPS++ with the engine's values for 240 FPS. Needs Frame rate corrections (Engine switches): without them the game runs at 144. On a slower display the extra frames are drawn but never shown); Uncapped (No limit: as fast as your PC can go, up to 480 FPS. Above 240 FPS the game is untested, and the old community uncapped patch froze in boss fights at such rates. For a high frame rate we recommend 240) · Default: 60 FPS | 30 is the PS4's; higher rates use the engine's corrections | Every rate above 30 runs on the engine's frame rate corrections, built on Kyo's 60 FPS++ and other community findings. With the corrections off (Engine switches › Frame rate corrections), the community FPS++ patches run instead, and 240 runs at 144. Above the display's refresh rate, V-Sync On (latest frame) and Off draw frames the display never shows; On (every frame) and Adaptive hold the game to the display's rate. 30 is the game as on the PS4 + *Default: 60 FPS* | Same order. The 60 to 144 notes become "With the engine's frame rate corrections for 60 FPS"; 240's keeps "Needs Frame rate corrections (Engine switches): without them the game runs at 144". "On a slower display the extra frames are drawn but never shown" leaves the notes for the tooltip, where it depends on V-Sync | Tooltip corrected. Today's texts credit Kyo's patch for what the engine's corrections do. The notes' "drawn but never shown" is wrong with V-Sync On (every frame) or Adaptive, which hold the game to the display (the note under V-Sync already says so). |
+| **V-Sync** · Frame rate | Line: How finished frames reach the screen · Tooltip: same text · Choices: On (latest frame) (No tearing, low latency: each refresh shows the newest finished frame. Default (Mailbox)); On (every frame) (Classic V-Sync: every frame shown in order, no tearing, a little more latency. The game can't run faster than the screen (FIFO)); Adaptive (Like On (every frame), but tears instead of stuttering when a frame is late (FIFO Relaxed)); Off (Frames go out the moment they're ready: lowest latency, may tear (Immediate)) · Default: On (latest frame) | Same | Same + *Default: On (latest frame)* | Off first: Off; On (latest frame); On (every frame); Adaptive (notes as today) | Its note ("The game waits for your 60 Hz display") will read the game's monitor (Changes outside the texts). |
 | **Monitor** · Screen | Line: The game opens here from the start, including fullscreen and… · Tooltip: The game opens here from the start, including fullscreen and HDR. If this monitor is disconnected, the Windows primary monitor is used. Applied on the next launch. | The monitor the game opens on | Same | — |  |
 | **Window mode** · Screen | Line: How the game's window fills the screen · Tooltip: same text · Choices: Windowed; Borderless fullscreen (Trophy notifications and other windows show over the game); Fullscreen (The driver may give the game the screen to itself (exclusive fullscreen): the lowest latency and G-SYNC's fullscreen-only mode, but trophy notifications and other windows don't show over it) | Same | Same | Same |  |
 | **Widescreen** · Screen | Line: Outputs that are not 16:9 (21:9, 32:9, 16:10, 5:4) with the… · Tooltip: Outputs that are not 16:9 (21:9, 32:9, 16:10, 5:4) with the right field of view and the UI kept in shape · Default: On | Right field of view and UI on screens that aren't 16:9 | Same + *Default: On* | — |  |
-| **Live resolution change** · Advanced | Line: Change the resolution in the game menu without restarting. · Tooltip: Change the resolution in the game menu without restarting. Off is faster; turn on only if you switch resolutions in game · Choices: Off (recommended); On · Default: Off (recommended) | Same | Same + *Default: Off* | Same | In-game menu: Live resolution changes. |
+| **Live resolution change** · Advanced | Line: Change the resolution in the game menu without restarting. · Tooltip: Change the resolution in the game menu without restarting. Off is faster; turn on only if you switch resolutions in game · Choices: Off (recommended); On · Default: Off (recommended) | Change the resolution in game, without restarting | Lets the in-game overlay menu change the resolution without restarting. Off is faster; turn it on only if you switch resolutions in game + *Default: Off* | Same | Tooltip corrected. In-game menu: Live resolution changes. "The game menu" today is the in-game overlay menu: the game's own menus don't change the resolution. |
 | **HDR output** · HDR | Line: The game's picture on an HDR screen, with brighter highlights. · Tooltip: The game's picture on an HDR screen, with brighter highlights. Applied when the game starts | The game in HDR, with brighter highlights | Same | — | In-game menu: HDR output (restart required). |
 | **HDR source** · HDR | Line: Native: highlights as bright as they are in the game's scene. · Tooltip: Native: highlights as bright as they are in the game's scene. Expanded: the SDR picture's bright parts made brighter · Choices: Native (default); Expanded · Default: Native (default) | The scene's own highlights, or the SDR picture expanded | Same | Same | In-game menu: HDR source. |
 | **UI brightness** · HDR | Line: Native source only: how bright the HUD, menus and subtitles are… · Tooltip: Native source only: how bright the HUD, menus and subtitles are, against paper white · Choices: Dimmer; Paper white (default); Brighter; Much brighter · Default: Paper white (default) | How bright the HUD, menus and subtitles are | Same | Same | In-game menu: UI brightness. |
 | **UI colour** · HDR | Line: Native source only: Vivid shows the HUD and menus with the… · Tooltip: Native source only: Vivid shows the HUD and menus with the colours a wide-gamut monitor gives SDR; Exact keeps sRGB's · Choices: Exact (sRGB); In between; Vivid (default) · Default: Vivid (default) | Vivid or exact (sRGB) colours for the HUD and menus | Same | Same | In-game menu: UI colour. |
 | **Paper white** · HDR | Line: How bright the game's white is, in nits. Range: 10–500 · Tooltip: same text · Default: 200 | Same | Same + *Default: 200* | — | In-game menu: Paper white (nits). |
 | **Peak brightness from the display** · HDR | Line: The peak Windows reports for the display the game is on (the… · Tooltip: The peak Windows reports for the display the game is on (the Windows HDR Calibration app's, once it has run). Off: the value below · Default: On | Takes the peak brightness Windows reports | Same + *Default: On* | — | In-game menu: Peak brightness from the display. |
-| **Peak brightness** · HDR | Line: Your display's peak brightness, in nits, when it is not taken… · Tooltip: Your display's peak brightness, in nits, when it is not taken from the display. Range: 10–4000 · Default: 1000 | Your display's peak brightness, in nits | Same + *Default: 1000* | — | In-game menu: Peak brightness (nits). |
+| **Peak brightness** · HDR | Line: Your display's peak brightness, in nits, when it is not taken… · Tooltip: Your display's peak brightness, in nits, when it is not taken from the display. Range: 10–4000 · Default: 1000 | Your display's peak brightness, in nits | Same + *Default: 1000* | — | In-game menu: Peak brightness (nits). Greyed while Peak brightness from the display is on (as today). |
 | **Highlight boost** · HDR | Line: Off keeps the game's own look… · Tooltip: Off keeps the game's own look; higher makes lamps, fire and the sky brighter · Choices: Off; Low (default); Medium; High · Default: Low (default) | How much brighter lamps, fire and the sky get | Same | Same | In-game menu: Highlight boost. |
-| **Picture tuning** · Picture | Line: Applies the settings below, live… · Tooltip: Applies the settings below, live; off shows the game's own picture and keeps your values. Also in the game's System menu (Graphics, Effects, Colour) and the Insert menu | Your own brightness, colour, fog and bloom, live | Same | — | In-game menu: Picture tuning. |
+| **Picture tuning** · Picture | Line: Applies the settings below, live… · Tooltip: Applies the settings below, live; off shows the game's own picture and keeps your values. Also in the game's System menu (Graphics, Effects, Colour) and the Insert menu | Your own brightness, colour, fog and bloom, live | Applies the settings below, live; off shows the game's own picture and keeps your values. Also in the game's System menu (Graphics, Effects, Colour) and the in-game overlay menu | — | Tooltip corrected. In-game menu: Picture tuning. "The Insert menu" becomes the in-game overlay menu. |
 | **Brightness** · Picture | — | — | 1.00 is the game's own | — | In-game menu: Brightness. |
 | **Contrast** · Picture | — | — | 1.00 is the game's own | — | In-game menu: Contrast. |
 | **Saturation** · Picture | — | — | 1.00 is the game's own | — | In-game menu: Saturation. |
@@ -74,20 +101,20 @@ column, *Default: …* is the line the row code adds.
 | **Fog** · Picture | — | How thick the fog is | 1.00 is the game's own | — | In-game menu: Fog. |
 | **Bloom** · Picture | — | How strong the glow around bright lights is | 1.00 is the game's own | — | In-game menu: Bloom. |
 | **Vignette** · Picture | Default: On | Darkens the edges of the screen, as the game does | Off: the picture stays even to the edges + *Default: On* | — | In-game menu: Vignette. |
-| **Ambient occlusion strength** · Picture | — | How dark the shading in corners is | Needs Ambient occlusion on (Graphics › Detail). 1.00 is the game's own | — | In-game menu: Ambient occlusion strength. |
+| **Ambient occlusion strength** · Picture | — | How dark the shading in corners is | Needs Ambient occlusion on (Graphics › Game effects). 1.00 is the game's own | — | In-game menu: Ambient occlusion strength. |
 | **Shadow distance** · Picture | — | How far away shadows are drawn | 1.00 is the game's own | — | In-game menu: Shadow distance. |
 | **Game's own picture** · Picture | Line: Puts the settings above back to the game's own values · Tooltip: same text | Same | Same | — | In-game menu: Game's own picture. |
 
 ## Graphics
 
-Proposed: the Detail and Effects groups become two groups by where each setting comes from. **Game effects**: what the game has and a switch leaves out (depth of field, motion blur with its upscaler fix, chromatic aberration, ambient occlusion, shadows from dynamic lights); caption "The game's own effects. Off leaves one out; applied when the game starts". **Enhancements**: past what the game does (texture filtering, model detail, screen-space reflections); caption "Not in the original game, or past what it does. Applied when the game starts". Today both groups say "Patches to the game, applied when it starts". The in-game overlay menu's Game effects section would split the same way.
+Decided: the Detail and Effects groups become two groups by where each setting comes from, in the launcher and the in-game overlay menu. **Game effects**: what the game has and a switch leaves out (depth of field, motion blur with its upscaler fix under it, chromatic aberration, ambient occlusion, shadows from dynamic lights); caption "The game's own effects. Off leaves one out; applied when the game starts". **Enhancements**: what goes past the game, or below it for weaker GPUs (texture filtering, model detail, screen-space reflections); caption "Model detail and texture filtering above or below the game's, and reflections it doesn't have. Applied when the game starts". Today both groups say "Patches to the game, applied when it starts". Two effects are on in the original game and off here by default (chromatic aberration, motion blur); their tooltips now say so.
 
 | Setting | Today | Proposed line | Proposed tooltip | Proposed choices | Notes |
 | --- | --- | --- | --- | --- | --- |
-| **Best settings for this PC** | Line: Output resolution, frame rate, upscaler and quality for this… · Tooltip: Output resolution, frame rate, upscaler and quality for this PC | Suggested resolution, frame rate and upscaler for this PC | Same | — |  |
+| **Suggested settings for this PC** (was Best settings for this PC) | Line: Output resolution, frame rate, upscaler and quality for this… · Tooltip: Output resolution, frame rate, upscaler and quality for this PC | Resolution, frame rate and upscaler from this PC's hardware | Output resolution, frame rate, upscaler and quality worked out from this PC's graphics card, processor and the game's monitor: a starting point, not a measurement. Every change is listed before it applies | — | Tooltip corrected. Renamed (the tester's call): a rule of thumb from the hardware, not a measured best. Its button "Recommend…" becomes "Suggest…". "The game's monitor" holds once the suggestion reads the chosen monitor (Changes outside the texts). |
 | **Anti-aliasing** · Upscaling and anti-aliasing | Line: Smooths edges when no upscaler runs · Tooltip: Smooths edges when no upscaler runs  Off: the sharpest, with jagged edges. The game's own: its PS4 pass, after a restart. TAA: smooth edges, live. · Choices: Off; The game's own (Applied when the game starts); TAA · Status: With an upscaler the box shows "Upscaler (DLSS)" (or AMD FSR), greyed | Same | Same | Same | In-game menu: Anti-aliasing. |
 | **Upscaler** · Upscaling and anti-aliasing | Line: Renders below the output and fills it in · Tooltip: Renders below the output and fills it in  DLSS needs an NVIDIA RTX card; AMD FSR runs on any GPU. Both anti-alias as they upscale. · Choices: None; AMD FSR; DLSS (NVIDIA RTX) · Default: None · Status: Status line when an upscaler is unavailable on this PC | Same | Same + *Default: None* | Same | In-game menu: Upscaler. |
-| **Upscaling quality** (was Quality) · Upscaling and anti-aliasing | Line: How far below the output the game renders… · Tooltip: How far below the output the game renders: lower is faster and softer. Auto: Native AA up to 1200 lines, Quality up to 1600, Performance above | How far below the output the game renders | Same | — | In-game menu: Quality (rename there too). Shown only with an upscaler; "Quality" alone reads as overall graphics quality. The rename you agreed. |
+| **Upscaling quality** (was Quality) · Upscaling and anti-aliasing | Line: How far below the output the game renders… · Tooltip: How far below the output the game renders: lower is faster and softer. Auto: Native AA up to 1200 lines, Quality up to 1600, Performance above | How far below the output the game renders | Same | — | In-game menu: Quality (rename there too). Shown only with an upscaler; "Quality" alone reads as overall graphics quality. The tester's call. |
 | **Render resolution** · Upscaling and anti-aliasing | Line: The share of the output's width and height the game renders at. · Tooltip: The share of the output's width and height the game renders at. DLSS runs the nearest quality's model | Same | Same | — | In-game menu: Render resolution. |
 | **FSR version** · Upscaling and anti-aliasing | Line: The versions AMD offers on this GPU; Automatic runs the newest · Tooltip: The versions AMD offers on this GPU; Automatic runs the newest  Newer is usually better. (driver) marks one AMD's graphics driver provides. | Same | Same | — | In-game menu: FSR version. |
 | **DLSS model** · Upscaling and anti-aliasing | Line: Which NVIDIA model DLSS runs; also in game (Insert or L3 + R3) · Tooltip: Which NVIDIA model DLSS runs; also in game (Insert or L3 + R3)  Auto: K from DLAA to Balanced, M at Performance, L at Ultra Performance. · Choices: Auto (per quality) (NVIDIA's DLSS 4.5 pairing: K for DLAA, Quality and Balanced, M for Performance, L for Ultra Performance); Transformer (preset K) (The newer model: steadier thin and moving objects (a weapon on the back, railings)); Transformer 2 (preset M) (DLSS 4.5's model for Performance: sharper, a little heavier); Transformer 2 (preset L) (DLSS 4.5's model for Ultra Performance); Transformer (preset J) (Like K, slightly less ghosting and a little more flicker); The DLL's default (Whatever the included DLSS version picks for each quality mode) · Default: Auto (per quality) · Status: Status line with Auto: "Auto: model K at this quality" (the model Auto picks) | Same | Same | Same | In-game menu: DLSS model. |
@@ -97,19 +124,19 @@ Proposed: the Detail and Effects groups become two groups by where each setting 
 | **Texture mip bias** · Advanced | Line: Below 0 sharper textures, above 0 softer · Tooltip: Below 0 sharper textures, above 0 softer  0 is what NVIDIA and AMD advise with an upscaler. Below 0 can shimmer. · Default: 0 | Same | Same + *Default: 0* | — | In-game menu: Texture mip bias. |
 | **Model detail** · Detail | Choices: As in the game; Highest (-2); Lower (1); Lowest (2) · Default: As in the game | How far away models keep their full detail | Highest costs GPU time; Lower and Lowest help weaker GPUs + *Default: As in the game* | Lowest (2); Lower (1); As in the game; Highest (-2) | In-game menu: Model detail (in-game: to an Enhancements section). Group: Enhancements. |
 | **Texture filtering** · Detail | Line: Anisotropic filtering forced on the game's textures… · Tooltip: Anisotropic filtering forced on the game's textures: ground and walls seen at an angle stay sharp. Lower values cost a little less GPU time; Game's own leaves the game's filtering as it is BB_ANISO, default: 16x. Applied when the game starts · Choices: 16x; 8x; 4x; 2x; Game's own · Default: 16x | Sharper ground and walls seen at an angle | Same | Game's own first: Game's own; 2x; 4x; 8x; 16x | Group: Enhancements. |
-| **Ambient occlusion (SSAO)** · Detail | Default: On | Adds soft shading in corners and creases | *Default: On* | — | In-game menu: Ambient occlusion (SSAO). Group: Game effects. |
-| **Shadows from dynamic lights** · Detail | Default: On | Lamps and torches cast shadows; a heavy effect | One of the heaviest effects: off gives a large FPS gain + *Default: On* | — | In-game menu: Shadows from dynamic lights. Group: Game effects. |
+| **Ambient occlusion (SSAO)** · Detail | Default: On | Soft shading in corners and creases | *Default: On* | — | In-game menu: Ambient occlusion (SSAO). Group: Game effects. |
+| **Shadows from dynamic lights** · Detail | Default: On | Shadows cast by lamps and torches; a heavy effect | One of the heaviest effects: off gives a large FPS gain + *Default: On* | — | In-game menu: Shadows from dynamic lights. Group: Game effects. |
 | **Screen-space reflections** · Detail | Line: Not in the original game · Tooltip: same text · Default: Off | Adds reflections on wet and shiny surfaces | Not in the original game: Kyo's patch turns on reflections the game has only in its debug functions. Costs GPU time + *Default: Off* | — | In-game menu: Screen-space reflections (in-game: to an Enhancements section). Group: Enhancements. |
-| **Chromatic aberration** · Effects | Default: Off | Adds colour fringes toward the screen's edges | On in the original game; off here by default, for a clearer picture | — | In-game menu: Chromatic aberration. Group: Game effects. |
-| **Depth of field** · Effects | Default: On | Blurs what is out of focus | *Default: On* | — | In-game menu: Depth of field (DoF). Group: Game effects. |
-| **Motion blur** · Effects | Default: Off | Blurs the picture when the camera turns fast | On in the original game; off here by default, for a clearer picture. Costs GPU time | — | In-game menu: Motion blur. Group: Game effects. |
-| **No motion blur smear with upscalers** · Effects | Line: With an upscaler at an output other than 1920x1080 the game's… · Tooltip: With an upscaler at an output other than 1920x1080 the game's motion blur is left out: the upscaler would smear it over the whole picture. Off (default): the blur stays. The Motion blur setting is not changed BB_UPSCALER_NO_BLUR, default: off. Applied when the game starts · Default: off | Leaves motion blur out at outputs other than 1080p | Same | — | Group: Game effects, under Motion blur as today (a fix of Hunter's Workshop's for upscalers). |
+| **Chromatic aberration** · Effects | Default: Off | Colour fringes toward the screen's edges | On in the original game; off here by default, for a clearer picture | — | In-game menu: Chromatic aberration. Group: Game effects. |
+| **Depth of field** · Effects | Default: On | Blur on what is out of focus | *Default: On* | — | In-game menu: Depth of field (DoF). Group: Game effects. |
+| **Motion blur** · Effects | Default: Off | Blur when the camera turns fast | On in the original game; off here by default, for a clearer picture. Costs GPU time | — | In-game menu: Motion blur. Group: Game effects. |
+| **No motion blur smear with upscalers** · Effects | Line: With an upscaler at an output other than 1920x1080 the game's… · Tooltip: With an upscaler at an output other than 1920x1080 the game's motion blur is left out: the upscaler would smear it over the whole picture. Off (default): the blur stays. The Motion blur setting is not changed BB_UPSCALER_NO_BLUR, default: off. Applied when the game starts · Default: off | Leaves out motion blur an upscaler would smear | Same | — | Group: Game effects, under Motion blur as today (a fix of Hunter's Workshop's for upscalers). |
 
 ## Interface
 
 | Setting | Today | Proposed line | Proposed tooltip | Proposed choices | Notes |
 | --- | --- | --- | --- | --- | --- |
-| **In-game menu shortcut** · Menus and HUD | Line: What opens the port's settings menu while playing. · Tooltip: What opens the port's settings menu while playing. Applied on the next launch · Choices: Off (The menu never opens; settings stay in the launcher and the game's PC menus); Insert only (Pressing both sticks in a fight no longer opens it); Insert or L3 + R3 (The keyboard's Insert key, or both sticks pressed on a controller) · Default: Insert or L3 + R3 | What opens the in-game overlay menu | What opens the in-game overlay menu while playing. Applied on the next launch + *Default: Insert or L3 + R3* | Off first: Off; Insert only; Insert or L3 + R3 (notes as today) | Tooltip corrected. "The port's settings menu" becomes "the in-game overlay menu" (your term). |
+| **In-game menu shortcut** · Menus and HUD | Line: What opens the port's settings menu while playing. · Tooltip: What opens the port's settings menu while playing. Applied on the next launch · Choices: Off (The menu never opens; settings stay in the launcher and the game's PC menus); Insert only (Pressing both sticks in a fight no longer opens it); Insert or L3 + R3 (The keyboard's Insert key, or both sticks pressed on a controller) · Default: Insert or L3 + R3 | What opens the in-game overlay menu | What opens the in-game overlay menu while playing. Applied on the next launch + *Default: Insert or L3 + R3* | Off first: Off; Insert only; Insert or L3 + R3 (notes as today) | Tooltip corrected. "The port's settings menu" becomes "the in-game overlay menu" (the tester's term). |
 | **In-game menu language** · Menus and HUD | Line: The port's settings menu (Insert or L3 + R3) · Tooltip: same text · Choices: 简体中文; English; Español; Português (Brasil); Français; Deutsch; Italiano; Polski; Türkçe; Русский · Default: English | The in-game overlay menu's language | None: the line says it all + *Default: English* | Same |  |
 | **Sharp UI** · Menus and HUD | Line: Menus, HUD and text drawn at the output resolution instead of… · Tooltip: Menus, HUD and text drawn at the output resolution instead of 1080p stretched up: much sharper at 1440p and 4K. New: on by default in betas while it is tested. Applied on the next launch · Default: On in betas, off in stable releases | Menus, HUD and text drawn at the output resolution | Same | — |  |
 | **Note while shaders build** · Menus and HUD | Line: "Building shaders" in a corner while the game builds shaders for… · Tooltip: "Building shaders" in a corner while the game builds shaders for a place it shows for the first time. Also in game: Insert or L3 + R3 · Default: On | Shows "Building shaders" while new shaders compile | Same + *Default: On* | — | In-game menu: Note while shaders build. |
@@ -140,13 +167,13 @@ Proposed: the Detail and Effects groups become two groups by where each setting 
 | **Free camera** · Extras | Line: Toggle with Cross + L3 / Space + Z · Tooltip: same text · Default: Off | Same | Same + *Default: Off* | — |  |
 | **Debug menu** · Extras | Line: Left touchpad / Tab. Needs the adhoc folder from Nexus mod #253… · Tooltip: Left touchpad / Tab. Needs the adhoc folder from Nexus mod #253 (adhoc/font) in the game's dvdroot_ps4 or as a mod; without it the patch is not applied · Default: Off | The game's developer menu (Left touchpad / Tab) | Same + *Default: Off* | — |  |
 | **Hunter's Dream mirror** · Extras | Line: The Dream's mirror opens the appearance editor (the game's… · Tooltip: The Dream's mirror opens the appearance editor (the game's unused "Put on Disguise"). Applied when the game starts | The Dream's mirror opens the appearance editor | Same | — |  |
-| **Rebirth at the altar** · Extras | Line: With the Yharnam Stone, the Altar of Despair resets your level… · Tooltip: With the Yharnam Stone, the Altar of Despair resets your level and attributes. Applied when the game starts | Reset your level and attributes at the Altar of Despair | Same | — | The line you approved. |
+| **Rebirth at the altar** · Extras | Line: With the Yharnam Stone, the Altar of Despair resets your level… · Tooltip: With the Yharnam Stone, the Altar of Despair resets your level and attributes. Applied when the game starts | Reset your level and attributes at the Altar of Despair | Same | — | The tester's line. |
 
 ## Controls
 
 | Setting | Today | Proposed line | Proposed tooltip | Proposed choices | Notes |
 | --- | --- | --- | --- | --- | --- |
-| **PC controls** · Keyboard & mouse | Line: The keyboard and mouse layout below… · Tooltip: The keyboard and mouse layout below; off keeps the gamepad-style keys · Default: On | Use the keyboard and mouse layout below | Same + *Default: On* | — | The line you approved. |
+| **PC controls** · Keyboard & mouse | Line: The keyboard and mouse layout below… · Tooltip: The keyboard and mouse layout below; off keeps the gamepad-style keys · Default: On | Use the keyboard and mouse layout below | Same + *Default: On* | — | The tester's line. |
 | **Mouse camera** · Keyboard & mouse | Line: The mouse turns the game's own camera by raw counts, at any… · Tooltip: The mouse turns the game's own camera by raw counts, at any frame rate · Default: On | The mouse turns the game's camera by raw counts | Same + *Default: On* | — |  |
 | **Mouse in menus** · Keyboard & mouse | Line: The mouse becomes a pointer in the game's menus… · Tooltip: The mouse becomes a pointer in the game's menus: hover and click items · Default: On | The mouse becomes a pointer in the game's menus | Same + *Default: On* | — |  |
 | **Move and look in menus** · Keyboard & mouse | Line: With a menu open in the world, the movement and look keys stay… · Tooltip: With a menu open in the world, the movement and look keys stay your character's and the arrow keys move through the menu. The mouse turns the camera while Mouse in menus is off. Whether the character can walk then is up to the game. Applied at the next start · Default: Off | Keep moving and looking with a menu open | Same + *Default: Off* | — |  |
@@ -168,14 +195,16 @@ Proposed: the Detail and Effects groups become two groups by where each setting 
 
 ## Engine switches
 
+Rows with a BB_ name already end their tooltip with "BB_X, default: …. Applied when the game starts"; that stays. Decided here: Unified frame time joins Frame rate corrections (it only works with them on), Fixed-refresh frame lock greys while Precise frame pacing is off, No shader freezes becomes Reduce shader stalls, and Changed switches also lists what Extra variables override (Changes outside the texts).
+
 | Setting | Today | Proposed line | Proposed tooltip | Proposed choices | Notes |
 | --- | --- | --- | --- | --- | --- |
-| **Changed switches** | Line: Every switch on this page that is not at its default · Tooltip: same text | Same | Same | — |  |
+| **Changed switches** | Line: Every switch on this page that is not at its default · Tooltip: same text | Same | Same | — | Will also list what Extra variables override, at a default or not (Changes outside the texts). |
 | **Extra variables** | Line: NAME=value pairs separated by spaces, passed to the game. · Tooltip: NAME=value pairs separated by spaces, passed to the game. For anything this page doesn't list; a variable set here wins over its switch | NAME=value pairs passed to the game | Same | — |  |
 | **Legacy shader compiler** · Experimental engine features | Line: Off by default: the native compiler reads constant data through… · Tooltip: Off by default: the native compiler reads constant data through the GPU's constant cache. On compiles the game's shaders the way 0.9.33 did: try it if something draws wrong. Switching recompiles every shader once · Default: Off | Compiles shaders the old way, if something draws wrong | Off by default: the native compiler reads constant data through the GPU's constant cache. On compiles the game's shaders the way earlier versions did: try it if something draws wrong. Switching recompiles every shader once | — | Tooltip corrected. "The way 0.9.33 did" becomes "the way earlier versions did". |
 | **VRAM cleanup** · Experimental engine features | Line: Frees video memory held by textures the GPU drew, so long… · Tooltip: Frees video memory held by textures the GPU drew, so long sessions don't fill up VRAM and slow down. Recommended: on · Default: On | Frees VRAM held by textures the GPU drew | Same + *Default: On* | — | "Recommended: on" stays. |
 | **Precise frame pacing** · Experimental engine features | Line: A high-resolution timer and even spacing between frames… · Tooltip: A high-resolution timer and even spacing between frames: steadier frame times and less VRR flicker. Uses a little CPU. On by default · Default: On | Steadier frame times and less VRR flicker | Same | — |  |
-| **Fixed-refresh frame lock** · Experimental engine features | Line: Only for monitors without G-Sync or FreeSync (VRR). · Tooltip: Only for monitors without G-Sync or FreeSync (VRR). Each frame is shown right after one of the monitor's refreshes when the FPS limit divides its refresh rate (60 FPS on 60, 120 or 240 Hz). Needs Precise frame pacing. With G-Sync or FreeSync it stutters: leave it off. Off by default · Default: Off | Same | Same | — |  |
+| **Fixed-refresh frame lock** · Experimental engine features | Line: Only for monitors without G-Sync or FreeSync (VRR). · Tooltip: Only for monitors without G-Sync or FreeSync (VRR). Each frame is shown right after one of the monitor's refreshes when the FPS limit divides its refresh rate (60 FPS on 60, 120 or 240 Hz). Needs Precise frame pacing. With G-Sync or FreeSync it stutters: leave it off. Off by default · Default: Off | Same | Same | — | Greyed while Precise frame pacing is off (the tester's call); its own value is kept. |
 | **Particle work safety cap** · Experimental engine features | Line: Checks the size of the game's GPU particle work before the… · Tooltip: Checks the size of the game's GPU particle work before the graphics card runs it, and caps it to what the card supports. Only for games that crash with "device lost" in effect-heavy scenes. It costs smoothness in busy scenes. Off by default · Default: Off | Against "device lost" crashes in effect-heavy scenes | Checks the size of the game's GPU particle work before the graphics card runs it, and caps it to what the card supports. Only if the game crashes with "device lost" in effect-heavy scenes. It costs smoothness in busy scenes. Off by default | — | Tooltip corrected. "Only for games that crash" becomes "Only if the game crashes". |
 | **Use more VRAM for textures** · Experimental engine features | Line: Keeps textures in video memory up to 80% of the card instead of… · Tooltip: Keeps textures in video memory up to 80% of the card instead of about 40%, so they aren't thrown out and loaded again (the cause of most stutters on 8 GB cards) · Default: On | Up to 80% of VRAM for textures, against stutter | Same + *Default: On* | — |  |
 | **Graphics threads first** · Experimental engine features | Line: Runs the engine's graphics threads at a higher CPU priority than… · Tooltip: Runs the engine's graphics threads at a higher CPU priority than the game's other threads, so a frame isn't held up behind them. On by default · Default: On | Graphics threads at a higher CPU priority | Same | — |  |
@@ -183,10 +212,10 @@ Proposed: the Detail and Effects groups become two groups by where each setting 
 | **Background shader compiling** · Experimental engine features | Line: New shaders compile on helper threads instead of freezing the… · Tooltip: New shaders compile on helper threads instead of freezing the frame: much shorter hitches when you reach a new area. On by default · Default: On | Much shorter hitches when you reach a new area | Same | — |  |
 | **Occlusion culling** · Experimental engine features | Line: Off by default. The game skips objects hidden behind walls… · Tooltip: Off by default. The game skips objects hidden behind walls: higher FPS in dense areas, but objects and floors can appear late or flicker · Default: Off | Skips objects hidden behind walls: more FPS, some pop-in | Same | — |  |
 | **Faster draw thread** · Experimental engine features | Line: Remembers texture and sampler lookups and hands the end of each… · Tooltip: Remembers texture and sampler lookups and hands the end of each frame to the draw thread: higher FPS in busy areas. New: turn it off if the game hangs or crashes · Default: On | Higher FPS in busy areas | Same + *Default: On* | — |  |
-| **No shader freezes** · Experimental engine features | Line: While a new shader compiles, the objects that need it appear a… · Tooltip: While a new shader compiles, the objects that need it appear a moment later instead of the game freezing. New: turn it off if something stays missing · Default: On | New objects appear late instead of the game freezing | Same + *Default: On* | — |  |
+| **Reduce shader stalls** (was No shader freezes) · Experimental engine features | Line: While a new shader compiles, the objects that need it appear a… · Tooltip: While a new shader compiles, the objects that need it appear a moment later instead of the game freezing. New: turn it off if something stays missing · Default: On | Some objects appear late while new shaders compile | While a new shader compiles, the scene objects that need it are left out for up to a second instead of the game waiting, and the draw thread goes on with the rest of the frame. Shadow maps, half-resolution effects, post-processing and the UI still wait for it, so some waits remain. New: turn it off if something stays missing + *Default: On* | — | Tooltip corrected. "No shader freezes" promised more than it does (engine/docs/pipeline_compiles.md: only scene geometry is left out, for at most 1 s). Same setting and stored key. |
 | **Fast loading** · Experimental engine features | Line: Above 60 FPS, loading screens run at 60 so more of the CPU goes… · Tooltip: Above 60 FPS, loading screens run at 60 so more of the CPU goes to the loading itself. Does nothing at 30 or 60 FPS, or before a cutscene. On by default · Default: On | Faster loading screens above 60 FPS | Same | — |  |
-| **Frame rate corrections** · Experimental engine features | Line: At 60 FPS and above, ragdolls, physics, cloth, jumps, slopes… · Tooltip: At 60 FPS and above, ragdolls, physics, cloth, jumps, slopes, sprinting, attack sounds, online movement and timers follow the real frame time, and the timings the FPS++ patches halved or doubled (menu repeat, hit lifetimes, online timers) are the game's own again. Off: the older FPS++ patches above 60. On by default · Default: On | Physics, cloth and timers right at 60 FPS and above | Same | — |  |
-| **Unified frame time** · Experimental engine features | Line: Needs Frame rate corrections. · Tooltip: Needs Frame rate corrections. The game and every correction use one frame time, the frame's own, in the same frame, instead of the corrections following a smoothed copy one frame late: after a stutter, ragdolls, physics, jumps, timers and the camera's easing catch up at once rather than over 10 to 15 frames. On by default · Default: On | Catches up at once after a stutter | Same | — |  |
+| **Frame rate corrections** · Experimental engine features | Line: At 60 FPS and above, ragdolls, physics, cloth, jumps, slopes… · Tooltip: At 60 FPS and above, ragdolls, physics, cloth, jumps, slopes, sprinting, attack sounds, online movement and timers follow the real frame time, and the timings the FPS++ patches halved or doubled (menu repeat, hit lifetimes, online timers) are the game's own again. Off: the older FPS++ patches above 60. On by default · Default: On | Physics, cloth, timers and camera right at 60 FPS and up | At 60 FPS and above, ragdolls, physics, cloth, jumps, slopes, sprinting, attack sounds, online movement, timers and the follow camera follow the real frame time: the frame's own, the same for the game and every correction, so after a stutter they catch up at once. The timings the FPS++ patches halved or doubled (menu repeat, hit lifetimes, online timers) are the game's own again. Off: the older FPS++ patches above 60. On by default | — | Tooltip corrected. Takes in Unified frame time (the tester's call): that half only works with the corrections on, and every log since 0.3.0 ran with it. |
+| **Unified frame time** · Experimental engine features | Line: Needs Frame rate corrections. · Tooltip: Needs Frame rate corrections. The game and every correction use one frame time, the frame's own, in the same frame, instead of the corrections following a smoothed copy one frame late: after a stutter, ragdolls, physics, jumps, timers and the camera's easing catch up at once rather than over 10 to 15 frames. On by default · Default: On | Row removed: Merged into Frame rate corrections | — | — | Its value goes (a player who turned it off gets it back on). For a test, BB_FRAME_FIXES_SKIP=timer,camera in Extra variables still runs the corrections on the old smoothed, one-frame-late copy. |
 | **Fewer memory write checks** · Experimental engine features | Line: Memory the game rewrites before almost every use is no longer… · Tooltip: Memory the game rewrites before almost every use is no longer watched for changes, saving up to about 2 ms a frame in busy areas. On by default · Default: On | Up to about 2 ms less a frame in busy areas | Same | — |  |
 | **Per-frame GPU data in place** · Experimental engine features | Line: The memory the game rewrites for the GPU every frame (288 MiB)… · Tooltip: The memory the game rewrites for the GPU every frame (288 MiB) is read by the GPU where the game writes it, as a PC game's upload heap: no write faults or uploads for it, and less CPU and GPU time a frame. On by default. Off: watched and copied as before 0.4.4, should something look wrong · Default: On | Less CPU and GPU time a frame | Same | — |  |
 | **Native draw calls** · Experimental engine features | Line: The game's draw calls reach the engine directly instead of as… · Tooltip: The game's draw calls reach the engine directly instead of as console GPU commands it decodes again. On by default; turn it off if something stops drawing · Default: On | Draw calls reach the engine directly | Same | — |  |
@@ -200,16 +229,18 @@ Proposed: the Detail and Effects groups become two groups by where each setting 
 | **Sound output** · Sound | Line: If the sound jitters or crackles, try DirectSound. · Tooltip: If the sound jitters or crackles, try DirectSound. The larger buffer is steadier but the sound comes a little later · Choices: WASAPI (Default); DirectSound; DirectSound, larger buffer · Default: WASAPI | Same | Same + *Default: WASAPI* | Same |  |
 | **Sound threads first** · Sound | Line: For CPUs with many slower cores (older Xeons and similar)… · Tooltip: For CPUs with many slower cores (older Xeons and similar): the game's sound runs before its other threads, against late or stuttering sound. Off by default · Default: Off | Against late or stuttering sound on many-core CPUs | Same | — |  |
 | **Run without sound** · Sound | Line: Starts without any sound device (silent). · Tooltip: Starts without any sound device (silent). Only for finding out whether a sound driver is what keeps the game from starting or hangs it BB_AUDIO, default: off. Applied when the game starts · Default: off | Same | Same | — |  |
-| **No minimum loading time after death** · Game fixes | Line: Skips the game's 12-second minimum loading screen after dying. · Tooltip: Skips the game's 12-second minimum loading screen after dying. Off: the original delay BB_RESPAWN_DELAY_FIX, default: on. Applied when the game starts · Default: on | Skips the 12-second loading screen after dying | Same | — |  |
+| **No minimum loading time after death** · Game fixes | Line: Skips the game's 12-second minimum loading screen after dying. · Tooltip: Skips the game's 12-second minimum loading screen after dying. Off: the original delay BB_RESPAWN_DELAY_FIX, default: on. Applied when the game starts · Default: on | Removes the 12-second minimum wait after dying | Same | — | Loading still takes what it takes: only the minimum goes (engine/src/respawn_patch.h). |
 | **Weapon sound save fix** · Game fixes | Line: Sets the flag in the game's save that some weapon and player… · Tooltip: Sets the flag in the game's save that some weapon and player sounds need (without it they never play), before the game reads the save. Off leaves saves untouched BB_SOUND_HACK, default: on. Applied when the game starts · Default: on | Fixes weapon sounds that never play | Same | — |  |
 | **OptiScaler compatibility** · Game fixes | Line: Only when OptiScaler is installed… · Tooltip: Only when OptiScaler is installed: DLSS calls wait for the GPU queue, and one thread sends the GPU work while its frame generation is on, so OptiScaler's hooks don't crash. Costs a little FPS with its frame generation. Off: the engine runs as without OptiScaler BB_OPTISCALER_COMPAT, default: on. Applied when the game starts · Default: on | Keeps OptiScaler's hooks from crashing the game | Same | — |  |
 | **Ebrietas effect fix** · Game fixes | Line: Replaces Ebrietas' trail effect with the one Nexus mod 41 uses… · Tooltip: Replaces Ebrietas' trail effect with the one Nexus mod 41 uses, made from your own game files: her rock attacks no longer pile up thousands of rocks (FPS falling from 90 to 40, crashes before beta 8). Off: the game's own effect. A mod that changes these effect files wins BB_EFFECT_FIXES, default: on. Applied when the game starts · Default: on | Stops her rock attacks from piling up rocks | Replaces Ebrietas' trail effect with the one Nexus mod 41 uses, made from your own game files: her rock attacks no longer pile up thousands of rocks (FPS falling from 90 to 40). Off: the game's own effect. A mod that changes these effect files wins | — | Tooltip corrected. "Crashes before beta 8" goes. |
 | **PS4 floating-point mode** · Game fixes | Line: The game's threads handle very small numbers as a PS4 does… · Tooltip: The game's threads handle very small numbers as a PS4 does, rounding them to zero, instead of as Windows does. Physics and cloth then behave as on the console: with Windows' way, some of Cainhurst's ghosts lose the lower half of their dresses. Off: Windows' way, as before 0.4.2 BB_PS4_FPU, default: on. Applied when the game starts · Default: on | Physics and cloth as on the PS4 | Same | — |  |
 | **Intel effect crash fix (test)** · Game fixes | Line: For crashes in effects on Intel 12th-14th gen CPUs (Ebrietas… · Tooltip: For crashes in effects on Intel 12th-14th gen CPUs (Ebrietas, Witch of Hemwick, One Reborn, the Cainhurst cutscene): the two effect ribbon writers keep their data where Windows can't overwrite it. Every effect stays drawn. Turn off the Effect trail crash fix with it, and post your log either way BB_RED_ZONE_FUNCTIONS, default: off. Applied when the game starts · Default: off | For effect crashes on Intel 12th-14th gen CPUs | Same | — |  |
 | **Intel black tonemap fix** · Game fixes | Line: Adds the Intel Black Tonemap Fix patch… · Tooltip: Adds the Intel Black Tonemap Fix patch: for Intel CPUs where the picture turns black or far too dark (the DLC areas most) BB_INTEL_TONEMAP_FIX, default: off. Applied when the game starts · Default: off | For a black or very dark picture on Intel CPUs | Same | — |  |
-| **Allow other game versions** (was Skip the game files check) · Game fixes | Line: Starts with game files that are not the supported version (base… · Tooltip: Starts with game files that are not the supported version (base game plus the 1.09 update). Other editions may crash, and the engine's patches and PC menus may not apply BB_SKIP_GAME_CHECK, default: off. Applied when the game starts · Default: off | Starts game versions other than 1.09; 1.09 works best | Same | — | Your ask: a better name, noting that 1.09 is best. |
+| **Allow other game versions** (was Skip the game files check) · Game fixes | Line: Starts with game files that are not the supported version (base… · Tooltip: Starts with game files that are not the supported version (base game plus the 1.09 update). Other editions may crash, and the engine's patches and PC menus may not apply BB_SKIP_GAME_CHECK, default: off. Applied when the game starts · Default: off | Starts game versions other than 1.09; 1.09 works best | Same | — | The tester asked for a clearer name that says 1.09 works best. |
 
 ## Log
+
+One Log options fold holds the log level and every diagnostic again (the tester's call, already applied). The BB_ names stay first in each tooltip, as today; these texts are translated in zh-CN only.
 
 | Setting | Today | Proposed line | Proposed tooltip | Proposed choices | Notes |
 | --- | --- | --- | --- | --- | --- |
@@ -248,8 +279,8 @@ Proposed: the Detail and Effects groups become two groups by where each setting 
 | **Launcher settings** · Files | Line: the file's path · Tooltip: same text | Same | Same | — | The line is the file's path. |
 | **Game settings (config.ini)** · Files | Line: the file's path · Tooltip: same text | Same | Same | — | The line is the file's path. |
 | **Shader cache** · Files | Line: The game's compiled shaders, kept between starts (a new engine… · Tooltip: The game's compiled shaders, kept between starts (a new engine version clears them itself). Clear them if something draws wrong in every save, such as missing skin or hair; the next start compiles them again and stutters for a while | The game's compiled shaders, kept between starts | Same | — |  |
-| **Shader catalog** · Files | Line: Save your shaders as a catalog file, or add someone else's… · Tooltip: Save your shaders as a catalog file, or add someone else's: areas they have played don't pop in or stutter for you. It works with the same kind of graphics card; a catalog adds to your shaders, it never replaces them | Share shaders so areas don't stutter the first time | Same | — |  |
-| **Share your settings** · Share settings | Line: Graphics, effects, camera, controls, cheats and engine options… · Tooltip: Graphics, effects, camera, controls, cheats and engine options, as a code to paste in Discord or a file. Not included: display and HDR, the online account, folders and languages | Your settings as a code for Discord, or a file | Same | — |  |
+| **Shader catalog** · Files | Line: Save your shaders as a catalog file, or add someone else's… · Tooltip: Save your shaders as a catalog file, or add someone else's: areas they have played don't pop in or stutter for you. It works with the same kind of graphics card; a catalog adds to your shaders, it never replaces them | Shares shader catalogs to reduce first-visit stutter | Save your shaders as a catalog file, or add someone else's: areas they have played need fewer new shaders the first time, so less pop-in and stutter. It works with the same kind of graphics card; a catalog adds to your shaders, it never replaces them | — | Tooltip corrected. Today's "areas they have played don't pop in or stutter for you" promises too much: a catalog covers only the shaders it holds. |
+| **Share your settings** · Share settings | Line: Graphics, effects, camera, controls, cheats and engine options… · Tooltip: Graphics, effects, camera, controls, cheats and engine options, as a code to paste in Discord or a file. Not included: display and HDR, the online account, folders and languages | Your settings as a code for Discord, or a file | Everything that sets how the game looks, runs and plays, as a code to paste in Discord or a file. Not included: what belongs to this PC (folders, monitor, output resolution, window mode, HDR, graphics card, sound device, preferred controller, and fixes or tuning for its hardware), to you (the online account, languages, profiles, the launcher's look, trophy notifications) or to one session (log options, Extra variables) | — | Tooltip corrected. Today's text is wrong both ways: it says display settings stay out, but frame rate, V-Sync, widescreen and live resolution go in; DLSS model, texture mip bias, texture filtering and most engine switches stay out. With the sharing change (the tester's call: everything but the list). |
 | **Import settings** · Share settings | Line: Someone's code or file. · Tooltip: Someone's code or file. You see what changes before anything is applied | Same | Same | — |  |
 | **Launcher updates** · Updates | — | — | — | — |  |
 | **Update channel** · Updates | Line: Stable: releases that have been tested. · Tooltip: Stable: releases that have been tested. Beta: every change as soon as it is done, before it is tested · Choices: Stable; Beta | Same | Same | Same |  |
@@ -266,7 +297,7 @@ Proposed: the Detail and Effects groups become two groups by where each setting 
 | **Website** · The Hunter's Dream | Line: Players online, the map and your hunter's profile · Tooltip: same text | Same | Same | — |  |
 | **Local P2P port** · Connection | Line: Empty: 3658, the PS4's · Tooltip: same text | The port co-op connects through | Same | — |  |
 | **Summon sign timeout** · Connection | Line: How long a sign you touched waits for its host before giving up · Tooltip: same text · Choices: 30 seconds (default); 60 seconds; The game's own (180 seconds) · Default: 30 seconds (default) | How long a touched sign waits for its host | Same | Same |  |
-| **Test the connection** · Connection | Line: Checks The Hunter's Dream… · Tooltip: Checks The Hunter's Dream: game server, co-op sessions and the relay summons use | Checks the game server, co-op and the summon relay | Same | — |  |
+| **Test the connection** · Connection | Line: Checks The Hunter's Dream… · Tooltip: Checks The Hunter's Dream: game server, co-op sessions and the relay summons use | Checks that the game server and summon relay answer | Same | — | A check that they answer, not a test summon. |
 
 ## Mods & patches
 
@@ -281,7 +312,9 @@ Proposed: the Detail and Effects groups become two groups by where each setting 
 | Setting | Today | Proposed line | Proposed tooltip | Proposed choices | Notes |
 | --- | --- | --- | --- | --- | --- |
 | **Blood Vials** · Items | Choices: Off; Infinite (Kept full at the normal carry limit, even if you have none. Items put into storage while it is on come back); Custom amount (Refilled to the amount below whenever it drops) | Infinite, or kept at a set amount | — | Same | In-game menu: Blood Vials. |
+| **Amount** · Items | Line: How many Blood Vials to keep · Tooltip: same text | Same | Same | — | Under its item, shown only for Custom amount. |
 | **Quicksilver Bullets** · Items | Choices: Off; Infinite (Kept full at the normal carry limit, even if you have none. Items put into storage while it is on come back); Custom amount (Refilled to the amount below whenever it drops) | Infinite, or kept at a set amount | — | Same | In-game menu: Quicksilver Bullets. |
+| **Amount** · Items | Line: How many Quicksilver Bullets to keep · Tooltip: same text | Same | Same | — | Under its item, shown only for Custom amount. |
 | **Infinite consumables** · Items | Line: Molotovs, throwing knives, pebbles, antidotes, papers and the… · Tooltip: Molotovs, throwing knives, pebbles, antidotes, papers and the like are not used up (not Blood Vials or Bullets, which are above, and not insight items) | Molotovs, knives, pebbles and the like aren't used up | Same | — | In-game menu: Infinite consumables. |
 | **Infinite stamina** · Character | Line: Your stamina stays full · Tooltip: same text | Same | Same | — | In-game menu: Infinite stamina. |
 | **Stealth** · Character | Line: Enemies don't notice you and your steps make no noise · Tooltip: same text | Same | Same | — | In-game menu: Stealth. |
@@ -290,7 +323,6 @@ Proposed: the Detail and Effects groups become two groups by where each setting 
 | **Keep Blood Echoes on death** · Blood Echoes | Line: Dying never drops your Blood Echoes, so there is nothing to pick… · Tooltip: Dying never drops your Blood Echoes, so there is nothing to pick back up | Dying never drops your Blood Echoes | Same | — | In-game menu: Keep Blood Echoes on death. |
 | **Blood Echo multiplier** · Blood Echoes | Line: Enemies already loaded give the new amount after you rest at a… · Tooltip: Enemies already loaded give the new amount after you rest at a lamp or reload · Choices: Normal; x2; x5; x10 · Default: Normal | More Blood Echoes from each enemy | Same + *Default: Normal* | Same | In-game menu: Blood Echo multiplier. |
 | **Add echoes or insight** · Blood Echoes | Line: In the in-game menu (Insert or L3 + R3)… · Tooltip: In the in-game menu (Insert or L3 + R3): +1,000, +10,000, +100,000 echoes and +1 insight | From the in-game overlay menu (Insert or L3 + R3) | Same | — |  |
-| **Amount** · Blood Echoes | Line: How many Blood Vials (or Quicksilver Bullets) to keep · Tooltip: same text | Same | Same | — |  |
 
 ## Trophies
 
@@ -305,32 +337,118 @@ Proposed: the Detail and Effects groups become two groups by where each setting 
 | **Trophy log** · Trophy data | — | — | — | — |  |
 | **Reset trophy progress** · Trophy data | Line: Starts trophies and completion over, for a fresh run. · Tooltip: Starts trophies and completion over, for a fresh run. The old log is kept as a backup | Same | Same | — |  |
 
+## Changes outside the texts
+
+What the launcher does changes in these, not only what it says. Each comes with the check that shows it works.
+
+1. **Suggested settings read the game's monitor.** Today `Hardware.Probe` reads the primary display's mode
+   (`EnumDisplaySettings(null, …)`), once per launcher run, and both the suggestion (`Hardware.Recommend`:
+   output resolution and frame rate) and the V-Sync note on Display ("The game waits for your 60 Hz display")
+   use it, whatever monitor Display › Monitor names. Change: read the mode of the monitor in `display_device`,
+   resolved as the game's start resolves it (`WindowsMonitors.Resolve`: the chosen one, else the primary),
+   each time it is needed; the summary names that monitor. Check: two monitors with different resolutions and
+   refresh rates; pick each in turn, then Suggest… and the V-Sync note follow it; with the chosen monitor
+   unplugged, the primary is used and named.
+2. **Changed switches lists what Extra variables override.** Today `EnginePage.ShowChanged` names an Extra
+   variable only when it sets a switch that is already changed: a switch at its default, or an experimental
+   feature (`BB_NATIVE_CALLS=0` with Native draw calls on), goes unmentioned, and the row can still say "None:
+   the engine runs with its own defaults". Change: every Extra variable that sets a switch or a feature's
+   variable on this page is listed, at its default or not; "None…" only when nothing is changed or set there.
+   Reset all keeps leaving Extra variables alone, as today. Check: `BB_NATIVE_CALLS=0` with Native draw calls
+   on is listed; an unrelated variable is not.
+3. **Unified frame time joins Frame rate corrections.** Its row and `exp_frame_timer` go
+   (`EnginePage`, `GameEnvironment`, `LauncherSettings`); the frame timer follows Frame rate corrections. A
+   player who had turned it off gets it back on. The engine is unchanged: `BB_FRAME_FIXES_SKIP=timer,camera` in
+   Extra variables still runs the corrections on the old smoothed, one-frame-late copy for a test.
+4. **Fixed-refresh frame lock greys while Precise frame pacing is off,** as Graphics' child rows do; its
+   value is kept and comes back with Precise frame pacing.
+5. **Share your settings shares everything except a list.** Today `SharedSettings` lists what goes in, so
+   every new setting is left out until someone adds it (DLSS model, texture mip bias, texture filtering, the
+   FPS counter's look and most engine switches are out; frame rate, V-Sync, widescreen and live resolution
+   are in, though the tooltip says display settings are out). Change: everything in config.ini and the
+   launcher's settings goes in except what belongs to this PC (folders and files, monitor, output resolution,
+   window mode, HDR, graphics card, sound device, preferred controller, the Intel CPU fixes and the effect
+   trail fix, and what is tuned to this PC's monitor, disk or processor: fixed-refresh frame lock, area
+   prefetch, shader compile threads, sound threads first), to the player (online account, languages,
+   profiles, the launcher's look, trophy notifications) or to one session (log options, Extra variables,
+   setup flags). Older codes still import; the import preview lists every change before it applies. Check: a
+   code from one PC imported on another changes no folder, monitor or language, and brings DLSS model and
+   texture filtering.
+6. **Graphics' groups:** `GraphicsPage`'s two effect sets become Game effects and Enhancements, with the
+   captions above; the in-game overlay menu's "Game effects (restart required)" section loses model detail
+   and screen-space reflections to a new "Enhancements (restart required)" section (its 8 language tables
+   gain the name).
+7. **In-game overlay menu names:** Quality becomes Upscaling quality and Sharpness becomes Sharpening
+   strength (8 language tables).
+8. **The default line** comes from each setting's own default in the row code, not from reading its text;
+   rows whose tooltip already says "On by default" carry a flag that leaves it out.
+
+## Outside review
+
+An outside review of the fourth draft (2026-11-02, at commit `434d381`) checked it against the code.
+
+**Taken:**
+- Five texts that promised too much: the respawn fix (it removes a 12-second minimum, loading still takes
+  what it takes), No shader freezes (only scene geometry is left out, for at most a second;
+  `engine/docs/pipeline_compiles.md`), the shader catalog (a catalog covers only the shaders it holds), Share
+  your settings (its included and excluded lists were both wrong), Test the connection (it checks that the
+  server and relay answer, not a summon).
+- Two old menu names kept as "Same": Live resolution change ("the game menu") and Picture tuning ("the
+  Insert menu").
+- Frame rate's notes said extra frames above the display's rate are never shown, which V-Sync On (every
+  frame) and Adaptive contradict; the sentence moves to the tooltip, where it depends on V-Sync.
+- Output resolution said the upscaler always renders below it; Native AA renders at it.
+- The Enhancements caption covers lower detail too (Model detail's Lower and Lowest).
+- The Suggested settings rename; the two bugs and the dependency handling in "Changes outside the texts".
+- 60 characters as an English target, with translated lines wrapping; Off or None first only where it is a
+  choice; the default line from the setting, not from its text.
+- A strict check that every text this step changes exists in all 13 launcher languages (the key check today
+  requires zh-CN only).
+
+**Not taken, and why:**
+- A settings framework (one record per setting with timing, applicability and a resolved
+  selected/next-launch/running state, and a running-state inspector): beyond a cleanup beta. The status bar
+  already says game settings apply at the game's next start; a running state needs the engine to report it.
+- Per-row "applies when" badges and symptom-based diagnostic presets: the status bar and the Log options fold
+  cover them for now.
+- A detected DLC state, a reported HDR peak readout and a list of connected controllers: useful, but not text
+  fixes; later.
+- Frame rate's line "The frame-rate limit the game aims to run at": the tester's line stays.
+- Cheats "Amount" under Blood Echoes: not a launcher fault. The launcher shows one Amount under each item, for
+  Custom amount only; the review's table had placed it wrong (fixed here).
+- A 14-case acceptance matrix and an accessibility audit: each change above carries its own check; keyboard
+  access to tooltips can be looked at with the Linux launcher work.
+
 ## Also found
 
-- **The old start in Settings' texts:** the engine folder's hint ("out\bb-probe.exe, its scripts and
+- **The old start in Settings' texts.** The engine folder's hint ("out\bb-probe.exe, its scripts and
   Python"; "with bin\bb-probe.exe and run.py"), its folder picker ("with run.py and bin\bb-probe.exe"), its
   warning ("no run.py with Bloodborne.exe or bin\bb-probe.exe") and the Command row ("instead of
   Bloodborne.exe --run") describe Lantern's start. The launcher starts `engine\out\bb-start.exe`, which
-  starts bb-probe.exe. Proposed: "The engine that runs your game: engine\out\bb-start.exe. Your game files
-  stay where they are"; "Not found. It is normally the folder this launcher is in"; the picker and the
-  warning as the start's own check already says it ("That folder has no engine\out\bb-start.exe.", already
-  translated). `GameRunner`'s comment likewise.
+  starts bb-probe.exe (`Paths.IsPortDir`, `Paths.Start`). Proposed: "The engine that runs your game:
+  engine\out\bb-start.exe. Your game files stay where they are"; "Not found. It is normally the folder this
+  launcher is in"; the picker and the warning as the start's own check already says it ("That folder has no
+  engine\out\bb-start.exe.", already translated). `GameRunner`'s comment likewise.
 - **Capture shaders** (Log): its text is not translated (no `L.T`).
 - **A dead launcher setting:** `dlss_preset` in `LauncherSettings` (default "k"). The DLSS model row writes
   config.ini's `dlss_preset` (default Auto); nothing reads the launcher's.
-- **Stale comments:** `Choices.DlssModels` names `BB_DLSS_PRESET` (now config.ini's `dlss_preset`);
-  `Choices.Effects` says the game's own anti-aliasing starts off (on since this beta).
-- **Other names that differ in the in-game menu** (left as they are unless you want them matched): Camera
-  FOV/distance/height scale (launcher: Field of view, Distance, Height, under Camera tuning), Background
-  colour (FPS counter background), Live resolution changes (Live resolution change).
+- **Stale code comments:** `Choices.DlssModels` names `BB_DLSS_PRESET` (now config.ini's `dlss_preset`);
+  `Choices.Effects` says the game's own anti-aliasing starts off (on since beta 28).
+- **A setting changed in both places during one session:** the launcher holds its config.ini changes while
+  the game runs and writes them over the file when the game exits (`Workspace.SaveNow`,
+  `IniFile.Save`), so for the same setting the launcher's value wins over the in-game overlay menu's. No
+  change proposed; noted so it is not mistaken for a lost setting.
+- **Other names that differ in the in-game overlay menu,** left as they are: Camera FOV/distance/height
+  scale (launcher: Field of view, Distance, Height, under Camera tuning), Background colour (FPS counter
+  background), Live resolution changes (Live resolution change). The surrounding section gives each its
+  context.
 
-## What the step involves
+## What applying it involves
 
-- 122 new lines and 27 new or corrected tooltips, translated into the 13 languages; every other tooltip
-  keeps its text and translations.
-- The row code: the line apart from the tooltip (no more cutting at 64 characters), and the default line.
-- Eight lists reordered or reworded: V-Sync, Area prefetch, Texture filtering, Model detail, Background,
-  Background blur, In-game menu shortcut, and Frame rate's notes.
-- Two renames, and Quality and Sharpness renamed in the in-game menu (its 8 tables).
-- If agreed: Graphics' Game effects and Enhancements groups, in the launcher and the in-game overlay menu.
-- The fixes above. Both launchers built, the translation key check clean.
+- 122 new lines and 35 new or corrected tooltips, translated into the 13 launcher languages; every other
+  tooltip keeps its text and translations.
+- The row code: the line apart from the tooltip (no more cutting at 64 characters), the default line.
+- Eight lists reordered or reworded, four renames, one row removed (Unified frame time).
+- The changes outside the texts above, the Also found fixes, and the in-game overlay menu's names and
+  sections in its 8 language tables.
+- Both launchers built, the localization checks clean, the strict check for this step's texts passing.

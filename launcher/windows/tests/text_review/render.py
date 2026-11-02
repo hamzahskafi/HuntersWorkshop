@@ -74,9 +74,11 @@ def expand():
                 out.append(dict(page=pg, group=g, kind='switch', title=name, desc='Shown in the FPS counter', default_label=dflt))
             continue
         if t.startswith('‹') or t.startswith('{'): continue
-        if pg == 'Cheats' and t == 'Amount':
-            r['title'] = 'Amount'; r['desc'] = 'How many {title} to keep'
+        # The amount row sits under each item and shows for Custom amount (CheatsPage.ItemRow): one row each.
+        if pg == 'Cheats' and t == 'Amount': continue
         out.append(r)
+        if pg == 'Cheats' and r['kind'] == 'cheat':
+            out.append(dict(page=pg, group=g, kind='slider', title='Amount', desc=f"How many {t} to keep"))
     return out
 
 
@@ -149,6 +151,10 @@ for r in expand():
     if r.get('group'):
         setting += f" · {c(r['group']).replace('(fold)', '').strip() or 'Advanced'}"
     pl = p.get('line', '?')
+    if p.get('removed'):
+        pages.setdefault(r['page'], []).append(f"| {setting} | {today} | Row removed: {c(p['removed'])} | — | — | {c(p.get('note'))} |")
+        count['removed'] = count.get('removed', 0) + 1
+        continue
     if pl == KEEP: pl_txt = 'Same' if line_now else ('Same (set by the upscaler)' if extra else '?')
     elif pl is None: pl_txt = '—'
     else: pl_txt = c(pl); count['lines'] += 1
@@ -176,13 +182,23 @@ for k in P:
     if k not in seen: problems.append(('proposal for no row', k))
 
 # A proposal for a page as a whole, shown above its table.
-INTROS = {'Graphics': "Proposed: the Detail and Effects groups become two groups by where each setting comes from. "
-          "**Game effects**: what the game has and a switch leaves out (depth of field, motion blur with its upscaler fix, "
-          "chromatic aberration, ambient occlusion, shadows from dynamic lights); caption \"The game's own effects. Off "
-          "leaves one out; applied when the game starts\". **Enhancements**: past what the game does (texture filtering, "
-          "model detail, screen-space reflections); caption \"Not in the original game, or past what it does. Applied when "
-          "the game starts\". Today both groups say \"Patches to the game, applied when it starts\". The in-game overlay "
-          "menu's Game effects section would split the same way."}
+INTROS = {
+    'Graphics': "Decided: the Detail and Effects groups become two groups by where each setting comes from, in the launcher "
+                "and the in-game overlay menu. **Game effects**: what the game has and a switch leaves out (depth of field, "
+                "motion blur with its upscaler fix under it, chromatic aberration, ambient occlusion, shadows from dynamic "
+                "lights); caption \"The game's own effects. Off leaves one out; applied when the game starts\". "
+                "**Enhancements**: what goes past the game, or below it for weaker GPUs (texture filtering, model detail, "
+                "screen-space reflections); caption \"Model detail and texture filtering above or below the game's, and "
+                "reflections it doesn't have. Applied when the game starts\". Today both groups say \"Patches to the game, "
+                "applied when it starts\". Two effects are on in the original game and off here by default (chromatic "
+                "aberration, motion blur); their tooltips now say so.",
+    'Output': "One Log options fold holds the log level and every diagnostic again (the tester's call, already applied). "
+              "The BB_ names stay first in each tooltip, as today; these texts are translated in zh-CN only.",
+    'Engine': "Rows with a BB_ name already end their tooltip with \"BB_X, default: …. Applied when the game starts\"; that "
+              "stays. Decided here: Unified frame time joins Frame rate corrections (it only works with them on), Fixed-refresh "
+              "frame lock greys while Precise frame pacing is off, No shader freezes becomes Reduce shader stalls, and Changed "
+              "switches also lists what Extra variables override (Changes outside the texts).",
+}
 
 HEAD = "| Setting | Today | Proposed line | Proposed tooltip | Proposed choices | Notes |\n| --- | --- | --- | --- | --- | --- |\n"
 out = []

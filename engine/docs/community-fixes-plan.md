@@ -424,8 +424,14 @@ From the audit of 27c (four read-only audits, re-checked) and the tester's calls
   with its style guide, every row's text today and the proposal beside it; made from the code by
   `launcher/windows/tests/text_review` (extract.py, render.py, the proposals in proposals.py), so the step
   makes it again from the launcher as it is then, checks every fact against the engine, and the tester
-  goes through it before the texts change.
-  With it: zh-CN for every changed text, both launchers built, the translation key check clean.
+  goes through it before the texts change. Its fifth draft (2026-11-02) takes in an outside review of the
+  fourth (five overpromising texts, two old menu names, the frame-rate notes against V-Sync) and the
+  tester's decisions, and lists the changes outside the texts that come with it: suggested settings read the
+  game's monitor, Changed switches lists what Extra variables override, Unified frame time joins Frame rate
+  corrections, Fixed-refresh frame lock greys without Precise frame pacing, settings sharing takes everything
+  but what belongs to the PC, the player or one session, and Graphics' Game effects and Enhancements groups.
+  With it: the 13 launcher languages for every changed text (a strict check for them), both launchers built,
+  the translation key check clean.
 - **The Log page** (the tester, 2026-11-02): one Log options fold again, the log level first in it and the
   diagnostics after it (part 12 had put the log level above a Diagnostics fold).
 - **Then the version step:** 0.4.4-beta.28, engine id 64, release notes (their Defaults section: a new
