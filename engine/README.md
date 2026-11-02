@@ -52,7 +52,7 @@ The engine builds in [MSYS2](https://www.msys2.org)'s CLANG64 environment.
 2. Install the toolchain and libraries:
 
    ```sh
-   pacman -S --needed git mingw-w64-clang-x86_64-{clang,lld,libc++,cmake,ninja,pkgconf,python,sdl3,boost,fmt,glslang,spirv-cross,spirv-headers,vulkan-headers,vulkan-loader,vulkan-memory-allocator,xxhash,zydis,robin-map,ffmpeg,protobuf,nlohmann-json,openssl,miniupnpc,zlib,expat}
+   pacman -S --needed git mingw-w64-clang-x86_64-{clang,lld,libc++,cmake,ninja,pkgconf,python,sdl3,boost,fmt,glslang,spirv-cross,spirv-headers,vulkan-headers,vulkan-loader,vulkan-memory-allocator,xxhash,zydis,robin-map,ffmpeg,nlohmann-json,openssl,zlib,expat}
    ```
 
 3. In this folder, run `bash build.sh`. The programs land in `out/`: `bb-start.exe` (prepares the
@@ -123,12 +123,12 @@ Engine), which allows distribution under version 3, with GPL-3.0-or-later ports 
 and widescreen plates). Copyright in each part stays with its authors.
 
 Also in the engine, under their own licenses: [shadPS4](https://github.com/shadps4-emu/shadPS4)'s
-video core and shader recompiler (GPL-2.0-or-later), shadNet's client (`licenses/SHADNET-PORT.md`),
+video core and shader recompiler (GPL-2.0-or-later), shadPS4's HTTP and SSL libraries (`licenses/SHADPS4-NETWORK.md`),
 [sirit](https://github.com/shadps4-emu/sirit), [half](https://half.sourceforge.net/),
 the AMD FSR SDK's API headers (MIT; AMD's DLLs are loaded at run time under AMD's licence,
 `licenses/AMD-FSR-SDK.md`),
 [LibAtrac9](https://github.com/Thealexbarney/LibAtrac9) (MIT),
-[Dear ImGui](https://github.com/ocornut/imgui) (MIT), cpp-httplib (MIT), wepoll (BSD), and the
+[Dear ImGui](https://github.com/ocornut/imgui) (MIT), cpp-httplib (MIT), and the
 DejaVu and Lantern Menu SC fonts (the latter a Noto Sans SC subset, SIL OFL 1.1). VRAM cleanup and
 frame pacing were adapted from IFreemz's shadPS4 fork, and crash and controller fixes from
 AwesomeObserver, Supermedo and deadinside28.

@@ -369,7 +369,11 @@ behind its tabs, Visuals holding Display to Interface; the Linux launchers are u
 ## Good to know
 
 - **Online play is The Hunter's Dream's.** The shadNet path (a server and password typed in by hand)
-  went; such settings now start the game offline.
+  went; such settings now start the game offline. With it went shadPS4's sceNet, NetCtl and NP
+  libraries and the shadNet client, which nothing called any more: The Hunter's Dream's own
+  functions answer every network import the game has (its import list, and an online run with none
+  left unanswered), and offline the engine's own answers serve the game. shadPS4's HTTP and SSL
+  stay. Building the engine no longer needs protobuf (with Abseil) or miniupnpc.
 - **A Lantern 0.9.x folder updated in place is no longer supported** (`run.bat`, the Python start and
   the 0.9.x settings migrations went): install the Hunter's Workshop package instead.
 

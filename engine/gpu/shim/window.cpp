@@ -120,7 +120,10 @@ static void UpdateDisplayPeak(SDL_Window* window) {
     (void)window;
 #endif
     auto& settings = BbSettings::Get();
-    if (peak != settings.hdr_display_peak.exchange(peak, std::memory_order_relaxed) && peak > 0.0f) {
+    // Only with HDR output asked for: every display reports a peak, SDR ones too (0.4.4 beta 28: a
+    // 60 Hz SDR monitor's 270 nits read as HDR output in the log).
+    if (peak != settings.hdr_display_peak.exchange(peak, std::memory_order_relaxed) && peak > 0.0f &&
+        settings.startup_hdr) {
         std::printf("HDR output: the display reports a peak of %.0f nits%s\n", peak,
                     settings.hdr_peak_auto.load() ? " (used: peak from the display)" : "");
     }

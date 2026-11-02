@@ -32,7 +32,6 @@ void runtime_memory_set_gpu_hooks(void (*)(uintptr_t, uint64_t),
     void (*)(uintptr_t, uint64_t), void (*)(uintptr_t, uint64_t)) { std::abort(); }
 void runtime_thread_attach_host(const char*) {}
 int32_t runtime_thread_spawn(void**, void* (*)(void*), void*, uint64_t, const char*) { std::abort(); }
-int32_t runtime_thread_join_spawned(void*, void**) { std::abort(); }
 void runtime_memory_gpu_protect(uintptr_t, uint64_t, int, int) { std::abort(); }
 void runtime_restart() { std::abort(); }
 uint64_t runtime_process_time_counter() { return runtime_process_time_us() * 1000; }
@@ -61,10 +60,9 @@ void runtime_thread_census(uint64_t* made, uint64_t* finished, uint64_t* found, 
     *made = *finished = *found = *steps = 0;
 }
 uint64_t runtime_memory_regions() { return 0; }
-// The GPU library calls these from its freeze and hitch reports (bbport_freeze.cpp), the online glue
-// (bbnet_glue.cpp) and the key prompts (key_prompts.cpp); every test that links it needs them.
+// The GPU library calls these from its freeze and hitch reports (bbport_freeze.cpp) and the key
+// prompts (key_prompts.cpp); every test that links it needs them.
 void runtime_blocked_report(const char*) {}
-[[noreturn]] void runtime_thread_exit(void*) { std::abort(); }
 int runtime_pad_type(void) { return 0; }
 int runtime_pad_button(uint32_t, int) { return 0; }
 }

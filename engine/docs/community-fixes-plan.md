@@ -412,7 +412,9 @@ From the audit of 27c (four read-only audits, re-checked) and the tester's calls
   sharpness sliders' 0.5 fallback.
 - **Still to ask:** the crash diagnostics for the fixed 0x263b8e7 heap corruption (`bbport_free_check`,
   `heap_sites`, `write_log`, `windows_experiments`; recommended: remove); OptiScaler (one key); the old
-  shadNet online path and bbnet's NP modules the game never imports (checked first); the GPU-path tracers
+  shadNet online path and bbnet's NP modules the game never imports (checked first; done: the path in
+  part 7, then all of shadPS4's sceNet, NetCtl and NP libraries and the shadNet client, once the
+  game's import list and an online run, 2026-11-02, showed nothing called them); the GPU-path tracers
   that overlap; `docs/archive/`.
 - **The launcher's texts, last before the version step** (the tester, 2026-11-02): once every part above
   and every open task is done. In the port's own voice (the tester: not a production game's): today's
