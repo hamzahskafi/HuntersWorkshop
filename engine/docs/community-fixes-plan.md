@@ -431,7 +431,13 @@ From the audit of 27c (four read-only audits, re-checked) and the tester's calls
   corrections, Fixed-refresh frame lock greys without Precise frame pacing, settings sharing takes everything
   but what belongs to the PC, the player or one session, and Graphics' Game effects and Enhancements groups.
   With it: the 13 launcher languages for every changed text (a strict check for them), both launchers built,
-  the translation key check clean.
+  the translation key check clean. **Applied** (2026-11-02, after the tester's last call: both Intel effect
+  fixes stay separate): the row code (the line apart from the tooltip, no final full stop, no tooltip that
+  repeats the line, "Default: …" from the setting, checked in English through `Localization.Source`), every
+  text, the changes outside the texts, the in-game overlay menu's Enhancements section and names (its 8
+  tables), the Also found fixes, and the 165 new texts in all 13 languages (machine-made). Not done here: the
+  on-screen check at 100% and 150% in English, German and Japanese (needs Windows), and the ~206 older texts
+  the 12 other catalogs still lack (zh-CN has them; they show in English, as before this step).
 - **The Log page** (the tester, 2026-11-02): one Log options fold again, the log level first in it and the
   diagnostics after it (part 12 had put the log level above a Diagnostics fold).
 - **Then the version step:** 0.4.4-beta.28, engine id 64, release notes (their Defaults section: a new

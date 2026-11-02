@@ -2,8 +2,8 @@
 
 Every row of the Windows launcher (208 rows on 13 pages), its text today beside the proposed text, as of
 Hunter's Workshop 0.4.4 beta 28 (2026-11-02). Fifth draft: the fourth draft, corrected after an outside review
-and with the tester's decisions on it. Nothing here has been applied yet: beta 28's text step applies it,
-after it is made again from the launcher as it is then (`launcher/windows/tests/text_review`).
+and with the tester's decisions on it. Applied in beta 28's text step (2026-11-02); the "Today" column shows
+the launcher before it (`launcher/windows/tests/text_review` makes these tables from the code).
 
 ## How to review
 
