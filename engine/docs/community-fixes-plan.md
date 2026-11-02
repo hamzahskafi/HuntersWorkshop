@@ -420,8 +420,10 @@ From the audit of 27c (four read-only audits, re-checked) and the tester's calls
   them mid-sentence) and a tooltip (the details, the cost, when it applies, "Default: on/off." at the
   end, any `BB_` name last); one phrase for when a change applies; Off or None first in every list; plain
   words, no Lantern version references. Row by row: [launcher-text-review.md](launcher-text-review.md),
-  made again from the launcher as it is when the step starts (rows and texts extracted, and every fact
-  they state checked against the engine then), and gone through by the tester before the texts change.
+  with its style guide, every row's text today and the proposal beside it; made from the code by
+  `launcher/windows/tests/text_review` (extract.py, render.py, the proposals in proposals.py), so the step
+  makes it again from the launcher as it is then, checks every fact against the engine, and the tester
+  goes through it before the texts change.
   With it: zh-CN for every changed text, both launchers built, the translation key check clean.
 - **Then the version step:** 0.4.4-beta.28, engine id 64, release notes (their Defaults section: a new
   install starts without an upscaler, on the game's own anti-aliasing), this document, every check.
