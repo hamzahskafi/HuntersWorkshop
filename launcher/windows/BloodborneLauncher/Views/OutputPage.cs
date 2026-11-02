@@ -8,7 +8,7 @@ using TextBox = System.Windows.Controls.TextBox;
 namespace BloodborneLauncher.Views
 {
     /// <summary>The game's own output (run.py and bb-probe), live while it runs, and what its log holds
-    /// (the log level and the Diagnostics fold).</summary>
+    /// (the Log options fold).</summary>
     public sealed class OutputPage : LauncherPage
     {
         private readonly TextBox _output;
@@ -32,12 +32,13 @@ namespace BloodborneLauncher.Views
             Body.Children.Add(bar);
 
             SettingToggle(SymbolRegular.WindowConsole20, L.T("Show this page when the game starts"), null, "switch_to_output");
+            // What the game writes into its log, beside the log, in one fold (0.4.4 beta 28, the tester:
+            // the log level inside it too). The rows after the log level reach the engine as one list,
+            // BB_DIAG (GameEnvironment), which its start programs expand.
+            var diag = Advanced(L.T("Log options"));
             SettingCombo(SymbolRegular.DocumentText24, L.T("Log level"),
                 L.T("How much the game writes into its log: Standard for everyday play, Detailed when asked for a log of something odd, Debug only to chase a specific bug"),
-                Choices.LogLevels, "log_level");
-            // 0.4.4 beta 28: what else the game writes into its log, as one fold; the launcher passes
-            // them as one list, BB_DIAG (GameEnvironment), which the engine's start programs expand.
-            var diag = Advanced(L.T("Diagnostics"));
+                Choices.LogLevels, "log_level", diag);
             SettingToggle(SymbolRegular.TextBulletListSquare24, L.T("Frame statistics in the log"), "BB_FRAME_STATS", "frame_stats", diag);
             SettingCombo(SymbolRegular.Pulse24, L.T("Hitch reports"),
                 L.T("A frame slower than this puts every thread's wait and stack in the log, for stutter reports. Pick about twice your frame time: 50 ms at 30 FPS, 40 at 60, 25 at 90, 20 at 120, 16 at 144 or uncapped. Each report pauses the game about 0.2 s; at most 12 a session, none in the first 20 s or just after a loading screen"),

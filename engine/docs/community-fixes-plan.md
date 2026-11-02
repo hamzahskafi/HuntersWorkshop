@@ -425,8 +425,14 @@ From the audit of 27c (four read-only audits, re-checked) and the tester's calls
   makes it again from the launcher as it is then, checks every fact against the engine, and the tester
   goes through it before the texts change.
   With it: zh-CN for every changed text, both launchers built, the translation key check clean.
+- **The Log page** (the tester, 2026-11-02): one Log options fold again, the log level first in it and the
+  diagnostics after it (part 12 had put the log level above a Diagnostics fold).
 - **Then the version step:** 0.4.4-beta.28, engine id 64, release notes (their Defaults section: a new
   install starts without an upscaler, on the game's own anti-aliasing), this document, every check.
+- **After the launcher: Streamline's slowdown** (the tester, 2026-11-02). Not the 120 FPS cap (beta 23,
+  above), which stays: the lower frame rate with Streamline loaded was probably the game's own
+  anti-aliasing still running under an upscaler, which 27b fixed (`NoUpscaler`). To be checked again
+  once the launcher is done.
 
 ### Release candidate, then 0.4.4
 
