@@ -9,8 +9,8 @@ after it is made again from the launcher as it is then (`launcher/windows/tests/
 
 - Each page has one table. **Today** is the launcher word for word ("Line" is what the Classic layout shows
   under a title, cut at 64 characters today; "Tooltip" is the full text on hover and behind Modern's (i)).
-- **Same** keeps today's text and its translations. In the tooltip column, *Default: …* is the line the
-  launcher adds from the setting's own default.
+- The proposed columns show the full text. *(unchanged)* marks today's text, kept with its translations. In
+  the tooltip column, *Default: …* is the line the launcher adds from the setting's own default.
 - Edit a proposed cell or comment on it. Rows left alone are taken as approved.
 - Decisions already taken are listed below with their reasons; changes to how settings behave (not only what
   they say) are in "Changes outside the texts", after the pages.
@@ -21,7 +21,7 @@ Hunter's Workshop is a port, and its texts read like the port's own notes: plain
 draft keeps that voice and fixes what is wrong, cut or out of date, rather than restyling everything.
 
 - **Today's texts stay** wherever they are right, with their translations (110 descriptions are translated
-  in all 13 languages). Tooltips change in 35 rows: 15 corrected (wrong, overpromising or out of date), 20
+  in all 13 languages). Tooltips change in 36 rows: 16 corrected (wrong, overpromising or out of date), 20
   added where today says nothing useful, mostly rows with no tooltip at all, such as the picture sliders.
 - **The line under the title** is new in 122 rows, where Classic cuts today's text mid-sentence or it says
   too little (a variable's name alone, "Relaxed is the default"). It is a complete phrase saying what the

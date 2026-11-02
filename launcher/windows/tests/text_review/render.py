@@ -49,8 +49,9 @@ EXTRA_NOW = {('Graphics', 'Sharpening (RCAS)'): "Line set by the upscaler: DLSS 
              ('Graphics', 'DLSS model'): "Status line with Auto: \"Auto: model K at this quality\" (the model Auto picks)",
              ('Graphics', 'Anti-aliasing'): "With an upscaler the box shows \"Upscaler (DLSS)\" (or AMD FSR), greyed",
              ('Graphics', 'Upscaler'): "Status line when an upscaler is unavailable on this PC"}
-# Defaults the extraction reads as code, not as what the row shows.
-RAW_DEFAULTS = {'en', 'default', 'auto'}
+# Defaults the extraction reads as stored values, as the row shows them.
+RAW_DEFAULTS = set()
+SHOWN_DEFAULTS = {'en': 'English', 'default': 'Default', 'auto': 'Auto'}
 
 
 def expand():
@@ -98,8 +99,11 @@ def now_fields(r):
     tips = [x for x in (r.get('tip') or []) if x]
     tip = desc if not tips else ((desc + '\n\n') if desc else '') + '\n'.join(tips)
     title, line, ch, dv = r['title'], brief(desc), r.get('choices'), r.get('default_label') or deflabel(r)
+    dv = SHOWN_DEFAULTS.get(dv, dv)
     if title == 'HDR output':  # its text is set in code apart from the row
         tip = "The game's picture on an HDR screen, with brighter highlights. Applied when the game starts"; line = brief(tip)
+    if title == 'Best settings for this PC':  # the code adds the hardware summary under the text
+        tip = "Output resolution, frame rate, upscaler and quality for this PC, then this PC's hardware summary"
     if title == 'V-Sync': dv = 'On (latest frame)'
     if title == 'Upscaler' and dv == 'off': dv = 'None'  # config.ini's value for the list's None
     return title, line, tip, ch, dv
@@ -117,14 +121,26 @@ LISTS = {'Modes': "Off; Infinite (Kept full at the normal carry limit, even if y
 # Values the code puts into its texts, as the launcher shows them.
 VALUES = {'{SaveBackups.InGameEvery.TotalMinutes:0}': '10', '{SaveBackups.Keep}': '10', '{SaveBackups.InGameKeep}': '5',
           '{Updater.Repository}': 'hamzahskafi/HuntersWorkshop', '{title}': 'Blood Vials (or Quicksilver Bullets)',
-          'l.Name': 'one per launcher language', 'LauncherTheme.Themes': 'the themes', 'AppIcon.Choices': 'the icons',
+          'l.Name': 'English; Deutsch; Español; Français; Italiano; Polski; Português (Brasil); Türkçe; Русский; Українська; '
+                    '日本語; 한국어; 简体中文; 繁體中文',
+          'LauncherTheme.Themes': 'Default; Crimson (The blood moon: deep red); Moonlight (Pale blue, like the Moonlight '
+                                  'Greatsword); Amber (Lamplight gold); Nightmare (Arcane violet); Verdant (Forbidden Woods '
+                                  'green); Custom (Your own colour, below)',
+          'AppIcon.Choices': 'Auto (Red lantern in betas, blue in stable releases); Red lantern; Blue lantern; Lantern by '
+                             'j3loo (Fan art by j3loo); Your picture',
           '‹Paths.ConfigFile›': "the file's path", '‹Paths.IniPath›': "the file's path"}
 
 
 def c(s):
     s = re.sub(r'\{(\d+)\}', r'\1', s or '')
     for k, v in VALUES.items(): s = s.replace(k, v)
-    return s.replace('|', '/').replace('\n', ' ').strip()
+    # A tooltip's next line or paragraph (the advice; an engine switch's variable line) reads as the next sentence.
+    s = re.sub(r'([^.!?:;\s])\s*\n+', r'\1. ', s)
+    return re.sub(r'\s+', ' ', s.replace('|', '/')).strip()
+
+
+# Text the proposal keeps from today, shown in full with this mark.
+U = ' *(unchanged)*'
 
 
 pages = {}; problems = []; seen = set()
@@ -138,7 +154,7 @@ for r in expand():
     parts = []
     if line_now: parts.append(f"Line: {c(line_now)}")
     if tip_now and tip_now != line_now: parts.append(f"Tooltip: {c(tip_now)}")
-    elif tip_now: parts.append("Tooltip: same text")
+    elif tip_now: parts.append(f"Tooltip: {c(tip_now)}")
     if ch_now: parts.append("Choices: " + '; '.join(c(x['label']) + (f" ({c(x['note'])})" if x.get('note') else '') for x in ch_now))
     elif r.get('choices_expr'): parts.append(f"Choices: {c(LISTS.get(r['choices_expr'], r['choices_expr']))}")
     if def_now and def_now not in RAW_DEFAULTS: parts.append(f"Default: {c(def_now)}")
@@ -155,24 +171,37 @@ for r in expand():
         pages.setdefault(r['page'], []).append(f"| {setting} | {today} | Row removed: {c(p['removed'])} | — | — | {c(p.get('note'))} |")
         count['removed'] = count.get('removed', 0) + 1
         continue
-    if pl == KEEP: pl_txt = 'Same' if line_now else ('Same (set by the upscaler)' if extra else '?')
+    if pl == KEEP: pl_txt = c(line_now) + U if line_now else (c(extra) + U if extra else '?')
     elif pl is None: pl_txt = '—'
     else: pl_txt = c(pl); count['lines'] += 1
     if pl is None and line_now and 'FPS counter' not in (line_now or '') and k[0] != 'Interface': problems.append(('line dropped', k, line_now))
     if pl == KEEP and line_now and line_now.endswith('…'): problems.append(('kept a cut line', k, line_now))
     if isinstance(pl, str) and pl != KEEP and len(pl) > 60: problems.append(('line over 60', k, len(pl), pl))
     tp = p.get('tip')
-    if tp is None: tp_txt = 'Same' if tip_now else '—'
+    if tp is None: tp_txt = c(tip_now) + U if tip_now else '—'
     elif tp == '': tp_txt = 'None: the line says it all' if pl else 'None'
-    else: tp_txt = c(tp); count['tips'] += 1
+    else:
+        # An engine switch's tooltip keeps the line the launcher adds under its hint (EngineSwitches.Describe).
+        tp_txt = c(tp + tip_now[len(SW[r['env']]['hint']):] if r['kind'] == 'engine' else tp); count['tips'] += 1
     # The default line the row code adds, unless the text or the list already says it (engine switches'
     # tooltips end with "BB_X, default: …" today).
     said = ' '.join([tp if tp else '', tip_now or '' if tp is None else '', ' '.join(x['label'] for x in ch_now or [])]).lower()
     dp = (def_now or '').replace(' (default)', '').replace(' (Default)', '').replace(' (recommended)', '')
     if dp and dp != 'not set' and dp not in RAW_DEFAULTS and r['kind'] != 'engine' and 'default' not in said:
         tp_txt = (f"*Default: {dp}*" if tp_txt in ('—', 'None') else tp_txt + f" + *Default: {dp}*")
-    pch = c(p['choices']) if p.get('choices') else ('Same' if ch_now or r.get('choices_expr') else '—')
-    if p.get('choices'): count['lists'] += 1
+    def item(x, note):
+        return c(x['label']) + (f" ({c(note)})" if note else '')
+    if p.get('order') or p.get('choice_notes'):
+        by_label = {c(x['label']): x for x in ch_now or []}
+        order = p.get('order') or [c(x['label']) for x in ch_now]
+        for label in order:
+            if label not in by_label: problems.append(('no such choice', k, label))
+        new_notes = p.get('choice_notes', {})
+        pch = '; '.join(item(by_label[l], new_notes.get(l, by_label[l].get('note'))) for l in order if l in by_label)
+        count['lists'] += 1
+    elif ch_now: pch = '; '.join(item(x, x.get('note')) for x in ch_now) + U
+    elif r.get('choices_expr'): pch = c(LISTS.get(r['choices_expr'], r['choices_expr'])) + U
+    else: pch = '—'
     notes = []
     if p.get('rewrite'): notes.append('Tooltip corrected.')
     if p.get('ingame'): notes.append(f"In-game menu: {c(p['ingame'])}.")

@@ -1,7 +1,7 @@
 # Proposed texts (fourth draft, in the port's own voice). Keyed by (page, current title), engine variable or effect key.
 # line: the line under the title (complete, <= 60 characters); KEEP = today's line already fits. tip: None keeps today's
 # tooltip (and its translations); a string is the new tooltip; rewrite=True marks a correction of today's text.
-# rename: new title. choices: a new order or wording of the list. ingame: name in the in-game overlay menu. note: remarks.
+# rename: new title. order: the list's labels in their new order; choice_notes: new notes by label. ingame: name in the in-game overlay menu. note: remarks.
 KEEP = 'keep'
 P = {
 # ---------------- Play
@@ -23,9 +23,11 @@ P = {
 ('Display', 'Custom resolution'): dict(line="Any width and height, in any shape"),
 ('Display', 'Frame rate'): dict(line="30 is the PS4's; higher rates use the engine's corrections",
     tip="Every rate above 30 runs on the engine's frame rate corrections, built on Kyo's 60 FPS++ and other community findings. With the corrections off (Engine switches › Frame rate corrections), the community FPS++ patches run instead, and 240 runs at 144. Above the display's refresh rate, V-Sync On (latest frame) and Off draw frames the display never shows; On (every frame) and Adaptive hold the game to the display's rate. 30 is the game as on the PS4", rewrite=True,
-    choices="Same order. The 60 to 144 notes become \"With the engine's frame rate corrections for 60 FPS\"; 240's keeps \"Needs Frame rate corrections (Engine switches): without them the game runs at 144\". \"On a slower display the extra frames are drawn but never shown\" leaves the notes for the tooltip, where it depends on V-Sync",
+    choice_notes={"60 FPS": "With the engine's frame rate corrections for 60 FPS", "90 FPS": "With the engine's frame rate corrections for 90 FPS",
+                  "120 FPS": "With the engine's frame rate corrections for 120 FPS", "144 FPS": "With the engine's frame rate corrections for 144 FPS",
+                  "240 FPS": "With the engine's frame rate corrections for 240 FPS. Needs Frame rate corrections (Engine switches): without them the game runs at 144"},
     note="Today's texts credit Kyo's patch for what the engine's corrections do. The notes' \"drawn but never shown\" is wrong with V-Sync On (every frame) or Adaptive, which hold the game to the display (the note under V-Sync already says so)."),
-('Display', 'V-Sync'): dict(line=KEEP, choices="Off first: Off; On (latest frame); On (every frame); Adaptive (notes as today)",
+('Display', 'V-Sync'): dict(line=KEEP, order=["Off", "On (latest frame)", "On (every frame)", "Adaptive"],
     note="Its note (\"The game waits for your 60 Hz display\") will read the game's monitor (Changes outside the texts)."),
 ('Display', 'Monitor'): dict(line="The monitor the game opens on"),
 ('Display', 'Window mode'): dict(line=KEEP),
@@ -72,9 +74,9 @@ P = {
 ('Graphics', 'Character motion vectors'): dict(line=KEEP, ingame="Character motion vectors"),
 ('Graphics', 'Texture mip bias'): dict(line=KEEP, ingame="Texture mip bias"),
 ('Graphics', 'Model detail'): dict(line="How far away models keep their full detail",
-    tip="Highest costs GPU time; Lower and Lowest help weaker GPUs", choices="Lowest (2); Lower (1); As in the game; Highest (-2)",
+    tip="Highest costs GPU time; Lower and Lowest help weaker GPUs", order=["Lowest (2)", "Lower (1)", "As in the game", "Highest (-2)"],
     ingame="Model detail (in-game: to an Enhancements section)", note="Group: Enhancements."),
-('BB_ANISO',): dict(line="Sharper ground and walls seen at an angle", choices="Game's own first: Game's own; 2x; 4x; 8x; 16x",
+('BB_ANISO',): dict(line="Sharper ground and walls seen at an angle", order=["Game's own", "2x", "4x", "8x", "16x"],
     note="Group: Enhancements."),
 ('effect_ssao',): dict(line="Soft shading in corners and creases", ingame="Ambient occlusion (SSAO)",
     note="Group: Game effects."),
@@ -94,7 +96,7 @@ P = {
 # ---------------- Interface
 ('Interface', 'In-game menu shortcut'): dict(line="What opens the in-game overlay menu",
     tip="What opens the in-game overlay menu while playing. Applied on the next launch", rewrite=True,
-    choices="Off first: Off; Insert only; Insert or L3 + R3 (notes as today)", note="\"The port's settings menu\" becomes \"the in-game overlay menu\" (the tester's term)."),
+    order=["Off", "Insert only", "Insert or L3 + R3"], note="\"The port's settings menu\" becomes \"the in-game overlay menu\" (the tester's term)."),
 ('Interface', 'In-game menu language'): dict(line="The in-game overlay menu's language", tip=''),
 ('Interface', 'Sharp UI'): dict(line="Menus, HUD and text drawn at the output resolution"),
 ('Interface', 'Note while shaders build'): dict(line="Shows \"Building shaders\" while new shaders compile", ingame="Note while shaders build"),
@@ -180,7 +182,7 @@ P = {
     tip="Off: never. Relaxed (default): before the game changes that memory. Precise: before it reads it too; slower",
     note="Today it says only \"Relaxed is the default\". Checked in the engine."),
 ('BB_PIPELINE_THREADS',): dict(line="How many threads compile new shaders"),
-('BB_FILE_PREFETCH',): dict(line="Reads an area's files ahead on hard disks", choices="Off first: Off; Auto; On"),
+('BB_FILE_PREFETCH',): dict(line="Reads an area's files ahead on hard disks", order=["Off", "Auto", "On"]),
 ('BB_BACKGROUND_FPS',): dict(line="The FPS limit while the game is in the background"),
 ('Engine', 'Sound output'): dict(line=KEEP),
 ('Engine', 'Sound threads first'): dict(line="Against late or stuttering sound on many-core CPUs"),
@@ -219,9 +221,9 @@ P = {
 ('Settings', 'Navigation'): dict(line=KEEP),
 ('Settings', 'Theme'): dict(line="The accent colour, and a faint tint of it"),
 ('Settings', 'Theme colour'): dict(line=KEEP),
-('Settings', 'Background'): dict(line=KEEP, choices="None first: None; Game artwork; Your picture"),
+('Settings', 'Background'): dict(line=KEEP, order=["None", "Game artwork", "Your picture"]),
 ('Settings', 'Picture'): dict(line=KEEP),
-('Settings', 'Background blur'): dict(line=None, choices="Off first: Off; Light; Strong"),
+('Settings', 'Background blur'): dict(line=None, order=["Off", "Light", "Strong"]),
 ('Settings', 'App icon'): dict(line=KEEP),
 ('Settings', 'Icon picture'): dict(line=KEEP),
 ('Settings', 'Window buttons'): dict(line=KEEP),
@@ -270,7 +272,9 @@ P = {
 ('Cheats', 'Firearm range'): dict(line="How far firearm bullets travel", ingame="Firearm range"),
 ('Cheats', 'Keep Blood Echoes on death'): dict(line="Dying never drops your Blood Echoes", ingame="Keep Blood Echoes on death"),
 ('Cheats', 'Blood Echo multiplier'): dict(line="More Blood Echoes from each enemy", ingame="Blood Echo multiplier"),
-('Cheats', 'Add echoes or insight'): dict(line="From the in-game overlay menu (Insert or L3 + R3)"),
+('Cheats', 'Add echoes or insight'): dict(line="From the in-game overlay menu (Insert or L3 + R3)",
+    tip="In the in-game overlay menu (Insert or L3 + R3): +1,000, +10,000, +100,000 echoes and +1 insight", rewrite=True,
+    note="\"The in-game menu\" becomes the in-game overlay menu."),
 ('Cheats', 'Amount'): dict(line=KEEP, note="Under its item, shown only for Custom amount."),
 # ---------------- Trophies
 ('Trophies', 'Show in game'): dict(line="A banner in a corner when you earn a trophy"),

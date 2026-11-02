@@ -55,8 +55,8 @@ An outside review of the fourth draft (2026-11-02, at commit `434d381`) checked 
   `engine/docs/pipeline_compiles.md`), the shader catalog (a catalog covers only the shaders it holds), Share
   your settings (its included and excluded lists were both wrong), Test the connection (it checks that the
   server and relay answer, not a summon).
-- Two old menu names kept as "Same": Live resolution change ("the game menu") and Picture tuning ("the
-  Insert menu").
+- Three old menu names the fourth draft kept unchanged: Live resolution change ("the game menu"), Picture
+  tuning ("the Insert menu") and Add echoes or insight ("the in-game menu").
 - Frame rate's notes said extra frames above the display's rate are never shown, which V-Sync On (every
   frame) and Adaptive contradict; the sentence moves to the tooltip, where it depends on V-Sync.
 - Output resolution said the upscaler always renders below it; Native AA renders at it.
@@ -107,7 +107,7 @@ An outside review of the fourth draft (2026-11-02, at commit `434d381`) checked 
 
 ## What applying it involves
 
-- 122 new lines and 35 new or corrected tooltips, translated into the 13 launcher languages; every other
+- 122 new lines and 36 new or corrected tooltips, translated into the 13 launcher languages; every other
   tooltip keeps its text and translations.
 - The row code: the line apart from the tooltip (no more cutting at 64 characters), the default line.
 - Eight lists reordered or reworded, four renames, one row removed (Unified frame time).
