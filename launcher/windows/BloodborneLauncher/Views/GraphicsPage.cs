@@ -38,7 +38,7 @@ namespace BloodborneLauncher.Views
         private List<string> _fsrValues = new();
         private bool _syncing;
 
-        public GraphicsPage() : base(L.T("Graphics"), "")
+        public GraphicsPage()
         {
             // Sets the Display page's resolution and frame rate and this page's upscaler and quality.
             Add(Card(SymbolRegular.Gauge24, L.T("Best settings for this PC"),

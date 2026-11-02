@@ -413,7 +413,10 @@ namespace BloodborneLauncher.Views
         protected ScrollViewer Scroller { get; }
         private bool _sectioned;
 
-        protected LauncherPage(string title, string subtitle)
+        /// <summary>A page. The tab or sidebar names it (no page title since 0.9.12); 0.4.4 beta 28: the title
+        /// and subtitle the constructor took and never showed went, and the subtitles that told the player
+        /// what to do (Online's steps, Cheats', Mods') are shown on their pages.</summary>
+        protected LauncherPage()
         {
             Background = Brushes.Transparent;
             // A Frame does not pass inherited properties on to its page: the window's crisp text

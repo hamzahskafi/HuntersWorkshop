@@ -28,7 +28,7 @@ namespace BloodborneLauncher.Views
         private readonly Dictionary<string, Wpf.Ui.Controls.ToggleSwitch> _features = new();
         private bool _syncing;
 
-        public EnginePage() : base(L.T("Engine switches"), "")
+        public EnginePage()
         {
             var intro = Text(L.T("Each switch stays at the engine's default until you change it. Only changed ones are used."), "Faint");
             intro.ToolTip = L.T("Only the switches you change are passed to the game, when it starts; a start in safe mode (after a crash) ") +

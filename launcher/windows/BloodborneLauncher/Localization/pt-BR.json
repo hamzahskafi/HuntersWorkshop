@@ -537,7 +537,6 @@
   "they stay in {0}, and adding a profile with the same name brings them back.": "eles ficam em {0}, e adicionar um perfil com o mesmo nome os traz de volta.",
   "Appearance": "Aparência",
   "Layout": "Layout",
-  "Modern: tabs and compact rows. Classic: the sidebar and one card per setting": "Moderno: abas e linhas compactas. Clássico: a barra lateral e um cartão por configuração",
   "Modern": "Moderno",
   "Classic": "Clássico",
   "Engine folder": "Pasta da engine",
@@ -1302,7 +1301,6 @@
   "App icon": "Ícone do app",
   "The launcher's and the game window's icon. The game window takes it at its next start": "O ícone do launcher e da janela do jogo. A janela do jogo o adota na próxima inicialização",
   "Window buttons": "Botões da janela",
-  "macOS: the red, yellow and green dots. Windows: – □ ✕": "macOS: os pontos vermelho, amarelo e verde. Windows: – □ ✕",
   "Window buttons side": "Lado dos botões da janela",
   "Usual": "Habitual",
   "macOS on the left, Windows on the right": "macOS à esquerda, Windows à direita",
@@ -1569,5 +1567,14 @@
   "DLSS needs an NVIDIA RTX card; AMD FSR runs on any GPU. Both anti-alias as they upscale.": "O DLSS precisa de uma placa NVIDIA RTX; o AMD FSR roda em qualquer GPU. Ambos fazem anti-aliasing ao escalar.",
   "Newer is usually better. (driver) marks one AMD's graphics driver provides.": "Mais nova costuma ser melhor. (driver) marca uma versão do driver gráfico da AMD.",
   "Auto: K from DLAA to Balanced, M at Performance, L at Ultra Performance.": "Auto: K de DLAA a Equilibrado, M em Desempenho, L em Ultra desempenho.",
-  "Upscaler ({0})": "Upscaler ({0})"
+  "Upscaler ({0})": "Upscaler ({0})",
+  "  ·  while playing": "  ·  durante o jogo",
+  "Before every start and every {0:0} minutes while playing, when this profile's saves changed. The newest {1} from before starting and {2} from playing are kept": "Antes de cada início e a cada {0:0} minutos durante o jogo, quando os saves deste perfil mudaram. Ficam os {1} mais recentes de antes de iniciar e {2} do jogo",
+  "Saves backed up while playing (the newest {0} of these are kept).": "Saves copiados durante o jogo (ficam os {0} mais recentes).",
+  "Fixed-refresh frame lock": "Trava de quadros em atualização fixa",
+  "Particle work safety cap": "Limite de segurança de partículas",
+  "Checks the size of the game's GPU particle work before the graphics card runs it, and caps it to what the card supports. Only for games that crash with \"device lost\" in effect-heavy scenes. It costs smoothness in busy scenes. Off by default": "Verifica o tamanho do trabalho de partículas do jogo na GPU antes de a placa de vídeo executá-lo e o limita ao que a placa suporta. Só se o jogo fechar com \"device lost\" em cenas cheias de efeitos. Custa fluidez em cenas cheias. Desligado por padrão",
+  "Only for monitors without G-Sync or FreeSync (VRR). Each frame is shown right after one of the monitor's refreshes when the FPS limit divides its refresh rate (60 FPS on 60, 120 or 240 Hz). Needs Precise frame pacing. With G-Sync or FreeSync it stutters: leave it off. Off by default": "Só para monitores sem G-Sync ou FreeSync (VRR). Cada quadro é mostrado logo após uma das atualizações do monitor quando o limite de FPS divide a taxa de atualização (60 FPS em 60, 120 ou 240 Hz). Precisa de \"Cadência de quadros precisa\". Com G-Sync ou FreeSync engasga: deixe desligado. Desligado por padrão",
+  "Classic: the sidebar and one card per setting. Modern: tabs and compact rows": "Clássico: a barra lateral e um cartão por configuração. Moderno: abas e linhas compactas",
+  "Windows: – □ ✕. macOS: the red, yellow and green dots": "Windows: – □ ✕. macOS: os pontos vermelho, amarelo e verde"
 }

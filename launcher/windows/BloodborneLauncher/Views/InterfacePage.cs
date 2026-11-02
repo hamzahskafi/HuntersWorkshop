@@ -13,7 +13,7 @@ namespace BloodborneLauncher.Views
     {
         private FoldRows _counter = null!;
 
-        public InterfacePage() : base(L.T("Interface"), "")
+        public InterfacePage()
         {
             Group(L.T("Menus and HUD"));
             SettingCombo(SymbolRegular.Keyboard24, L.T("In-game menu shortcut"),

@@ -537,7 +537,6 @@
   "they stay in {0}, and adding a profile with the same name brings them back.": "它們會保留在 {0}，新增同名的設定檔即可找回。",
   "Appearance": "外觀",
   "Layout": "版面配置",
-  "Modern: tabs and compact rows. Classic: the sidebar and one card per setting": "現代：分頁與緊湊列。傳統：側邊欄，每項設定一張卡片",
   "Modern": "現代",
   "Classic": "傳統",
   "Engine folder": "引擎資料夾",
@@ -1302,7 +1301,6 @@
   "App icon": "應用程式圖示",
   "The launcher's and the game window's icon. The game window takes it at its next start": "啟動器與遊戲視窗的圖示。遊戲視窗會在下次啟動時套用",
   "Window buttons": "視窗按鈕",
-  "macOS: the red, yellow and green dots. Windows: – □ ✕": "macOS：紅、黃、綠圓點。Windows：– □ ✕",
   "Window buttons side": "視窗按鈕位置",
   "Usual": "慣用",
   "macOS on the left, Windows on the right": "macOS 在左側，Windows 在右側",
@@ -1569,5 +1567,14 @@
   "DLSS needs an NVIDIA RTX card; AMD FSR runs on any GPU. Both anti-alias as they upscale.": "DLSS 需要 NVIDIA RTX 顯示卡；AMD FSR 可在任何 GPU 上執行。兩者在放大時都會反鋸齒。",
   "Newer is usually better. (driver) marks one AMD's graphics driver provides.": "通常越新越好。（驅動程式）表示由 AMD 顯示卡驅動程式提供的版本。",
   "Auto: K from DLAA to Balanced, M at Performance, L at Ultra Performance.": "自動：DLAA 到平衡用 K，效能用 M，極致效能用 L。",
-  "Upscaler ({0})": "超解析度技術（{0}）"
+  "Upscaler ({0})": "超解析度技術（{0}）",
+  "  ·  while playing": "  ·  遊戲中",
+  "Before every start and every {0:0} minutes while playing, when this profile's saves changed. The newest {1} from before starting and {2} from playing are kept": "每次啟動前，以及遊戲中每 {0:0} 分鐘，在此設定檔的存檔有變化時。保留啟動前最新的 {1} 份和遊戲中的 {2} 份",
+  "Saves backed up while playing (the newest {0} of these are kept).": "已在遊戲中備份存檔（保留最新的 {0} 份）。",
+  "Fixed-refresh frame lock": "固定更新率畫格鎖定",
+  "Particle work safety cap": "粒子運算安全上限",
+  "Checks the size of the game's GPU particle work before the graphics card runs it, and caps it to what the card supports. Only for games that crash with \"device lost\" in effect-heavy scenes. It costs smoothness in busy scenes. Off by default": "在顯示卡執行前檢查遊戲 GPU 粒子運算的規模，並將其限制在顯示卡支援的範圍內。僅用於在特效密集場景中因「device lost」當機的情況。在繁忙場景中會降低流暢度。預設關閉",
+  "Only for monitors without G-Sync or FreeSync (VRR). Each frame is shown right after one of the monitor's refreshes when the FPS limit divides its refresh rate (60 FPS on 60, 120 or 240 Hz). Needs Precise frame pacing. With G-Sync or FreeSync it stutters: leave it off. Off by default": "僅適用於不支援 G-Sync 或 FreeSync（VRR）的螢幕。當 FPS 上限能整除更新率時（60、120 或 240 Hz 下的 60 FPS），每格畫面都會在螢幕一次更新後立即顯示。需要「精確畫格節奏」。開啟 G-Sync 或 FreeSync 時會卡頓：請保持關閉。預設關閉",
+  "Classic: the sidebar and one card per setting. Modern: tabs and compact rows": "傳統：側邊欄，每項設定一張卡片。現代：分頁與緊湊列",
+  "Windows: – □ ✕. macOS: the red, yellow and green dots": "Windows：– □ ✕。macOS：紅、黃、綠圓點"
 }

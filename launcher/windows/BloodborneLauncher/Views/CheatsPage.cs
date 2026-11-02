@@ -26,9 +26,9 @@ namespace BloodborneLauncher.Views
         private readonly InfoBar _engine;
         private readonly InfoBar _online;
 
-        public CheatsPage() : base(L.T("Cheats"),
-            L.T("Set here for the next start. While playing, change them in the in-game menu (Insert or L3 + R3): they apply live. Turning a cheat off puts the game's values back; items you already have stay."))
+        public CheatsPage()
         {
+            Body.Children.Add(Text(L.T("Set here for the next start. While playing, change them in the in-game menu (Insert or L3 + R3): they apply live. Turning a cheat off puts the game's values back; items you already have stay."), "Faint"));
             _engine = new InfoBar
             {
                 IsClosable = false,

@@ -119,7 +119,7 @@ namespace BloodborneLauncher.Views
                 Choices.PresentModes, "present_mode", noteOf: c => FrameRateSync.Note(S.Str("fps_mode"), c.Value, refresh) ?? c.Note);
         }
 
-        public DisplayPage() : base(L.T("Display"), "")
+        public DisplayPage()
         {
             _monitor.SetResourceReference(StyleProperty, "DefaultComboBoxStyle");
             ComboSearch.Attach(_monitor);

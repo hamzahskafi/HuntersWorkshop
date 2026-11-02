@@ -20,8 +20,7 @@ namespace BloodborneLauncher.Views
         private readonly TextBlock _logHint;
         private string _filter = "all";
 
-        public TrophiesPage() : base(L.T("Trophies"),
-            L.T("Bloodborne's 40 trophies, your completion rate, and the notification shown in game when one unlocks."))
+        public TrophiesPage()
         {
             _support = new InfoBar { IsClosable = false, Severity = InfoBarSeverity.Warning, Margin = new Thickness(0, 14, 0, 0) };
             Body.Children.Add(_support);

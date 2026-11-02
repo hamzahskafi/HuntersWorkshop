@@ -17,7 +17,7 @@ namespace BloodborneLauncher.Views
         private readonly Segmented _tabs;
         private int _current = -1;
 
-        protected SectionedPage(string title, (string Key, string Label, Type Page)[] sections) : base(title, "")
+        protected SectionedPage((string Key, string Label, Type Page)[] sections)
         {
             _sections = sections;
             // As wide as the longest name needs (the columns share the width evenly), at least 104 each.
@@ -106,7 +106,7 @@ namespace BloodborneLauncher.Views
             ("interface", L.T("Interface"), typeof(InterfacePage)),
         };
 
-        public VisualsPage() : base(L.T("Visuals"), Sections) { }
+        public VisualsPage() : base(Sections) { }
     }
 
     /// <summary>The less used pages behind one tab: mods, cheats, the engine's switches and the game's
@@ -122,6 +122,6 @@ namespace BloodborneLauncher.Views
             ("output", L.T("Log"), typeof(OutputPage)),
         }.Where(s => s.Item1 != "cheats" || CheatsPage.Supported).ToArray();
 
-        public MorePage() : base(L.T("More"), Sections) { }
+        public MorePage() : base(Sections) { }
     }
 }

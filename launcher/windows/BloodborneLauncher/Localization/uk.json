@@ -537,7 +537,6 @@
   "they stay in {0}, and adding a profile with the same name brings them back.": "вони залишаються в {0}, а додавання профілю з такою самою назвою поверне їх.",
   "Appearance": "Вигляд",
   "Layout": "Компонування",
-  "Modern: tabs and compact rows. Classic: the sidebar and one card per setting": "Сучасне: вкладки й компактні рядки. Класичне: бічна панель і окрема картка для кожного налаштування",
   "Modern": "Сучасне",
   "Classic": "Класичне",
   "Engine folder": "Тека рушія",
@@ -1302,7 +1301,6 @@
   "App icon": "Значок програми",
   "The launcher's and the game window's icon. The game window takes it at its next start": "Значок лаунчера й вікна гри. Вікно гри отримає його під час наступного запуску",
   "Window buttons": "Кнопки вікна",
-  "macOS: the red, yellow and green dots. Windows: – □ ✕": "macOS: червона, жовта й зелена точки. Windows: – □ ✕",
   "Window buttons side": "Бік кнопок вікна",
   "Usual": "Звичний",
   "macOS on the left, Windows on the right": "macOS ліворуч, Windows праворуч",
@@ -1569,5 +1567,14 @@
   "DLSS needs an NVIDIA RTX card; AMD FSR runs on any GPU. Both anti-alias as they upscale.": "DLSS потрібна відеокарта NVIDIA RTX; AMD FSR працює на будь-якій. Обидва згладжують під час апскейлу.",
   "Newer is usually better. (driver) marks one AMD's graphics driver provides.": "Новіша — зазвичай краща. (драйвер) позначає версію з графічного драйвера AMD.",
   "Auto: K from DLAA to Balanced, M at Performance, L at Ultra Performance.": "Авто: K — від DLAA до «Баланс», M — «Продуктивність», L — «Ультра».",
-  "Upscaler ({0})": "Апскейлер ({0})"
+  "Upscaler ({0})": "Апскейлер ({0})",
+  "  ·  while playing": "  ·  під час гри",
+  "Before every start and every {0:0} minutes while playing, when this profile's saves changed. The newest {1} from before starting and {2} from playing are kept": "Перед кожним запуском і кожні {0:0} хв під час гри, якщо збереження цього профілю змінилися. Зберігаються останні: {1} до запуску та {2} з гри",
+  "Saves backed up while playing (the newest {0} of these are kept).": "Збереження скопійовано під час гри (зберігаються останні {0}).",
+  "Fixed-refresh frame lock": "Прив’язка кадрів до фіксованої частоти",
+  "Particle work safety cap": "Захисна межа для частинок",
+  "Checks the size of the game's GPU particle work before the graphics card runs it, and caps it to what the card supports. Only for games that crash with \"device lost\" in effect-heavy scenes. It costs smoothness in busy scenes. Off by default": "Перевіряє обсяг роботи з частинками на GPU до того, як її виконає відеокарта, і обмежує його тим, що карта підтримує. Лише якщо гра вилітає з «device lost» у сценах з багатьма ефектами. Знижує плавність у насичених сценах. Типово вимк.",
+  "Only for monitors without G-Sync or FreeSync (VRR). Each frame is shown right after one of the monitor's refreshes when the FPS limit divides its refresh rate (60 FPS on 60, 120 or 240 Hz). Needs Precise frame pacing. With G-Sync or FreeSync it stutters: leave it off. Off by default": "Лише для моніторів без G-Sync і FreeSync (VRR). Кожен кадр показується одразу після одного з оновлень монітора, коли межа FPS ділить його частоту (60 FPS при 60, 120 або 240 Гц). Потрібна «Точний темп кадрів». З G-Sync або FreeSync смикається: не вмикайте. Типово вимк.",
+  "Classic: the sidebar and one card per setting. Modern: tabs and compact rows": "Класичне: бічна панель і окрема картка для кожного налаштування. Сучасне: вкладки й компактні рядки",
+  "Windows: – □ ✕. macOS: the red, yellow and green dots": "Windows: – □ ✕. macOS: червона, жовта й зелена точки"
 }

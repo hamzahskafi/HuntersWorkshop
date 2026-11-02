@@ -24,7 +24,7 @@ namespace BloodborneLauncher.Views
         private readonly TextBlock _playStatus;
         private readonly DispatcherTimer _clock;
 
-        public PlayPage() : base(L.T("Play"), L.T("Check the game folder, choose where saves go, and start Bloodborne."))
+        public PlayPage()
         {
             // ==================== Summary + Play ====================
             // A glass pane in the Modern layout, a card in Classic.

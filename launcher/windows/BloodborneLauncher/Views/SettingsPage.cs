@@ -28,7 +28,7 @@ namespace BloodborneLauncher.Views
         private readonly StackPanel _themeColour = new(), _picture = new(), _blur = new(), _iconPicture = new();
         private TextBlock _pictureHint = null!, _iconPictureHint = null!;
 
-        public SettingsPage() : base(L.T("Settings"), "")
+        public SettingsPage()
         {
             Group(L.T("Appearance"));
             ComboRow(SymbolRegular.LocalLanguage24, L.T("Launcher language"), L.T("Restart the launcher to apply the language."),

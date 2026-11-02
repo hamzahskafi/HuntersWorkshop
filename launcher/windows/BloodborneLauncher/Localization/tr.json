@@ -537,7 +537,6 @@
   "they stay in {0}, and adding a profile with the same name brings them back.": "{0} içinde kalırlar ve aynı adla bir profil eklemek onları geri getirir.",
   "Appearance": "Görünüm",
   "Layout": "Düzen",
-  "Modern: tabs and compact rows. Classic: the sidebar and one card per setting": "Modern: sekmeler ve sıkı satırlar. Klasik: kenar çubuğu ve ayar başına bir kart",
   "Modern": "Modern",
   "Classic": "Klasik",
   "Engine folder": "Motor klasörü",
@@ -1302,7 +1301,6 @@
   "App icon": "Uygulama simgesi",
   "The launcher's and the game window's icon. The game window takes it at its next start": "Başlatıcının ve oyun penceresinin simgesi. Oyun penceresi onu bir sonraki başlatmada alır",
   "Window buttons": "Pencere düğmeleri",
-  "macOS: the red, yellow and green dots. Windows: – □ ✕": "macOS: kırmızı, sarı ve yeşil noktalar. Windows: – □ ✕",
   "Window buttons side": "Pencere düğmelerinin tarafı",
   "Usual": "Olağan",
   "macOS on the left, Windows on the right": "macOS solda, Windows sağda",
@@ -1569,5 +1567,14 @@
   "DLSS needs an NVIDIA RTX card; AMD FSR runs on any GPU. Both anti-alias as they upscale.": "DLSS bir NVIDIA RTX kartı ister; AMD FSR her GPU'da çalışır. İkisi de ölçeklerken kenar yumuşatır.",
   "Newer is usually better. (driver) marks one AMD's graphics driver provides.": "Yeni olan genelde daha iyidir. (sürücü), AMD grafik sürücüsünün sağladığı sürümü belirtir.",
   "Auto: K from DLAA to Balanced, M at Performance, L at Ultra Performance.": "Otomatik: DLAA ile Dengeli arası K, Performans için M, Ultra Performans için L.",
-  "Upscaler ({0})": "Ölçekleyici ({0})"
+  "Upscaler ({0})": "Ölçekleyici ({0})",
+  "  ·  while playing": "  ·  oynarken",
+  "Before every start and every {0:0} minutes while playing, when this profile's saves changed. The newest {1} from before starting and {2} from playing are kept": "Her başlatmadan önce ve oynarken her {0:0} dakikada bir, bu profilin kayıtları değiştiyse. Başlatmadan önceki en yeni {1} ve oyundan {2} kayıt tutulur",
+  "Saves backed up while playing (the newest {0} of these are kept).": "Kayıtlar oynarken yedeklendi (en yeni {0} tanesi tutulur).",
+  "Fixed-refresh frame lock": "Sabit yenilemede kare kilidi",
+  "Particle work safety cap": "Parçacık işi güvenlik sınırı",
+  "Checks the size of the game's GPU particle work before the graphics card runs it, and caps it to what the card supports. Only for games that crash with \"device lost\" in effect-heavy scenes. It costs smoothness in busy scenes. Off by default": "Oyunun GPU parçacık işinin boyutunu ekran kartı çalıştırmadan önce denetler ve kartın desteklediği kadarla sınırlar. Yalnızca oyun efekt yoğun sahnelerde \"device lost\" ile çöküyorsa. Kalabalık sahnelerde akıcılıktan götürür. Varsayılan olarak kapalı",
+  "Only for monitors without G-Sync or FreeSync (VRR). Each frame is shown right after one of the monitor's refreshes when the FPS limit divides its refresh rate (60 FPS on 60, 120 or 240 Hz). Needs Precise frame pacing. With G-Sync or FreeSync it stutters: leave it off. Off by default": "Yalnızca G-Sync veya FreeSync (VRR) olmayan monitörler için. FPS sınırı monitörün yenileme hızını böldüğünde (60, 120 veya 240 Hz'de 60 FPS) her kare monitörün bir yenilemesinin hemen ardından gösterilir. \"Hassas kare zamanlaması\" gerekir. G-Sync veya FreeSync ile takılır: kapalı bırakın. Varsayılan olarak kapalı",
+  "Classic: the sidebar and one card per setting. Modern: tabs and compact rows": "Klasik: kenar çubuğu ve ayar başına bir kart. Modern: sekmeler ve sıkı satırlar",
+  "Windows: – □ ✕. macOS: the red, yellow and green dots": "Windows: – □ ✕. macOS: kırmızı, sarı ve yeşil noktalar"
 }

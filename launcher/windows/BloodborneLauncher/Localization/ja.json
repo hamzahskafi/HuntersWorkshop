@@ -537,7 +537,6 @@
   "they stay in {0}, and adding a profile with the same name brings them back.": "セーブデータは {0} に残り、同じ名前のプロファイルを追加すると元に戻ります。",
   "Appearance": "外観",
   "Layout": "レイアウト",
-  "Modern: tabs and compact rows. Classic: the sidebar and one card per setting": "モダン: タブとコンパクトな行。クラシック: サイドバーと設定ごとのカード",
   "Modern": "モダン",
   "Classic": "クラシック",
   "Engine folder": "エンジンフォルダー",
@@ -1302,7 +1301,6 @@
   "App icon": "アプリアイコン",
   "The launcher's and the game window's icon. The game window takes it at its next start": "ランチャーとゲームウィンドウのアイコン。ゲームウィンドウには次回の起動時に反映されます",
   "Window buttons": "ウィンドウボタン",
-  "macOS: the red, yellow and green dots. Windows: – □ ✕": "macOS: 赤、黄、緑のドット。Windows: – □ ✕",
   "Window buttons side": "ウィンドウボタンの位置",
   "Usual": "標準",
   "macOS on the left, Windows on the right": "macOS は左、Windows は右",
@@ -1569,5 +1567,14 @@
   "DLSS needs an NVIDIA RTX card; AMD FSR runs on any GPU. Both anti-alias as they upscale.": "DLSS には NVIDIA RTX が必要です。AMD FSR はどの GPU でも動作します。どちらもアップスケールと同時にアンチエイリアスします。",
   "Newer is usually better. (driver) marks one AMD's graphics driver provides.": "通常は新しいほど良好です。(ドライバー) は AMD のグラフィックドライバーが提供するものです。",
   "Auto: K from DLAA to Balanced, M at Performance, L at Ultra Performance.": "自動: DLAA～バランスは K、パフォーマンスは M、ウルトラパフォーマンスは L。",
-  "Upscaler ({0})": "アップスケーラー ({0})"
+  "Upscaler ({0})": "アップスケーラー ({0})",
+  "  ·  while playing": "  ·  プレイ中",
+  "Before every start and every {0:0} minutes while playing, when this profile's saves changed. The newest {1} from before starting and {2} from playing are kept": "起動前と、プレイ中は {0:0} 分ごとに、このプロファイルのセーブが変わっていれば。起動前の最新 {1} 個とプレイ中の {2} 個を保持します",
+  "Saves backed up while playing (the newest {0} of these are kept).": "プレイ中にセーブをバックアップしました (最新 {0} 個を保持)。",
+  "Fixed-refresh frame lock": "固定リフレッシュのフレームロック",
+  "Particle work safety cap": "パーティクル処理の安全上限",
+  "Checks the size of the game's GPU particle work before the graphics card runs it, and caps it to what the card supports. Only for games that crash with \"device lost\" in effect-heavy scenes. It costs smoothness in busy scenes. Off by default": "ゲームの GPU パーティクル処理の量をグラフィックカードが実行する前に確認し、カードが扱える量に抑えます。エフェクトの多い場面で「device lost」でクラッシュする場合のみ。混雑した場面では滑らかさが落ちます。既定はオフ",
+  "Only for monitors without G-Sync or FreeSync (VRR). Each frame is shown right after one of the monitor's refreshes when the FPS limit divides its refresh rate (60 FPS on 60, 120 or 240 Hz). Needs Precise frame pacing. With G-Sync or FreeSync it stutters: leave it off. Off by default": "G-Sync や FreeSync (VRR) のないモニター専用です。FPS 上限がリフレッシュレートを割り切れるとき (60、120、240 Hz で 60 FPS)、各フレームをモニターのリフレッシュ直後に表示します。「精密なフレームペーシング」が必要です。G-Sync や FreeSync ではカクつくのでオフのままに。既定はオフ",
+  "Classic: the sidebar and one card per setting. Modern: tabs and compact rows": "クラシック: サイドバーと設定ごとのカード。モダン: タブとコンパクトな行",
+  "Windows: – □ ✕. macOS: the red, yellow and green dots": "Windows: – □ ✕。macOS: 赤、黄、緑のドット"
 }

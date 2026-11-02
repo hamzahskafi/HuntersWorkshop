@@ -49,8 +49,7 @@ namespace BloodborneLauncher.Views
         private List<ControlProfiles.Profile> _profiles = new();
         private bool _fillingProfiles;
 
-        public ControlsPage() : base(L.T("Controls"),
-            L.T("Keyboard and mouse for every action, the mouse camera, and shareable profiles. Gamepads work as on PS4."))
+        public ControlsPage()
         {
             // ==================== PC controls & mouse ====================
             Group(L.T("Keyboard & mouse"));

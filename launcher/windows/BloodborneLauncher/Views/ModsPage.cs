@@ -15,9 +15,9 @@ namespace BloodborneLauncher.Views
         private List<Mods.Entry> _mods = new();
         private List<(Patches.Patch Patch, bool On)> _patches = new();
 
-        public ModsPage() : base(L.T("Mods & patches"),
-            L.T("Extract each mod into its own folder (with dvdroot_ps4, or straight chr/, parts/ and so on). Applied when the game starts."))
+        public ModsPage()
         {
+            Body.Children.Add(Text(L.T("Extract each mod into its own folder (with dvdroot_ps4, or straight chr/, parts/ and so on). Applied when the game starts."), "Faint"));
             Group(L.T("Mods"));
             SettingToggle(SymbolRegular.PuzzlePiece24, L.T("Load mods"), L.T("When two mods replace the same file, the one lower in the list wins"),
                 "mods_enabled");

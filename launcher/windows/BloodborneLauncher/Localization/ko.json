@@ -537,7 +537,6 @@
   "they stay in {0}, and adding a profile with the same name brings them back.": "{0}에 그대로 남아 있으며, 같은 이름으로 프로필을 추가하면 다시 돌아옵니다.",
   "Appearance": "모양",
   "Layout": "레이아웃",
-  "Modern: tabs and compact rows. Classic: the sidebar and one card per setting": "모던: 탭과 간결한 행. 클래식: 사이드바와 설정마다 카드 하나",
   "Modern": "모던",
   "Classic": "클래식",
   "Engine folder": "엔진 폴더",
@@ -1302,7 +1301,6 @@
   "App icon": "앱 아이콘",
   "The launcher's and the game window's icon. The game window takes it at its next start": "런처와 게임 창의 아이콘. 게임 창은 다음 시작 시 적용됩니다",
   "Window buttons": "창 버튼",
-  "macOS: the red, yellow and green dots. Windows: – □ ✕": "macOS: 빨강, 노랑, 초록 점. Windows: – □ ✕",
   "Window buttons side": "창 버튼 위치",
   "Usual": "기본",
   "macOS on the left, Windows on the right": "macOS는 왼쪽, Windows는 오른쪽",
@@ -1569,5 +1567,14 @@
   "DLSS needs an NVIDIA RTX card; AMD FSR runs on any GPU. Both anti-alias as they upscale.": "DLSS는 NVIDIA RTX 그래픽카드가 필요하고, AMD FSR은 모든 GPU에서 동작합니다. 둘 다 업스케일하며 안티에일리어싱합니다.",
   "Newer is usually better. (driver) marks one AMD's graphics driver provides.": "보통 최신일수록 좋습니다. (드라이버)는 AMD 그래픽 드라이버가 제공하는 버전입니다.",
   "Auto: K from DLAA to Balanced, M at Performance, L at Ultra Performance.": "자동: DLAA~균형: K, 성능: M, 울트라 성능: L.",
-  "Upscaler ({0})": "업스케일러 ({0})"
+  "Upscaler ({0})": "업스케일러 ({0})",
+  "  ·  while playing": "  ·  플레이 중",
+  "Before every start and every {0:0} minutes while playing, when this profile's saves changed. The newest {1} from before starting and {2} from playing are kept": "시작할 때마다, 그리고 플레이 중 {0:0}분마다 이 프로필의 저장이 바뀌었으면. 시작 전 최신 {1}개와 플레이 중 {2}개를 보관합니다",
+  "Saves backed up while playing (the newest {0} of these are kept).": "플레이 중 저장을 백업했습니다(최신 {0}개 보관).",
+  "Fixed-refresh frame lock": "고정 주사율 프레임 고정",
+  "Particle work safety cap": "파티클 작업 안전 제한",
+  "Checks the size of the game's GPU particle work before the graphics card runs it, and caps it to what the card supports. Only for games that crash with \"device lost\" in effect-heavy scenes. It costs smoothness in busy scenes. Off by default": "게임의 GPU 파티클 작업 크기를 그래픽카드가 실행하기 전에 확인하고 카드가 지원하는 만큼으로 제한합니다. 효과가 많은 장면에서 \"device lost\"로 튕길 때만 쓰세요. 복잡한 장면에서 부드러움이 떨어집니다. 기본값은 꺼짐",
+  "Only for monitors without G-Sync or FreeSync (VRR). Each frame is shown right after one of the monitor's refreshes when the FPS limit divides its refresh rate (60 FPS on 60, 120 or 240 Hz). Needs Precise frame pacing. With G-Sync or FreeSync it stutters: leave it off. Off by default": "G-Sync나 FreeSync(VRR)가 없는 모니터 전용입니다. FPS 제한이 주사율을 나누어떨어지게 할 때(60, 120, 240Hz에서 60 FPS) 각 프레임을 모니터 갱신 직후에 표시합니다. '정밀 프레임 페이싱' 설정이 필요합니다. G-Sync나 FreeSync에서는 끊기니 끄세요. 기본값은 꺼짐",
+  "Classic: the sidebar and one card per setting. Modern: tabs and compact rows": "클래식: 사이드바와 설정마다 카드 하나. 모던: 탭과 간결한 행",
+  "Windows: – □ ✕. macOS: the red, yellow and green dots": "Windows: – □ ✕. macOS: 빨강, 노랑, 초록 점"
 }

@@ -537,7 +537,6 @@
   "they stay in {0}, and adding a profile with the same name brings them back.": "它们仍保存在 {0} 中；重新添加同名配置即可恢复。",
   "Appearance": "外观",
   "Layout": "布局",
-  "Modern: tabs and compact rows. Classic: the sidebar and one card per setting": "现代：使用标签页和紧凑列表。经典：使用侧边栏，每项设置单独显示为卡片",
   "Modern": "现代",
   "Classic": "经典",
   "Engine folder": "引擎文件夹",
@@ -1303,7 +1302,6 @@
   "App icon": "应用图标",
   "The launcher's and the game window's icon. The game window takes it at its next start": "启动器和游戏窗口的图标；游戏窗口在下次启动时应用",
   "Window buttons": "窗口按钮",
-  "macOS: the red, yellow and green dots. Windows: – □ ✕": "macOS：红、黄、绿圆点。Windows：– □ ✕",
   "Window buttons side": "窗口按钮位置",
   "Usual": "常规",
   "macOS on the left, Windows on the right": "macOS 在左侧，Windows 在右侧",
@@ -1789,5 +1787,14 @@
   "DLSS needs an NVIDIA RTX card; AMD FSR runs on any GPU. Both anti-alias as they upscale.": "DLSS 需要 NVIDIA RTX 显卡；AMD FSR 可在任何 GPU 上运行。两者在放大时都会抗锯齿。",
   "Newer is usually better. (driver) marks one AMD's graphics driver provides.": "通常越新越好。（驱动）表示由 AMD 显卡驱动提供的版本。",
   "Auto: K from DLAA to Balanced, M at Performance, L at Ultra Performance.": "自动：DLAA 到平衡用 K，性能用 M，超高性能用 L。",
-  "Upscaler ({0})": "超分辨率算法（{0}）"
+  "Upscaler ({0})": "超分辨率算法（{0}）",
+  "  ·  while playing": "  ·  游戏中",
+  "Before every start and every {0:0} minutes while playing, when this profile's saves changed. The newest {1} from before starting and {2} from playing are kept": "每次启动前，以及游戏中每 {0:0} 分钟，在此配置的存档有变化时。保留启动前最新的 {1} 份和游戏中的 {2} 份",
+  "Saves backed up while playing (the newest {0} of these are kept).": "已在游戏中备份存档（保留最新的 {0} 份）。",
+  "Fixed-refresh frame lock": "固定刷新率帧锁定",
+  "Particle work safety cap": "粒子运算安全上限",
+  "Checks the size of the game's GPU particle work before the graphics card runs it, and caps it to what the card supports. Only for games that crash with \"device lost\" in effect-heavy scenes. It costs smoothness in busy scenes. Off by default": "在显卡执行前检查游戏 GPU 粒子运算的规模，并将其限制在显卡支持的范围内。仅用于在特效密集场景中因“device lost”崩溃的情况。在繁忙场景中会降低流畅度。默认关闭",
+  "Only for monitors without G-Sync or FreeSync (VRR). Each frame is shown right after one of the monitor's refreshes when the FPS limit divides its refresh rate (60 FPS on 60, 120 or 240 Hz). Needs Precise frame pacing. With G-Sync or FreeSync it stutters: leave it off. Off by default": "仅适用于不支持 G-Sync 或 FreeSync（VRR）的显示器。当 FPS 上限能整除刷新率时（60、120 或 240 Hz 下的 60 FPS），每帧都会在显示器一次刷新后立即显示。需要“精确帧节奏”。开启 G-Sync 或 FreeSync 时会卡顿：请保持关闭。默认关闭",
+  "Classic: the sidebar and one card per setting. Modern: tabs and compact rows": "经典：使用侧边栏，每项设置单独显示为卡片。现代：使用标签页和紧凑列表",
+  "Windows: – □ ✕. macOS: the red, yellow and green dots": "Windows：– □ ✕。macOS：红、黄、绿圆点"
 }

@@ -17,7 +17,7 @@ namespace BloodborneLauncher.Views
 
         private FoldRows _camera = null!;
 
-        public GameplayPage() : base(L.T("Gameplay"), "")
+        public GameplayPage()
         {
             Group(L.T("Camera"));
             IniCombo(SymbolRegular.Camera24, L.T("Follow camera"),

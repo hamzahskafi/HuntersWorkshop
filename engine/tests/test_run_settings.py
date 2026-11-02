@@ -12,7 +12,7 @@ import unittest
 
 
 class RestartResolutionTests(unittest.TestCase):
-    def run_restarts(self, explicit=False, live=False, ini_extra='', caps=None, bare_path=False):
+    def run_restarts(self, explicit=False, live=False, ini_extra='', bare_path=False):
         with tempfile.TemporaryDirectory() as directory:
             data = Path(directory)
             # Preparation is unrelated to this test; allow the real patch compiler to
@@ -26,11 +26,9 @@ class RestartResolutionTests(unittest.TestCase):
             (out / 'eboot.elf').write_bytes(elf)
             (data / 'eboot.bin').touch()
             config = data / 'config.ini'
-            config.write_text('upscaler=fsr3\npreset=1\noutput_res=1280x720\n' + ini_extra)
-            if caps is not None:  # the GPU check next to the probe (live_resolution=auto)
-                tool = data / 'bb-gpu-capabilities'
-                tool.write_text(f'#!/bin/sh\necho {caps}\n')
-                tool.chmod(0o755)
+            # DLSS: an upscaler that keeps the startup patch on Linux (AMD FSR runs TAA there since
+            # 0.4.4 beta 27, which renders at the output; fsr3 made three of these fail).
+            config.write_text('upscaler=dlss\npreset=1\noutput_res=1280x720\n' + ini_extra)
             python = data / 'python'
             python.write_text(f'#!{sys.executable}\n' +
                 'import subprocess, sys\n'
@@ -47,7 +45,7 @@ class RestartResolutionTests(unittest.TestCase):
                 '    f.write(json.dumps({key:os.environ.get(key) for key in '
                 '("BB_RENDER_RES", "BB_OUTPUT_RES", "BB_AUTO_RENDER_RES")})+"\\n")\n'
                 'if stage<2:\n'
-                '    config.write_text("upscaler=fsr3\\npreset=4\\noutput_res="+'
+                '    config.write_text("upscaler=dlss\\npreset=4\\noutput_res="+'
                 '("1280x720" if stage==0 else "1920x1080")+"\\n")\n'
                 '    os.environ["BB_TEST_STAGE"]=str(stage+1)\n'
                 '    os.execlp("bash", "bash", "run.sh")\n')
@@ -88,21 +86,17 @@ class RestartResolutionTests(unittest.TestCase):
     def test_live_resolution_setting(self):
         # Only the first launch matters here: the probe rewrites config.ini for the restarts.
         self.assertIsNone(self.run_restarts(ini_extra='live_resolution=1\n')[0]['BB_RENDER_RES'])
-        self.assertEqual(self.run_restarts(ini_extra='live_resolution=0\n', caps=1)[0]['BB_RENDER_RES'],
-                         '852x480')
-        # Unset: off (the startup patch), whatever the GPU. "auto" (0.4.4 beta 25c: no longer
-        # offered) reads as off too, whatever the GPU check would have said.
-        self.assertEqual(self.run_restarts(caps=1)[0]['BB_RENDER_RES'], '852x480')
-        self.assertEqual(self.run_restarts(ini_extra='live_resolution=auto\n', caps=1)[0]['BB_RENDER_RES'],
-                         '852x480')
-        self.assertEqual(self.run_restarts(ini_extra='live_resolution=auto\n', caps=0)[0]['BB_RENDER_RES'],
-                         '852x480')
+        self.assertEqual(self.run_restarts(ini_extra='live_resolution=0\n')[0]['BB_RENDER_RES'], '852x480')
+        # Unset: off (the startup patch). "auto" (0.4.4 beta 25c: no longer offered, and no GPU check
+        # any more) reads as off too.
+        self.assertEqual(self.run_restarts()[0]['BB_RENDER_RES'], '852x480')
+        self.assertEqual(self.run_restarts(ini_extra='live_resolution=auto\n')[0]['BB_RENDER_RES'], '852x480')
 
     def test_live_resolution_without_sed_or_grep(self):
         # A missing sed ended run.sh (exit 127) before the game in the AppImage on NixOS.
-        self.assertEqual(self.run_restarts(ini_extra='live_resolution=0\n', caps=1,
+        self.assertEqual(self.run_restarts(ini_extra='live_resolution=0\n',
                                            bare_path=True)[0]['BB_RENDER_RES'], '852x480')
-        self.assertEqual(self.run_restarts(ini_extra='live_resolution=auto\n', caps=1,
+        self.assertEqual(self.run_restarts(ini_extra='live_resolution=auto\n',
                                            bare_path=True)[0]['BB_RENDER_RES'], '852x480')
 
     def test_explicit_render_override_survives_restart(self):

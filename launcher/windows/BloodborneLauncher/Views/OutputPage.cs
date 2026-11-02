@@ -14,7 +14,7 @@ namespace BloodborneLauncher.Views
         private readonly TextBox _output;
         private readonly ToggleSwitch _follow;
 
-        public OutputPage() : base(L.T("Log"), "")
+        public OutputPage()
         {
             var bar = new Grid { Margin = new Thickness(0, 18, 0, 8) };
             bar.ColumnDefinitions.Add(new ColumnDefinition());
