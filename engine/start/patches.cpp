@@ -475,11 +475,15 @@ int Round(double v) {
     return int(std::nearbyint(v));  // round half to even, as Python's round()
 }
 
-double PresetScale(const std::map<std::string, std::string>& settings) {
+// 0.4.4 beta 27c: preset=auto (the default) picks by the output's height, as BbSettings::AutoPreset:
+// Native AA up to 1200 lines, Quality up to 1600, Performance above.
+int AutoPreset(int height) { return height <= 1200 ? 0 : height <= 1600 ? 1 : 3; }
+
+double PresetScale(const std::map<std::string, std::string>& settings, Size out) {
     int preset = 0;
     try {
-        const std::string text = Setting(settings, "preset").value_or("0");
-        preset = text.empty() ? 0 : std::stoi(text);
+        const std::string text = Lower(Setting(settings, "preset").value_or("auto"));
+        preset = text.empty() || text == "auto" ? AutoPreset(out.h) : std::stoi(text);
     } catch (const std::exception&) {
         throw Error("invalid preset");
     }
@@ -504,7 +508,7 @@ std::optional<Size> RenderSize(const std::map<std::string, std::string>& setting
         return size;
     }
     if (Setting(settings, "upscaler").value_or("fsr") == "off") return std::nullopt;
-    const double scale = PresetScale(settings);
+    const double scale = PresetScale(settings, kOutput);
     if (scale == 1.0) return std::nullopt;
     // Multiples of 4, as ScaledSizes: the game pads its targets to them (undrawn edge columns).
     return Size{std::max(4, Round(kOutput.w / scale / 4) * 4), std::max(4, Round(kOutput.h / scale / 4) * 4)};
@@ -817,7 +821,7 @@ std::optional<std::pair<Size, Size>> ScaledSizes(const std::map<std::string, std
     const Size out = OutputSize(settings);
     if (out == kOutput || Setting(settings, "upscaler") == "taa") return std::nullopt;
     double scale = 1.0;
-    if (Setting(settings, "upscaler").value_or("fsr") != "off") scale = PresetScale(settings);
+    if (Setting(settings, "upscaler").value_or("fsr") != "off") scale = PresetScale(settings, out);
     // A scene of at least 640x360, a third of 1080p: Ultra Performance at a 720p output made 428x240,
     // where a ROG Ally showed the world in half the picture (0.9.37 beta 7), and the upscaler has
     // little to work from below it.

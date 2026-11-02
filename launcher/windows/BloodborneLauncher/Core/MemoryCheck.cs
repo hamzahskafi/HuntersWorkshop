@@ -48,7 +48,8 @@ namespace BloodborneLauncher.Core
             var scale = 1.0;
             if (upscaler != "off")
             {
-                int.TryParse(ini.Get("preset", "0"), out var preset);
+                // 0.4.4 beta 27c: Auto resolved by the output's height; Custom as Quality's ratio or more.
+                var preset = Choices.ResolvePreset(ini.Get("preset", "auto"), h);
                 scale = PresetScales[Math.Clamp(preset, 0, PresetScales.Length - 1)];
             }
             long rw = (long)Math.Round(w / scale / 4) * 4, rh = (long)Math.Round(h / scale / 4) * 4;

@@ -153,7 +153,8 @@ else
 "$CC" "${cstd[@]}" -O2 -g -Wall -Wextra -Werror "${threads[@]}" "${includes[@]}" -I. -Isrc src/probe.c "${runtime[@]}" src/vulkan_smoke.c out/libatrac9.a -lm "${gpu[@]}" "${libraries[@]}" "${link[@]}" -o out/bb-probe
 echo "Built $PWD/out/bb-probe"
 # GPU and controller inventory; keep the Windows C dialect and include SDL headers.
-"$CC" "${cstd[@]}" -O2 -Wall -Wextra -Werror "${includes[@]}" tools/gpu_capabilities.c "${libraries[@]}" -o out/bb-gpu-capabilities
+# --fsr-versions (0.4.4 beta 27c) reads AMD's FSR API headers (MIT, gpu/third_party/amd-fsr-sdk).
+"$CC" "${cstd[@]}" -O2 -Wall -Wextra -Werror "${includes[@]}" -Igpu/third_party/amd-fsr-sdk tools/gpu_capabilities.c "${libraries[@]}" -o out/bb-gpu-capabilities
 fi
 # The native start (Windows): boot image, mods, patches, engine assets, then bb-probe. One static
 # program: it runs before bb-probe's DLLs are found, and replaces the Python scripts.

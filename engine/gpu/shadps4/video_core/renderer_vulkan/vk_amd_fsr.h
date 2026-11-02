@@ -40,11 +40,12 @@ public:
 
     /// Starts making the context for an output size and its inputs on a worker thread (making it
     /// builds the upscaler's shaders: seconds the first time); nothing when one is made or being made
-    /// for them. `fsr31`: FSR 3.1 instead of the newest version AMD's SDK runs here.
-    void Prepare(u32 output_width, u32 output_height, bool hdr, bool auto_exposure, bool fsr31);
+    /// for them. `version`: "auto" (the newest AMD's SDK runs here) or a version AMD lists for this GPU
+    /// by its name (BbSettings::FsrVersionMatch; 0.4.4 beta 27c, was FSR 3.1 or not).
+    void Prepare(u32 output_width, u32 output_height, bool hdr, bool auto_exposure, const std::string& version);
     /// A context for these is made: Record can run.
     [[nodiscard]] bool Ready(u32 output_width, u32 output_height, bool hdr, bool auto_exposure,
-                             bool fsr31) const;
+                             const std::string& version) const;
     /// A context is being made on the worker thread.
     [[nodiscard]] bool Preparing() const noexcept;
 
@@ -65,6 +66,8 @@ public:
     [[nodiscard]] std::string VersionName() const;
     /// The version that runs is FSR 3.1 (it takes the reactive mask and the tuning constants).
     [[nodiscard]] bool RunsFsr31() const noexcept;
+    /// The version that runs is one AMD's driver provides (" *" in AMD's list).
+    [[nodiscard]] bool RunsDriverVersion() const noexcept;
     /// A user retry (a menu change): failures forgotten, the context made again when next needed.
     void ClearFailure() noexcept;
 

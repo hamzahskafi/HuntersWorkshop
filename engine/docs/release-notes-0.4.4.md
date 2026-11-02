@@ -10,10 +10,17 @@ What changed since 0.4.3, for the release page. The engine work behind each line
   switches). The follow camera stays Original and model detail As in the game.
   Settings files from earlier versions get the unified frame time turned on once; everything else in
   them stays as it was.
-- **A new install starts on AMD FSR at Native AA**, the engine's own defaults, which run on any
-  graphics card (the launcher used to start it on FSR 4 at Ultra Performance). The first start's
-  Best settings for this PC still offers DLSS on an RTX card and a quality preset for the card. A
-  settings file that has an upscaler and preset keeps them.
+- **A new install starts on AMD FSR with Auto quality and DLSS's Auto model**, the engine's own
+  defaults, which run on any graphics card (the launcher used to start it on FSR 4 at Ultra
+  Performance). **Auto quality** goes by the output's height: Native AA up to 1200 lines (1080p),
+  Quality up to 1600 (1440p), Performance above (4K renders 1920 × 1080), so by default the game never
+  renders much more than native 1080p, and it follows the output when you change it. **DLSS's Auto
+  model** is NVIDIA's pairing: K for DLAA, Quality and Balanced, M for Performance, L for Ultra
+  Performance. The first start's Best settings for this PC still offers DLSS on an RTX card and a
+  lower quality for weaker cards. A settings file that has its own choices keeps them.
+- **The shipped settings file matches:** a new install's settings came from a file that still said
+  FSR 4.1.1 at Quality after the defaults changed. It now holds the same defaults as the launcher and
+  the engine, and two tests keep the three in step.
 
 ## The launcher
 
@@ -31,13 +38,19 @@ behind its tabs, Visuals holding Display to Interface; the Linux launchers are u
   **Steam Deck** output is its screen's 1280 × 800 (the list had 1280 × 720 under its name).
 - **Graphics:** everything about how the game is drawn, in one place. Best settings for this PC at
   the top, then **Upscaling and anti-aliasing:**
-  - **Upscaler:** AMD FSR, DLSS or None, with the FSR version (AMD FSR) or the DLSS model (DLSS)
-    under it.
-  - **Render resolution** (was Quality preset): each choice shows the size the game renders at for
-    the output you chose (Quality at 1920 × 1080 is 1280 × 720; on the Steam Deck, Ultra Performance
-    is 640 × 400), the render scale under Custom. With an upscaler only.
-  - **Anti-aliasing:** TAA, the game's own or Off, for Upscaler None (greyed with an upscaler, which
-    anti-aliases itself).
+  - **Anti-aliasing:** TAA, the game's own or Off, for Upscaler None. With an upscaler it is greyed,
+    with nothing chosen, and says the upscaler anti-aliases.
+  - **Upscaler:** AMD FSR, DLSS or None, with what belongs to it under it:
+    - **Quality** (was Quality preset): Auto (the default; it says what it picks, e.g. "Auto
+      (Quality)"), Native AA (DLAA with DLSS), Quality, Balanced, Performance, Ultra Performance,
+      Custom.
+    - **Render resolution**, under it: a slider showing the share of the output the game renders at
+      and its size, as the engine works it out ("67% — 1280 × 720"; on the Steam Deck the engine never
+      goes below 640 × 360, so Ultra Performance shows 50% — 640 × 400). Only Custom moves it.
+    - **FSR version** (AMD FSR): Automatic, with the version it runs, and every version AMD offers on
+      your graphics card, found by asking AMD's FSR SDK as the game does (in the background, once a
+      launcher session). Versions AMD's driver provides are marked.
+    - **DLSS model** (DLSS): Auto by default, and what Auto runs at the chosen quality.
   - **Sharpening**, its strength under it.
   - **Advanced:** character motion vectors, texture mip bias and DLSS's two finer settings.
 
@@ -79,10 +92,17 @@ behind its tabs, Visuals holding Display to Interface; the Linux launchers are u
 - **Save backups while playing every 10 minutes** (was 15), when the saves changed.
 - **Frame generation and NVIDIA Reflex are not offered** (the launcher's rows and the in-game items
   are gone; a saved frame generation choice runs off and the log says so). The code stays.
-- **The in-game menu (Insert or L3 + R3) matches Graphics:** Upscaler (AMD FSR, DLSS, None) with its
-  own rows under it, Anti-aliasing, Render resolution with each choice's size, Sharpening with its
-  strength under it, and Advanced (character motion vectors, texture mip bias, sub-pixel jitter). The
-  game's own anti-aliasing moved from the game effects to Anti-aliasing.
+- **The in-game menu (Insert or L3 + R3) matches Graphics:** Anti-aliasing, then the Upscaler with its
+  Quality and locked render resolution slider, the FSR version (every version AMD offers here) or
+  DLSS's model under it, Sharpening with its strength under it, and Advanced (character motion
+  vectors, texture mip bias, DLSS's two finer settings, sub-pixel jitter). The DLSS section went:
+  its rows are in those places. It shows what runs: "Running: FSR 3.1.6" (marked when AMD's driver
+  provides it) and "Running: DLSS 310.9.16, model K". The FPS counter's upscaler item shows the same
+  ("FSR 3.1.6", "DLSS K"). The game's own anti-aliasing moved from the game effects to
+  Anti-aliasing; FSR 3.1's tuning presets are called Tuning.
+- **Shorter texts:** every launcher row shows one short line under its name (the rest when you hover
+  it), the Graphics page's descriptions were rewritten short, and the game's System menu help lines
+  fit the window (Output resolution's was cut off).
 
 ## AMD FSR
 
@@ -90,9 +110,11 @@ behind its tabs, Visuals holding Display to Interface; the Linux launchers are u
   graphics card runs: **FSR 4.1** on Radeon RX 9000, RX 7000 and RX 6000 (and Ryzen AI Max, Ryzen AI
   300/400 and the Z2 handhelds), **FSR 3.1** on other cards (NVIDIA, Intel, older Radeon). One "AMD
   FSR" choice replaces FSR 3, FSR 4 and FSR 4.1.1; settings files that chose any of them get AMD FSR.
-- **FSR version:** Automatic (AMD's choice) or FSR 3.1, in the launcher (Graphics, under the
-  upscaler) and the in-game menu, where the menu also names the version that runs. FSR 4.1 on AMD cards has not been tested by
-  the project yet (no AMD testers): FSR 3.1 is the way back should it look wrong.
+- **FSR version:** Automatic (the newest AMD offers on your graphics card) or any version AMD offers
+  there: FSR 3.1.6 and FSR 2.3.4 on NVIDIA and Intel cards and older Radeons, FSR 4.1 too on Radeon RX
+  6000 and newer. In the launcher (Graphics, under the upscaler) and the in-game menu, where the menu
+  also names the version that runs. FSR 4.1 on AMD cards and FSR 2.3.4 have not been tested by the
+  project yet (no AMD testers): FSR 3.1 is the way back should FSR 4.1 look wrong.
 - When AMD FSR starts or its settings change, it builds its shaders for a few seconds; the game shows
   the picture at full size without it meanwhile.
 - **Without AMD's files** (they come with the package, in `engine\amd-fsr`), the game runs TAA

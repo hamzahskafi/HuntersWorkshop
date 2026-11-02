@@ -13,11 +13,14 @@ namespace BloodborneLauncher.Core
         /// <summary>The keys a new config.ini gets, at the engine's own defaults (bbport_settings.h).
         /// 0.4.4 beta 26: the upscaler and preset as the engine's, FSR at Native AA, which run on any GPU
         /// (were FSR 4 at Ultra Performance); the first start's Best settings for this PC still offers DLSS
-        /// and a preset by GPU. A config.ini that has them keeps its own. 0.4.4 beta 27: "fsr", AMD's FSR.</summary>
+        /// and a preset by GPU. A config.ini that has them keeps its own. 0.4.4 beta 27: "fsr", AMD's FSR.
+        /// 27c: the quality and DLSS's model "auto", the FSR version AMD's choice. engine/config.default.ini
+        /// and the engine's defaults agree (tests/test_engine_defaults.py).</summary>
         public static readonly (string Key, string Value)[] Defaults =
         {
             ("upscaler", "fsr"),
-            ("preset", "0"),
+            ("fsr_version", "auto"),
+            ("preset", "auto"),
             ("sharpen", "1"),
             ("sharpness", "0.20"),
             ("object_motion", "1"),
@@ -29,7 +32,7 @@ namespace BloodborneLauncher.Core
             ("live_resolution", "0"),
             ("frame_gen", "off"),
             ("frame_gen_cap", "1"),
-            ("dlss_preset", "k"),
+            ("dlss_preset", "auto"),
             ("fps_position", "0"),
             ("fps_scale", "1.00"),
             ("fps_text_color", "#FFFFFF"),

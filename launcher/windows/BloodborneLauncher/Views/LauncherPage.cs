@@ -241,6 +241,19 @@ namespace BloodborneLauncher.Views
         public static string Short(string label) =>
             label.IndexOfAny(new[] { '(', '（' }) is > 0 and var i ? label[..i].TrimEnd() : label;
 
+        /// <summary>No option highlighted (0.4.4 beta 27c: a choice another setting decides for now).</summary>
+        public void Clear()
+        {
+            SelectedIndex = -1;
+            foreach (var item in _items)
+            {
+                item.Background = Brushes.Transparent;
+                var label = (TextBlock)item.Child;
+                label.SetResourceReference(TextBlock.ForegroundProperty, "TextFillColorPrimaryBrush");
+                label.FontWeight = FontWeights.Normal;
+            }
+        }
+
         public void Select(int index, bool notify)
         {
             if (index < 0 || index >= _items.Count || !_items[index].IsEnabled) return;
@@ -471,8 +484,11 @@ namespace BloodborneLauncher.Views
         }
 
         /// <summary>The first sentence of a long description, for a line under a row (the whole
-        /// text goes in its tooltip). Short text is returned as it is.</summary>
-        public static string Brief(string text, int max = 90)
+        /// text goes in its tooltip). Short text is returned as it is. 0.4.4 beta 27c: one short line
+        /// (64 characters, was 90; the tester: the texts were too long), in every language.</summary>
+        public const int BriefLength = 64;
+
+        public static string Brief(string text, int max = BriefLength)
         {
             if (text.Length <= max) return text;
             foreach (var end in new[] { ". ", "; ", ": " })
@@ -635,7 +651,7 @@ namespace BloodborneLauncher.Views
                     return;
                 }
                 var full = index >= 0 ? choices[index].Note : null;
-                var brief = full == null ? null : Brief(full, 110);
+                var brief = full == null ? null : Brief(full);
                 SetHint(note, brief);
                 note.ToolTip = brief == full ? null : full;
             }
@@ -690,6 +706,14 @@ namespace BloodborneLauncher.Views
         {
             if (control is Segmented segmented) segmented.Select(index, notify: true);
             else if (control is ComboBox box) box.SelectedIndex = index;
+        }
+
+        /// <summary>Shows a ComboRow with no option chosen, without saving anything (0.4.4 beta 27c: the
+        /// anti-aliasing an upscaler does itself).</summary>
+        protected static void Unpick(FrameworkElement control)
+        {
+            if (control is Segmented segmented) segmented.Clear();
+            else if (control is ComboBox box) box.SelectedIndex = -1;
         }
 
         protected FrameworkElement SettingCombo(SymbolRegular icon, string title, string? hint, IReadOnlyList<Choice> choices,

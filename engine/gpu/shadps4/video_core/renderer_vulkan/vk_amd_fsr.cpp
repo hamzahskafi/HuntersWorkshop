@@ -32,6 +32,7 @@
 #include "api/include/vk/ffx_api_vk.h"
 #include "upscalers/include/ffx_upscale.h"
 
+#include "bbport_settings.h"
 #include "bbport_toggles.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
@@ -152,11 +153,12 @@ struct AmdFsr::Impl {
     ffxContext context{};
     struct Key {
         u32 width{}, height{};
-        bool hdr{}, auto_exposure{}, fsr31{};
+        bool hdr{}, auto_exposure{};
+        std::string version = "auto"; ///< fsr_version: "auto" or a version's name
         bool operator==(const Key&) const = default;
     } made{}, wanted{};
     std::string provider_name;
-    bool runs_fsr31{};
+    bool runs_fsr31{}, runs_driver{};
     std::array<float, 5> tuning{};
     bool tuned{};
     std::deque<u64> ticks; ///< scheduler ticks of the frames in flight
@@ -205,7 +207,7 @@ struct AmdFsr::Impl {
         ticks.clear();
         tuned = false;
         provider_name.clear();
-        runs_fsr31 = false;
+        runs_fsr31 = runs_driver = false;
     }
 
     bool Load() {
@@ -284,23 +286,10 @@ struct AmdFsr::Impl {
         std::printf("Upscaler: AMD FSR SDK loaded (%s); FSR versions for this GPU: %s (Automatic: AMD's "
                     "choice, the newest; * = provided by the driver)\n",
                     Utf8(Directory()).c_str(), listed.c_str());
+        // 0.4.4 beta 27c: the menus offer these (fsr_version), as the launcher does (bb-gpu-capabilities).
+        BbSettings::SetFsrVersionsOffered(version_names);
         probe_ok = true;
         return true;
-    }
-
-    /// The FSR 3.1 version to ask for: one shipped with the game first (AMD lists the driver's too).
-    std::optional<uint64_t> Fsr31Id() const {
-        std::optional<uint64_t> driver;
-        for (size_t i = 0; i < version_ids.size(); ++i) {
-            if (!Fsr31Name(version_names[i])) {
-                continue;
-            }
-            if (!DriverProvided(version_names[i])) {
-                return version_ids[i];
-            }
-            driver = driver ? driver : std::optional<uint64_t>{version_ids[i]};
-        }
-        return driver;
     }
 
     bool CreateContextNow(Key key) {
@@ -340,12 +329,15 @@ struct AmdFsr::Impl {
         override_version.header.type = FFX_API_DESC_TYPE_OVERRIDE_VERSION;
         desc.header.pNext = &api.header;
         api.header.pNext = &backend.header;
-        if (key.fsr31) {
-            if (const auto id = Fsr31Id()) {
-                override_version.versionId = *id;
+        // 0.4.4 beta 27c: a version by its name among AMD's for this GPU (one shipped with the game before
+        // the driver's; a family such as 27a's "3.1": its newest listed), else AMD's choice.
+        if (key.version != "auto") {
+            if (const int i = BbSettings::FsrVersionMatch(version_names, key.version); i >= 0) {
+                override_version.versionId = version_ids[size_t(i)];
                 backend.header.pNext = &override_version.header;
             } else {
-                std::printf("Upscaler: AMD FSR: no FSR 3.1 in AMD's list for this GPU; AMD's choice instead\n");
+                std::printf("Upscaler: AMD FSR: version %s is not in AMD's list for this GPU; AMD's choice instead\n",
+                            key.version.c_str());
             }
         }
         const auto result = create(&context, &desc.header, nullptr);
@@ -363,6 +355,16 @@ struct AmdFsr::Impl {
                                ? version.versionName
                                : "";
         name.erase(0, name.find_first_not_of(' '));
+        // Whether the driver provides it: its entry in AMD's list (by id), or a " *" on the name itself.
+        runs_driver = DriverProvided(name);
+        for (size_t i = 0; i < version_ids.size(); ++i) {
+            if (version_ids[i] == version.versionId && DriverProvided(version_names[i])) {
+                runs_driver = true;
+            }
+        }
+        while (!name.empty() && (name.back() == '*' || name.back() == ' ')) {
+            name.pop_back();
+        }
         runs_fsr31 = Fsr31Name(name);
         provider_name = name.empty() ? "FSR" : name.rfind("FSR", 0) == 0 ? name : "FSR " + name;
         return true;
@@ -381,7 +383,7 @@ struct AmdFsr::Impl {
         std::printf("Upscaler: AMD FSR building its shaders in the background (output %ux%u, %s%s); "
                     "the scene at full size meanwhile\n",
                     key.width, key.height, key.hdr ? "HDR scene" : "linear frame",
-                    key.fsr31 ? ", FSR 3.1 asked for" : "");
+                    key.version == "auto" ? "" : (", FSR " + key.version + " asked for").c_str());
         prep = std::thread([this, key] {
             const auto start = std::chrono::steady_clock::now();
             created_ok = CreateContextNow(key);
@@ -584,13 +586,13 @@ bool AmdFsr::Probe() {
     return impl->Probe();
 }
 
-void AmdFsr::Prepare(u32 ow, u32 oh, bool hdr, bool auto_exposure, bool fsr31) {
+void AmdFsr::Prepare(u32 ow, u32 oh, bool hdr, bool auto_exposure, const std::string& version) {
     impl->Settle();
-    impl->Prepare({ow, oh, hdr, auto_exposure, fsr31});
+    impl->Prepare({ow, oh, hdr, auto_exposure, BbSettings::FsrVersionKey(version)});
 }
 
-bool AmdFsr::Ready(u32 ow, u32 oh, bool hdr, bool auto_exposure, bool fsr31) const {
-    return impl->Ready({ow, oh, hdr, auto_exposure, fsr31});
+bool AmdFsr::Ready(u32 ow, u32 oh, bool hdr, bool auto_exposure, const std::string& version) const {
+    return impl->Ready({ow, oh, hdr, auto_exposure, BbSettings::FsrVersionKey(version)});
 }
 
 bool AmdFsr::Preparing() const noexcept {
@@ -625,6 +627,10 @@ bool AmdFsr::RunsFsr31() const noexcept {
     return !impl->preparing && impl->runs_fsr31;
 }
 
+bool AmdFsr::RunsDriverVersion() const noexcept {
+    return !impl->preparing && impl->runs_driver;
+}
+
 void AmdFsr::ClearFailure() noexcept {
     impl->Settle();
     if (impl->preparing) {
@@ -646,8 +652,8 @@ AmdFsr::~AmdFsr() = default;
 bool AmdFsr::Probe() {
     return false;
 }
-void AmdFsr::Prepare(u32, u32, bool, bool, bool) {}
-bool AmdFsr::Ready(u32, u32, bool, bool, bool) const {
+void AmdFsr::Prepare(u32, u32, bool, bool, const std::string&) {}
+bool AmdFsr::Ready(u32, u32, bool, bool, const std::string&) const {
     return false;
 }
 bool AmdFsr::Preparing() const noexcept {
@@ -667,6 +673,9 @@ std::string AmdFsr::VersionName() const {
     return "FSR";
 }
 bool AmdFsr::RunsFsr31() const noexcept {
+    return false;
+}
+bool AmdFsr::RunsDriverVersion() const noexcept {
     return false;
 }
 void AmdFsr::ClearFailure() noexcept {}

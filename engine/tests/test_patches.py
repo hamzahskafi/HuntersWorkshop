@@ -96,6 +96,18 @@ class NativeUiTests(unittest.TestCase):
         # TAA is native-only and uses the live host targets.
         self.assertIsNone(scaled_sizes({'output_res': '1280x720', 'upscaler': 'taa', 'preset': '3'}))
 
+    def test_auto_preset_follows_the_output_height(self):
+        # 0.4.4 beta 27c: preset=auto, the default (BbSettings::AutoPreset): Native AA up to 1200 lines,
+        # Quality up to 1600, Performance above.
+        for preset in ({}, {'preset': 'auto'}, {'preset': 'Auto'}):
+            with self.subTest(preset=preset):
+                self.assertIsNone(render_size(preset))
+                self.assertEqual(scaled_sizes({'output_res': '1280x800', **preset}), ((1280, 800), (1280, 800)))
+                self.assertEqual(scaled_sizes({'output_res': '1920x1200', **preset}), ((1920, 1200), (1920, 1200)))
+                self.assertEqual(scaled_sizes({'output_res': '2560x1440', **preset}), ((1708, 960), (2560, 1440)))
+                self.assertEqual(scaled_sizes({'output_res': '3440x1440', **preset}), ((2292, 960), (3440, 1440)))
+                self.assertEqual(scaled_sizes({'output_res': '3840x2160', **preset}), ((1916, 1076), (3840, 2160)))
+
 
 class DebugPatchTests(unittest.TestCase):
     def test_camera_patch_is_optional_and_compatible_with_fps_and_debug_menu(self):

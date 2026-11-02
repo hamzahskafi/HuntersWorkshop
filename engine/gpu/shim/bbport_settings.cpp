@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -100,8 +101,8 @@ void Set(Values& v, const std::string& key, const std::string& value) {
             std::printf("Settings: unknown upscaler '%s' (expected fsr, dlss, taa or off)\n", value.c_str());
         }
     } else if (key == "fsr_version") {
-        // 0.4.4 beta 27: AMD's choice ("auto") or FSR 3.1 ("3.1").
-        v.fsr_version = value == "3.1" || value == "31" ? FsrVersion31 : FsrVersionAuto;
+        // 0.4.4 beta 27c: "auto" or a version's name; 27a's "3.1" (and "31") the newest FSR 3.1.
+        SetFsrVersion(value == "31" ? std::string("3.1") : value);
     } else if (key == "frame_gen") {
         // bbport: "off" / "fsr3" / "dlss"; 0 and 1 too (BB_FRAME_GEN=0).
         v.frame_gen = value == "dlss"                     ? FrameGenDlss
@@ -135,7 +136,8 @@ void Set(Values& v, const std::string& key, const std::string& value) {
     } else if (key == "dlss_auto_exposure") {
         v.dlss_auto_exposure = i != 0;
     } else if (key == "preset") {
-        v.preset = std::clamp(i, 0, PresetCount - 1);
+        // 0.4.4 beta 27c: "auto" (the default), or a preset's number as before.
+        v.preset = value == "auto" || value.empty() ? PresetAuto : std::clamp(i, 0, PresetCount - 1);
     } else if (key == "sharpen") {
         v.sharpen = i != 0;
     } else if (key == "sharpness") {
@@ -548,10 +550,20 @@ bool FixedRenderSession() {
     return size && size[0];
 }
 
+int ResolvePreset(int preset, int output) {
+    return preset == PresetAuto ? AutoPreset(OutputHeight(output)) : std::clamp(preset, 0, int(PresetCustom));
+}
+
 int RenderPreset() {
     const auto& v = Get();
-    return FixedRenderSession() ? v.startup_preset :
-        v.upscaler == UpscalerTaa ? NativeAA : v.preset.load();
+    if (FixedRenderSession()) {
+        return ResolvePreset(v.startup_preset, v.startup_output_res);
+    }
+    if (v.upscaler == UpscalerTaa) {
+        return NativeAA;
+    }
+    // The output the scene follows: the one at start while one chosen in game waits for a restart.
+    return ResolvePreset(v.preset, ResolutionNeedsRestart() ? v.startup_output_res : v.output_res.load());
 }
 
 bool OutputChangesLive() {
@@ -568,9 +580,11 @@ bool ResolutionNeedsRestart() {
     if (!FixedRenderSession())
         return !OutputChangesLive() && v.output_res != v.startup_output_res;
     // TAA needs the live path (native guest targets): run.sh selects it on restart.
+    // 0.4.4 beta 27c: presets compared as they resolve (Auto at 1440p is Quality).
+    const int preset = ResolvePreset(v.preset, v.output_res);
     return FixedRenderSession() &&
-        (v.preset != v.startup_preset || v.output_res != v.startup_output_res ||
-         (v.preset == PresetCustom && v.render_scale != v.startup_render_scale) ||
+        (preset != ResolvePreset(v.startup_preset, v.startup_output_res) || v.output_res != v.startup_output_res ||
+         (preset == PresetCustom && v.render_scale != v.startup_render_scale) ||
          (v.upscaler == UpscalerOff) != (v.startup_upscaler == UpscalerOff) ||
          (v.upscaler == UpscalerTaa) != (v.startup_upscaler == UpscalerTaa));
 }
@@ -589,8 +603,8 @@ void Save() {
     const auto flag = [](bool value) { return std::string(value ? "1" : "0"); };
     put("menu_language", MenuLanguageCodes[int(v.menu_language.load())]);
     put("upscaler", UpscalerName(v.upscaler));
-    put("fsr_version", FsrVersionNames[std::clamp(v.fsr_version.load(), 0, FsrVersionCount - 1)]);
-    put("preset", std::to_string(v.preset.load()));
+    put("fsr_version", FsrVersion());
+    put("preset", v.preset == PresetAuto ? std::string("auto") : std::to_string(v.preset.load()));
     put("frame_gen", FrameGenNames[std::clamp(v.frame_gen.load(), 0, FrameGenCount - 1)]);
     put("frame_gen_cap", flag(v.frame_gen_cap));
     put("frame_gen_frames", std::to_string(std::clamp(v.frame_gen_frames.load(), 1, FrameGenFramesMax)));
@@ -753,6 +767,7 @@ void Save() {
 
 float PresetScale(int preset) {
     static constexpr float scales[PresetCustom] = {1.0f, 1.5f, 1.7f, 2.0f, 3.0f};
+    preset = ResolvePreset(preset, Get().output_res); // Auto: for the output chosen
     if (preset == PresetCustom) {
         // The startup patch's render size is fixed for the session (BB_RENDER_RES, run.sh).
         const auto& v = Get();
@@ -763,30 +778,75 @@ float PresetScale(int preset) {
 }
 
 const char* PresetName(int preset) {
-    static constexpr const char* names[PresetCount] = {"Native AA", "Quality", "Balanced",
-                                                       "Performance", "Ultra Performance", "Custom"};
+    static constexpr const char* names[PresetCount] = {"Native AA", "Quality", "Balanced", "Performance",
+                                                       "Ultra Performance", "Custom", "Auto"};
     return names[std::clamp(preset, 0, PresetCount - 1)];
+}
+
+namespace {
+/// The output index the presets apply to: now in a live session (the one at start while a chosen one
+/// waits for a restart), the one chosen in a startup-patched session (its next start).
+int PresetOutputIndex() {
+    const auto& v = Get();
+    return !FixedRenderSession() && ResolutionNeedsRestart() ? v.startup_output_res : v.output_res.load();
+}
+} // namespace
+
+SceneSize PresetOutput() {
+    const int output = PresetOutputIndex();
+    return {OutputWidth(output), OutputHeight(output)};
+}
+
+int RenderPercentMin() {
+    const auto& v = Get();
+    const SceneSize out = PresetOutput();
+    const bool patched =
+        FixedRenderSession() && !(out.width == 1920 && out.height == 1080) && v.live_resolution != 1;
+    const double most = patched ? std::max(1.0, std::min({3.0, out.width / 640.0, out.height / 360.0})) : 3.0;
+    return int(std::lround(100.0 / most));
+}
+
+std::string NewestFsrVersion(const std::vector<std::string>& offered) {
+    const auto numbers = [](const std::string& name) {
+        std::vector<int> parts;
+        int part = -1;
+        for (const char c : FsrVersionKey(name)) {
+            if (std::isdigit(static_cast<unsigned char>(c))) {
+                part = (part < 0 ? 0 : part * 10) + (c - '0');
+            } else if (part >= 0) {
+                parts.push_back(part);
+                part = -1;
+            }
+        }
+        if (part >= 0) {
+            parts.push_back(part);
+        }
+        return parts;
+    };
+    std::string newest;
+    for (const auto& name : offered) {
+        if (newest.empty() || numbers(name) > numbers(newest)) {
+            newest = name;
+        }
+    }
+    return newest;
 }
 
 SceneSize PresetRenderSize(int preset) {
     const auto& v = Get();
+    // The output it applies to (PresetOutputIndex); Auto resolves for it.
+    const bool fixed = FixedRenderSession();
+    const int output = PresetOutputIndex();
+    preset = ResolvePreset(preset, output);
     double scale = PresetScale(std::min(preset, PresetCustom - 1));
-    if (preset >= PresetCustom) {
+    if (preset == PresetCustom) {
         const float custom = v.render_scale;
         scale = std::clamp(std::isfinite(custom) ? double(custom) : 1.0, double(RenderScaleMin), double(RenderScaleMax));
     }
-    const auto live = [&](int output) {
-        const double s = std::clamp(scale, 1.0, 3.0);
-        return SceneSize{int(std::max(1l, std::lround(OutputWidth(output) / s / 4)) * 4),
-                         int(std::max(1l, std::lround(OutputHeight(output) / s / 4)) * 4)};
-    };
-    if (!FixedRenderSession()) {
-        return live(ResolutionNeedsRestart() ? v.startup_output_res : v.output_res.load());
-    }
-    const int output = v.output_res;
     const int w = OutputWidth(output), h = OutputHeight(output);
-    if ((w == 1920 && h == 1080) || v.live_resolution == 1) {
-        return live(output);
+    if (!fixed || (w == 1920 && h == 1080) || v.live_resolution == 1) {
+        const double s = std::clamp(scale, 1.0, 3.0);
+        return SceneSize{int(std::max(1l, std::lround(w / s / 4)) * 4), int(std::max(1l, std::lround(h / s / 4)) * 4)};
     }
     const double s = std::max(1.0, std::min({scale, w / 640.0, h / 360.0}));
     SceneSize size{std::max(4, int(std::nearbyint(w / s / 4)) * 4), std::max(4, int(std::nearbyint(h / s / 4)) * 4)};
@@ -796,7 +856,76 @@ SceneSize PresetRenderSize(int preset) {
     return size;
 }
 
+namespace {
+std::mutex fsr_version_mutex;
+std::string fsr_version_wanted = "auto";
+std::vector<std::string> fsr_versions_offered;
+} // namespace
+
+std::string FsrVersionKey(const std::string& name) {
+    std::string key = name;
+    while (!key.empty() && (key.back() == '*' || key.back() == ' ')) {
+        key.pop_back(); // AMD's " *": provided by the driver
+    }
+    key.erase(0, key.find_first_not_of(' '));
+    for (char& c : key) {
+        c = char(std::tolower(static_cast<unsigned char>(c)));
+    }
+    if (key.rfind("fsr", 0) == 0) {
+        key.erase(0, 3);
+        key.erase(0, key.find_first_not_of(' '));
+    }
+    return key.empty() ? std::string("auto") : key;
+}
+
+int FsrVersionMatch(const std::vector<std::string>& offered, const std::string& wanted) {
+    const std::string want = FsrVersionKey(wanted);
+    if (want == "auto") {
+        return -1;
+    }
+    int found = -1;
+    bool found_driver = false;
+    for (int i = 0; i < int(offered.size()); ++i) {
+        const std::string name = FsrVersionKey(offered[i]);
+        const bool same = name == want || (name.size() > want.size() && name.compare(0, want.size(), want) == 0 &&
+                                           name[want.size()] == '.');
+        if (!same) {
+            continue;
+        }
+        const bool driver = offered[i].find('*') != std::string::npos;
+        if (found < 0 || (found_driver && !driver)) {
+            found = i;
+            found_driver = driver;
+        }
+    }
+    return found;
+}
+
+std::string FsrVersion() {
+    std::lock_guard lock{fsr_version_mutex};
+    return fsr_version_wanted;
+}
+
+void SetFsrVersion(const std::string& version) {
+    {
+        std::lock_guard lock{fsr_version_mutex};
+        fsr_version_wanted = FsrVersionKey(version);
+    }
+    Get().fsr_version_serial.fetch_add(1, std::memory_order_relaxed);
+}
+
+std::vector<std::string> FsrVersionsOffered() {
+    std::lock_guard lock{fsr_version_mutex};
+    return fsr_versions_offered;
+}
+
+void SetFsrVersionsOffered(std::vector<std::string> names) {
+    std::lock_guard lock{fsr_version_mutex};
+    fsr_versions_offered = std::move(names);
+}
+
 int ModelPreset(int preset) {
+    preset = ResolvePreset(preset, Get().output_res);
     if (preset != PresetCustom) {
         return std::clamp(preset, 0, PresetCustom - 1);
     }
@@ -835,13 +964,13 @@ int DlssPresetFromText(const char* text) {
         // bbport: letters NVIDIA removed (A-D) or ignores (G-I, N, O) ran the DLL's default
         // while the menu showed the letter: K instead, said once here.
         if (!DlssPresetValid(letter - 'a' + 1)) {
-            std::printf("Settings: DLSS preset '%s' is not one of NVIDIA's (J, K, L, M); k\n", text);
-            return DlssPresetK;
+            std::printf("Settings: DLSS preset '%s' is not one of NVIDIA's (J, K, L, M); auto\n", text);
+            return DlssPresetAuto;
         }
         return letter - 'a' + 1;
     }
-    std::printf("Settings: unknown dlss_preset '%s' (expected default or a letter); k\n", text);
-    return DlssPresetK;
+    std::printf("Settings: unknown dlss_preset '%s' (expected auto, default or a letter); auto\n", text);
+    return DlssPresetAuto;
 }
 
 const char* DlssPresetText(int preset) {

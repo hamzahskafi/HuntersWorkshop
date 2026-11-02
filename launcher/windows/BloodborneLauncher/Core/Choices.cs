@@ -32,9 +32,9 @@
         /// With an upscaler the upscaler anti-aliases, and the engine leaves the game's own pass out.</summary>
         public static readonly Choice[] AntiAliasing =
         {
-            new("TAA", "taa", L.T("Temporal anti-aliasing at the output resolution: smooth edges, a little soft (sharpening helps)")),
-            new(L.T("The game's own"), "game", L.T("The game's own anti-aliasing pass, as on the PS4. Applied when the game starts")),
-            new(L.T("Off"), "off", L.T("No anti-aliasing: the sharpest picture, with jagged edges and shimmer")),
+            new("TAA", "taa"),
+            new(L.T("The game's own"), "game", L.T("Applied when the game starts")),
+            new(L.T("Off"), "off"),
         };
 
         /// <summary>fsr_version in config.ini (0.4.4 beta 27): AMD's choice, or FSR 3.1.</summary>
@@ -83,15 +83,56 @@
                 L.T("The driver may give the game the screen to itself (exclusive fullscreen): the lowest latency and G-SYNC's fullscreen-only mode, but trophy notifications and other windows don't show over it")),
         };
 
+        /// <summary>preset in config.ini, the upscaler's quality (0.4.4 beta 27c): Auto ("auto", the default:
+        /// AutoPreset by the output's height), then the engine's presets by number. Plain names; the
+        /// Graphics page shows what each renders at on its slider.</summary>
         public static readonly Choice[] Presets =
         {
-            new(L.T("Native AA (no upscaling; DLAA with DLSS)"), "0"),
-            new(L.T("Quality (x1.5)"), "1"),
-            new(L.T("Balanced (x1.7)"), "2"),
-            new(L.T("Performance (x2)"), "3"),
-            new(L.T("Ultra Performance (x3)"), "4"),
-            new(L.T("Custom (render scale below)"), "5"),
+            new(L.T("Auto"), "auto"),
+            new(L.T("Native AA"), "0"),
+            new(L.T("Quality"), "1"),
+            new(L.T("Balanced"), "2"),
+            new(L.T("Performance"), "3"),
+            new(L.T("Ultra Performance"), "4"),
+            new(L.T("Custom"), "5"),
         };
+
+        /// <summary>The preset value for Custom (render_scale).</summary>
+        public const int PresetCustom = 5;
+
+        /// <summary>Auto's choice for an output this many lines tall, as the engine's (BbSettings::AutoPreset):
+        /// Native AA up to 1200, Quality up to 1600, Performance above.</summary>
+        public static int AutoPreset(int height) => height <= 1200 ? 0 : height <= 1600 ? 1 : 3;
+
+        /// <summary>A preset value as the engine runs it for an output this tall: Auto resolved, the rest
+        /// by number (Native AA for anything else).</summary>
+        public static int ResolvePreset(string value, int height) =>
+            value is "" or "auto" ? AutoPreset(height)
+            : int.TryParse(value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var p) ? Math.Clamp(p, 0, PresetCustom)
+            : 0;
+
+        /// <summary>The lowest share of the output per side, in percent, the engine renders at there
+        /// (BbSettings::RenderPercentMin): a third, or what keeps 640 × 360 where the start is patched.</summary>
+        public static int RenderPercentMin(int outW, int outH, bool live)
+        {
+            var most = (outW, outH) == (1920, 1080) || live ? 3.0 : Math.Max(1.0, Math.Min(3.0, Math.Min(outW / 640.0, outH / 360.0)));
+            return (int)Math.Round(100 / most, MidpointRounding.AwayFromZero);
+        }
+
+        /// <summary>The model DLSS's Auto runs at a preset (NVIDIA's pairing, as the engine's DlssPresetAuto):
+        /// K for Native AA (DLAA), Quality and Balanced, M for Performance, L for Ultra Performance; Custom
+        /// by the nearest preset's ratio.</summary>
+        public static char DlssAutoModel(int preset, double customScale)
+        {
+            if (preset == PresetCustom)
+            {
+                var nearest = 0;
+                for (var p = 1; p < PresetScales.Length; p++)
+                    if (Math.Abs(PresetScales[p] - customScale) < Math.Abs(PresetScales[nearest] - customScale)) nearest = p;
+                preset = nearest;
+            }
+            return preset switch { 3 => 'M', 4 => 'L', _ => 'K' };
+        }
 
         public static readonly Choice[] OutputResolutions =
         {

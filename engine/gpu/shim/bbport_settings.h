@@ -6,6 +6,8 @@
 #pragma once
 
 #include <atomic>
+#include <string>
+#include <vector>
 
 namespace BbSettings {
 
@@ -24,11 +26,22 @@ inline int NoUpscaling(bool game_aa) { return game_aa ? UpscalerOff : UpscalerTa
 /// The game's own anti-aliasing pass applies (a patch at start) only without an upscaler or TAA:
 /// patches.cpp NoUpscaler leaves it out under them.
 inline bool GameAaApplies(bool game_aa, int upscaler) { return game_aa && upscaler == UpscalerOff; }
-/// fsr_version in config.ini: AMD's choice (no version override: the newest this GPU runs, FSR 4.1 on
-/// RX 6000 and newer, FSR 3.1 elsewhere), or FSR 3.1 (AMD's FSR 3.1.6). Live.
-enum FsrVersion : int { FsrVersionAuto = 0, FsrVersion31 = 1, FsrVersionCount };
-inline constexpr const char* FsrVersionNames[] = {"auto", "3.1"};
-static_assert(sizeof(FsrVersionNames) / sizeof(FsrVersionNames[0]) == FsrVersionCount);
+/// fsr_version in config.ini (0.4.4 beta 27c): "auto", AMD's choice (no version override: the newest
+/// this GPU runs, FSR 4.1 on RX 6000 and newer, FSR 3.1 elsewhere), or a version AMD's SDK offers on
+/// this GPU by its name ("3.1.6", "2.3.4", "4.1.2"; 27a's "3.1" asks for the newest FSR 3.1). One
+/// AMD does not offer here runs AMD's choice (the log says so). Live: the context is made again.
+std::string FsrVersion();
+void SetFsrVersion(const std::string& version);
+/// The versions AMD's SDK offers on this GPU, as AMD lists and names them (" *": provided by the
+/// driver); empty until the renderer has asked, or when AMD FSR cannot run. Set by the renderer.
+std::vector<std::string> FsrVersionsOffered();
+void SetFsrVersionsOffered(std::vector<std::string> names);
+/// A version name as config.ini keeps it: AMD's " *" and an "FSR " prefix dropped, lowercase ("auto"
+/// for nothing).
+std::string FsrVersionKey(const std::string& name);
+/// Which of `offered` a wanted version asks for: its exact name, or the newest listed of a family
+/// ("3.1": the first 3.1.x), one shipped with the game before the driver's; -1 for "auto" or none.
+int FsrVersionMatch(const std::vector<std::string>& offered, const std::string& wanted);
 /// bbport: frame_gen in config.ini (BB_FRAME_GEN): generated frames between the game's own
 /// (vk_frame_generation.h): NVIDIA DLSS Frame Generation through Streamline (vk_streamline.h; RTX
 /// 40/50, loaded at start, frame_gen_frames per real one). FSR 3.1 frame interpolation went with
@@ -48,8 +61,14 @@ inline constexpr bool FrameGenOffered = false;
 enum Reflex : int { ReflexOff = 0, ReflexOn = 1, ReflexBoost = 2, ReflexCount };
 inline constexpr const char* ReflexNames[] = {"off", "on", "boost"};
 static_assert(sizeof(ReflexNames) / sizeof(ReflexNames[0]) == ReflexCount);
-/// Custom (render_scale in config.ini): output / render size of the player's choosing.
-enum Preset : int { NativeAA = 0, Quality, Balanced, Performance, UltraPerformance, PresetCustom, PresetCount };
+/// Custom (render_scale in config.ini): output / render size of the player's choosing. 0.4.4 beta 27c:
+/// Auto (preset=auto, the default) picks one by the output's height (AutoPreset); config.ini keeps the
+/// others' numbers as before.
+enum Preset : int { NativeAA = 0, Quality, Balanced, Performance, UltraPerformance, PresetCustom, PresetAuto, PresetCount };
+/// Auto's choice for an output this many lines tall: Native AA up to 1200 (1080p, 1920x1200), Quality up
+/// to 1600 (1440p, 2560x1600), Performance above (4K renders 1920x1080): by default the scene is never much
+/// more work than native 1080p. bb-start (patches.cpp) and patches.py choose the same.
+inline constexpr int AutoPreset(int height) { return height <= 1200 ? NativeAA : height <= 1600 ? Quality : Performance; }
 inline constexpr float RenderScaleMin = 1.0f, RenderScaleMax = 3.0f;
 /// mip_bias in config.ini: added to the scene's texture LOD bias while an upscaler runs.
 inline constexpr float MipBiasMin = -2.0f, MipBiasMax = 1.0f;
@@ -166,9 +185,9 @@ static_assert(sizeof(PadIconsNames) / sizeof(PadIconsNames[0]) == PadIconsCount)
 struct Values {
     std::atomic<MenuLanguage> menu_language{MenuLanguage::English};
     std::atomic<int> upscaler{UpscalerFsr};
-    /// FsrVersion: AMD's choice or FSR 3.1; live (the context is made again).
-    std::atomic<int> fsr_version{FsrVersionAuto};
-    std::atomic<int> preset{NativeAA};
+    /// fsr_version: FsrVersion() / SetFsrVersion() (a name); counts its changes, for the renderer.
+    std::atomic<unsigned> fsr_version_serial{0};
+    std::atomic<int> preset{PresetAuto};
     std::atomic<int> frame_gen{FrameGenOff}; ///< FrameGen; live
     /// While generated frames are shown, the game runs at half the refresh rate so every
     /// generated frame reaches the display (any present mode); live.
@@ -304,9 +323,13 @@ struct Values {
     /// whether it is FSR 3.1 (it takes the fsr3_* tuning).
     std::atomic<const char*> fsr_running{nullptr};
     std::atomic<bool> fsr_runs_31{false};
+    /// Set by the renderer (0.4.4 beta 27c): the running FSR version is one AMD's driver provides.
+    std::atomic<bool> fsr_running_driver{false};
+    /// Set by DLSS at start (0.4.4 beta 27c): the version of the DLSS file it loads ("310.9.16"), or null.
+    std::atomic<const char*> dlss_version{nullptr};
     /// DLSS's render preset (DlssPreset*); live: its feature is created again (vk_dlss.cpp). Set by
     /// DLSS: the preset its feature runs (0 the DLL's default, a refused one included), -1 before.
-    std::atomic<int> dlss_preset{DlssPresetK}, dlss_applied_preset{-1};
+    std::atomic<int> dlss_preset{DlssPresetAuto}, dlss_applied_preset{-1};
     /// dlss_mip_bias (BB_DLSS_MIP_BIAS): one more mip level of texture detail under DLSS; live.
     std::atomic<bool> dlss_mip_bias{true};
     /// dlss_auto_exposure: DLSS's own exposure for any input (HDR inputs always use it); live.
@@ -327,7 +350,7 @@ struct Values {
     } startup_optiscaler;
 
     /// Startup settings for the explicit BB_RENDER_RES compatibility patch only.
-    int startup_preset = NativeAA;
+    int startup_preset = PresetAuto;
     float startup_render_scale = 1.3f;
     /// frame_gen at start: DLSS Frame Generation loads Streamline before the Vulkan instance.
     int startup_frame_gen = FrameGenOff;
@@ -365,7 +388,11 @@ bool FixedRenderSession();
 /// 0.4.4 beta 26b: whether an output resolution chosen in game (the Insert menu, the pause menu's
 /// Graphics page) applies at once: only with Live resolution changes on when the game started.
 bool OutputChangesLive();
+/// The preset in effect: Auto resolved for the output it applies to, NativeAA under TAA, the startup's
+/// in a startup-patched session. Never PresetAuto.
 int RenderPreset();
+/// A preset with Auto resolved for an output index (OutputWidths); the others as they are.
+int ResolvePreset(int preset, int output);
 /// A resolution chosen in game that waits for a restart: in a startup-patched session, or with Live
 /// resolution changes off in a session that needed no patch (started at 1920x1080).
 bool ResolutionNeedsRestart();
@@ -388,6 +415,13 @@ struct SceneSize {
 /// exactly 1920x1080) unless that start is live (1920x1080, or Live resolution changes on). Custom:
 /// render_scale as set now.
 SceneSize PresetRenderSize(int preset);
+/// 0.4.4 beta 27c: the output the presets apply to (as PresetRenderSize), and the lowest render share
+/// of it per side, in percent, the Custom slider offers there: a third, or what keeps 640x360 where the
+/// start is patched (50 on the Steam Deck).
+SceneSize PresetOutput();
+int RenderPercentMin();
+/// The newest of AMD's versions by number (the one Automatic runs), as AMD names it; empty for none.
+std::string NewestFsrVersion(const std::vector<std::string>& offered);
 /// dlss_preset letters offered: J, K, L, M (the transformers). NVIDIA removed A-D and deprecated E
 /// and F (the CNN models; read as auto from 0.4.4 beta 25b); G-I, N, O fall back to its default.
 bool DlssPresetValid(int preset);

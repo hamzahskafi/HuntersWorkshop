@@ -84,6 +84,38 @@ anyway. VISUALS is **Display, Graphics, Interface** (Look went):
   without an upscaler or TAA; the System menu opened from the title no longer has Quit to Desktop (the
   title's own Quit Game is there), kept in game.
 
+## As built (beta 27c)
+
+The tester's look at 27b (2026-11-02), discussed in full before any code:
+
+```
+Anti-aliasing             TAA / The game's own / Off   (with an upscaler: greyed, nothing chosen,
+                                                         "AMD FSR anti-aliases (Upscaler below)")
+Upscaler                  AMD FSR / DLSS / None
+  Quality                 Auto (Quality) / Native AA / Quality / Balanced / Performance /
+                          Ultra Performance / Custom                     (hidden with None)
+    Render resolution     slider "67% — 1280 × 720"                     (locked unless Custom)
+  FSR version             Automatic (FSR 3.1.6) / FSR 3.1.6 / FSR 2.3.4 (AMD FSR; what AMD offers)
+  DLSS model              Auto / K / M / L / J / The DLL's default      (DLSS; "Auto: model K at this quality")
+Sharpening (RCAS)
+  Sharpening strength
+Advanced: character motion vectors, texture mip bias, DLSS sharper textures, DLSS auto exposure
+```
+
+- **Quality:** plain names; Auto first and the default, by the output's height (Native AA up to 1200
+  lines, Quality up to 1600, Performance above), showing what it picks. "Render resolution" is the name
+  games give a percentage slider, so the slider under it has it: the share per side and the size, as
+  the engine works them out, locked (not greyed: what it shows applies) unless Custom.
+- **FSR version:** every version AMD offers on the GPU, asked through `bb-gpu-capabilities
+  --fsr-versions` once a launcher session (the last answer kept for the next start); Automatic only when
+  it cannot tell. Driver-provided versions marked.
+- **DLSS:** Auto the default; its version from the file's numbers ("DLSS 310.9.16").
+- **Text:** one short line per row (`LauncherPage.Brief`, 64 characters, every page and language), the
+  rest in the tooltip; the Graphics page's descriptions rewritten short.
+- **In game:** the overlay in the same order, its DLSS section merged; "Running: FSR 3.1.6" (driver
+  marked) and "Running: DLSS 310.9.16, model K"; the FPS counter shows the same. The System menu's help
+  lines within about 65 characters.
+
 
 - **Classic:** the WPF launcher's Classic layout is the one designed here.
 - **Modern:** it follows the same pages (its tab mapping is near the end).

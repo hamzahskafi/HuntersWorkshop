@@ -409,9 +409,9 @@ void TemporalUpscaler::PrepareFsr() {
     // third-party resolution patch; RecordFrameUpscaler), until the output changes.
     const u32 ow = fsr_width ? fsr_width : target_width, oh = fsr_height ? fsr_height : target_height;
     const bool auto_exposure = settings.fsr4_auto_exposure.load(std::memory_order_relaxed);
-    const bool fsr31 = settings.fsr_version.load(std::memory_order_relaxed) == BbSettings::FsrVersion31;
-    if (!amd_fsr->Ready(ow, oh, hdr, auto_exposure, fsr31)) {
-        amd_fsr->Prepare(ow, oh, hdr, auto_exposure, fsr31);
+    const std::string version = BbSettings::FsrVersion();
+    if (!amd_fsr->Ready(ow, oh, hdr, auto_exposure, version)) {
+        amd_fsr->Prepare(ow, oh, hdr, auto_exposure, version);
         fsr_building = !amd_fsr->Fatal();
     }
 }
@@ -564,7 +564,8 @@ bool TemporalUpscaler::OnFrameStart() {
     const bool was_building = fsr_building;
     PrepareFsr();
     if (was_building && !fsr_building && upscaler == BbSettings::UpscalerFsr) {
-        std::printf("Upscaler: AMD FSR running (%s)\n", amd_fsr->VersionName().c_str());
+        std::printf("Upscaler: AMD FSR running (%s%s)\n", amd_fsr->VersionName().c_str(),
+                    amd_fsr->RunsDriverVersion() ? ", provided by AMD's driver" : "");
     }
     // The menu shows the FSR version that runs (AMD's name); the strings outlive the pointer it reads.
     {
@@ -576,6 +577,7 @@ bool TemporalUpscaler::OnFrameStart() {
         if (!running) {
             BbSettings::Get().fsr_running.store(nullptr, std::memory_order_relaxed);
             BbSettings::Get().fsr_runs_31.store(false, std::memory_order_relaxed);
+            BbSettings::Get().fsr_running_driver.store(false, std::memory_order_relaxed);
         } else if (const std::string name = amd_fsr->VersionName(); name != shown_name ||
                    !BbSettings::Get().fsr_running.load(std::memory_order_relaxed)) {
             shown_name = name;
@@ -583,6 +585,7 @@ bool TemporalUpscaler::OnFrameStart() {
             BbSettings::Get().fsr_running.store(names[next_name].c_str(), std::memory_order_relaxed);
             next_name = (next_name + 1) % names.size();
             BbSettings::Get().fsr_runs_31.store(amd_fsr->RunsFsr31(), std::memory_order_relaxed);
+            BbSettings::Get().fsr_running_driver.store(amd_fsr->RunsDriverVersion(), std::memory_order_relaxed);
         }
     }
     const bool active = Active();
@@ -2738,8 +2741,7 @@ bool TemporalUpscaler::RecordFrameUpscaler(vk::CommandBuffer cmdbuf, UpscaleInpu
     if (!use_dlss && reactive && reactive_image) {
         frame.reactive = {vk::Image(reactive_image), *reactive_view, w, h, vk::Format::eR8Unorm};
     }
-    if (!use_dlss && !amd_fsr->Ready(ow, oh, hdr, frame.auto_exposure,
-                                     settings.fsr_version.load() == BbSettings::FsrVersion31)) {
+    if (!use_dlss && !amd_fsr->Ready(ow, oh, hdr, frame.auto_exposure, BbSettings::FsrVersion())) {
         // A frame of another size than the context was made for (a third-party resolution patch
         // renders the scene larger than the output): made again for it, the scene at full size
         // meanwhile (PrepareFsr, Active).

@@ -8,10 +8,12 @@
 #include <filesystem>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #ifdef _WIN32
 #include <windows.h>
+#include <winver.h>
 #else
 #include <dlfcn.h>
 #endif
@@ -206,6 +208,62 @@ ResourceVk Resource(const UpscaleInput::Image& image, vk::ImageAspectFlags aspec
     r.type = 0;
     r.read_write = rw;
     return r;
+}
+
+/// 0.4.4 beta 27c: the version of the DLSS file NGX loads from these folders ("310.9.16"), for the menu,
+/// the FPS counter and the log: Windows' file version of nvngx_dlss.dll (version.dll's functions, loaded
+/// here: no link change), the Linux library's name (libnvidia-ngx-dlss.so.310.4.0). Empty if not found.
+std::string DlssFileVersion(const std::vector<std::wstring>& paths) {
+#ifdef _WIN32
+    using SizeFn = DWORD(WINAPI*)(LPCWSTR, LPDWORD);
+    using InfoFn = BOOL(WINAPI*)(LPCWSTR, DWORD, DWORD, LPVOID);
+    using QueryFn = BOOL(WINAPI*)(LPCVOID, LPCWSTR, LPVOID*, PUINT);
+    static const HMODULE version_dll = LoadLibraryW(L"version.dll");
+    if (!version_dll) {
+        return {};
+    }
+    const auto size_fn = reinterpret_cast<SizeFn>(GetProcAddress(version_dll, "GetFileVersionInfoSizeW"));
+    const auto info_fn = reinterpret_cast<InfoFn>(GetProcAddress(version_dll, "GetFileVersionInfoW"));
+    const auto query_fn = reinterpret_cast<QueryFn>(GetProcAddress(version_dll, "VerQueryValueW"));
+    if (!size_fn || !info_fn || !query_fn) {
+        return {};
+    }
+    for (const auto& dir : paths) {
+        const std::wstring file = (std::filesystem::path(dir) / L"nvngx_dlss.dll").wstring();
+        DWORD handle = 0;
+        const DWORD size = size_fn(file.c_str(), &handle);
+        if (size == 0) {
+            continue;
+        }
+        std::vector<unsigned char> data(size);
+        VS_FIXEDFILEINFO* fixed = nullptr;
+        UINT length = 0;
+        if (!info_fn(file.c_str(), 0, size, data.data()) ||
+            !query_fn(data.data(), L"\\", reinterpret_cast<LPVOID*>(&fixed), &length) || !fixed) {
+            continue;
+        }
+        char text[48];
+        std::snprintf(text, sizeof(text), "%u.%u.%u", unsigned(HIWORD(fixed->dwFileVersionMS)),
+                      unsigned(LOWORD(fixed->dwFileVersionMS)), unsigned(HIWORD(fixed->dwFileVersionLS)));
+        std::string version = text;
+        if (const unsigned revision = LOWORD(fixed->dwFileVersionLS)) {
+            version += "." + std::to_string(revision);
+        }
+        return version;
+    }
+#else
+    constexpr std::string_view prefix = "libnvidia-ngx-dlss.so.";
+    for (const auto& dir : paths) {
+        std::error_code ec;
+        for (const auto& entry : std::filesystem::directory_iterator(std::filesystem::path(dir), ec)) {
+            const std::string name = entry.path().filename().string();
+            if (name.size() > prefix.size() && name.compare(0, prefix.size(), prefix) == 0) {
+                return name.substr(prefix.size());
+            }
+        }
+    }
+#endif
+    return {};
 }
 
 } // namespace
@@ -426,7 +484,13 @@ struct DlssUpscaler::Impl {
             return;
         }
         available = true;
-        std::printf("DLSS: Super Resolution available (NGX core loaded)\n");
+        // 0.4.4 beta 27c: the DLSS file's version, for the menu and the FPS counter.
+        static const std::string version = DlssFileVersion(paths);
+        if (!version.empty()) {
+            BbSettings::Get().dlss_version.store(version.c_str(), std::memory_order_relaxed);
+        }
+        std::printf("DLSS: Super Resolution available (NGX core loaded; DLSS %s)\n",
+                    version.empty() ? "version unknown" : version.c_str());
     }
 
     static std::string fmt_hex(const char* what, unsigned value) {

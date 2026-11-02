@@ -251,8 +251,15 @@ PRESET_SCALES=[1.0,1.5,1.7,2.0,3.0]
 PRESET_CUSTOM=len(PRESET_SCALES)
 
 
-def preset_scale(settings):
-    preset=int(settings.get('preset','0') or 0)
+def auto_preset(height):
+    """0.4.4 beta 27c: preset=auto (the default) by the output's height (BbSettings::AutoPreset): Native AA
+    up to 1200 lines, Quality up to 1600, Performance above."""
+    return 0 if height<=1200 else 1 if height<=1600 else 3
+
+
+def preset_scale(settings,out=None):
+    text=(settings.get('preset','auto') or 'auto').strip().lower()
+    preset=auto_preset((out or OUTPUT_SIZE)[1]) if text=='auto' else int(text)
     if preset==PRESET_CUSTOM:
         try:
             return min(3.0,max(1.0,float(settings.get('render_scale','1.3') or 1.3)))
@@ -451,7 +458,7 @@ def scaled_sizes(settings):
     if out==OUTPUT_SIZE or settings.get('upscaler')=='taa': return None
     scale=1.0
     if settings.get('upscaler','fsr')!='off':
-        scale=preset_scale(settings)
+        scale=preset_scale(settings,out)
     # A scene of at least 640x360 (start/patches.cpp ScaledSizes): 428x240 (Ultra Performance at a
     # 720p output) showed the world in half the picture on a ROG Ally.
     scale=max(1.0,min(scale,out[0]/640,out[1]/360))

@@ -21,8 +21,13 @@ The sections after this one are the record of the work from the first frame anal
   and driven through the AMD FSR API (`third_party/amd-fsr-sdk`, MIT headers). AMD's SDK lists the
   versions for the GPU (the log names them) and picks one: FSR 4.1.2 on RX 9000 (FP8), RX 7000, RX 6000
   and Ryzen AI Max (INT8), Ryzen AI 300/400 and Z2 (lightweight INT8); FSR 3.1.6 elsewhere (NVIDIA,
-  Intel, older Radeon). `fsr_version=3.1` asks for FSR 3.1 instead (AMD's version override; live, the
-  context made again). The context is made on a worker thread (it builds the upscaler's shaders): the
+  Intel, older Radeon). `fsr_version` (0.4.4 beta 27c) is `auto` or the name of a version AMD lists
+  for the GPU (`3.1.6`, `2.3.4`, `4.1.2`; 27a's `3.1` the newest 3.1; `BbSettings::FsrVersionMatch`,
+  a shipped version before the driver's), asked for by AMD's version override; live, the context made
+  again; one AMD does not list runs AMD's choice, logged. The menus list what AMD offers: the engine's
+  probe (`FsrVersionsOffered`), the launcher's `bb-gpu-capabilities --fsr-versions` (AMD's same query
+  on a device of the game's GPU). The menu, the FPS counter and the log name the version that runs,
+  marked when AMD's driver provides it (`fsr_running_driver`); DLSS's file version too (`dlss_version`). The context is made on a worker thread (it builds the upscaler's shaders): the
   scene renders at full size without the upscaler meanwhile. Inputs as before: standard depth (AMD
   supports it), render-size motion vectors without jitter, dynamic resolution within the output size;
   HDR at a 1920x1080 output, the game's frame decoded to linear light elsewhere. Windows only: AMD's
@@ -34,9 +39,12 @@ The sections after this one are the record of the work from the first frame anal
   tonemap and UI run on it; at other outputs on the game's tonemapped frame before its UI, which
   is then drawn at the output size. Inputs: the scene depth, camera motion vectors, object motion
   vectors (`object_motion`, on by default) and sub-pixel jitter (`jitter`, on).
-- **Presets** (`preset`; the menus' Render resolution from 0.4.4 beta 27b): Native AA (DLAA with
-  DLSS), Quality x1.5, Balanced x1.7, Performance x2, Ultra Performance x3 and Custom (`render_scale`,
-  1.0-3.0). TAA always renders at the output. The menus show each one's scene size for the output
+- **Presets** (`preset`; the menus' Quality from 0.4.4 beta 27c): Auto (`auto`, the default from 27c:
+  `BbSettings::AutoPreset` by the output's height, Native AA up to 1200 lines, Quality up to 1600,
+  Performance above; bb-start's and `patches.py`'s start sizes resolve it the same), Native AA (DLAA
+  with DLSS), Quality x1.5, Balanced x1.7, Performance x2, Ultra Performance x3 and Custom
+  (`render_scale`, 1.0-3.0; the menus' Render resolution slider, in percent of the output per side,
+  only Custom moves). TAA always renders at the output. The menus show each one's scene size for the output
   (`BbSettings::PresetRenderSize`, the launcher's `Choices.RenderSize`): live, `ForScale` of the
   output (multiples of 4); patched at start, `ScaledSizes` (at least 640x360, never exactly 1920x1080:
   1916x1076).
@@ -51,6 +59,8 @@ The sections after this one are the record of the work from the first frame anal
   so TAA runs at the output size. A fatal failure in play falls back the same way (DLSS to AMD FSR,
   AMD FSR to TAA); in a session started at a reduced render size TAA cannot run, and the picture is
   not upscaled until the game starts again. The menu shows the upscaler in use and why.
+- **DLSS's model** (`dlss_preset`): Auto from 0.4.4 beta 27c (NVIDIA's pairing: K for DLAA, Quality and
+  Balanced, M for Performance, L for Ultra Performance), was K; J, K, L, M or the DLL's default.
 - **Sharpening:** `sharpen` (on) and `sharpness` (0-2, default 0.20). AMD FSR applies its own
   RCAS up to 1 and an extra RCAS pass above it; DLSS, which has no sharpening of its own, gets the
   whole range from that pass; TAA has its own pass (docs/MODS.md, "TAA sharpening").

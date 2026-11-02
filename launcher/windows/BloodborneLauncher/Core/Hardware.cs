@@ -270,7 +270,9 @@ namespace BloodborneLauncher.Core
                 StyleFps => Math.Min(4, Math.Max(3, preset + 2)),
                 _ => preset,
             };
-            Ini(L.T("Render resolution"), "preset", preset.ToString(), Choices.Presets, "0");
+            // 0.4.4 beta 27c: Auto where it picks the same for this output (it then follows the output).
+            Ini(L.T("Upscaling quality"), "preset", preset == Choices.AutoPreset(height) ? "auto" : preset.ToString(),
+                Choices.Presets, "auto");
 
             // 120 needs a fast display, a mid or better GPU and a CPU with 12+ threads (the game's
             // render thread is the limit); 60 otherwise.

@@ -102,10 +102,16 @@ namespace BloodborneLauncher.Core
             File.Exists(Path.Combine(EngineDir, "amd-fsr", "amd_fidelityfx_loader_vk.dll")) &&
             File.Exists(Path.Combine(EngineDir, "amd-fsr", "amd_fidelityfx_upscaler_vk.dll"));
 
-        /// <summary>The DLSS runtime's version: the DLL's file version, or the end of the .so's name.</summary>
-        public static string DlssVersion(string runtime) => OperatingSystem.IsWindows()
-            ? System.Diagnostics.FileVersionInfo.GetVersionInfo(runtime).FileVersion ?? ""
-            : Path.GetFileName(runtime)["libnvidia-ngx-dlss.so.".Length..];
+        /// <summary>The DLSS runtime's version ("310.9.16"): the DLL's file version from its numbers (its
+        /// version text has commas: "310,9,16,0"), or the end of the .so's name.</summary>
+        public static string DlssVersion(string runtime)
+        {
+            if (!OperatingSystem.IsWindows()) return Path.GetFileName(runtime)["libnvidia-ngx-dlss.so.".Length..];
+            var info = System.Diagnostics.FileVersionInfo.GetVersionInfo(runtime);
+            if (info.FileMajorPart == 0 && info.FileMinorPart == 0) return info.FileVersion ?? "";
+            var version = $"{info.FileMajorPart}.{info.FileMinorPart}.{info.FileBuildPart}";
+            return info.FilePrivatePart != 0 ? $"{version}.{info.FilePrivatePart}" : version;
+        }
 
         /// <summary>The Bloodborne PC engine: out\bb-probe.exe and what starts it (out\bb-start.exe, or
         /// scripts\run_windows.py before 0.9.32), in the folder or its engine\.</summary>
