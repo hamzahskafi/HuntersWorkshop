@@ -1,8 +1,9 @@
 # Launcher settings review: titles, lines and tooltips
 
-Windows launcher, every page, as of 0.4.4 beta 28 (2026-11-02, before its text step). This is the
-proposal for beta 28's last step before the version (community-fixes-plan.md › Beta 28): the tester
-goes through it first, then the texts are changed as agreed. Nothing here has been applied yet.
+Windows launcher, every page, as of 0.4.4 beta 28 commit 67e6040 (2026-11-02). This is the first
+draft for beta 28's last step before the version (community-fixes-plan.md › Beta 28). The step makes
+it again from the launcher as it is then; the tester goes through that version, then the texts are
+changed as agreed. Nothing here has been applied yet.
 
 ## How a row shows its text today
 
