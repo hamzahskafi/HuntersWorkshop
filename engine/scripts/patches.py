@@ -48,9 +48,9 @@ def frame_fixes_on(env=os.environ):
 
 def camera_per_frame(env=os.environ):
     """The engine converts the follow camera's weights every frame (camera_rate.cpp, 0.4.4 beta 24) with the frame
-    timer: the corrections on, BB_FRAME_TIMER not 0, neither camera nor timer in BB_FRAME_FIXES_SKIP."""
+    timer: the corrections on, neither camera nor timer in BB_FRAME_FIXES_SKIP."""
     skip={''.join(n.split()).lower() for n in env.get('BB_FRAME_FIXES_SKIP','').split(',')}
-    return frame_fixes_on(env) and not env.get('BB_FRAME_TIMER','1').startswith('0') and not skip&{'camera','timer'}
+    return frame_fixes_on(env) and not skip&{'camera','timer'}
 
 
 def fps_preset(fps, corrections):
@@ -137,7 +137,7 @@ CLOTH_LEFT_OUT=((0xB6FBD4,0xB6FBD8),(0xB73F84,0xB73F8D),(0xB73FA8,0xB73FC1),(0x4
 # no list writes), the distance ease (0x4D25E68, 0.1; the lists' 0.025 eased at half speed at 60)
 # and the chase-rate ease (0x4D25E94, 1/30). That conversion is BB_CAMERA_FIX=1 (below).
 #
-# Original (camera_tuning in config.ini or BB_CAMERA_TUNING, the default) leaves Kyo's retune out: the
+# Original (camera_tuning in config.ini, the default) leaves Kyo's retune out: the
 # constructor's defaults, the stores (in place of two blocks of the camera's debug-menu sliders), the wall
 # escape and the older camera's jump target (players saw the retune pull back, lag and widen while
 # sprinting, GitHub issue 32).
@@ -146,7 +146,7 @@ CLOTH_LEFT_OUT=((0xB6FBD4,0xB6FBD8),(0xB73F84,0xB73F8D),(0xB73FA8,0xB73FC1),(0x4
 # camera each frame from the game's 30 fps frame (camera_rate.cpp): Original is the game's camera at every rate,
 # and FPS++ keeps Kyo's constructor values, wall escape and jump as the list has them (the engine makes the values
 # the game's plus his changes, as a 30 fps frame's) without his debug-menu stores; nothing is converted here.
-# Without it (BB_FRAME_TIMER=0), as up to beta 23: Original converts the game's own eases from a 30 fps frame,
+# Without it ("timer" in BB_FRAME_FIXES_SKIP), as up to beta 23: Original converts the game's own eases from a 30 fps frame,
 # and FPS++ above 60 with the frame-rate corrections on: the retune's weights and eases (the constructor's, the
 # stores', the list's distance and chase-rate eases and LockCamParam's blend) are a 60 fps frame's, converted
 # from it once for the preset's rate (bbhost's camera_tuned_fps).
@@ -868,8 +868,6 @@ def main():
         settings=read_settings(a.settings)
         if 'BB_UPSCALER' in os.environ:
             settings['upscaler']='fsr' if os.environ['BB_UPSCALER'] in FSR_NAMES else 'off'
-        if 'BB_UPSCALE_PRESET' in os.environ:
-            settings['preset']=os.environ['BB_UPSCALE_PRESET']
         size=render_size(settings)
         if size: print(f'{size[0]}x{size[1]}')
         return
@@ -904,7 +902,7 @@ def main():
     if preset and preset[0] in names:
         fps={'60':60,'90':90,**SCALED_FPS,**TABLE_FPS}.get(a.fps)
         if a.fps=='uncap' and on_sixty: fps=UNCAPPED_REFERENCE
-        tuning=os.environ.get('BB_CAMERA_TUNING',read_settings(a.settings).get('camera_tuning','original')).lower()
+        tuning=read_settings(a.settings).get('camera_tuning','original').lower()
         per_frame=corrections and camera_per_frame()
         writes=frame_rate_fixes(writes,fps,elf,tuning!='fps++',corrections,per_frame)
         if fps:

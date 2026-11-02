@@ -74,7 +74,7 @@ int main() {
                v.mouse_invert_y == fresh.mouse_invert_y.load() && v.mouse_auto_rotation == fresh.mouse_auto_rotation.load() &&
                v.mouse_sensitivity == fresh.mouse_sensitivity.load());
         assert(v.change_appearance == fresh.change_appearance.load() && v.rebirth == fresh.rebirth.load());
-        assert(v.fsr4_invert_jitter == fresh.fsr4_invert_jitter.load());
+        assert(v.fsr_invert_jitter == fresh.fsr_invert_jitter.load());
         v.fullscreen = fresh.fullscreen.load();
         v.menu_x = fresh.menu_x.load();
         v.menu_y = fresh.menu_y.load();
@@ -263,7 +263,7 @@ int main() {
     { std::ofstream file(path); file << "hdr_mode=native\n"; }
     BbSettings::Load();
     assert(s.hdr_mode == BbSettings::HdrModeNative);
-    // BB_HDR* override the file.
+    // 0.4.4 beta 28: the BB_HDR* aliases went; the file decides.
 #ifdef _WIN32
     _putenv_s("BB_HDR", "1");
     _putenv_s("BB_HDR_PEAK", "600");
@@ -274,8 +274,7 @@ int main() {
     setenv("BB_HDR_MODE", "expand", 1);
 #endif
     BbSettings::Load();
-    assert(s.hdr && s.startup_hdr && s.hdr_peak == 600.0f && s.hdr_paper_white == 10.0f &&
-           s.hdr_mode == BbSettings::HdrModeExpand);
+    assert(s.hdr_mode == BbSettings::HdrModeNative && s.hdr_peak != 600.0f);
 #ifdef _WIN32
     _putenv_s("BB_HDR", "");
     _putenv_s("BB_HDR_PEAK", "");
@@ -288,8 +287,7 @@ int main() {
     BbSettings::Load();
     assert(s.hdr_mode == BbSettings::HdrModeNative);
     // hdr_peak_auto: the peak the display reports (window.cpp sets hdr_display_peak) when it
-    // reports one, else hdr_peak; BB_HDR_PEAK (a peak for this run) turns it off.
-    assert(!s.hdr_peak_auto); // BB_HDR_PEAK was set above
+    // reports one, else hdr_peak.
     { std::ofstream file(path); file << "hdr_peak=800\nhdr_peak_auto=1\n"; }
     BbSettings::Load();
     assert(s.hdr_peak_auto && s.hdr_peak == 800.0f);
@@ -332,40 +330,44 @@ int main() {
     BbSettings::Load();
     assert(s.live_resolution == 1);
     s.live_resolution = 0;
-    // The DLSS model (live in the menu), the OptiScaler switches (read at start). dlss_mip_bias went in
-    // 0.4.4 beta 27d (NVIDIA's extra level always): read as nothing, left in the file as it was.
+    // 0.4.4 beta 28: fsr4_invert_jitter is read as fsr_invert_jitter and saved under the new name, once
+    // (a file with both lines keeps one).
+    {
+        std::ofstream file(path);
+        file << "fsr4_invert_jitter=1\nfsr_invert_jitter=1\n";
+    }
+    BbSettings::Load();
+    assert(s.fsr_invert_jitter);
+    BbSettings::Save();
+    {
+        const std::string text = Read(path);
+        assert(text.find("fsr4_invert_jitter") == std::string::npos);
+        assert(text.find("fsr_invert_jitter=1\n") != std::string::npos &&
+               text.find("fsr_invert_jitter=1\n") == text.rfind("fsr_invert_jitter=1\n"));
+    }
+    s.fsr_invert_jitter = false;
+    // The DLSS model (live in the menu), OptiScaler's compatibility mode (read at start). dlss_mip_bias
+    // went in 0.4.4 beta 27d (NVIDIA's extra level always), the OptiScaler parts' own keys in beta 28
+    // (they follow the mode): read as nothing, left in the file as they were.
     {
         std::ofstream file(path);
         file << "dlss_preset=j\ndlss_mip_bias=0\noptiscaler_compat=0\noptiscaler_sync_submit=1\n";
     }
     BbSettings::Load();
-    assert(s.dlss_preset == 10 && !s.optiscaler_compat &&
-           s.optiscaler_sync_submit == BbSettings::OptiSubmitOn);
-    assert(!s.startup_optiscaler.compat && s.startup_optiscaler.sync_submit == BbSettings::OptiSubmitOn);
+    assert(s.dlss_preset == 10 && !s.optiscaler_compat && !s.startup_optiscaler_compat);
     s.dlss_preset = BbSettings::DlssPresetDefault;
     s.optiscaler_compat = true;
-    s.optiscaler_sync_submit = BbSettings::OptiSubmitAuto;
     BbSettings::Save();
     {
         const std::string text = Read(path);
         assert(text.find("dlss_preset=default\n") != std::string::npos);
         assert(text.find("dlss_mip_bias=0\n") != std::string::npos);
         assert(text.find("optiscaler_compat=1\n") != std::string::npos);
-        assert(text.find("optiscaler_sync_submit=auto\n") != std::string::npos);
+        assert(text.find("optiscaler_sync_submit=1\n") != std::string::npos);
     }
-    assert(!s.startup_optiscaler.compat); // the menu's change waits for a restart
-#ifdef _WIN32
-    _putenv_s("BB_DLSS_PRESET", "K");
-#else
-    setenv("BB_DLSS_PRESET", "K", 1);
-#endif
+    assert(!s.startup_optiscaler_compat); // the menu's change waits for a restart
     BbSettings::Load();
-    assert(s.dlss_preset == BbSettings::DlssPresetK && s.optiscaler_compat && s.startup_optiscaler.compat);
-#ifdef _WIN32
-    _putenv_s("BB_DLSS_PRESET", "");
-#else
-    unsetenv("BB_DLSS_PRESET");
-#endif
+    assert(s.optiscaler_compat && s.startup_optiscaler_compat);
     assert(BbSettings::DlssPresetFromText("m") == 13 && std::string(BbSettings::DlssPresetText(13)) == "m");
     // 0.4.4 beta 27c: Auto (NVIDIA's model for each quality mode) by default and for unknown text.
     {

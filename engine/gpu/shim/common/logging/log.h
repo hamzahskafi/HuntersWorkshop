@@ -1,5 +1,5 @@
 // bbport: replaces shadPS4's spdlog-based logger with a small fmt sink.
-// Level from BB_GPU_LOG (trace|debug|info|warning|error; default warning).
+// Level from BB_LOG_LEVEL (standard: warnings; detailed: info; debug).
 #pragma once
 #include <algorithm>
 #include <array>

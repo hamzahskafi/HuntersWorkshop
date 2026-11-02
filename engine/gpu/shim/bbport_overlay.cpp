@@ -1008,7 +1008,7 @@ void UpscalerSection() {
     }
     if (s.upscaler == BbSettings::UpscalerFsr || Searching()) {
         // 0.4.4 beta 27d: its auto exposure as AMD advises (no checkbox), the jitter sign check in
-        // config.ini only (fsr4_invert_jitter): neither a player's choice.
+        // config.ini only (fsr_invert_jitter): neither a player's choice.
         FsrVersionRow();
     }
     if (s.upscaler == BbSettings::UpscalerDlss || Searching()) {
@@ -1233,7 +1233,7 @@ void MaskSection() {
 }
 
 // bbport: OptiScaler (vk_optiscaler.h): what was found at start, and the engine's compatibility
-// mode for it (optiscaler_* in config.ini, applied on restart).
+// mode for it (optiscaler_compat in config.ini, applied on restart).
 void OptiScalerSection() {
     auto& s = BbSettings::Get();
     const auto& opti = Vulkan::OptiScaler::Detect();
@@ -1287,33 +1287,6 @@ void OptiScalerSection() {
                                           "compatibility."));
         }
     }
-    ImGui::BeginDisabled(!s.optiscaler_compat);
-    ImGui::Indent();
-    if (const char* label = Item("DLSS calls wait for the GPU queue", "Вызовы DLSS ждут очередь GPU")) {
-        Checkbox(label, s.optiscaler_ngx_lock);
-    }
-    if (const char* label = Item("Vulkan device on a thread of its own", "Устройство Vulkan в отдельном потоке")) {
-        Checkbox(label, s.optiscaler_clean_thread);
-    }
-    if (const char* label = Item("One GPU submit thread", "Один поток отправки GPU")) {
-        const char* modes[] = {BbSettings::MenuText("With its frame generation only", "Только с его генерацией кадров"),
-                               BbSettings::MenuText("Always", "Всегда"), BbSettings::MenuText("Off", "Выкл.")};
-        const int current = s.optiscaler_sync_submit;
-        int index = current == BbSettings::OptiSubmitOn ? 1 : current == BbSettings::OptiSubmitOff ? 2 : 0;
-        if (ImGui::Combo(label, &index, modes, 3)) {
-            Store(s.optiscaler_sync_submit,
-                  index == 1 ? int(BbSettings::OptiSubmitOn)
-                             : index == 2 ? int(BbSettings::OptiSubmitOff) : int(BbSettings::OptiSubmitAuto),
-                  true);
-        }
-        Hint(BbSettings::MenuText(
-            "The parts of the compatibility mode, each applied after a restart. Turn one off only to "
-            "find which one a crash with OptiScaler comes from, and post your log either way.",
-            "Части режима совместимости, каждая применяется после перезапуска. Выключайте их по одной, "
-            "только чтобы найти, из-за какой падает игра с OptiScaler, и в любом случае пришлите лог."));
-    }
-    ImGui::Unindent();
-    ImGui::EndDisabled();
 }
 
 // Output resolution and live resolution changes.
@@ -1765,11 +1738,7 @@ void Menu() {
     restart |= BbSettings::GameAaApplies(s.effects[BbSettings::EffectGameAa], s.upscaler) !=
                BbSettings::GameAaApplies(s.startup_effects[BbSettings::EffectGameAa], s.startup_upscaler);
     // OptiScaler's switches matter only with it loaded.
-    restart |= Vulkan::OptiScaler::Detect().loaded &&
-               (s.optiscaler_compat != s.startup_optiscaler.compat ||
-                s.optiscaler_ngx_lock != s.startup_optiscaler.ngx_lock ||
-                s.optiscaler_clean_thread != s.startup_optiscaler.clean_thread ||
-                s.optiscaler_sync_submit != s.startup_optiscaler.sync_submit);
+    restart |= Vulkan::OptiScaler::Detect().loaded && s.optiscaler_compat != s.startup_optiscaler_compat;
     if (restart) {
         ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "%s",
                            BbSettings::MenuText("Changes apply after restarting the game",

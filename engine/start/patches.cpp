@@ -68,9 +68,9 @@ const std::map<std::string, std::vector<std::string>>& FpsPresets() {
 // FPS++ list carries) and fixing the sprint's wall test (the Sprint Fix's job). Off: the lists above.
 bool FrameFixesOn() { return Env("BB_FRAME_FIXES", "1").substr(0, 1) != "0"; }
 // The engine converts the follow camera's weights every frame (camera_rate.cpp, 0.4.4 beta 24) with the frame
-// timer: the corrections on, BB_FRAME_TIMER not 0, neither "camera" nor "timer" in BB_FRAME_FIXES_SKIP.
+// timer: the corrections on, neither "camera" nor "timer" in BB_FRAME_FIXES_SKIP.
 bool CameraPerFrame() {
-    if (!FrameFixesOn() || Env("BB_FRAME_TIMER", "1").substr(0, 1) == "0") return false;
+    if (!FrameFixesOn()) return false;
     std::string name;
     for (const char c : Env("BB_FRAME_FIXES_SKIP", "") + ",") {
         if (c != ',') {
@@ -380,7 +380,7 @@ double CameraValue(std::optional<std::uint32_t> field, double value, double fram
 // (kCameraFields, a 40 degree pitch angle among them), stores of the same values in place of two blocks of the
 // camera's debug-menu sliders (kCameraStores; they replace sliders, not per-area parameters), the wall escape at
 // 0x183DCFE and the jump at 0x183DC96; players saw a camera that pulled back, lagged and widened while sprinting
-// (GitHub issue 32). Original (the default; camera_tuning=fps++ or BB_CAMERA_TUNING=fps++ keeps the retune) leaves
+// (GitHub issue 32). Original (the default; camera_tuning=fps++ keeps the retune) leaves
 // all of them as the game has them.
 //
 // With the frame timer (CameraPerFrame, 0.4.4 beta 24) the engine converts every per-frame weight of the camera
@@ -388,7 +388,7 @@ double CameraValue(std::optional<std::uint32_t> field, double value, double fram
 // keeps Kyo's constructor values, wall escape and jump as the list has them (the engine makes the values the
 // game's plus his changes, as a 30 FPS frame's) without his debug-menu stores; nothing is converted here.
 //
-// Without it (BB_FRAME_TIMER=0), as up to beta 23: Original converts the game's two eases, distance (0.1) and
+// Without it ("timer" in BB_FRAME_FIXES_SKIP), as up to beta 23: Original converts the game's two eases, distance (0.1) and
 // chase rate (1/30), from a 30 FPS frame for the preset's rate, and nothing else (the other weights stay the
 // game's 30 FPS values every frame). FPS++ above 60 with the frame-rate corrections on: the retune's weights and
 // eases (the constructor's, the stores', the list's distance and chase-rate eases and LockCamParam's blend) are a
@@ -944,7 +944,7 @@ PatchResult CompilePatches(const PatchRequest& request) {
         else if (scaled_fps.count(request.fps)) fps = scaled_fps.at(request.fps);
         else if (table_fps.count(request.fps)) fps = table_fps.at(request.fps);
         else if (request.fps == "uncap" && on_sixty) fps = kUncappedReference;
-        const std::string tuning = Lower(Env("BB_CAMERA_TUNING", Setting(settings, "camera_tuning").value_or("original")));
+        const std::string tuning = Lower(Setting(settings, "camera_tuning").value_or("original"));
         const bool per_frame = corrections && CameraPerFrame();
         writes = FrameRateFixes(writes, fps, elf, tuning != "fps++", corrections, per_frame);
         if (fps) Log("Patches: follow camera %s", per_frame ? (tuning != "fps++"

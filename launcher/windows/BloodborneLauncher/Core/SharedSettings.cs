@@ -26,7 +26,7 @@ namespace BloodborneLauncher.Core
             "change_appearance", "rebirth", "skip_intro",
         };
         private static readonly string[] IniPrefixes =
-            { "graphics_", "camera_", "effect_", "reactive_", "fsr4_", "cheat_", "bind.", "mouse_", "pad_" };
+            { "graphics_", "camera_", "effect_", "reactive_", "fsr_", "fsr4_", "cheat_", "bind.", "mouse_", "pad_" };
         private static readonly string[] LauncherKeys = { "present_mode", "fps_mode", "draw_pipe", "readbacks" };
         private static readonly string[] LauncherPrefixes = { "exp_", "cheat_" };
 

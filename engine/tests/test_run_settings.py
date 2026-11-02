@@ -12,7 +12,7 @@ import unittest
 
 
 class RestartResolutionTests(unittest.TestCase):
-    def run_restarts(self, explicit=False, live=False, ini_extra='', bare_path=False):
+    def run_restarts(self, explicit=False, ini_extra='', bare_path=False):
         with tempfile.TemporaryDirectory() as directory:
             data = Path(directory)
             # Preparation is unrelated to this test; allow the real patch compiler to
@@ -46,7 +46,7 @@ class RestartResolutionTests(unittest.TestCase):
                 '("BB_RENDER_RES", "BB_OUTPUT_RES", "BB_AUTO_RENDER_RES")})+"\\n")\n'
                 'if stage<2:\n'
                 '    config.write_text("upscaler=dlss\\npreset=4\\noutput_res="+'
-                '("1280x720" if stage==0 else "1920x1080")+"\\n")\n'
+                '("1280x720" if stage==0 else "1920x1080")+"\\n"+' + repr(ini_extra) + ')\n'
                 '    os.environ["BB_TEST_STAGE"]=str(stage+1)\n'
                 '    os.execlp("bash", "bash", "run.sh")\n')
             probe.chmod(0o755)
@@ -54,11 +54,8 @@ class RestartResolutionTests(unittest.TestCase):
                        BB_DATA_DIR=str(data), BB_CONFIG=str(config), BB_GAME_DIR=str(data))
             for key in ('BB_RENDER_RES', 'BB_OUTPUT_RES', 'BB_AUTO_RENDER_RES', 'BB_TEST_STAGE'):
                 env.pop(key, None)
-            env.pop('BB_LIVE_RES', None)
             if explicit:
                 env['BB_RENDER_RES'] = '800x450'
-            if live:
-                env['BB_LIVE_RES'] = '1'
             if bare_path:  # a minimal PATH: coreutils and bash, no sed/grep
                 tools = data / 'bin'
                 tools.mkdir()
@@ -78,7 +75,7 @@ class RestartResolutionTests(unittest.TestCase):
         self.assertEqual([row['BB_AUTO_RENDER_RES'] for row in rows], ['1', '1', None])
 
     def test_live_resolution_keeps_guest_sizes_native(self):
-        rows = self.run_restarts(live=True)
+        rows = self.run_restarts(ini_extra='live_resolution=1\n')
         self.assertTrue(all(row['BB_RENDER_RES'] is None for row in rows))
         self.assertTrue(all(row['BB_OUTPUT_RES'] is None for row in rows))
         self.assertTrue(all(row['BB_AUTO_RENDER_RES'] is None for row in rows))

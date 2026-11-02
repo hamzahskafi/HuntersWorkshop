@@ -71,8 +71,8 @@ static int sdl_audio(void) {
     }
     return sdl_ready;
 }
-/* As runtime_thread.c reads it: off only when it starts with 0. */
-static int audio_priority(void) { const char *e=getenv("BB_AUDIO_THREAD_PRIORITY"); return !(e && e[0]=='0'); }
+/* As runtime_thread.c reads it: on only when it starts with 1. */
+static int audio_priority(void) { const char *e=getenv("BB_AUDIO_THREAD_PRIORITY"); return e && e[0]=='1'; }
 /* The device thread, seen from the first port's postmix callback: written frames, mixes and
    the longest wait between two, read and reset by that port's statistics. */
 static struct { uint64_t last_ns, max_gap_ns, frames; unsigned calls; int freq, seen; } device_thread;

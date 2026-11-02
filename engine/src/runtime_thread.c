@@ -297,16 +297,17 @@ static void set_host_name(const char *name) {
  * stream and file threads at 256-265 and every other thread at 700. At the host priority of the
  * ~60 game threads (and below the render threads with BB_GPU_THREAD_PRIORITY), a busy CPU ran
  * FMOD's mixer late: late and stuttering sound on CPUs with slower cores. That range runs above
- * them; it is mostly asleep. BB_AUDIO_THREAD_PRIORITY=0: all at normal priority, as before. */
+ * them; it is mostly asleep. BB_AUDIO_THREAD_PRIORITY=1 (the launcher's "Sound threads first"): that;
+ * unset, all at normal priority (0.4.4 beta 28: the default, as the launcher had it). */
 #define HIGH_PRIO_LAST 300
 static void apply_priority(int prio) {
     static int enabled=-1;
-    if (enabled<0) { const char *e=getenv("BB_AUDIO_THREAD_PRIORITY"); enabled=!(e && e[0]=='0'); }
+    if (enabled<0) { const char *e=getenv("BB_AUDIO_THREAD_PRIORITY"); enabled=e && e[0]=='1'; }
     if (enabled) host_thread_set_high_priority(prio<=HIGH_PRIO_LAST);
     static int noted;
     if (prio<=HIGH_PRIO_LAST && !__atomic_exchange_n(&noted,1,__ATOMIC_RELAXED))
         printf("Runtime: audio threads (priority %d-%d) %s\n",256,HIGH_PRIO_LAST,
-               enabled ? "above the game's other threads" : "at normal priority (BB_AUDIO_THREAD_PRIORITY=0)");
+               enabled ? "above the game's other threads" : "at normal priority (BB_AUDIO_THREAD_PRIORITY=1: above)");
 }
 /* The PS4's floating-point state on the game's threads, after ayozetr's caa9b4b and shadPS4#3568
  * (StevenMiller123, found by red-prig), the values dumped from real hardware: MXCSR 0x9fc0

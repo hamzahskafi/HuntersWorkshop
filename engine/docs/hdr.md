@@ -1,6 +1,6 @@
 # HDR output
 
-`hdr=1` in `config.ini` (`BB_HDR=1`, the menu's and the launcher's "HDR output", applied on
+`hdr=1` in `config.ini` (the menu's and the launcher's "HDR output", applied on
 restart) presents the game in an HDR swapchain when the display offers one (Windows HDR on): HDR10
 (BT.2020, PQ, `A2B10G10R10`) or scRGB (linear BT.709 in FP16). The game itself only makes an 8-bit
 SDR frame; `hdr_output.frag` encodes it. SDR white is shown at `hdr_paper_white` nits (10-500,
@@ -14,10 +14,10 @@ brightness from the display"): the window asks DXGI about the output its monitor
 else the display's EDID), at start and when the window moves to another display (`window.cpp`
 `UpdateDisplayPeak`; `dxgi.dll` is loaded, not linked). The log says `HDR output: the display
 reports a peak of N nits`. With auto off, or a display that reports nothing, `hdr_peak` (10-4000,
-default 1000) is used; `BB_HDR_PEAK` sets it for one run and turns auto off.
+default 1000) is used.
 `BbSettings::HdrPeakNits` is the one place that decides.
 
-How the highlights get above paper white is `hdr_mode` (`BB_HDR_MODE`, the menu's "HDR mode",
+How the highlights get above paper white is `hdr_mode` (the menu's "HDR mode",
 the launcher's "HDR source", live):
 
 | mode | highlights from | midtones | UI |
@@ -163,7 +163,7 @@ the synthetic curve's inverse, monotonic, the bloom halo left out) and the halo 
 it (to 4%); the tiles under a half-stop vignette on one side (each within 0.06 stops), and a
 highlight there keeping the vignette against the same highlight on the other side (to 3%).
 `settings-test` covers `hdr_mode`, `hdr_peak_auto` and `HdrPeakNits` (the display's peak, none
-reported, the limits, auto off, `BB_HDR_PEAK`) and that the comparison is not saved.
+reported, the limits, auto off) and that the comparison is not saved.
 
 ### Limits
 

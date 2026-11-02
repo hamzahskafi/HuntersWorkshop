@@ -304,7 +304,59 @@ int RunProbe(const fs::path& probe, const std::vector<std::wstring>& arguments, 
     return int(code);
 }
 
+// 0.4.4 beta 28: switches that stand for several (the launcher passes one value; the engine's own
+// switches keep their names for tests). Safe mode (BB_SAFE_MODE=1, the run after a crash): every
+// experimental option and the mods off, a crash guard on; it sets its values whatever was set. Fast
+// draws, compile skipping and the VRAM budget off (BB_FAST_DRAWS=0, BB_COMPILE_SKIP=0, BB_VRAM_BUDGET=0)
+// turn off their parts, except a part set on its own; BB_SYNC=legacy puts back the synchronisation of
+// before the GPU work's fences were honest (every fallback the A/B tests kept, the GX region tracked). The same table is in run.sh (switch groups);
+// tests/test_switch_groups.py checks they agree.
+// switch-groups-begin
+struct SwitchGroup {
+    const char* name;
+    const char* when;
+    bool force;
+    std::vector<std::pair<const char*, const char*>> sets;
+};
+const SwitchGroup kSwitchGroups[] = {
+    {"BB_SAFE_MODE", "1", true,
+     {
+         {"BB_FAST_LOADING", "0"}, {"BB_FRAME_FIXES", "0"}, {"BB_HOT_PAGES", "0"}, {"BB_GX_IN_PLACE", "0"},
+         {"BB_NATIVE_CALLS", "0"}, {"BB_PRECISE_PACING", "0"}, {"BB_VBLANK_PACING", "0"},
+         {"BB_INDIRECT_CLAMP", "1"}, {"BB_IMAGE_WRITEBACK_GC", "0"}, {"BB_GPU_THREAD_PRIORITY", "0"},
+         {"BB_AUDIO_THREAD_PRIORITY", "0"}, {"BB_NATIVE_SHADERS", "0"}, {"BB_SLEEP_SPIN_US", "600"},
+         {"BB_ASYNC_PIPELINES", "0"}, {"BB_OCCLUSION", "0"}, {"BB_MODS_ENABLED", "0"},
+         {"BB_FAST_DRAWS", "0"}, {"BB_COMPILE_SKIP", "0"}, {"BB_VRAM_BUDGET", "0"}}},
+    {"BB_FAST_DRAWS", "0", false,
+     {
+         {"BB_SUBMIT_END_TASKS", "0"}, {"BB_MEMO_REVALIDATE", "0"}, {"BB_SAMPLER_MEMO", "0"},
+         {"BB_DRAIN_SLEEP", "0"}, {"BB_FAULT_SKIP_TEXTURES", "0"}}},
+    {"BB_COMPILE_SKIP", "0", false,
+     {
+         {"BB_SKIP_UNCOMPILED", "0"}, {"BB_LATE_PIPELINE_BIND", "0"}, {"BB_PIPELINE_TAKE", "0"}}},
+    {"BB_VRAM_BUDGET", "0", false,
+     {
+         {"BB_GC_PRESSURE_PERCENT", "0"}, {"BB_GC_PRESSURE_SECONDS", "0"}}},
+    {"BB_SYNC", "legacy", false,
+     {
+         {"BB_HONEST_LABELS", "0"}, {"BB_GX_IN_PLACE", "0"}, {"BB_PIPE_SIGNALS", "0"}, {"BB_SUBMIT_LOCK", "gpu"},
+         {"BB_WORK_RETIRED", "0"}, {"BB_ZPASS_IN_ORDER", "0"}, {"BB_FENCE_ORDER", "all"}, {"BB_DMA_WAITS", "all"},
+         {"BB_HOST_COPY_WAITS", "all"}, {"BB_PRODUCER_CHECK", "1"}}},
+};
+// switch-groups-end
+
+void ExpandSwitchGroups() {
+    for (const SwitchGroup& group : kSwitchGroups) {
+        if (Env(group.name, "") != group.when) continue;
+        for (const auto& [name, value] : group.sets) {
+            if (group.force || !Env(name)) SetEnv(name, value);
+        }
+        Log("Engine: %s=%s sets %zu switches", group.name, group.when, group.sets.size());
+    }
+}
+
 int Main(std::vector<std::wstring> arguments) {
+    ExpandSwitchGroups();
     const Folders folders = Locate();
     std::optional<std::string> game = Env("BB_GAME_DIR");
     if (arguments.size() > 1 && arguments[0] == L"--game-dir") {
@@ -533,8 +585,7 @@ int Main(std::vector<std::wstring> arguments) {
     }
     std::string live = "0";
     if (scaled) {
-        live = Env("BB_LIVE_RES", "");
-        if (live.empty()) live = SettingValue(config, "live_resolution").value_or("0");
+        live = SettingValue(config, "live_resolution").value_or("0");
         if (live.empty()) live = "0";
         // 0.4.4 beta 25c: Off or On; "auto" (a GPU check) is no longer offered and reads as off.
         if (live == "auto") {

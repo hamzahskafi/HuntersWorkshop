@@ -1271,7 +1271,7 @@ void TemporalUpscaler::DebugView(vk::Image target, u32 w, u32 h, u32 ow, u32 oh,
 }
 
 void TemporalUpscaler::OnBlendedSceneDraw() {
-    // The mask is opt-in (menu, BB_REACTIVE=1): on Bloodborne's thin mist it trades trails for
+    // The mask is opt-in (menu, reactive=1): on Bloodborne's thin mist it trades trails for
     // jitter shimmer, which looked worse. Toggle 1 << 27 switches it off.
     if (snapshot_taken || !scene_color || !Active() || !ReactiveOn()) {
         return;
@@ -2632,9 +2632,8 @@ bool TemporalUpscaler::RecordFrameUpscaler(vk::CommandBuffer cmdbuf, UpscaleInpu
                                            UpscaleInput::Image depth, u32 w, u32 h, u32 ow, u32 oh,
                                            float frame_ms, bool hdr, bool reactive) {
     const auto& settings = BbSettings::Get();
-    // The jitter convention FSR 3 had; the menu (or toggle 1 << 26) flips it for tests.
-    const float sign =
-        BbToggle::Disabled(1u << 26) != settings.fsr4_invert_jitter.load() ? -1.0f : 1.0f;
+    // The jitter convention FSR 3 had; fsr_invert_jitter in config.ini flips it for tests.
+    const float sign = settings.fsr_invert_jitter.load() ? -1.0f : 1.0f;
     const bool use_dlss = settings.upscaler == BbSettings::UpscalerDlss && dlss;
     UpscaleInput::Frame frame{
         .cmdbuf = cmdbuf,

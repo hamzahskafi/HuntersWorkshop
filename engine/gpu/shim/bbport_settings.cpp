@@ -183,14 +183,8 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         v.dlss_preset = DlssPresetFromText(value.c_str());
     } else if (key == "optiscaler_compat") {
         v.optiscaler_compat = i != 0;
-    } else if (key == "optiscaler_ngx_lock") {
-        v.optiscaler_ngx_lock = i != 0;
-    } else if (key == "optiscaler_clean_thread") {
-        v.optiscaler_clean_thread = i != 0;
-    } else if (key == "optiscaler_sync_submit") {
-        v.optiscaler_sync_submit = value == "1" ? OptiSubmitOn : value == "0" ? OptiSubmitOff : OptiSubmitAuto;
-    } else if (key == "fsr4_invert_jitter") {
-        v.fsr4_invert_jitter = i != 0;
+    } else if (key == "fsr_invert_jitter" || key == "fsr4_invert_jitter") { // 0.4.4 beta 28: was fsr4_
+        v.fsr_invert_jitter = i != 0;
     } else if (key == "widescreen") {
         v.widescreen=i!=0;
     } else if (key == "pc_controls") {
@@ -347,7 +341,7 @@ void Set(Values& v, const std::string& key, const std::string& value) {
     }
 }
 
-// The menu's language for the launcher's code (BB_MENU_LANGUAGE: en, ru, pt_BR...) or a locale
+// The menu's language for a launcher's code (en, ru, pt_BR...) or a locale
 // (ru_RU.UTF-8, de_DE...): its first two letters; Portuguese only as pt_BR. Else English.
 // Simplified Chinese is never picked from the locale, only chosen (menu_language=zh_CN).
 MenuLanguage LanguageOfLocale(const char* lang) {
@@ -421,15 +415,13 @@ void Load() {
         v.effects[e] = Effects[e].default_on;
     }
     // bbport: the menu's language until one is chosen in it (menu_language in config.ini): the
-    // launcher's (BB_MENU_LANGUAGE), else the system's, as the launcher picks its own.
+    // system's, as the launcher picks its own.
     {
-        const char* lang = std::getenv("BB_MENU_LANGUAGE");
-        if (!lang || !*lang) {
-            for (const char* key : {"LC_ALL", "LC_MESSAGES", "LANG", "LANGUAGE"}) {
-                if (const char* value = std::getenv(key); value && *value) {
-                    lang = value;
-                    break;
-                }
+        const char* lang = nullptr;
+        for (const char* key : {"LC_ALL", "LC_MESSAGES", "LANG", "LANGUAGE"}) {
+            if (const char* value = std::getenv(key); value && *value) {
+                lang = value;
+                break;
             }
         }
         v.menu_language = LanguageOfLocale(lang);
@@ -448,27 +440,10 @@ void Load() {
         std::fclose(file);
         std::printf("Settings: %s\n", Path());
     }
-    // Environment overrides (scripts, A/B tests).
+    // The one environment override, for A/B runs: BB_UPSCALER (0.4.4 beta 28: the other settings'
+    // aliases went; config.ini decides them).
     if (const char* env = std::getenv("BB_UPSCALER")) {
         v.upscaler = std::max(UpscalerFromName(env), int(UpscalerOff)); // "none" (no upscaler path): off
-    }
-    const std::pair<const char*, const char*> env_keys[] = {
-        {"BB_FSR_SHARPNESS", "sharpness"},        {"BB_JITTER", "jitter"},
-        {"BB_REACTIVE", "reactive"},              {"BB_REACTIVE_SCALE", "reactive_scale"},
-        {"BB_REACTIVE_THRESHOLD", "reactive_threshold"}, {"BB_REACTIVE_MAX", "reactive_max"},
-        {"BB_UPSCALE_PRESET", "preset"},            {"BB_OBJECT_MOTION", "object_motion"},
-        {"BB_HDR", "hdr"},                          {"BB_HDR_PAPER_WHITE", "hdr_paper_white"},
-        {"BB_HDR_PEAK", "hdr_peak"},                {"BB_HDR_BOOST", "hdr_boost"},
-        {"BB_HDR_MODE", "hdr_mode"},                {"BB_DLSS_PRESET", "dlss_preset"},
-        {"BB_RENDER_SCALE", "render_scale"},        {"BB_MIP_BIAS", "mip_bias"},
-    };
-    for (const auto& [env, key] : env_keys) {
-        if (const char* value = std::getenv(env)) {
-            Set(v, key, value);
-        }
-    }
-    if (std::getenv("BB_HDR_PEAK")) {
-        v.hdr_peak_auto = false; // a peak given for this run is meant
     }
     v.startup_preset = v.preset;
     v.startup_render_scale = v.render_scale;
@@ -481,8 +456,7 @@ void Load() {
     v.startup_output_res = v.output_res;
     v.startup_live_resolution = v.live_resolution;
     v.startup_hdr = v.hdr;
-    v.startup_optiscaler = {v.optiscaler_compat, v.optiscaler_ngx_lock, v.optiscaler_clean_thread,
-                            v.optiscaler_sync_submit};
+    v.startup_optiscaler_compat = v.optiscaler_compat;
 }
 
 void ConfigureUpscalerSupport(bool fsr, bool dlss) {
@@ -600,13 +574,9 @@ void Save() {
     put("fps_text_opacity", fixed(v.fps_text_opacity, 2));
     put("fps_border", flag(v.fps_border));
     put("hide_cursor", flag(v.hide_cursor));
-    put("fsr4_invert_jitter", flag(v.fsr4_invert_jitter));
+    put("fsr_invert_jitter", flag(v.fsr_invert_jitter));
     put("dlss_preset", DlssPresetText(v.dlss_preset));
     put("optiscaler_compat", flag(v.optiscaler_compat));
-    put("optiscaler_ngx_lock", flag(v.optiscaler_ngx_lock));
-    put("optiscaler_clean_thread", flag(v.optiscaler_clean_thread));
-    put("optiscaler_sync_submit", v.optiscaler_sync_submit == OptiSubmitAuto ? std::string("auto")
-                                                                            : flag(v.optiscaler_sync_submit != 0));
     // Read by patches.py at start.
     for (int e = 0; e < EffectCount; ++e) {
         put(Effects[e].key, flag(v.effects[e]));
@@ -681,11 +651,18 @@ void Save() {
                 std::string key = text.substr(0, eq);
                 key.erase(key.find_last_not_of(" \t") + 1);
                 key.erase(0, key.find_first_not_of(" \t"));
+                // A renamed key's old line becomes the new one (0.4.4 beta 28).
+                if (key == "fsr4_invert_jitter") {
+                    key = "fsr_invert_jitter";
+                }
                 const auto it = std::find_if(keys.begin(), keys.end(),
                                              [&](const auto& k) { return k.first == key; });
                 if (it != keys.end()) {
-                    out += it->first + "=" + it->second + "\n";
-                    written[size_t(it - keys.begin())] = true;
+                    // Once: a second line of the same key (an old and a new name) goes.
+                    if (!written[size_t(it - keys.begin())]) {
+                        out += it->first + "=" + it->second + "\n";
+                        written[size_t(it - keys.begin())] = true;
+                    }
                     continue;
                 }
             }

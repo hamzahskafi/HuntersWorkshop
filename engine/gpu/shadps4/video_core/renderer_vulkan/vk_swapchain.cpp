@@ -361,7 +361,7 @@ void Swapchain::FindPresentFormat() {
     surface_format.format = found->format;
     surface_format.colorSpace = found->colorSpace;
 
-    // bbport: HDR output (hdr in config.ini, BB_HDR), chosen once.
+    // bbport: HDR output (hdr in config.ini), chosen once.
     const auto& settings = BbSettings::Get();
     if (!settings.startup_hdr) {
         return;

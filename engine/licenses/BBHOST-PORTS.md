@@ -83,7 +83,7 @@ yogesh1239's high-FPS fixes.
 Since 0.3.0 the Windows start program writes Kyo's "60 FPS++" from our own table,
 start/frame_rate_base.inc (made by tools/re/frame_rate_base.py from the list and a 1.09 eboot, its
 comments after what src/engine/frame_rate.cpp says each entry is), instead of the patch file's list. The
-frame timer (BB_FRAME_TIMER=1) follows bbhost's kStepLoad: the cave loads a step of ours into the task
+frame timer (on by default) follows bbhost's kStepLoad: the cave loads a step of ours into the task
 step, here from the game's own pacer measurement through a hook in the cave rather than bbhost's
 SprjFlipper::Update, and the follow camera's two eases are read per frame, as bbhost's each_frame
 kRated entries. The rest of the list's fixed steps, read entry by entry for 0.3.0

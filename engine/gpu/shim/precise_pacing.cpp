@@ -75,11 +75,7 @@ bool Enabled() {
             return !(env[0] == '0' || env[0] == 'n' || env[0] == 'N' || env[0] == 'f' ||
                      env[0] == 'F');
         }
-#ifdef _WIN32
-        return true;
-#else
-        return false;
-#endif
+        return true; // 0.4.4 beta 28: on Linux too (the launchers passed 1 there already)
     }();
     return on;
 }

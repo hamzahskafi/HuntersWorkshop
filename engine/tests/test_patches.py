@@ -481,7 +481,6 @@ class FrameRateFixTests(unittest.TestCase):
     def test_camera_per_frame_follows_the_timer(self):
         self.assertTrue(patches.camera_per_frame({}))
         self.assertTrue(patches.camera_per_frame({'BB_FRAME_FIXES_SKIP': 'cloth, steps'}))
-        self.assertFalse(patches.camera_per_frame({'BB_FRAME_TIMER': '0'}))
         self.assertFalse(patches.camera_per_frame({'BB_FRAME_FIXES': '0'}))
         self.assertFalse(patches.camera_per_frame({'BB_FRAME_FIXES_SKIP': 'cloth, Camera'}))
         self.assertFalse(patches.camera_per_frame({'BB_FRAME_FIXES_SKIP': ' timer '}))

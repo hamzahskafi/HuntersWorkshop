@@ -25,7 +25,7 @@ Clock::time_point g_start, g_began;
 std::uint64_t g_frames = 0;
 bool g_seen_world = false;
 
-// Loading pace (BB_FAST_LOADING=1, the launcher's "Fast loading"), above 60 FPS only (BB_FPS 90, 120,
+// Loading pace (the launcher's "Fast loading"; on unless BB_FAST_LOADING=0), above 60 FPS only (BB_FPS 90, 120,
 // 144, 240 or uncap): while a loading screen is up the four instructions that set the pacer's target
 // (mov dword [r12+0x18], frame time; the FPS patches' frame sites) give 1/60 s, and they go back when
 // the load ends. Measured: loads run on the main thread's per-frame work beside the decompression
@@ -79,7 +79,7 @@ void Install(std::uint8_t* image) {
     g_start = Clock::now();
     const char* fast = std::getenv("BB_FAST_LOADING");
     const char* fps = std::getenv("BB_FPS");
-    if (!fast || fast[0] != '1') return;
+    if (fast && fast[0] == '0') return; // 0.4.4 beta 28: on by default, as the launcher had it
     const bool above_sixty = fps && (!std::strcmp(fps, "90") || !std::strcmp(fps, "120") ||
                                      !std::strcmp(fps, "144") || !std::strcmp(fps, "240") ||
                                      !std::strcmp(fps, "uncap"));

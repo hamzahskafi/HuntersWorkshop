@@ -3,10 +3,10 @@
 // functions dcb.drawIndexAuto (0x10741b0), dcb.drawIndex (0x1074360) and dcb.drawIndexOffset
 // (0x1074420) hand the GPU thread a record of the call instead of the PM4 it would be decoded from.
 //
-// BB_NATIVE_CALLS unset: nothing changes. =verify: the game's own functions still write their
+// BB_NATIVE_CALLS=0: nothing changes. =verify: the game's own functions still write their
 // packets; a hook notes each call's record (by the address of the packet it wrote) and the GPU
 // thread compares it with the decode: packet words, register effects, register checksum.
-// =1: the functions are replaced: they reserve the same space through the command buffer's own
+// Unset or =1 (the default since 0.4.4 beta 28, as the launcher had it): the functions are replaced: they reserve the same space through the command buffer's own
 // reserve callback and write one type-3 NOP that carries the record (tag below). The GPU thread
 // applies the record's register effects exactly as the draw packet would (same checksum, same
 // prepared draws) and draws as for DRAW_INDEX_*. A call the record cannot express (a thread trace

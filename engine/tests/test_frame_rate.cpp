@@ -97,6 +97,14 @@ void SetEnv(const char* name, const char* value) {
 #endif
 }
 
+// The groups the tests leave out: the frame timer and the camera's eases with it (the tests without the timer;
+// TestTimer, TestCaveRuns and TestCameraFallback turn it on), plus `more`.
+void SetSkip(const char* more = nullptr, bool timer = false) {
+    std::string skip = more ? more : "";
+    if (!timer) skip += skip.empty() ? "timer,camera" : ",timer,camera";
+    SetEnv("BB_FRAME_FIXES_SKIP", skip.empty() ? nullptr : skip.c_str());
+}
+
 enum class Counted { Frames, Micros, Digits };
 struct Site { std::string group; std::uint64_t at; std::string was, listed, now; };
 struct Load {
@@ -308,9 +316,9 @@ void TestSixty() {
     for (const Load& l : loads) if (l.group == "Online" && !online) online = &l;
     image.at(online->insn)[0] ^= 0xff;
     SetEnv("BB_FPS", "60");
-    SetEnv("BB_FRAME_FIXES_SKIP", "Slope");
+    SetSkip("Slope");
     assert(BbEngine::FrameRate::Install(image.base, image.size));
-    SetEnv("BB_FRAME_FIXES_SKIP", nullptr);
+    SetSkip();
     Protections(image);
 
     for (const Site& s : sites) {
@@ -491,9 +499,9 @@ void TestTimer() {
             constexpr std::uint64_t kCave = 0x2418e3d, kSkip = 0x183dc96;
             if (retune) image.put(kSkip, {0xe9, 0xd6, 0x05, 0x00, 0x00}), CameraFields(image, true);
             SetEnv("BB_FPS", fps);
-            SetEnv("BB_FRAME_TIMER", nullptr); // the default: on
+            SetSkip(nullptr, true); // the default: the timer on
             assert(BbEngine::FrameRate::Install(image.base, image.size));
-            SetEnv("BB_FRAME_TIMER", "0");
+            SetSkip();
             Protections(image);
             const double rate = fps[0] == '6' ? 60 : 120;
             // push rdi; mov rdi, rbx; jmp [rip+0] to the hook; pop rdi; movss xmm0, [step]; movss [rbp-0x38], xmm0.
@@ -577,9 +585,9 @@ void TestCaveRuns() {
     const Image image = Build(kSize, true);
     constexpr std::uint64_t kCave = 0x2418e3d;
     SetEnv("BB_FPS", "60");
-    SetEnv("BB_FRAME_TIMER", "1");
+    SetSkip(nullptr, true);
     assert(BbEngine::FrameRate::Install(image.base, image.size));
-    SetEnv("BB_FRAME_TIMER", "0");
+    SetSkip();
     Protections(image);
     // A ret where the task function goes on (its page opened for it: code pages are read and execute).
     std::uint8_t* const page = image.at(kCave + 46) - (reinterpret_cast<std::uintptr_t>(image.at(kCave + 46)) % kPage);
@@ -617,11 +625,11 @@ void TestSelfHit() {
     const auto run = [](const char* skip, std::uint32_t radius, int frames) {
         const Image image = Build(kSize, true);
         SetEnv("BB_FPS", "60");
-        SetEnv("BB_FRAME_FIXES_SKIP", skip);
+        SetSkip(skip);
         g_params_loaded = false;
         g_self_hit_row[0] = radius;
         assert(BbEngine::FrameRate::Install(image.base, image.size));
-        SetEnv("BB_FRAME_FIXES_SKIP", nullptr);
+        SetSkip();
         Protections(image);
         BbEngine::FrameRate::Tick(); // not loaded yet
         assert(g_self_hit_row[0] == radius);
@@ -647,9 +655,9 @@ int ClothLasts(const char* skip, double seconds, int frames, int substeps, bool 
     image.put(0x1567a80, Hex("554889e54157415653" "50" "c5f828d0" "89d0" "4883c4085b415e415f5dc3"));
     image.put(0xb6e67a, Hex(listed ? "bb01000000909090909090" : "8b581885db7504418b5d20"));
     SetEnv("BB_FPS", "60");
-    SetEnv("BB_FRAME_FIXES_SKIP", skip);
+    SetSkip(skip);
     assert(BbEngine::FrameRate::Install(image.base, image.size));
-    SetEnv("BB_FRAME_FIXES_SKIP", nullptr);
+    SetSkip();
     Protections(image);
     for (const Site& s : sites)
         if (s.group == "ClothStep") g_damped = image.holds(s, Hex(s.now));
@@ -687,9 +695,9 @@ void TestCameraFallback() {
         std::memcpy(image.at(0x4d25e68), &game, 4);
         image.at(0x183e964)[3] ^= 1;
         SetEnv("BB_FPS", "120");
-        SetEnv("BB_FRAME_TIMER", timer);
+        SetSkip(nullptr, timer[0] == '1');
         assert(BbEngine::FrameRate::Install(image.base, image.size));
-        SetEnv("BB_FRAME_TIMER", "0");
+        SetSkip();
         const float now = image.get<float>(0x4d25e68);
         assert(timer[0] == '1' ? Near(now, 1 - std::pow(0.9, 0.25)) : now == game);
         Free(image.base, Pages(image.size));
@@ -697,7 +705,7 @@ void TestCameraFallback() {
 }
 
 int main() {
-    SetEnv("BB_FRAME_TIMER", "0"); // the tests without the frame timer; TestTimer and TestCaveRuns turn it on
+    SetSkip(); // the tests without the frame timer; TestTimer and TestCaveRuns turn it on
     TestRated();
     TestPlayTime();
     TestTable();

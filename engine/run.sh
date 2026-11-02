@@ -20,6 +20,29 @@ data=${BB_DATA_DIR:-.}
 out=${BB_OUT_DIR:-$data/out}
 mkdir -p "$out"
 export BB_CONFIG=${BB_CONFIG:-$data/config.ini}
+# 0.4.4 beta 28: switches that stand for several (start/main.cpp ExpandSwitchGroups holds the same table;
+# tests/test_switch_groups.py checks they agree). Safe mode (BB_SAFE_MODE=1) sets its values whatever
+# was set; the others turn off their parts, except a part set on its own.
+# switch-groups-begin
+switch_groups=(
+    "BB_SAFE_MODE=1 force BB_FAST_LOADING=0 BB_FRAME_FIXES=0 BB_HOT_PAGES=0 BB_GX_IN_PLACE=0 BB_NATIVE_CALLS=0 BB_PRECISE_PACING=0 BB_VBLANK_PACING=0 BB_INDIRECT_CLAMP=1 BB_IMAGE_WRITEBACK_GC=0 BB_GPU_THREAD_PRIORITY=0 BB_AUDIO_THREAD_PRIORITY=0 BB_NATIVE_SHADERS=0 BB_SLEEP_SPIN_US=600 BB_ASYNC_PIPELINES=0 BB_OCCLUSION=0 BB_MODS_ENABLED=0 BB_FAST_DRAWS=0 BB_COMPILE_SKIP=0 BB_VRAM_BUDGET=0"
+    "BB_FAST_DRAWS=0 keep BB_SUBMIT_END_TASKS=0 BB_MEMO_REVALIDATE=0 BB_SAMPLER_MEMO=0 BB_DRAIN_SLEEP=0 BB_FAULT_SKIP_TEXTURES=0"
+    "BB_COMPILE_SKIP=0 keep BB_SKIP_UNCOMPILED=0 BB_LATE_PIPELINE_BIND=0 BB_PIPELINE_TAKE=0"
+    "BB_VRAM_BUDGET=0 keep BB_GC_PRESSURE_PERCENT=0 BB_GC_PRESSURE_SECONDS=0"
+    "BB_SYNC=legacy keep BB_HONEST_LABELS=0 BB_GX_IN_PLACE=0 BB_PIPE_SIGNALS=0 BB_SUBMIT_LOCK=gpu BB_WORK_RETIRED=0 BB_ZPASS_IN_ORDER=0 BB_FENCE_ORDER=all BB_DMA_WAITS=all BB_HOST_COPY_WAITS=all BB_PRODUCER_CHECK=1"
+)
+# switch-groups-end
+for group in "${switch_groups[@]}"; do
+    read -r trigger mode sets <<< "$group"
+    name=${trigger%%=*}
+    [[ ${!name:-} == "${trigger#*=}" ]] || continue
+    read -ra assignments <<< "$sets"
+    for assignment in "${assignments[@]}"; do
+        part=${assignment%%=*}
+        if [[ $mode == force || -z ${!part+set} ]]; then export "$assignment"; fi
+    done
+    echo "Engine: $trigger sets ${#assignments[@]} switches"
+done
 # BB_SAVE_LOG=1 (launcher: "Save the log and statistics to a file"): this run's output and its
 # per-frame statistics also go to $data/logs/<time>.log, .frames.csv and .readbacks.csv.
 if [[ ${BB_SAVE_LOG:-} == 1 ]]; then
@@ -104,7 +127,7 @@ export BB_FPS=$fps
 # Live resolution changes keep the guest at 1920x1080 and scale host targets at run time instead
 # (output and presets change in the menu without a restart, but post-processing stays at 1080p
 # and scene targets are copied back: much slower on the Steam Deck and older GPUs). Chosen by
-# BB_LIVE_RES=0/1, else config.ini live_resolution=0/1; off when unset (recommended). "auto" (a GPU
+# config.ini live_resolution=0/1; off when unset (recommended). "auto" (a GPU
 # check) is no longer offered from 0.4.4 beta 25c and reads as off. 1080p output and TAA always use
 # the live path.
 if [[ -z ${BB_RENDER_RES:-} ]]; then
@@ -112,9 +135,8 @@ if [[ -z ${BB_RENDER_RES:-} ]]; then
 fi
 live=0
 if [[ -n ${scaled_output:-} ]]; then
-    live=${BB_LIVE_RES:-}
     # Bash builtins only: a minimal PATH may have no sed/grep (a missing one ended run.sh silently).
-    if [[ -z $live && -f $BB_CONFIG ]]; then
+    if [[ -f $BB_CONFIG ]]; then
         while IFS= read -r line || [[ -n $line ]]; do
             [[ $line =~ ^live_resolution=([01]|auto)$ ]] && live=${BASH_REMATCH[1]}
         done < "$BB_CONFIG"

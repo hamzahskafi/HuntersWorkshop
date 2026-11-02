@@ -289,7 +289,7 @@ FRAME_COUNT(Sound, 0x4b33c51, 5, 33333, Digits)
 
 // FRAME_EASE(instruction, length, displacement offset, constant, the instruction's bytes, the game's weight, the
 // 60 FPS++ list's): the follow camera's eases, a weight a frame read from a slot with the frame timer
-// (BB_FRAME_TIMER=1), worked out from the frame's step every frame: the game's own a 30 FPS frame (Original, or
+// (its default), worked out from the frame's step every frame: the game's own a 30 FPS frame (Original, or
 // BB_CAMERA_FIX=1), or with the FPS++ retune the list's a 60 FPS frame, so it eases as it does at 60. Without
 // the timer the start program converts them once for the rate (patches.cpp).
 // the distance ease (vmulss xmm1, xmm1, [0x4d25e68]): 0.1 a frame, the list's 0.025.

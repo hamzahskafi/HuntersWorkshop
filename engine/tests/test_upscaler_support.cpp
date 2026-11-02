@@ -43,7 +43,6 @@ int main() {
     { FILE* config = std::fopen(path.c_str(), "w"); assert(config); std::fclose(config); }
     SetEnv("BB_CONFIG", path.c_str());
     SetEnv("BB_UPSCALER", nullptr);
-    SetEnv("BB_UPSCALE_PRESET", nullptr);
     SetEnv("BB_RENDER_RES", nullptr);
     const int qhd = Output(2560, 1440);
     assert(qhd >= 0);

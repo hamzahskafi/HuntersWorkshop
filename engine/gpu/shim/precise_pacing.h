@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Hunter's Workshop: frame pacing. Waits that land on time (an OS timer sleep for most of the wait,
 // then a spin as long as the timer's recent wake-ups needed) and an even cadence of slots for
-// vblank ticks and flips. On by default on Windows; BB_PRECISE_PACING=0 turns it off (=1 on Linux).
+// vblank ticks and flips. On by default; BB_PRECISE_PACING=0 turns it off.
 #pragma once
 
 #include <chrono>

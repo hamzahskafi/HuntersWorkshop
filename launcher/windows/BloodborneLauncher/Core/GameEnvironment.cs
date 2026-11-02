@@ -152,7 +152,8 @@ namespace BloodborneLauncher.Core
             if (s.Bool("audio_stats")) env["BB_AUDIO_STATS"] = "1";
             if (s.Bool("load_profile")) env["BB_SAMPLE_THREADS"] = "load";
             // Experimental engine features: on by default, each can be turned off.
-            env["BB_PRECISE_PACING"] = s.Bool("exp_frame_pacing") ? "1" : "0";
+            // 0.4.4 beta 28: what is on by default in the engine is passed only when off.
+            if (!s.Bool("exp_frame_pacing")) env["BB_PRECISE_PACING"] = "0";
             // Off by default, and passed either way: an engine that has it on unless told 0 gets 0.
             env["BB_VBLANK_PACING"] = s.Bool("exp_vblank_lock") ? "1" : "0";
             env["BB_INDIRECT_CLAMP"] = s.Bool("exp_particle_cap") ? "1" : "0";
@@ -164,42 +165,33 @@ namespace BloodborneLauncher.Core
                 env[key] = value;
 
             // Off: the engine's earlier behaviour; on: its default (left unset).
-            if (!s.Bool("exp_vram_budget")) { env["BB_GC_PRESSURE_PERCENT"] = "0"; env["BB_GC_PRESSURE_SECONDS"] = "0"; }
+            // Switches that stand for several (0.4.4 beta 28: the engine's start programs expand them,
+            // bb-start's ExpandSwitchGroups and run.sh).
+            if (!s.Bool("exp_vram_budget")) env["BB_VRAM_BUDGET"] = "0";
             if (!s.Bool("exp_thread_priority")) env["BB_GPU_THREAD_PRIORITY"] = "0";
             if (!s.Bool("exp_sleep_spin")) env["BB_SLEEP_SPIN_US"] = "600";
             if (!s.Bool("exp_async_pipelines")) env["BB_ASYNC_PIPELINES"] = "0";
             if (!s.Bool("exp_occlusion")) env["BB_OCCLUSION"] = "0";
             if (s.Bool("exp_sharp_ui")) env["BB_SHARP_UI"] = "1";
-            if (!s.Bool("exp_fast_draws"))
-            {
-                env["BB_SUBMIT_END_TASKS"] = "0";
-                env["BB_MEMO_REVALIDATE"] = "0";
-                env["BB_SAMPLER_MEMO"] = "0";
-                env["BB_DRAIN_SLEEP"] = "0";
-                env["BB_FAULT_SKIP_TEXTURES"] = "0";
-            }
+            if (!s.Bool("exp_fast_draws")) env["BB_FAST_DRAWS"] = "0";
             // Sound threads first (CPUs with many slower cores): off unless chosen.
-            if (!s.Bool("audio_priority") || s.Bool("safe_mode_next")) env["BB_AUDIO_THREAD_PRIORITY"] = "0";
+            if (s.Bool("audio_priority")) env["BB_AUDIO_THREAD_PRIORITY"] = "1";
             // Sound output: DirectSound writes further ahead than WASAPI, so a late sound thread
             // doesn't leave a gap (SDL reads its driver and buffer size from the environment).
             var output = s.Bool("safe_mode_next") ? "" : s.Str("sound_output");
             if (output.StartsWith("directsound")) env["SDL_AUDIO_DRIVER"] = "directsound";
             if (output == "directsound_large") env["SDL_AUDIO_DEVICE_SAMPLE_FRAMES"] = "2048";
-            if (s.Bool("exp_fast_loading")) env["BB_FAST_LOADING"] = "1";
+            if (!s.Bool("exp_fast_loading")) env["BB_FAST_LOADING"] = "0";
             if (!s.Bool("exp_frame_fixes")) env["BB_FRAME_FIXES"] = "0";
-            env["BB_FRAME_TIMER"] = s.Bool("exp_frame_timer") ? "1" : "0";
+            // The unified frame time off: the frame timer and the camera's per-frame eases left out.
+            if (!s.Bool("exp_frame_timer")) env["BB_FRAME_FIXES_SKIP"] = "timer,camera";
             if (s.Bool("exp_hot_pages")) env["BB_HOT_PAGES"] = "2";
             // The game's per-frame GPU memory read in place (on unless 0; safe mode sets 0 below).
             if (!s.Bool("exp_gx_in_place")) env["BB_GX_IN_PLACE"] = "0";
-            if (s.Bool("exp_native_calls")) env["BB_NATIVE_CALLS"] = "1";
+            if (!s.Bool("exp_native_calls")) env["BB_NATIVE_CALLS"] = "0";
             if (s.Bool("exp_sfx_workaround")) env["BB_SFX_WORKAROUND"] = "1";
             if (s.Bool("borderless_fullscreen")) env["BB_EXCLUSIVE_FULLSCREEN"] = "0";
-            if (!s.Bool("exp_compile_skip"))
-            {
-                env["BB_SKIP_UNCOMPILED"] = "0";
-                env["BB_LATE_PIPELINE_BIND"] = "0";
-                env["BB_PIPELINE_TAKE"] = "0";
-            }
+            if (!s.Bool("exp_compile_skip")) env["BB_COMPILE_SKIP"] = "0";
             if (s.Bool("section_stats")) env["BB_SECTIONS"] = "1";
             if (s.Str("overlay_keys") is "insert" or "off") env["BB_OVERLAY_KEYS"] = s.Str("overlay_keys");
             if (s.Bool("legacy_shaders")) env["BB_NATIVE_SHADERS"] = "0";
@@ -208,38 +200,9 @@ namespace BloodborneLauncher.Core
                 env["BB_SHADER_CAPTURE"] = "1";
                 env["BB_SHADER_CAPTURE_DIR"] = Path.Combine(Path.GetDirectoryName(GameRunner.SessionLog)!, "shaders");
             }
-            if (s.Bool("safe_mode_next"))
-            {
-                // Safe mode (after a crash, one run): every experimental engine option and the mods off.
-                env.Remove("BB_FAST_LOADING");
-                env["BB_FRAME_FIXES"] = "0";
-                env["BB_FRAME_TIMER"] = "0";
-                env.Remove("BB_HOT_PAGES");
-                env.Remove("BB_GUEST_IN_PLACE");
-                env["BB_GX_IN_PLACE"] = "0"; // the game's GX region tracked as before
-                env.Remove("BB_NATIVE_CALLS");
-                env["BB_PRECISE_PACING"] = "0";
-                env["BB_VBLANK_PACING"] = "0";
-                // A crash guard: on, whatever the setting, in the run after a crash.
-                env["BB_INDIRECT_CLAMP"] = "1";
-                env["BB_IMAGE_WRITEBACK_GC"] = "0";
-                env["BB_GC_PRESSURE_PERCENT"] = "0";
-                env["BB_GC_PRESSURE_SECONDS"] = "0";
-                env["BB_GPU_THREAD_PRIORITY"] = "0";
-                env["BB_NATIVE_SHADERS"] = "0";
-                env["BB_SLEEP_SPIN_US"] = "600";
-                env["BB_ASYNC_PIPELINES"] = "0";
-                env["BB_OCCLUSION"] = "0";
-                env["BB_SUBMIT_END_TASKS"] = "0";
-                env["BB_MEMO_REVALIDATE"] = "0";
-                env["BB_SAMPLER_MEMO"] = "0";
-                env["BB_DRAIN_SLEEP"] = "0";
-                env["BB_FAULT_SKIP_TEXTURES"] = "0";
-                env["BB_SKIP_UNCOMPILED"] = "0";
-                env["BB_LATE_PIPELINE_BIND"] = "0";
-                env["BB_PIPELINE_TAKE"] = "0";
-                env["BB_MODS_ENABLED"] = "0";
-            }
+            // Safe mode (after a crash, one run): every experimental engine option and the mods off, a crash
+            // guard on (the engine's start programs set them, whatever the rows above say).
+            if (s.Bool("safe_mode_next")) env["BB_SAFE_MODE"] = "1";
             // The Hunter's Dream account (scripts/online.py uses it in that pool only).
             if (s.HuntersDreamToken is { Length: > 0 } token && s.Str("hd_name") is { Length: > 0 } name)
             {

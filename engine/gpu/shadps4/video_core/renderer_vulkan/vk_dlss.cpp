@@ -129,7 +129,7 @@ void SetP(NgxParameter* p, const char* name, void* v) {
     Slot<void (*)(NgxParameter*, const char*, void*)>(p, SetVoid)(p, name, v);
 }
 /// bbport: NVSDK_NGX_DLSS_Hint_Render_Preset (0 the DLL's default, 1 A ... 11 K): dlss_preset in
-/// config.ini, BB_DLSS_PRESET overrides it ("k" when neither); live from the menu.
+/// config.ini ("k" when it has none); live from the menu.
 unsigned DlssPreset(int quality);
 /// The same preset for every quality mode: the feature is created again when the mode changes.
 void SetPreset(NgxParameter* p, unsigned preset) {
@@ -303,8 +303,8 @@ struct DlssUpscaler::Impl {
 
     /// OptiScaler's NGX calls may run vkDeviceWaitIdle (a feature released or its backend
     /// changed), which needs every queue externally synchronized: they go out under the lock
-    /// our submissions and presents take (BB_OPTISCALER_NGX_LOCK).
-    const bool ngx_lock = OptiScaler::Part("BB_OPTISCALER_NGX_LOCK");
+    /// our submissions and presents take (OptiScaler's compatibility mode).
+    const bool ngx_lock = OptiScaler::Compat();
     std::unique_lock<std::mutex> QueueLock() {
         return ngx_lock ? std::unique_lock{Scheduler::submit_mutex} : std::unique_lock<std::mutex>{};
     }
@@ -538,7 +538,7 @@ struct DlssUpscaler::Impl {
             SetI(params, "DLSS.Enable.Output.Subrects", 0);
             // bbport: the model is chosen, not left to the DLL's default per mode: preset K (the
             // transformer model) keeps thin moving objects - a weapon on the back, railings -
-            // steadier than the CNN presets. dlss_preset / BB_DLSS_PRESET: a letter (e: the last CNN
+            // steadier than the CNN presets. dlss_preset: a letter (e: the last CNN
             // model) or "default". A preset the DLL refuses is retried with its default.
             const unsigned preset = wanted.preset;
             SetPreset(params, preset);

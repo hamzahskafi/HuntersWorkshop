@@ -60,7 +60,7 @@ enum DebugView : int { DebugNone = 0, DebugReactive = 1, DebugMotion = 2, DebugV
 enum class MenuLanguage {
     English, Russian, Spanish, PortugueseBrazil, French, German, Italian, Polish, Turkish, ChineseSimplified
 };
-/// menu_language in config.ini, by MenuLanguage; the launcher's BB_MENU_LANGUAGE uses the same codes.
+/// menu_language in config.ini, by MenuLanguage; the launcher uses the same codes.
 inline constexpr const char* MenuLanguageCodes[] = {"en", "ru", "es", "pt_BR", "fr", "de", "it", "pl", "tr", "zh_CN"};
 inline constexpr int MenuLanguageCount = int(sizeof(MenuLanguageCodes) / sizeof(MenuLanguageCodes[0]));
 static_assert(MenuLanguageCount == int(MenuLanguage::ChineseSimplified) + 1);
@@ -137,7 +137,7 @@ enum HdrMode : int { HdrModeNative = 0, HdrModeExpand = 1, HdrModeCount };
 inline constexpr const char* HdrModeNames[] = {"native", "expand"};
 static_assert(sizeof(HdrModeNames) / sizeof(HdrModeNames[0]) == HdrModeCount);
 
-/// dlss_preset in config.ini (BB_DLSS_PRESET): DLSS's render preset, "default" (0: the DLL's own
+/// dlss_preset in config.ini: DLSS's render preset, "default" (0: the DLL's own
 /// for each quality mode) or a letter (1 = A .. 26 = Z). K (11, the transformer model) unless set.
 inline constexpr int DlssPresetDefault = 0, DlssPresetK = 11, DlssPresetMax = 26;
 /// bbport: "auto": the model per quality mode as NVIDIA's DLSS 4.5 pairs them: K (DLAA, Quality,
@@ -146,10 +146,6 @@ inline constexpr int DlssPresetAuto = -1, DlssPresetL = 12, DlssPresetM = 13;
 int DlssPresetFromText(const char* text);
 /// "default" or the preset's letter (lowercase), as config.ini keeps it.
 const char* DlssPresetText(int preset);
-
-/// optiscaler_sync_submit in config.ini (BB_OPTISCALER_SYNC_SUBMIT): one submit thread only while
-/// OptiScaler's frame generation is on (auto), always, or never.
-enum OptiSubmit : int { OptiSubmitAuto = -1, OptiSubmitOff = 0, OptiSubmitOn = 1 };
 
 /// button_prompts in config.ini: the game's button icons drawn as the bound keys while the keyboard
 /// or mouse is in use (auto), always (keyboard), or never (controller). engine/key_prompts.h.
@@ -204,9 +200,9 @@ struct Values {
     std::atomic<bool> hide_cursor{true};
     /// The settings menu's position (fraction of the screen), -1 until it is moved.
     std::atomic<float> menu_x{-1.0f}, menu_y{-1.0f};
-    // AMD FSR check (config.ini only since 0.4.4 beta 27d): the jitter sign it is given. Auto exposure
-    // follows NVIDIA's and AMD's guidance, no setting (27d: fsr4_auto_exposure, dlss_auto_exposure went).
-    std::atomic<bool> fsr4_invert_jitter{false};
+    // AMD FSR check (fsr_invert_jitter, config.ini only; fsr4_invert_jitter before 0.4.4 beta 28): the
+    // jitter sign it is given. Auto exposure follows NVIDIA's and AMD's guidance, no setting.
+    std::atomic<bool> fsr_invert_jitter{false};
     std::atomic<int> active_render_width{1920}, active_render_height{1080};
     /// Set by the renderer: the game's motion blur is held off (engine/graphics.cpp), as a temporal
     /// upscaler takes the game's finished frame, blur and all (BB_UPSCALER_NO_BLUR).
@@ -240,18 +236,17 @@ struct Values {
         cheat_no_durability{false}, cheat_consumables{false};
     /// One of CheatGunRanges / CheatEchoMultipliers; live.
     std::atomic<int> cheat_gun_range{0}, cheat_echo_multiplier{1};
-    /// Borderless fullscreen window at the desktop size (F11 toggles; BB_FULLSCREEN overrides).
+    /// Borderless fullscreen window at the desktop size (F11 toggles).
     std::atomic<bool> fullscreen{false};
-    /// HDR output (hdr, BB_HDR): the game's SDR picture shown in an HDR swapchain when the
+    /// HDR output (hdr): the game's SDR picture shown in an HDR swapchain when the
     /// display offers one (Windows HDR on). Applied at start (startup_hdr).
     std::atomic<bool> hdr{false};
     /// Nits of the SDR picture's white, the display's peak, and the highlight expansion (0: SDR
-    /// white stays at paper white, 1: up to the peak); live (BB_HDR_PAPER_WHITE, BB_HDR_PEAK,
-    /// BB_HDR_BOOST).
+    /// white stays at paper white, 1: up to the peak); live.
     std::atomic<float> hdr_paper_white{HdrPaperWhiteDefault}, hdr_peak{HdrPeakDefault},
         hdr_boost{HdrBoostDefault};
     /// hdr_peak_auto: the peak the display reports (hdr_display_peak) instead of hdr_peak, when it
-    /// reports one; live. BB_HDR_PEAK turns it off.
+    /// reports one; live.
     std::atomic<bool> hdr_peak_auto{true};
     /// Set by the window: the peak brightness Windows reports for the game's display (DXGI
     /// MaxLuminance, the Windows HDR Calibration app's value when it has run), 0 when unknown.
@@ -259,7 +254,7 @@ struct Values {
     /// The in-game menu's SDR | HDR comparison: the left half as SDR. Not saved.
     std::atomic<bool> hdr_compare{false};
     std::atomic<float> hdr_ui_brightness{1.0f}, hdr_ui_color{HdrUiColorDefault};
-    /// HdrMode (hdr_mode, BB_HDR_MODE); live. In native mode boost is the share of the scene's
+    /// HdrMode (hdr_mode); live. In native mode boost is the share of the scene's
     /// highlight range shown: sqrt(boost) of it in log2 (0.25: half, 1: all of it).
     std::atomic<int> hdr_mode{HdrModeNative};
     /// Set by the renderer: the HDR output in use (HdrOutput).
@@ -282,20 +277,16 @@ struct Values {
     /// DLSS's render preset (DlssPreset*); live: its feature is created again (vk_dlss.cpp). Set by
     /// DLSS: the preset its feature runs (0 the DLL's default, a refused one included), -1 before.
     std::atomic<int> dlss_preset{DlssPresetAuto}, dlss_applied_preset{-1};
-    /// render_scale (BB_RENDER_SCALE): the Custom preset's output / render ratio; live as presets.
+    /// render_scale: the Custom preset's output / render ratio; live as presets.
     std::atomic<float> render_scale{1.3f};
-    /// mip_bias (BB_MIP_BIAS): texture LOD bias added while an upscaler runs (MipBiasMin..Max); live.
+    /// mip_bias: texture LOD bias added while an upscaler runs (MipBiasMin..Max); live.
     std::atomic<float> mip_bias{0.0f};
-    /// OptiScaler compatibility (vk_optiscaler.h), optiscaler_* in config.ini: the mode, NGX calls
-    /// under the queue lock, the Vulkan instance and device made on a thread of their own, one
-    /// submit thread (OptiSubmit). The menu edits these; the engine reads startup_optiscaler, and
-    /// BB_OPTISCALER_* (the launcher's switch) override that.
-    std::atomic<bool> optiscaler_compat{true}, optiscaler_ngx_lock{true}, optiscaler_clean_thread{true};
-    std::atomic<int> optiscaler_sync_submit{OptiSubmitAuto};
-    struct OptiScalerSwitches {
-        bool compat = true, ngx_lock = true, clean_thread = true;
-        int sync_submit = OptiSubmitAuto;
-    } startup_optiscaler;
+    /// OptiScaler's compatibility mode (vk_optiscaler.h), optiscaler_compat in config.ini: the menu
+    /// edits it; the engine reads startup_optiscaler_compat, and BB_OPTISCALER_COMPAT (the launcher's
+    /// switch) overrides that. (0.4.4 beta 28: optiscaler_ngx_lock, _clean_thread and _sync_submit,
+    /// its parts' own keys, went; they follow it.)
+    std::atomic<bool> optiscaler_compat{true};
+    bool startup_optiscaler_compat = true;
 
     /// Startup settings for the explicit BB_RENDER_RES compatibility patch only.
     int startup_preset = PresetAuto;
