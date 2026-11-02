@@ -414,6 +414,16 @@ From the audit of 27c (four read-only audits, re-checked) and the tester's calls
   `heap_sites`, `write_log`, `windows_experiments`; recommended: remove); OptiScaler (one key); the old
   shadNet online path and bbnet's NP modules the game never imports (checked first); the GPU-path tracers
   that overlap; `docs/archive/`.
+- **The launcher's texts, last before the version step** (the tester, 2026-11-02): once every part above
+  and every open task is done. Every row gets a line under its title (one complete phrase of 60
+  characters or fewer saying what it does; Classic cuts today's descriptions at 64 characters, 70 of
+  them mid-sentence) and a tooltip (the details, the cost, when it applies, "Default: on/off." at the
+  end, any `BB_` name last); one phrase for when a change applies; Off or None first in every list; plain
+  words, no Lantern version references. Row by row: [launcher-text-review.md](launcher-text-review.md),
+  which the tester goes through before the texts change. With it: zh-CN for every changed text, both
+  launchers built, the translation key check clean.
+- **Then the version step:** 0.4.4-beta.28, engine id 64, release notes (their Defaults section: a new
+  install starts without an upscaler, on the game's own anti-aliasing), this document, every check.
 
 ### Release candidate, then 0.4.4
 

@@ -17,6 +17,8 @@ features are in [archive/](archive/README.md) (0.4.4 beta 28; was `history/`).
 - [community-fixes-plan.md](community-fixes-plan.md): every change since Hunter's Workshop began, with
   its measurements and credits (the main table, newest rows at the bottom), and the review of what
   other Bloodborne PC projects fixed.
+- [launcher-text-review.md](launcher-text-review.md): every launcher row's title, line and tooltip, with
+  the texts proposed for beta 28's text step.
 - [engine-map.md](engine-map.md): how the engine works (threads, a frame from the game's commands to
   the screen, where the GPU and CPU time goes) and the reviewed optimization ideas, with the status of
   each after 0.4.4 beta 21 at its top.
