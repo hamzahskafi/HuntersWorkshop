@@ -193,7 +193,7 @@
         }
 
         /// <summary>The size an output_res value names; "auto" is the display's own (1920 × 1080
-        /// when it is unknown), as the engine reads it at start (scripts/run_windows.py).</summary>
+        /// when it is unknown), as the engine reads it at start (bb-start).</summary>
         public static (int W, int H) OutputSize(string value)
         {
             if (value == "auto")

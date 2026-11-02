@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// bb-start.exe: starts Bloodborne PC natively (was scripts/run_windows.py and the scripts it ran).
+// bb-start.exe: starts Bloodborne PC natively on Windows (0.9.32 replaced the Python start with it).
 //
 //     bb-start.exe [--game-dir DIR] [bb-probe options...]
 //
@@ -202,18 +202,12 @@ void SeedGpuCache(const fs::path& cache, const fs::path& catalogs, const fs::pat
     }
 }
 
-void ResetStaleGpuCache(const fs::path& cache, const std::string& identity, const std::string& legacy,
-                        const fs::path& recompiler) {
+void ResetStaleGpuCache(const fs::path& cache, const std::string& identity, const fs::path& recompiler) {
+    if (identity.empty()) return;
     const fs::path stamp = cache / "engine.txt";
     std::error_code error;
     try {
-        const std::string stamped = Trim(ReadText(stamp));
-        if (identity.empty() || stamped == identity) return;
-        // Made by an earlier engine from these same sources (its identity hashed whole files).
-        if (!legacy.empty() && stamped == legacy) {
-            WriteText(stamp, identity + "\n");
-            return;
-        }
+        if (Trim(ReadText(stamp)) == identity) return;
     } catch (const Error&) {
     }
     if (fs::is_directory(cache, error) && RecompileGpuCache(cache, recompiler)) {
@@ -331,15 +325,13 @@ int Main(std::vector<std::wstring> arguments) {
     try {
         const auto package = nlohmann::json::parse(ReadText(folders.package / "package.json"));
         const std::string engine = package.value("engine", "");
-        std::string identity = engine, legacy;
+        std::string identity = engine;
         try {
             const std::string id = Trim(ReadText(out / "gpu-cache.id"));
             if (!id.empty()) identity = "gpu " + id;
-            const std::string old = Trim(ReadText(out / "gpu-cache.legacy.id"));
-            if (!old.empty()) legacy = "gpu " + old;
         } catch (const Error&) {
         }
-        ResetStaleGpuCache(Path(Env("BB_GPU_USER_DIR", "")) / "cache", identity, legacy, out / "bb-shader-lab.exe");
+        ResetStaleGpuCache(Path(Env("BB_GPU_USER_DIR", "")) / "cache", identity, out / "bb-shader-lab.exe");
     } catch (const std::exception&) {
     }
     fs::create_directories(out);

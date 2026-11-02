@@ -418,7 +418,7 @@ def render_size(settings,override=''):
 
 def output_size(settings):
     """Output (UI) size from config.ini output_res, e.g. 3840x2160; "auto" is the display's own
-    (BB_DISPLAY_SIZE, from run_windows.py); 1920x1080 by default."""
+    (BB_DISPLAY_SIZE, from the start); 1920x1080 by default."""
     value=settings.get('output_res','').lower()
     if value=='auto': value=os.environ.get('BB_DISPLAY_SIZE','')
     try:
@@ -942,7 +942,7 @@ def main():
         writes+=compile_external(external_selection(external_patches(a.patches_dir,a.app_version,a.xml),
                                                     a.patches_config),segments,resolution)
     # Whether a patch enlarges the game's heaps (the built-in one, or a resolution patch above
-    # 1080p from a patches/ file): run_windows.py then gives the game the larger memory pool.
+    # 1080p from a patches/ file): the start then gives the game the larger memory pool.
     heap_bytes={offset+i for offset,data in compile_patches(a.xml,[HEAP_PATCH],a.app_version,segments)
                 for i in range(len(data))}
     heaps=any(offset+i in heap_bytes for offset,data in writes for i in range(len(data)))

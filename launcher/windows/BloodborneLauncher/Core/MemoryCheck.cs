@@ -27,7 +27,7 @@ namespace BloodborneLauncher.Core
         /// flexible memory.</summary>
         public static long PoolMiB(IniFile ini)
         {
-            // As scripts/run_windows.py: 9152 MiB of direct memory for a scene above 1080p, unless
+            // As bb-start: 9152 MiB of direct memory for a scene above 1080p, unless
             // Live resolution is On (a missing value, or "auto" from before 0.4.4 beta 25c, counts as off).
             return (ini.Get("live_resolution") != "1" && LargeScene(ini) ? 9152 : 5056) + 1024;
         }

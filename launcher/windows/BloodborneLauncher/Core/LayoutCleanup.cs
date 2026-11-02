@@ -7,6 +7,8 @@ using System.Windows.Controls;
 namespace BloodborneLauncher.Core
 {
     /// <summary>
+    /// 0.4.4 beta 28: used by the Avalonia launcher only (the Windows launcher no longer runs it: no Hunter's
+    /// Workshop package had the old layout); it goes with the Linux work.
     /// Packages since 0.9.30 keep the engine in engine\, so the top of the folder holds only the
     /// launcher, Bloodborne.exe and the player's files. An update copies the new layout over an
     /// older one, which leaves the engine's old top-level folders behind: they are removed once,

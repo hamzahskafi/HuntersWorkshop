@@ -41,7 +41,7 @@ install -m755 "$(readlink -f "$sdl")" "$bin/gpu/libSDL3.so.0"
 patchelf --set-rpath '$ORIGIN' "$bin/gpu/libbbgpu.so"
 patchelf --set-rpath '$ORIGIN/gpu' "$bin/bb-gpu-capabilities"
 strip --strip-debug "$bin/gpu/libbbgpu.so" "$bin/gpu/libSDL3.so.0"
-cp out/gpu-cache.id out/gpu-cache.legacy.id "$bin/" 2>/dev/null || true
+cp out/gpu-cache.id "$bin/" 2>/dev/null || true
 # NVIDIA's DLSS runtime (DLSS SDK license, tools/fetch_dlss.sh) beside bb-probe, where the engine
 # looks for it, as the Windows package has nvngx_dlss.dll. Kept in out/ once downloaded.
 bash tools/fetch_dlss.sh out

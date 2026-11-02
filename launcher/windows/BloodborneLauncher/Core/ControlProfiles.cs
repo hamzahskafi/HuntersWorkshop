@@ -25,8 +25,6 @@ namespace BloodborneLauncher.Core
     public static class ControlProfiles
     {
         public const string Format = "lantern-controls";
-        /// <summary>The format name of profiles exported before 0.9.37 beta 2 (still read).</summary>
-        private const string OldFormat = "bbport-controls";
         public const int Version = 2;
         private const int MaxBytes = 64 * 1024;
 
@@ -190,7 +188,7 @@ namespace BloodborneLauncher.Core
                 throw new FormatException(L.T("This is not valid JSON: ") + e.Message);
             }
 
-            if ((string?)Str(root, "format") is { } format && format != Format && format != OldFormat)
+            if ((string?)Str(root, "format") is { } format && format != Format)
                 throw new FormatException(L.F($"This is a \"{format}\" file, not a control profile."));
             if (root["bindings"] is not JsonObject bindings)
                 throw new FormatException(L.T("This file has no \"bindings\" section."));

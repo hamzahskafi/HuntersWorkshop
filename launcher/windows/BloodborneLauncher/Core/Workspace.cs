@@ -158,14 +158,6 @@ namespace BloodborneLauncher.Core
             }
 
             Ini.Load();
-            // The DLSS model moved from the launcher's settings to config.ini (dlss_preset), where the
-            // in-game menu changes it live: an older launcher's choice is carried over once.
-            if (Paths.IsPortDir(Paths.PortDir) && Settings.Str("dlss_preset") is { Length: > 0 } dlss && dlss != "k")
-            {
-                Ini.Set("dlss_preset", dlss);
-                Settings.Set("dlss_preset", "k");
-                SaveSoon();
-            }
             _iniWarned = false;
             PortChanged?.Invoke();
         }

@@ -3,7 +3,7 @@
 namespace BloodborneLauncher.Core
 {
     /// <summary>
-    /// The environment run_windows.py gets from the launcher. Most settings travel in config.ini
+    /// The environment the start (bb-start; run.sh on Linux) gets from the launcher. Most settings travel in config.ini
     /// (graphics, controls, online); these are the ones the engine takes from the environment.
     /// </summary>
     public static class GameEnvironment
@@ -117,7 +117,7 @@ namespace BloodborneLauncher.Core
             var fps = Fps(s);
             var env = new Dictionary<string, string>(StringComparer.Ordinal)
             {
-                // The package's engine is already built: run_windows.py must not try MSYS2.
+                // The package's engine is already built: the start must not build it (run.sh on Linux).
                 ["BB_PREBUILT"] = "1",
                 ["BB_DATA_DIR"] = Paths.DataDir,
                 ["BB_CONFIG"] = Paths.IniPath,

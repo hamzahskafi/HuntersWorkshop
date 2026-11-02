@@ -251,7 +251,6 @@ namespace BloodborneLauncher.Views
             _hardware = hardware;
             // The play style is the first start's "settings for this PC": not offered again after the guide.
             S.Set("hardware_offered", true);
-            S.Set("engine_preset_asked", true);
             Ws.SaveSoon();
             SetStatus("");
             if (_step == Step.Style) Render();

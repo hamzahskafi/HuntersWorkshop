@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// bb-start: the native start of Bloodborne PC (what scripts/run_windows.py and the scripts it ran
-// did): the game's boot image, mods, patches, the engine's own assets, then bb-probe. Shared
+// bb-start: the native start of Bloodborne PC on Windows (Linux: run.sh and scripts/): the game's boot image, mods, patches, the engine's own assets, then bb-probe. Shared
 // helpers: files, hashes, the environment the engine gets, the session log.
 #pragma once
 #include <cstdint>
@@ -42,7 +41,7 @@ inline void WriteText(const fs::path& path, std::string_view text) { WriteFile(p
 std::string Sha256Hex(const void* data, std::size_t size);
 inline std::string Sha256Hex(const Bytes& data) { return Sha256Hex(data.data(), data.size()); }
 Bytes Sha1(const void* data, std::size_t size);
-/// SHA-256 over several files' names and contents, as run_windows.py prepare_key.
+/// SHA-256 over several files' names and contents (the boot image's preparation key).
 class Sha256Stream {
 public:
     Sha256Stream();

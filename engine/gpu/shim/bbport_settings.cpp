@@ -401,7 +401,7 @@ MenuLanguage LanguageOfLocale(const char* lang) {
 
 } // namespace
 
-// The display's size for output_res = auto: BB_DISPLAY_SIZE ("WxH", from run_windows.py), even
+// The display's size for output_res = auto: BB_DISPLAY_SIZE ("WxH", from bb-start or run.sh), even
 // (the game has half-resolution buffers); 1920x1080 without it.
 static std::pair<int, int> DisplaySize() {
     static const std::pair<int, int> size = [] {

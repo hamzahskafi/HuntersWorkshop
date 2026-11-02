@@ -133,11 +133,6 @@ namespace BloodborneLauncher
                     _ = Dispatcher.BeginInvoke(() => SetupGuide.Open(firstRun: true), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
                 else if (!ws.Settings.Bool("hardware_offered") && Prompt.SnapshotPath == null && Paths.IsPortDir(Paths.PortDir))
                     _ = Dispatcher.BeginInvoke(() => OfferBestSettings(firstRun: true), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
-                // Once, after updating from an older launcher (a new install starts on New): the
-                // newer engine or the one 0.9.33 ran, the player's choice. Nothing changes unasked.
-                else if (ws.Settings.Bool("hardware_offered") && !ws.Settings.Bool("engine_preset_asked") &&
-                         Prompt.SnapshotPath == null && Paths.IsPortDir(Paths.PortDir))
-                    _ = Dispatcher.BeginInvoke(AskEnginePreset, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
             };
             Closing += OnClosing;
         }
@@ -235,29 +230,10 @@ namespace BloodborneLauncher
         }
 
         /// <summary>Shows what would change to suit this PC, and applies it on Apply.</summary>
-        /// <summary>Graphics › Engine preset, asked once: New or Legacy (0.9.33). Closed without a
-        /// choice, it asks again at the next start.</summary>
-        private void AskEnginePreset()
-        {
-            var ws = Workspace.Current;
-            var choice = Prompt.Choose(L.T("New engine or the 0.9.33 one?"),
-                L.T("This update brings a newer engine: a faster draw thread, quicker shader compiling and more VRAM for textures. " +
-                    "Most players run faster with it. Legacy keeps the engine as 0.9.33 ran it.\n\n" +
-                    "You can change it any time under Engine switches > Engine preset."),
-                L.T("Stay on Legacy"), L.T("Use New (recommended)"));
-            if (choice < 0) return;
-            EnginePreset.Apply(ws.Settings, choice == 1 ? EnginePreset.New : EnginePreset.Legacy);
-            ws.Settings.Set("engine_preset_asked", true);
-            ws.SaveSoon();
-            ws.Log(choice == 1 ? L.T("Engine preset: New") : L.T("Engine preset: Legacy (0.9.33)"), LogLevel.Good);
-        }
-
         public void OfferBestSettings(bool firstRun)
         {
             var ws = Workspace.Current;
             ws.Settings.Set("hardware_offered", true);
-            // A new install starts on the New engine preset: nothing to ask it later.
-            if (firstRun) ws.Settings.Set("engine_preset_asked", true);
             ws.SaveSoon();
             var hw = Hardware.Detect();
             var changes = hw.Recommend(ws.Settings, ws.Ini);
@@ -995,14 +971,14 @@ namespace BloodborneLauncher
                 if (!Paths.IsPortDir(Paths.PortDir))
                 {
                     if (!Prompt.Confirm(L.T("Where is the engine?"),
-                            L.T("The launcher needs the engine (the folder with run.py and bin\\bb-probe.exe). ") +
+                            L.T("The launcher needs the engine (the folder with engine\\out\\bb-start.exe). ") +
                             L.T("It is normally the folder the launcher came in."), L.T("Choose folder")))
                         return;
-                    var dialog = new Microsoft.Win32.OpenFolderDialog { Title = L.T("Port folder (with Bloodborne.exe and run.py)") };
+                    var dialog = new Microsoft.Win32.OpenFolderDialog { Title = L.T("Hunter's Workshop folder") };
                     if (dialog.ShowDialog(this) != true) return;
                     if (!Paths.IsPortDir(dialog.FolderName))
                     {
-                        Prompt.Tell(L.T("Not the port folder"), L.T("That folder has no run.py with Bloodborne.exe or bin\\bb-probe.exe."));
+                        Prompt.Tell(L.T("Not the port folder"), L.T("That folder has no engine\\out\\bb-start.exe."));
                         return;
                     }
                     s.Set("port_dir", dialog.FolderName);

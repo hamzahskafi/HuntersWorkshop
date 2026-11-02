@@ -380,7 +380,7 @@ namespace BloodborneLauncher.Views
         }
 
         /// <summary>Deletes the engine's shader and pipeline caches (user\cache beside the engine;
-        /// scripts\run_windows.py also clears them when the engine changes).</summary>
+        /// bb-start also clears or recompiles them when the engine's shader compiler changes).</summary>
         private static async void ClearShaderCache()
         {
             if (Process.GetProcessesByName("bb-probe").Length > 0)
@@ -465,19 +465,9 @@ namespace BloodborneLauncher.Views
                 }
                 return;
             }
-            var mine = ShaderCacheShare.Pipelines(Path.Combine(ShaderCacheShare.CacheDir, "CUSA03173"));
-            if (mine > 0 && !Prompt.Confirm(L.T("Replace your shader cache?"),
-                    L.F($"Yours has {mine} pipelines; it is kept as a backup (user\\cache\\CUSA03173.bak)."), L.T("Replace")))
-                return;
-            try
-            {
-                var count = ShaderCacheShare.Import(dialog.FileName);
-                Ws.Log(L.F($"Shader cache: {count} pipelines taken; the game loads them at the next start."), LogLevel.Good);
-            }
-            catch (Exception e)
-            {
-                Prompt.Tell(L.T("Shader cache not used"), L.T("This file doesn't fit: ") + e.Message + ".");
-            }
+            // 0.4.4 beta 28: a whole cache (what launchers before Lantern 0.9.37 beta 4 shared) is no longer
+            // taken; its stamp never matched this engine's compiler anyway.
+            Prompt.Tell(L.T("Shader catalog not used"), L.T("This file doesn't fit: ") + "it is not a shader catalog.");
         }
 
         // ---------------------------------------------------------------- shared settings

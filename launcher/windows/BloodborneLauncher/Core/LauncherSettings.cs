@@ -142,22 +142,6 @@ namespace BloodborneLauncher.Core
                     // them (the game's GPU range allocator nearly empty); most reports came without.
                     if (Updater.CurrentBeta > 0 && !saved.ContainsKey("frame_stats_beta_on"))
                         _data["frame_stats"] = true;
-                    // Beta 9.9: occlusion culling off once (9.8 switched it on for everyone; floors
-                    // and objects appeared late or flickered). On again only by choice.
-                    if (!saved.ContainsKey("occlusion_off_99"))
-                        _data["exp_occlusion"] = false;
-                    // Beta 9.8: the legacy shader compiler is the default again (the native one
-                    // held 45-55 FPS where the legacy one held 60, Forbidden Woods, RTX 3090);
-                    // switched on once, the native one stays a choice.
-                    if (!saved.ContainsKey("legacy_shaders_default_98"))
-                        _data["legacy_shaders"] = true;
-                    // 0.9.37 beta 4: the engine options the dev build ran with, once, over older
-                    // files (beta 3 players ran with half of the engine's own speedups switched off:
-                    // render threads at normal priority, long sleep spins, no precise pacing, every
-                    // memory page watched, 1/3 of the CPU and GPU used on an i7-10700F).
-                    if (!saved.ContainsKey(PerfDefaultsMarker))
-                        foreach (var (key, value) in PerfDefaults)
-                            _data[key] = value;
                     // 0.4.0 beta 4: the PC memory model off once (beta 4 of 0.9.37 had switched it on
                     // for everyone); on again only by choice.
                     if (!saved.ContainsKey(GuestInPlaceOffMarker))
@@ -194,26 +178,14 @@ namespace BloodborneLauncher.Core
                 _data["vram_budget_beta_on"] = true;
                 _data["frame_stats_beta_on"] = true;
             }
-            _data["legacy_shaders_default_98"] = true;
-            _data["occlusion_off_99"] = true;
-            _data[PerfDefaultsMarker] = true;
             _data[GuestInPlaceOffMarker] = true;
             _data[FrameTimerOnMarker] = true;
             if (Updater.CurrentBeta == 0) _data[BetaTestingOffMarker] = true;
         }
 
-        private const string PerfDefaultsMarker = "perf_defaults_b4";
         private const string GuestInPlaceOffMarker = "guest_in_place_off_040";
         private const string FrameTimerOnMarker = "frame_timer_on_044";
         private const string BetaTestingOffMarker = "beta_testing_off_040";
-
-        /// <summary>0.9.37 beta 4's defaults that older settings files are switched to once.</summary>
-        private static readonly (string Key, bool Value)[] PerfDefaults =
-        {
-            ("exp_frame_pacing", true), ("exp_thread_priority", true), ("exp_sleep_spin", true),
-            ("exp_fast_loading", true), ("exp_hot_pages", true), ("exp_native_calls", true),
-            ("legacy_shaders", false),
-        };
 
         public void Save()
         {

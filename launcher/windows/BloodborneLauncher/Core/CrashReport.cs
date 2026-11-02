@@ -149,8 +149,8 @@ namespace BloodborneLauncher.Core
             @"^Memory: game (\d+) MiB in RAM \((\d+) MiB committed, peak (\d+) MiB\); PC (\d+) of (\d+) MiB free, (\d+) MiB commit left",
             RegexOptions.Compiled);
 
-        /// <summary>The engine's own exit code: run_windows.py before 0.9.9 passed Windows crash
-        /// codes (0xC0000005) on as -1.</summary>
+        /// <summary>The engine's own exit code (its last exit line), a negative one as Windows' unsigned
+        /// crash code (0xC0000005).</summary>
         private static long EngineCode(List<string> tail, int code)
         {
             var line = tail.LastOrDefault(l => ExitLine.IsMatch(l));

@@ -208,7 +208,7 @@ void Install(std::uint8_t* image, std::size_t size) {
     const bool mirror = asset && *asset;
     const bool respec=std::getenv("BB_REBIRTH_ASSET");
     // Cheats (cheats.cpp) are switched live from the overlay, so a verified executable always
-    // gets the frame hook; run_windows.py verifies it for any engine feature or cheat.
+    // gets the frame hook; the start (bb-start, run.sh) verifies it for any engine feature or cheat.
     if (!identity && !mirror && !respec && !BbSettings::Get().camera_controls && !BbSettings::Get().graphics_controls && !BbSettings::Get().pc_controls && !BbSettings::Get().widescreen) return;
     if (!identity || std::strcmp(identity, "071df19c8880086d97182dbc057bc8cb37badaca57d9112683836b24a0444c0a")) {
         Log("mirror disabled: executable identity was not verified"); return;

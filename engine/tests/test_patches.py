@@ -623,7 +623,7 @@ class GxRegionTests(unittest.TestCase):
 
 class HeapPoolTests(unittest.TestCase):
     """An external resolution patch above 1080p enlarges the game's heaps with a 1080p output:
-    patches-info.json tells run_windows.py to give the game the larger memory pool."""
+    patches-info.json tells the start to give the game the larger memory pool."""
 
     def run_patches(self, directory, external):
         import shutil, subprocess, sys

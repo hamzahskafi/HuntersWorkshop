@@ -94,9 +94,6 @@ gpu_cache_sources | grep -v -E 'vk_(graphics|compute)_pipeline\.cpp$|vk_pipeline
     xargs cat | tr -d '\r' | grep -v -E 'Shader::Native::Capture|shader_recompiler/native/capture\.h|lab_flat|fetch_override' |
     sed -E 's#^[[:space:]]*//.*$##; s/[[:space:]]+$//' | grep -v '^$' |
     sha256sum | cut -c1-16 > out/gpu-cache.id
-# The identity as earlier engines computed it (whole files): a cache stamped with it for these same
-# sources is kept and stamped again with the new one.
-gpu_cache_sources | xargs cat | sha256sum | cut -c1-16 > out/gpu-cache.legacy.id
 # $ORIGIN/gpu: packaged copies keep the library next to the binary without patching it.
 gpu=(-Lout/gpu -lbbgpu -Wl,-rpath,'$ORIGIN/gpu' -Wl,-rpath,"$PWD/out/gpu" -rdynamic)
 runtime=(src/runtime*.c)
@@ -124,7 +121,7 @@ if [[ ! -f out/libatrac9.a || -n $(find third_party/LibAtrac9/C/src -newer out/l
     ar rcs out/libatrac9.a out/atrac9/*.o
 fi
 # Windows: the link includes the GPU library's link-time optimization (a minute or more), and
-# run.bat builds before every start, so an up-to-date executable is kept.
+# an engine built in a checkout is linked again only when something it uses changed.
 gpu_inputs=(out/gpu/libbbgpu.a out/gpu/bbgpu_link.txt)
 if [[ -n $windows ]]; then
     # Native bridge dependencies can change without changing libbbgpu.a itself.

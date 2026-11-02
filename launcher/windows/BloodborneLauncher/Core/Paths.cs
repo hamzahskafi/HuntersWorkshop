@@ -59,14 +59,13 @@ namespace BloodborneLauncher.Core
             name + ".exe";
 #endif
 
-        /// <summary>A package's engine folder: its engine\, or the package itself (older layout).</summary>
+        /// <summary>A package's engine folder: its engine\, or the folder itself when it is the engine.</summary>
         public static string EngineDirOf(string dir) =>
-            File.Exists(Path.Combine(dir, "engine", "out", Program("bb-probe"))) ||
-            File.Exists(Path.Combine(dir, "engine", "scripts", "run_windows.py"))
+            File.Exists(Path.Combine(dir, "engine", "out", Program("bb-probe")))
                 ? Path.Combine(dir, "engine")
                 : dir;
 
-        /// <summary>The engine in use: out\bb-probe.exe, scripts, patches, shaders and Python.</summary>
+        /// <summary>The engine in use: out\bb-probe.exe and bb-start.exe, patches, data and AMD's FSR files.</summary>
         public static string EngineDir => EngineDirOf(PortDir);
 
         /// <summary>The engine and its DLLs.</summary>
@@ -113,22 +112,18 @@ namespace BloodborneLauncher.Core
             return info.FilePrivatePart != 0 ? $"{version}.{info.FilePrivatePart}" : version;
         }
 
-        /// <summary>The Bloodborne PC engine: out\bb-probe.exe and what starts it (out\bb-start.exe, or
-        /// scripts\run_windows.py before 0.9.32), in the folder or its engine\.</summary>
+        /// <summary>The Bloodborne PC engine: out\bb-probe.exe and out\bb-start.exe, which starts it, in the
+        /// folder or its engine\.</summary>
         public static bool IsPortDir(string? dir)
         {
             if (string.IsNullOrWhiteSpace(dir)) return false;
             var engine = EngineDirOf(dir);
             return File.Exists(Path.Combine(engine, "out", Program("bb-probe"))) &&
-                   (File.Exists(Path.Combine(engine, "out", Program("bb-start"))) ||
-                    File.Exists(Path.Combine(engine, "scripts", "run_windows.py")));
+                   File.Exists(Path.Combine(engine, "out", Program("bb-start")));
         }
 
-        /// <summary>The native start (0.9.32 and later): the boot image, mods, patches, then the game.</summary>
+        /// <summary>The native start: the boot image, mods, patches, then the game.</summary>
         public static string Start => Path.Combine(EngineDir, "out", Program("bb-start"));
-
-        /// <summary>The Python an older engine started with (scripts\run_windows.py).</summary>
-        public static string Python => Path.Combine(EngineDir, "tools", "python", "python.exe");
 
         /// <summary>The port next to the game folder (its usual layout: &lt;port&gt;\CUSA03173).</summary>
         public static string? PortBesideGame(string gameDir)

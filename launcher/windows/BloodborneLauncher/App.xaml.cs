@@ -63,39 +63,6 @@ namespace BloodborneLauncher
                 Shutdown();
                 return;
             }
-
-            // An update to the engine\ layout: the old top-level engine folders go first.
-            if (Core.Paths.DetectPortDir() is { } package)
-            {
-                FixShippedMouseBinds(package);
-                var failed = Core.LayoutCleanup.Run(package);
-                if (failed.Count > 0)
-                    MessageBox.Show("These old files could not be removed (in use?) and can be deleted by hand:\n\n" +
-                                    string.Join("\n", failed), "Hunter's Workshop", MessageBoxButton.OK, MessageBoxImage.Information);
-            }
-        }
-
-        /// <summary>Packages before 0.9.34 beta 9 shipped lock on as Mouse3 and strong attack as Mouse2,
-        /// meant as middle and right click; the engine counts buttons as SDL does (2 middle, 3 right),
-        /// so they were swapped. Fixed once, and only while both are still those shipped values.</summary>
-        private static void FixShippedMouseBinds(string package)
-        {
-            try
-            {
-                var ini = Path.Combine(package, "config.ini");
-                if (!File.Exists(ini)) return;
-                var lines = File.ReadAllLines(ini);
-                var lockOn = Array.FindIndex(lines, l => l.Trim() == "bind.lock_on=Mouse3");
-                var strong = Array.FindIndex(lines, l => l.Trim() == "bind.strong_attack=Mouse2");
-                if (lockOn < 0 || strong < 0) return;
-                lines[lockOn] = "bind.lock_on=Mouse2";
-                lines[strong] = "bind.strong_attack=Mouse3";
-                File.WriteAllLines(ini, lines);
-            }
-            catch (Exception)
-            {
-                // The binds stay as they were; the launcher's Controls page can change them.
-            }
         }
 
         private void OnDispatcherException(object sender, DispatcherUnhandledExceptionEventArgs args)

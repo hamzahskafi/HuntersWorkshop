@@ -75,7 +75,7 @@ Short paths are used below. They expand like this:
 | `bbport_*` | `engine/gpu/shim/` |
 | `runtime_*.c` | `engine/src/` |
 | `config.default.ini` | `engine/` |
-| `run_windows.py` | `engine/scripts/` |
+| `main.cpp` (bb-start) | `engine/start/` |
 | `GameEnvironment.cs`, `LauncherSettings.cs` | `launcher/windows/BloodborneLauncher/Core/` |
 | `*.md` docs | `engine/docs/` |
 
@@ -162,7 +162,7 @@ Bloodborne's code runs natively on the PC. The C runtime (`engine/src`) and the 
    - the upscaler segment, recorded directly on stage B (`Scheduler::EnterDirectMode`, `vk_scheduler.cpp:755-790`): edge clamp, motion compose, DLSS, extra sharpening, then the merge into the game's scene colour;
    - the game's own post-processing, tonemap and UI at native size.
 6. **Signals.** `bb:GpuSignals` writes the fence labels once the GPU passes them. The frame-end task retires the frame, which wakes the game thread (`liverpool.cpp:171-193`).
-7. **Flip and present.** The flip task runs `Presenter::PrepareFrame`. It waits for the frame before (`BB_FRAMES_AHEAD=1`, `vk_presenter.cpp:1023-1041`), runs the host post pass and optional FSR 1 or HDR. The present thread then copies the frame to the swapchain at its 120 Hz cadence. On the tester's 60 Hz display, Mailbox shows every other frame. That is by design: the 120 preset is fixed-timestep (`BB_VBLANK_HZ=120`, `run_windows.py:223-225`) and the game's speed follows the flip rate.
+7. **Flip and present.** The flip task runs `Presenter::PrepareFrame`. It waits for the frame before (`BB_FRAMES_AHEAD=1`, `vk_presenter.cpp:1023-1041`), runs the host post pass and optional FSR 1 or HDR. The present thread then copies the frame to the swapchain at its 120 Hz cadence. On the tester's 60 Hz display, Mailbox shows every other frame. That is by design: the 120 preset is fixed-timestep (`BB_VBLANK_HZ=120`, `start/main.cpp` ConfigureFrameRate) and the game's speed follows the flip rate.
 
 ### 1.4 Where the GPU time goes
 
