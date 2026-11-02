@@ -200,6 +200,47 @@ void Scheduler::BeginRendering(const RenderState& new_state) {
     // in the next command buffer without clearing its attachments again.
     const bool resume = resume_rendering && !is_rendering && render_state == new_state;
     resume_rendering = false;
+    // 0.4.4 beta 18: the pass that ended last begun again as it was: split by what ended it.
+    auto& savings = GpuSavings::Get();
+    if (!is_rendering && render_state == new_state && (!resume || ended_after_cut)) {
+        GpuSavings::Count(savings.pass_splits[static_cast<u32>(pass_break)]);
+        // 0.4.4 beta 20: a barrier's detail, only for a pass begun again.
+        for (u32 bit = 0; bit < savings.pass_barrier_waits.size(); ++bit) {
+            if (pass_break_detail & (1u << bit)) {
+                GpuSavings::Count(savings.pass_barrier_waits[bit]);
+            }
+        }
+        for (u32 bit = 0; bit < savings.pass_barrier_layouts.size(); ++bit) {
+            if (pass_break_detail & (1u << (8 + bit))) {
+                GpuSavings::Count(savings.pass_barrier_layouts[bit]);
+            }
+        }
+    } else if (resume) {
+        GpuSavings::Count(savings.pass_resumes_after_cut);
+    } else if (new_state.num_color_attachments > 0 && // (a depth-only pass has no colour targets)
+               render_state.width == new_state.width && render_state.height == new_state.height &&
+               render_state.num_layers == new_state.num_layers &&
+               render_state.num_color_attachments == new_state.num_color_attachments) {
+        // 0.4.4 beta 20: the same colour targets again, the state changed: another depth view (a
+        // depth write toggle at native size), or other layouts or clears (a pass begun with a
+        // clear goes on without it).
+        bool same_colour = true;
+        for (u32 i = 0; i < new_state.num_color_attachments && i < 8; ++i) {
+            same_colour &= render_state.color_attachments[i].image_view ==
+                           new_state.color_attachments[i].image_view;
+        }
+        if (same_colour) {
+            if (render_state.depth_stencil_attachment.image_view !=
+                new_state.depth_stencil_attachment.image_view) {
+                GpuSavings::Count(savings.pass_restarts_depth_view);
+            } else if (!(render_state == new_state)) {
+                GpuSavings::Count(savings.pass_restarts_layout_or_clear);
+            }
+        }
+    }
+    pass_break = GpuSavings::PassBreak::Other;
+    pass_break_detail = 0;
+    ended_after_cut = false;
     EndRendering();
     is_rendering = true;
     render_state = new_state;
@@ -270,9 +311,22 @@ void Scheduler::BeginRendering(const RenderState& new_state) {
 }
 
 void Scheduler::EndRendering() {
+    EndRendering(GpuSavings::PassBreak::Other);
+}
+
+void Scheduler::EndRendering(GpuSavings::PassBreak why, u32 detail) {
     if (!is_rendering) {
+        // 0.4.4 beta 20 (the audit): a cut closed the pass: the first ender since names it (it
+        // would have ended it), and a submission (which drops the resume) too.
+        if (resume_rendering && !ended_after_cut) {
+            pass_break = why;
+            pass_break_detail = detail;
+            ended_after_cut = true;
+        }
         return;
     }
+    pass_break = why;
+    pass_break_detail = detail;
     is_rendering = false;
     Record([](vk::CommandBuffer cmdbuf) { cmdbuf.endRendering(); });
 }
@@ -329,16 +383,13 @@ std::unique_ptr<RecordChunk> Scheduler::AcquireChunk() {
 }
 
 namespace {
-/// bbport BB_HOST_WAIT_SPIN_US (default 100; 0: the loops as before): the waits for host copies
-/// and deferred signals spin with pause for this long before they yield (Sleep(0) on Windows: a
+/// bbport: the waits for host copies and deferred signals spin with pause for up to 100 us
+/// (BB_SPIN_US lowers it; 0: they yield at once) before they yield (Sleep(0) on Windows: a
 /// system call each, and the core may go to another thread for a while), and help the copy
 /// threads one queued task at a time (BbCopy::HelpOne) instead of BbCopy::WaitAsync, which also
 /// waits for copies issued after the signal.
 u32 HostWaitSpinUs() {
-    static const u32 us = [] {
-        const char* env = std::getenv("BB_HOST_WAIT_SPIN_US");
-        return env && env[0] ? static_cast<u32>(std::max(0, std::atoi(env))) : 100u;
-    }();
+    static const u32 us = BbThreads::SpinLimitUs(100);
     return us;
 }
 
@@ -346,17 +397,8 @@ u32 HostWaitSpinUs() {
 template <typename Done>
 void WaitUntil(Done&& done, bool help) {
     const u32 spin_us = HostWaitSpinUs();
-    if (spin_us == 0) {
-        while (!done()) {
-            if (help) {
-                BbCopy::WaitAsync();
-            }
-            std::this_thread::yield();
-        }
-        return;
-    }
     const auto spin_until = std::chrono::steady_clock::now() + std::chrono::microseconds(spin_us);
-    bool spinning = true;
+    bool spinning = spin_us != 0;
     for (u32 spins = 1; !done(); ++spins) {
         if (help && (spins & 63) == 1 && BbCopy::HelpOne()) {
             continue;
@@ -409,12 +451,7 @@ bool FenceOrderEnv() {
 } // namespace
 
 bool Scheduler::FenceOrderScoped() {
-    return FenceOrderEnv() || BbToggle::Experiment(8);
-}
-
-bool Scheduler::FenceOrderPossible() {
-    static const bool possible = FenceOrderEnv() || std::getenv("BB_TOGGLE_FILE") != nullptr;
-    return possible;
+    return FenceOrderEnv();
 }
 
 void Scheduler::WaitDeferredSignals(u32 site) {
@@ -751,12 +788,8 @@ void Scheduler::EnterDirectMode() {
     // bbport: with submissions going out from the recording threads, the commands recorded
     // here get a segment of their own, from this thread's pool, after the segments handed over:
     // the recording threads go on with those instead of this thread waiting for them (~90 us,
-    // the upscaler's passes every frame). BB_DIRECT_SEGMENT=0: the wait.
-    static const bool own_segment = [] {
-        const char* env = std::getenv("BB_DIRECT_SEGMENT");
-        return !(env && env[0] == '0');
-    }();
-    if (own_segment && async_submit && current_segment + 2 < MaxSegments &&
+    // the upscaler's passes every frame).
+    if (async_submit && current_segment + 2 < MaxSegments &&
         !BbToggle::Disabled(BbToggle::ThreadedRecording)) {
         if (is_rendering) {
             Record([](vk::CommandBuffer cmdbuf) { cmdbuf.endRendering(); });
@@ -828,7 +861,8 @@ void Scheduler::RecorderThread(std::stop_token stoken, u32 index) {
         // The thread of the segment being recorded spins briefly before sleeping: its next
         // chunk usually follows within microseconds, and a sleeping thread costs the producer
         // a wake-up syscall per kick. With few hardware threads (Steam Deck: 8) the spin would
-        // take time from guest threads. The others sleep until a new segment reaches them.
+        // take time from guest threads (BB_SPIN_US lowers it). The others sleep until a new
+        // segment reaches them.
         if (active_worker.load(std::memory_order_relaxed) == index) {
             static const auto spin_time =
                 std::chrono::microseconds(BbThreads::CapSpinUs(BbThreads::Available() >= 12 ? 200 : 20));
@@ -1027,7 +1061,7 @@ void Scheduler::SubmitExecution(SubmitInfo& info) {
         on_submit(info);
     }
 
-    EndRendering();
+    EndRendering(GpuSavings::PassBreak::Submission);
     if (auto* profiler = GpuProfiler::Get(); profiler && profiler->Records(this)) {
         // Until the next submission's first timestamp: mostly the GPU waiting for it.
         profiler->Mark(0x5B317ull, [] { return std::string{"(between submissions: GPU idle)"}; });
@@ -1095,17 +1129,35 @@ void Scheduler::SubmitExecution(SubmitInfo& info) {
     // bbport: no semaphore query here (an ioctl per submission, ~3% of the recording thread):
     // PopPendingOperations asks when an operation waits, the GPU signal thread on every fence.
     AllocateWorkerCommandBuffers();
+    recorded_since_submit.store(false, std::memory_order_relaxed);
 
     // Apply pending operations
     PopPendingOperations();
 }
 
+void Scheduler::CheckRecordedFlag() {
+    if (recorded_since_submit.load(std::memory_order_relaxed)) {
+        return;
+    }
+    const bool commands = direct_mode || current_segment != 0 || segment_bytes != 0 ||
+                          !full_chunks.empty() || (record_chunk && !record_chunk->Empty()) ||
+                          !ordered_full.empty() || (ordered_chunk && !ordered_chunk->Empty());
+    static std::atomic<bool> reported{false};
+    if (commands && !reported.exchange(true)) {
+        std::printf("GPU: a submission held commands recorded without the scheduler's recording "
+                    "calls noting it (RecordedSinceSubmit): a signal registered after them could "
+                    "have been given to the submission before\n");
+        std::fflush(stdout);
+    }
+}
+
 void Scheduler::SubmitAsync(SubmitInfo& info) {
+    CheckRecordedFlag();
     const u64 signal_value = work_semaphore.NextTick();
     if (on_submit) {
         on_submit(info);
     }
-    EndRendering();
+    EndRendering(GpuSavings::PassBreak::Submission);
     if (auto* profiler = GpuProfiler::Get(); profiler && profiler->Records(this)) {
         profiler->Mark(0x5B317ull, [] { return std::string{"(between submissions: GPU idle)"}; });
     }
@@ -1176,6 +1228,8 @@ void Scheduler::SubmitAsync(SubmitInfo& info) {
     });
     KickRecording(true);
     AllocateWorkerCommandBuffers();
+    // What this function recorded itself (the end of the batch, the submission) is in it.
+    recorded_since_submit.store(false, std::memory_order_relaxed);
     PopPendingOperations();
 }
 

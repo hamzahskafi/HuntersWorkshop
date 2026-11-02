@@ -8,3 +8,7 @@ dist/
 .vs/
 .idea/
 launcher/windows/install.txt
+
+# Python caches
+__pycache__/
+*.pyc

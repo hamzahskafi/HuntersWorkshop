@@ -6,7 +6,7 @@ namespace BloodborneLauncher.Core
 {
     /// <summary>
     /// What this PC has (GPU and its memory, CPU, RAM, the main display) and the settings that
-    /// suit it: upscaler, quality preset, output resolution, frame rate cap and motion vectors.
+    /// suit it: upscaler, render resolution, output resolution, frame rate cap and motion vectors.
     /// The GPU comes from the display adapters' registry keys (the one with the most memory, so
     /// the discrete card on a laptop), the display from its current mode.
     /// </summary>
@@ -20,8 +20,6 @@ namespace BloodborneLauncher.Core
 
         public int VramGb => (int)Math.Round(VramBytes / 1073741824.0);
         public bool Rtx => Vendor == "NVIDIA" && Gpu.Contains("RTX", StringComparison.OrdinalIgnoreCase);
-        /// <summary>Radeon RX 9000 (RDNA 4): FSR 4 runs natively.</summary>
-        public bool Rdna4 => Vendor == "AMD" && System.Text.RegularExpressions.Regex.IsMatch(Gpu, @"RX\s*9\d{3}");
         /// <summary>Integrated graphics: little dedicated memory, or a known integrated name.</summary>
         public bool Integrated => VramBytes < 2L << 30 || Gpu.Contains("UHD", StringComparison.OrdinalIgnoreCase) ||
                                   Gpu.Contains("Iris", StringComparison.OrdinalIgnoreCase) ||
@@ -34,10 +32,47 @@ namespace BloodborneLauncher.Core
         /// <summary>One line for the UI: "NVIDIA GeForce RTX 5060 (8 GB) · AMD Ryzen 5 5600 (12 threads) · 2560 × 1440 at 165 Hz".</summary>
         public string Summary =>
             L.F($"{Gpu}{(VramBytes > 0 ? $" ({VramGb} GB)" : "")} · {Cpu} ({Threads} threads) · ") +
-            (ScreenWidth > 0 ? L.F($"{ScreenWidth} × {ScreenHeight} at {RefreshHz} Hz") : L.T("display unknown"));
+            (ScreenWidth > 0 ? (Display is { } display ? display + ", " : "") + L.F($"{ScreenWidth} × {ScreenHeight} at {RefreshHz} Hz")
+                : L.T("display unknown"));
 
-        private static Hardware? _detected;
-        public static Hardware Detect() => _detected ??= Probe();
+        /// <summary>The monitor the display mode is from ("Monitor 2: DELL U2720Q"), when known.</summary>
+        public string? Display { get; init; }
+
+        private static Hardware? _machine;
+
+        /// <summary>
+        /// The PC's graphics card, processor and memory (read once), with the current mode of the monitor
+        /// the game opens on: Display › Monitor, resolved as the game's start resolves it
+        /// (WindowsMonitors.Resolve: the chosen one, else the primary), read each time it is asked for.
+        /// 0.4.4 beta 28: was the primary display's, read once per launcher run, whatever monitor was chosen.
+        /// </summary>
+        public static Hardware Detect()
+        {
+            var machine = _machine ??= Probe();
+            return GameMonitorMode() is { } mode
+                ? machine with { ScreenWidth = mode.Width, ScreenHeight = mode.Height, RefreshHz = mode.Hz, Display = mode.Name }
+                : machine;
+        }
+
+        private static (int Width, int Height, int Hz, string Name)? GameMonitorMode()
+        {
+#if AVALONIA
+            if (!OperatingSystem.IsWindows()) return null;
+#endif
+            try
+            {
+                var monitor = WindowsMonitors.Resolve(Workspace.Current.Settings.Str("display_device"), WindowsMonitors.All());
+                if (monitor == null) return null;
+                var mode = new DevMode { dmSize = (short)Marshal.SizeOf<DevMode>() };
+                return EnumDisplaySettings(monitor.Device, EnumCurrentSettings, ref mode) && mode.dmPelsWidth > 0
+                    ? (mode.dmPelsWidth, mode.dmPelsHeight, Math.Max(mode.dmDisplayFrequency, 1), monitor.Label)
+                    : null;
+            }
+            catch
+            {
+                return null; // not readable (or asked for before the settings are loaded): the primary display's, from Probe
+            }
+        }
 
         private static Hardware Probe()
         {
@@ -238,7 +273,8 @@ namespace BloodborneLauncher.Core
 
             var tier = GpuTier;
             var dlss = Paths.DlssRuntime != null;
-            Ini(L.T("Upscaler"), "upscaler", Rtx && dlss ? "dlss" : Rdna4 ? "fsr4" : "fsr3", Choices.Upscalers);
+            // 0.4.4 beta 27: AMD FSR (AMD's SDK picks FSR 4.1 or 3.1 by GPU), TAA without AMD's files.
+            Ini(L.T("Upscaler"), "upscaler", Rtx && dlss ? "dlss" : Paths.AmdFsrPresent ? "fsr" : "taa", Choices.Upscalers);
 
             // The output: the display's own size, by name where it is one of the choices, else
             // "Display (auto)"; 1920 x 1080 when the display is unknown.
@@ -269,7 +305,9 @@ namespace BloodborneLauncher.Core
                 StyleFps => Math.Min(4, Math.Max(3, preset + 2)),
                 _ => preset,
             };
-            Ini(L.T("Quality preset"), "preset", preset.ToString(), Choices.Presets, "0");
+            // 0.4.4 beta 27c: Auto where it picks the same for this output (it then follows the output).
+            Ini(L.T("Upscaling quality"), "preset", preset == Choices.AutoPreset(height) ? "auto" : preset.ToString(),
+                Choices.Presets, "auto");
 
             // 120 needs a fast display, a mid or better GPU and a CPU with 12+ threads (the game's
             // render thread is the limit); 60 otherwise.
@@ -280,9 +318,12 @@ namespace BloodborneLauncher.Core
             {
                 StyleQuality => "60",
                 StyleSmooth => fps == "120" ? "120" : RefreshHz >= 89 && Threads >= 8 ? "90" : "60",
-                StyleFps => RefreshHz >= 143 ? "144" : RefreshHz >= 119 ? "120" : RefreshHz >= 89 ? "90" : "60",
+                StyleFps => RefreshHz >= 239 ? "240" : RefreshHz >= 143 ? "144" : RefreshHz >= 119 ? "120" : RefreshHz >= 89 ? "90" : "60",
                 _ => fps,
             };
+            // From Uncapped, V-Sync Off goes back to On (latest frame), as on the Display page.
+            if (FrameRateSync.After(s.Str("fps_mode"), fps, s.Str("present_mode")) is { } sync)
+                Setting(L.T("V-Sync"), "present_mode", sync, Choices.PresentModes);
             Setting(L.T("Frame rate"), "fps_mode", fps, Choices.FpsModes);
 
             // Character motion vectors cost about 10%: on for the biggest GPUs, off for the smallest.

@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.IO;
 using System.Reflection;
 using System.Text.Json;
@@ -19,6 +19,9 @@ public static class Localization
     };
 
     private static IReadOnlyDictionary<string, string> _strings = new Dictionary<string, string>();
+    /// <summary>Each translation's English text (0.4.4 beta 28: a row's default line checks what its
+    /// texts say in English).</summary>
+    private static IReadOnlyDictionary<string, string> _sources = new Dictionary<string, string>();
     public static string Language { get; private set; } = "en";
 
     /// <summary>A language's translations, or null for English and for codes not in <see cref="Languages"/>.</summary>
@@ -36,6 +39,9 @@ public static class Localization
     {
         var catalog = Catalog(language);
         _strings = catalog ?? new Dictionary<string, string>();
+        var sources = new Dictionary<string, string>();
+        foreach (var (english, translated) in _strings) sources.TryAdd(translated, english);
+        _sources = sources;
         Language = catalog == null ? "en" : language;
     }
 
@@ -57,6 +63,8 @@ public static class Localization
     }
 
     public static string T(string text) => _strings.TryGetValue(text, out var translated) ? translated : text;
+    /// <summary>The English text a translation came from (the text itself when it is not one).</summary>
+    public static string Source(string text) => _sources.TryGetValue(text, out var english) ? english : text;
     public static string F(FormattableString text) => string.Format(CultureInfo.CurrentCulture, T(text.Format), text.GetArguments());
 }
 

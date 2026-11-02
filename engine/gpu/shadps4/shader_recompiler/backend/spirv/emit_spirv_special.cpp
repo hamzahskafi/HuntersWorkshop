@@ -132,13 +132,16 @@ static void EmitVertexMotion(EmitContext& ctx) {
                                      ctx.OpIAdd(u32_type, store_base, slot), 16);
     // Indexed draws may invoke the same vertex more than once. Atomic component stores
     // avoid write/write races; all these invocations produce the same clip position.
+    // 0.4.4 beta 15: relaxed atomic stores (a plain store on NVIDIA and AMD) instead of atomic
+    // exchanges, which read each value back: the same race freedom for ~6.5 M vertices a frame
+    // facing the lamps of the dense area.
     const Id scalar_ptr = ctx.TypePointer(spv::StorageClass::PhysicalStorageBuffer, u32_type);
     const Id scope = ctx.ConstU32(static_cast<u32>(spv::Scope::Device));
     for (u32 i = 0; i < 4; ++i) {
         const Id ptr = ctx.OpConvertUToPtr(scalar_ptr,
             ctx.OpIAdd(ctx.U64, store_address, ctx.Constant(ctx.U64, u64(i * 4))));
         const Id bits = ctx.OpBitcast(u32_type, ctx.OpCompositeExtract(ctx.F32[1], position, i));
-        ctx.OpAtomicExchange(u32_type, ptr, scope, ctx.u32_zero_value, bits);
+        ctx.OpAtomicStore(ptr, scope, ctx.u32_zero_value, bits);
     }
     ctx.OpBranch(store_merge);
     ctx.AddLabel(store_merge);
@@ -190,10 +193,20 @@ static void EmitFragmentMotion(EmitContext& ctx) {
     // written. Preserve depth so the compose pass can reject an occluded vector.
     const Id depth = ctx.OpCompositeExtract(f32_type,
                                             ctx.OpLoad(ctx.F32[4], ctx.frag_coord), 2u);
+    // bbport 0.7 (deadinside28), 0.4.4 beta 15: R32G32_UINT, 8 bytes a pixel instead of 16 (four
+    // floats): the vector as two halves, the depth at full precision with the sign bit set where
+    // a vector was written (depth is never negative; a cleared target has none).
+    const Id u32_type = ctx.U32[1];
+    const Id vector = ctx.OpCompositeConstruct(ctx.F32[2], ctx.OpSelect(f32_type, front, dx, zero),
+                                               ctx.OpSelect(f32_type, front, dy, zero));
+    const Id written = ctx.OpFOrdGreaterThan(ctx.U1[1], valid, ctx.Constant(f32_type, 0.99f));
+    const Id depth_bits = ctx.OpBitwiseOr(
+        u32_type,
+        ctx.OpBitwiseAnd(u32_type, ctx.OpBitcast(u32_type, depth), ctx.ConstU32(0x7fffffffu)),
+        ctx.OpSelect(u32_type, written, ctx.ConstU32(0x80000000u), ctx.ConstU32(0u)));
     ctx.OpStore(ctx.motion_frag_out,
-                ctx.OpCompositeConstruct(ctx.F32[4], std::array<Id, 4>{
-                    ctx.OpSelect(f32_type, front, dx, zero),
-                    ctx.OpSelect(f32_type, front, dy, zero), valid, depth}));
+                ctx.OpCompositeConstruct(ctx.U32[2], ctx.OpPackHalf2x16(u32_type, vector),
+                                         depth_bits));
 }
 
 void EmitEpilogue(EmitContext& ctx) {

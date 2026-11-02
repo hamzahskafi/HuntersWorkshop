@@ -14,6 +14,7 @@
 #include "loading.h"
 #include "render_guard.h"
 #include "game_fixes.h"
+#include "gx_region.h"
 #include "effect_timing.h"
 #include "frame_rate.h"
 #include "online_fixes.h"
@@ -207,7 +208,7 @@ void Install(std::uint8_t* image, std::size_t size) {
     const bool mirror = asset && *asset;
     const bool respec=std::getenv("BB_REBIRTH_ASSET");
     // Cheats (cheats.cpp) are switched live from the overlay, so a verified executable always
-    // gets the frame hook; run_windows.py verifies it for any engine feature or cheat.
+    // gets the frame hook; the start (bb-start, run.sh) verifies it for any engine feature or cheat.
     if (!identity && !mirror && !respec && !BbSettings::Get().camera_controls && !BbSettings::Get().graphics_controls && !BbSettings::Get().pc_controls && !BbSettings::Get().widescreen) return;
     if (!identity || std::strcmp(identity, "071df19c8880086d97182dbc057bc8cb37badaca57d9112683836b24a0444c0a")) {
         Log("mirror disabled: executable identity was not verified"); return;
@@ -253,10 +254,11 @@ void Install(std::uint8_t* image, std::size_t size) {
     const bool online=OnlineFixes::Install(image,size);
     const bool guard=RenderGuard::Install(image,size);
     const bool fixes=GameFixes::Install(image,size);
+    const bool region=GxRegion::Install(image,size);
     const bool timing=EffectTiming::Install(image,size);
     const bool frames=FrameRate::Install(image,size);
     if (!g_frame_on && !camera && !rebirth && !menus && !graphics && !wide && !input && !cheats && !online && !guard && !fixes &&
-        !timing && !frames) {
+        !region && !timing && !frames) {
         for (auto& hook : hooks) Discard(hook);
         Log("engine enhancements disabled: no compatible feature could be prepared"); return;
     }

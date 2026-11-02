@@ -54,12 +54,13 @@ enum : std::uint64_t {
     HotPages = 32768,
     FaultWindow = 65536,
     ParallelCopies = 131072,
-    AsyncFences = 262144,
+    // 262144 (bit 18): BB_ASYNC_FENCES, removed in 0.4.4 beta 21 (measured slower). Left unused so
+    // the bit numbers in BB_TOGGLE_FILE and tools/ab.sh stay as they were.
     PoolSmallCopies = 524288,
     RecordPrefetch = 1ull << 32,
     TextureViewMemo = 1ull << 33,
-    TextureBindHelper = 1ull << 34,
-    EarlyDrawInputs = 1ull << 35,
+    // 1ull << 34: free (the texture binding helper, removed in 0.4.4 beta 28).
+    // 1ull << 35: free (draw inputs resolved while the texture binding helper ran; removed).
     ConstantRing = 1ull << 36,
     DrawPipeline = 1ull << 37,
     PipelinedTasks = 1ull << 38,
@@ -78,14 +79,8 @@ enum : std::uint64_t {
     UpdateImageFastPath = 1u << 30,
     /// Bit set: the texture collector frees nothing (A/B of its evictions while the game runs).
     TextureCollector = 1ull << 31,
-    // TAA A/B in one run: optional techniques, off by default (no measured gain, 2026-10-02).
-    TaaTonemapBlend = 1ull << 51,
-    TaaClip = 1ull << 52,
-    TaaVariance = 1ull << 53,
-    TaaFilter = 1ull << 54,
-    // On by default (bit set: off): history of a thin feature this jitter phase missed is kept
-    // when nothing moves. Static-camera flicker of railings/window bars p99.9 -45% (2026-10-03).
-    TaaKeepNearerHistory = 1ull << 55,
+    // Bits 51-55: free (TAA A/B switches, removed in 0.4.4 beta 28; the history of thin features
+    // is always kept when nothing moves).
     /// FSR 4 (4.0 and 4.1.1) gets the motion vectors with y negated (motionVectorScale.y = -1); FSR 3
     /// and TAA keep them. A/B of the vertical convention FSR 4 expects.
     Fsr4MotionYFlip = 1ull << 56,
@@ -93,27 +88,18 @@ enum : std::uint64_t {
     /// The command stream is cut into segments recorded in parallel (BB_VK_RECORD_THREADS);
     /// bit set: no new cuts, one recording thread at a time.
     ParallelRecording = 1ull << 58,
-    /// Finished GPU writes are read back on the readback queue (BufferCache::DownloadMemory);
-    /// bit set: on the graphics queue after everything queued, as before.
-    ReadbackQueue = 1ull << 59,
-    /// Camera vectors from the inverse of the view matrix itself instead of the game's stored
-    /// inverse; bit set: the other one of BB_CAMERA_INVERSE (A/B while the game runs).
-    CameraOwnInverse = 1ull << 60,
-    /// Scene textures use BB_ANISO (16) times anisotropic filtering instead of the game's
-    /// ratio; bit set: the game's own samplers (A/B while the game runs).
-    ForcedAniso = 1ull << 61,
-    /// Camera motion vectors: the screen y sign derived from the G-buffer viewport, inverted
-    /// (A/B of the y convention while the game runs).
-    CameraYFlip = 1ull << 62,
-    /// FSR 4 on the scaled presets gets the tonemapped frame decoded to linear light (its output
-    /// encoded again); bit set: the encoded frame as before (A/B while the game runs).
-    Fsr4EncodedInput = 1ull << 63,
-    // Bits 20-29 are used as raw debug toggles by the camera/object motion and the upscaler.
+    // Bits 59-63: free (removed in 0.4.4 beta 28; BB_READBACK_QUEUE, BB_ANISO, BB_CAMERA_Y and
+    // BB_FSR_LINEAR do what bits 59, 61, 62 and 63 did).
+    // Bits 20-25 and 28 are used as raw debug toggles by the camera motion and the upscaler.
+    // Bits 27 and 29: free (removed in 0.4.4 beta 28; the menu's reactive and object_motion
+    // settings remain).
 };
 inline bool Disabled(std::uint64_t bit) {
     return (__atomic_load_n(&runtime_disabled_optimizations, __ATOMIC_RELAXED) & bit) != 0;
 }
 /// A temporary experiment switched on by bit `bit` of the second number in BB_TOGGLE_FILE.
+/// 1, 2, 4 and 8: free (removed in 0.4.4 beta 28); 16 pauses the lookahead thread
+/// (BbStats::lookahead_packets).
 inline bool Experiment(std::uint64_t bit) {
     return (__atomic_load_n(&runtime_experiment_bits, __ATOMIC_RELAXED) & bit) != 0;
 }
@@ -124,9 +110,9 @@ namespace BbStats {
 inline std::atomic<std::uint64_t> tracker_faults{0};
 /// Writes the GPU side heard of from the writers (libc copies over watched pages, no write tracking).
 inline std::atomic<std::uint64_t> cpu_write_notes{0}, cpu_write_note_bytes{0};
-/// Ranges the game's GPU memory allocator handed out (guest hook, BB_GUEST_IN_PLACE).
+/// Ranges the game's GPU memory allocator handed out.
 inline std::atomic<std::uint64_t> gpu_range_allocs{0}, gpu_range_alloc_bytes{0};
-/// Buffer bindings (BB_GUEST_IN_PLACE): bytes bound where the game's memory is (read over PCIe on a
+/// Buffer bindings: bytes bound where the game's memory is (BB_GX_IN_PLACE; read over PCIe on a
 /// discrete GPU) and bytes bound to VRAM copies.
 inline std::atomic<std::uint64_t> bound_in_place_bytes{0}, bound_vram_bytes{0};
 inline std::atomic<std::uint64_t> bound_in_place_written_bytes{0};
@@ -134,10 +120,15 @@ inline std::atomic<std::uint64_t> bound_in_place_written_bytes{0};
 /// back to the game's memory before moving in place; downloads of GPU data (readbacks).
 inline std::atomic<std::uint64_t> gpu_data_updates{0}, copied_back_blocks{0}, readbacks{0};
 inline std::atomic<std::uint64_t> late_vram_writes{0}; ///< labels and the like put into VRAM copies
-/// BB_GUEST_IN_PLACE: copies of in-place data the CPU writes into VRAM for reading (ShadowCopy).
-inline std::atomic<std::uint64_t> shadow_copies{0}, shadow_bytes{0};
-/// BB_HONEST_LABELS: submissions sent early because the GPU had finished everything before them.
-inline std::atomic<std::uint64_t> idle_flushes{0};
+/// BB_HONEST_LABELS: submissions for fences: at the end of a guest submission with the GPU out of
+/// work, or on its last submission; on the GPU's announcement that it got to its last one; and by
+/// the GPU command thread's safety net (fence work nothing would submit: expected 0).
+inline std::atomic<std::uint64_t> idle_flushes{0}, ahead_flushes{0}, announced_flushes{0},
+    net_flushes{0};
+/// BB_PIPE_SIGNALS: frames retired in the frame end's own submission, and in one of their own.
+inline std::atomic<std::uint64_t> retired_with_end{0}, retired_alone{0};
+/// BB_HONEST_LABELS: flushes with nothing recorded since the last submission (none made).
+inline std::atomic<std::uint64_t> empty_flushes{0};
 /// EOP fences with data: decoded, and their labels written (a growing gap: lost fences, guest leaks).
 inline std::atomic<std::uint64_t> eop_decoded{0}, eop_written{0};
 /// sceGnmAreSubmitsAllowed calls, and those that answered no (submission lock held).
@@ -165,6 +156,9 @@ inline std::atomic<std::uint64_t> t_resident{0}, t_protect{0}, t_image_create{0}
 /// Image(), and RefreshImage's hashes, source buffer and detiling.
 inline std::atomic<std::uint64_t> t_image_query{0}, t_image_alloc{0}, t_refresh_hash{0},
     t_refresh_obtain{0}, t_refresh_detile{0};
+/// Images given memory (UniqueImage::Create) and images whose guest data was checked for changes
+/// (RefreshImage). Counted always (long frames).
+inline std::atomic<std::uint64_t> image_allocs{0}, image_checks{0};
 /// Diagnostics are collected only with BB_FRAME_STATS=1.
 inline const bool enabled = [] {
     const char* env = std::getenv("BB_FRAME_STATS");
@@ -186,6 +180,9 @@ struct Timer {
 };
 /// Wall time the GPU command thread waited for guest submissions (ns).
 inline std::atomic<std::uint64_t> gpu_idle_ns{0};
+/// 0.4.4 beta 20: the part of it spent spinning before sleeping (BB_SPIN_US): counted in its
+/// CPU time, unlike the sleep (ns).
+inline std::atomic<std::uint64_t> gpu_spin_ns{0};
 /// Draws recorded into the reduced scene targets, and draws after the scene started.
 inline std::atomic<std::uint64_t> reduced_draws{0}, scene_draws{0};
 /// Wall time spent blocked in the scheduler (ns): waiting for the recording thread to drain,
@@ -237,22 +234,16 @@ inline std::atomic<std::uint64_t> protect_calls{0}, protect_pages{0}, protect_re
     protect_revoke_pages{0};
 /// bbport (BB_FRAME_STATS): protection changes by what they are for. On the draw recording thread
 /// (stage B): pages watched again after an upload, texture tracking, the rest (unwatching). Other
-/// threads together; bb:Protect (BB_DEFER_PROTECT) apart. Calls and ns.
+/// threads together. Calls and ns.
 enum ProtectKind : unsigned {
     ProtectUpload,
     ProtectTexture,
     ProtectOther,
-    ProtectDeferred,
     ProtectKinds,
 };
 inline std::array<std::atomic<std::uint64_t>, ProtectKinds> stage_b_protect_calls{},
     stage_b_protect_ns{};
 inline std::atomic<std::uint64_t> other_protect_calls{0}, other_protect_ns{0};
-/// BB_DEFER_PROTECT: pages whose write protection was deferred, protection changes that applied
-/// them (calls, ns), flushes a copy had to make itself (bb:Protect behind), deferred pages whose
-/// watch was dropped before they were protected (no system call at all).
-inline std::atomic<std::uint64_t> deferred_protect_pages{0}, deferred_protect_calls{0},
-    deferred_protect_ns{0}, copy_flushes{0}, deferred_cancelled_pages{0};
 /// Where host copies and deferred fences are waited for (Scheduler::WaitHostCopies,
 /// WaitDeferredSignals): waits that blocked, their ns, and fence waits found not needed
 /// (BB_FENCE_ORDER=ordered).

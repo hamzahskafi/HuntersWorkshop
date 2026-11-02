@@ -4,6 +4,7 @@
 #pragma once
 
 #include <atomic>
+#include <cstdlib>
 #include <functional>
 #include <vector>
 

@@ -3,8 +3,8 @@
 On Windows with the .NET 8 Desktop SDK, run from the repository root:
 
 ```powershell
-dotnet run --project launcher/tests/LocalizationChecks -- en
-dotnet run --project launcher/tests/LocalizationChecks -- zh-CN
+dotnet run --project launcher/windows/tests/LocalizationChecks -- en
+dotnet run --project launcher/windows/tests/LocalizationChecks -- zh-CN
 ```
 
 The argument is any code from `Localization.Languages` (`en`, `de`, `es`, `fr`,
@@ -20,9 +20,14 @@ cover English defaults and fallback, unknown codes, menu codes,
 keyboard/controller identifiers, and control-profile round trips. They do not
 load or save user settings, launch the game, or contact update servers.
 
+On any system with Python 3, `python3 launcher/windows/tests/check_localization_keys.py`
+compares the catalogs with the code (0.4.4 beta 28): it fails when the Windows launcher looks up
+a text `zh-CN.json` lacks (shown in English everywhere) or a catalog keeps a text no code uses
+any more (a rewording or a removed row). Run it after changing a launcher text.
+
 ## Adding a language
 
-Add `launcher/BloodborneLauncher/Localization/<code>.json` (English text to
+Add `launcher/windows/BloodborneLauncher/Localization/<code>.json` (English text to
 translation, the keys of `zh-CN.json`) and one `(code, native name)` entry to
 `Localization.Languages` in `Core/Localization.cs`. Both launchers embed every
 file in that folder and show the list in **Settings > Appearance > Launcher
@@ -31,4 +36,4 @@ language**.
 For visual review, select the language there and restart. Check both layouts,
 the window buttons, settings search, dialogs, and **Display > Language >
 In-game settings menu language**. The game menu uses `zh_CN` for Chinese; its
-font and build steps are documented in `engine/docs/history/bbport-README.md`.
+font and build steps are documented in `engine/docs/archive/bbport-README.md`.

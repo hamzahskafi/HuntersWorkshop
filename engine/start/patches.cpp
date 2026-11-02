@@ -67,6 +67,21 @@ const std::map<std::string, std::vector<std::string>>& FpsPresets() {
 // list, the engine setting the frame pacer's target, the values for the rate and the cloth (which the 90
 // FPS++ list carries) and fixing the sprint's wall test (the Sprint Fix's job). Off: the lists above.
 bool FrameFixesOn() { return Env("BB_FRAME_FIXES", "1").substr(0, 1) != "0"; }
+// The engine converts the follow camera's weights every frame (camera_rate.cpp, 0.4.4 beta 24) with the frame
+// timer: the corrections on, neither "camera" nor "timer" in BB_FRAME_FIXES_SKIP.
+bool CameraPerFrame() {
+    if (!FrameFixesOn()) return false;
+    std::string name;
+    for (const char c : Env("BB_FRAME_FIXES_SKIP", "") + ",") {
+        if (c != ',') {
+            if (!std::isspace(static_cast<unsigned char>(c))) name += char(std::tolower(static_cast<unsigned char>(c)));
+            continue;
+        }
+        if (name == "camera" || name == "timer") return false;
+        name.clear();
+    }
+    return true;
+}
 struct BaseEntry {
     std::uint64_t at;
     const char *was, *now;
@@ -97,7 +112,10 @@ const std::vector<std::tuple<std::string, const char*, const char*>>& Effects() 
 }
 const std::map<std::string, std::string> kModelLod{
     {"-2", "Model LOD -2 (Highest)"}, {"1", "Model LOD 1 (Lower)"}, {"2", "Model LOD 2 (Lowest)"}};
-const std::set<std::string> kDefaultOff{"effect_chromatic_aberration", "effect_dof", "effect_motion_blur", "effect_game_aa"};
+// A key config.ini doesn't have takes the engine's default (bbport_settings.h Effects): these start off, and
+// the intro videos are skipped (0.4.4: the defaults the project's own tests run with).
+const std::set<std::string> kDefaultOff{"effect_chromatic_aberration", "effect_motion_blur"};
+const std::set<std::string> kDefaultOn{"skip_intro"};
 const std::set<std::string> kBloodborneIds{"CUSA00207", "CUSA00208", "CUSA00299", "CUSA00900", "CUSA01363",
                                            "CUSA03014", "CUSA03023", "CUSA03173", "CUSA03179"};
 
@@ -359,20 +377,25 @@ double CameraValue(std::optional<std::uint32_t> field, double value, double fram
 }
 
 // The follow camera. The FPS++ lists carry Kyo's retune of it: the constructor's defaults
-// (kCameraFields, a 40 degree pitch angle among them), the parameter reads replaced by stores
-// of fixed values (kCameraStores: the game's per-area camera parameters never load) and the
-// wall escape at 0x183DCFE; players saw a camera that pulled back, lagged and widened while
-// sprinting (GitHub issue 32). Original (the default; camera_tuning=fps++ or
-// BB_CAMERA_TUNING=fps++ keeps the retune) leaves all of them as the game has them and
-// converts the game's own per-frame eases, distance (0.1) and chase rate (1/30), from a 30 FPS
-// frame: the camera of the game at 30 at every rate, as bbhost's Camera tuning: Original. FPS++ above 60 with
-// the frame-rate corrections on: the retune's weights and eases (the constructor's, the stores', the list's
-// distance and chase-rate eases and LockCamParam's blend) are a 60 FPS frame's, converted from it, so the
-// camera moves as it does at 60 (bbhost's camera_tuned_fps). BB_CAMERA_FIX=1 converts the eases from the
-// game's 30 instead, as before.
+// (kCameraFields, a 40 degree pitch angle among them), stores of the same values in place of two blocks of the
+// camera's debug-menu sliders (kCameraStores; they replace sliders, not per-area parameters), the wall escape at
+// 0x183DCFE and the jump at 0x183DC96; players saw a camera that pulled back, lagged and widened while sprinting
+// (GitHub issue 32). Original (the default; camera_tuning=fps++ keeps the retune) leaves
+// all of them as the game has them.
+//
+// With the frame timer (CameraPerFrame, 0.4.4 beta 24) the engine converts every per-frame weight of the camera
+// each frame from the game's 30 FPS frame (camera_rate.cpp): Original is the game's camera at every rate, and FPS++
+// keeps Kyo's constructor values, wall escape and jump as the list has them (the engine makes the values the
+// game's plus his changes, as a 30 FPS frame's) without his debug-menu stores; nothing is converted here.
+//
+// Without it ("timer" in BB_FRAME_FIXES_SKIP), as up to beta 23: Original converts the game's two eases, distance (0.1) and
+// chase rate (1/30), from a 30 FPS frame for the preset's rate, and nothing else (the other weights stay the
+// game's 30 FPS values every frame). FPS++ above 60 with the frame-rate corrections on: the retune's weights and
+// eases (the constructor's, the stores', the list's distance and chase-rate eases and LockCamParam's blend) are a
+// 60 FPS frame's, converted from it once for the preset's rate (bbhost's camera_tuned_fps).
 constexpr std::uint64_t kCameraWallEscape = 0x183DCFE;
-// The jump the retune puts over 1.5 KiB of the game's follow camera (to 0x183E271), with the wall
-// escape inside the code it skips.
+// The older camera's jump (its path with Enable New Camera off; the game has it on) past the chase rates' update
+// to 0x183E2F2: the retune points it at 0x183E271, so that path updates them too.
 constexpr std::uint64_t kCameraSkip = 0x183DC96;
 
 bool KyoCameraSite(std::uint64_t a, std::size_t size) {
@@ -382,9 +405,9 @@ bool KyoCameraSite(std::uint64_t a, std::size_t size) {
 }
 
 Writes FrameRateFixes(const Writes& writes, std::optional<int> fps, const Bytes& elf, bool original_camera,
-                      bool sixty_camera) {
-    const bool camera = !original_camera && Env("BB_CAMERA_FIX", "0") == "1";
-    sixty_camera = sixty_camera && !original_camera && !camera && fps && *fps > 60;
+                      bool sixty_camera, bool per_frame) {
+    per_frame = per_frame && fps.has_value();
+    sixty_camera = sixty_camera && !per_frame && !original_camera && fps && *fps > 60;
     original_camera = original_camera && fps.has_value();
     Writes out;
     for (const auto& [offset, original] : writes) {
@@ -395,9 +418,13 @@ Writes FrameRateFixes(const Writes& writes, std::optional<int> fps, const Bytes&
         if (original_camera) {
             if (KyoCameraSite(a, data.size())) continue;
             if (const auto ease = kCameraEases.find(a); ease != kCameraEases.end()) {
-                out.emplace_back(offset, F32(CameraValue(std::nullopt, ease->second, 30.0 / *fps)));
+                // Per frame the engine reads the eases from slots of its own: the game's constants stay.
+                if (!per_frame) out.emplace_back(offset, F32(CameraValue(std::nullopt, ease->second, 30.0 / *fps)));
                 continue;
             }
+        } else if (per_frame && std::any_of(std::begin(kCameraStores), std::end(kCameraStores),
+                                            [&](const auto& r) { return a < r.second && a + data.size() > r.first; })) {
+            continue; // FPS++ per frame: the debug menu's sliders as the game has them
         }
         if (fps && *fps > 60) {
             bool skip = false;
@@ -414,7 +441,7 @@ Writes FrameRateFixes(const Writes& writes, std::optional<int> fps, const Bytes&
                 data = Concat({one, one, one, one});
             }
         }
-        if (fps && (camera || sixty_camera)) {
+        if (sixty_camera) {
             if (const auto field = kCameraFields.find(a); field != kCameraFields.end()) {
                 data = F32(CameraValue(field->second, Load<float>(data.data()), 60.0 / *fps));
             } else if (std::any_of(std::begin(kCameraStores), std::end(kCameraStores),
@@ -424,9 +451,8 @@ Writes FrameRateFixes(const Writes& writes, std::optional<int> fps, const Bytes&
                 const float value = Load<float>(data.data() + 7);
                 const Bytes v = F32(CameraValue(f, value, 60.0 / *fps));
                 std::copy(v.begin(), v.end(), data.begin() + 7);
-            } else if (const auto ease = kCameraEases.find(a); ease != kCameraEases.end()) {
-                data = camera ? F32(CameraValue(std::nullopt, ease->second, 30.0 / *fps))
-                              : F32(CameraValue(std::nullopt, Load<float>(data.data()), 60.0 / *fps));
+            } else if (kCameraEases.count(a)) {
+                data = F32(CameraValue(std::nullopt, Load<float>(data.data()), 60.0 / *fps));
             }
         }
         out.emplace_back(offset, std::move(data));
@@ -434,9 +460,9 @@ Writes FrameRateFixes(const Writes& writes, std::optional<int> fps, const Bytes&
     if (std::any_of(out.begin(), out.end(), [](const Write& w) { return w.first + kBase == kEffectStepFirst; }) &&
         OriginalBytes(elf, kEffectStepSecond - kBase, kEffectStepWas.size()) == kEffectStepWas)
         out.emplace_back(kEffectStepSecond - kBase, kEffectStepNow);
-    if (fps && (camera || sixty_camera) && OriginalBytes(elf, kCameraParamEase - kBase, 4) == kCameraParamWas)
-        out.emplace_back(kCameraParamEase - kBase, F32(CameraValue(std::nullopt, Load<float>(kCameraParamWas.data()),
-                                                                   (camera ? 30.0 : 60.0) / *fps)));
+    if (sixty_camera && OriginalBytes(elf, kCameraParamEase - kBase, 4) == kCameraParamWas)
+        out.emplace_back(kCameraParamEase - kBase,
+                         F32(CameraValue(std::nullopt, Load<float>(kCameraParamWas.data()), 60.0 / *fps)));
     return out;
 }
 
@@ -446,11 +472,15 @@ int Round(double v) {
     return int(std::nearbyint(v));  // round half to even, as Python's round()
 }
 
-double PresetScale(const std::map<std::string, std::string>& settings) {
+// 0.4.4 beta 27c: preset=auto (the default) picks by the output's height, as BbSettings::AutoPreset:
+// Native AA up to 1200 lines, Quality up to 1600, Performance above.
+int AutoPreset(int height) { return height <= 1200 ? 0 : height <= 1600 ? 1 : 3; }
+
+double PresetScale(const std::map<std::string, std::string>& settings, Size out) {
     int preset = 0;
     try {
-        const std::string text = Setting(settings, "preset").value_or("0");
-        preset = text.empty() ? 0 : std::stoi(text);
+        const std::string text = Lower(Setting(settings, "preset").value_or("auto"));
+        preset = text.empty() || text == "auto" ? AutoPreset(out.h) : std::stoi(text);
     } catch (const std::exception&) {
         throw Error("invalid preset");
     }
@@ -474,8 +504,8 @@ std::optional<Size> RenderSize(const std::map<std::string, std::string>& setting
         if (!size) throw Error("invalid render resolution " + override_size);
         return size;
     }
-    if (Setting(settings, "upscaler").value_or("fsr3") == "off") return std::nullopt;
-    const double scale = PresetScale(settings);
+    if (Setting(settings, "upscaler").value_or("off") == "off") return std::nullopt;
+    const double scale = PresetScale(settings, kOutput);
     if (scale == 1.0) return std::nullopt;
     // Multiples of 4, as ScaledSizes: the game pads its targets to them (undrawn edge columns).
     return Size{std::max(4, Round(kOutput.w / scale / 4) * 4), std::max(4, Round(kOutput.h / scale / 4) * 4)};
@@ -508,12 +538,28 @@ Size UiSize(const std::map<std::string, std::string>& settings, Size out) {
 
 // --- selection --------------------------------------------------------------------------------
 
+// 0.4.4 beta 27b: the game's own anti-aliasing is one of the anti-aliasing choices without an upscaler
+// (upscaler=off, as the launcher's Anti-aliasing). AMD FSR, DLSS and TAA anti-alias themselves, and the
+// game's pass under them only softened the frame they work from: left out then, whatever
+// effect_game_aa says. BB_UPSCALER (scripts, A/B tests) decides as it does in the engine (bbport_settings.cpp).
+bool NoUpscaler(const std::map<std::string, std::string>& settings) {
+    if (const auto env = Env("BB_UPSCALER"); env && !env->empty())
+        return !(*env == "fsr" || *env == "fsr3" || *env == "fsr4" || *env == "fsr411" || *env == "dlss" || *env == "taa");
+    return Setting(settings, "upscaler").value_or("off") == "off";
+}
+
 std::vector<std::string> EffectPatches(const std::map<std::string, std::string>& settings) {
     std::vector<std::string> names;
+    const bool no_upscaler = NoUpscaler(settings);
     for (const auto& [key, off, on] : Effects()) {
+        if (key == "effect_game_aa" && !no_upscaler) {
+            names.push_back(off);
+            continue;
+        }
         const auto value = Setting(settings, key);
         if (!value) {
             if (kDefaultOff.count(key) && off) names.push_back(off);
+            if (kDefaultOn.count(key) && on) names.push_back(on);
             continue;
         }
         const char* name = *value == "1" ? on : off;
@@ -772,7 +818,7 @@ std::optional<std::pair<Size, Size>> ScaledSizes(const std::map<std::string, std
     const Size out = OutputSize(settings);
     if (out == kOutput || Setting(settings, "upscaler") == "taa") return std::nullopt;
     double scale = 1.0;
-    if (Setting(settings, "upscaler").value_or("fsr3") != "off") scale = PresetScale(settings);
+    if (Setting(settings, "upscaler").value_or("off") != "off") scale = PresetScale(settings, out);
     // A scene of at least 640x360, a third of 1080p: Ultra Performance at a 720p output made 428x240,
     // where a ROG Ally showed the world in half the picture (0.9.37 beta 7), and the upscaler has
     // little to work from below it.
@@ -788,9 +834,15 @@ PatchResult CompilePatches(const PatchRequest& request) {
     const PatchFile xml(request.xml);
     const auto& presets = FpsPresets();
     const std::map<std::string, int> scaled_fps{{"120", 120}, {"144", 144}};
+    // 0.4.4 beta 22: 240 on the frame-rate table only: the patch file's lists have no values for it (the
+    // start runs 144 without the corrections, main.cpp ConfigureFrameRate).
+    const std::map<std::string, int> table_fps{{"240", 240}};
     const auto preset_it = presets.find(request.fps);
-    if (preset_it == presets.end() && !scaled_fps.count(request.fps)) throw Error("invalid FPS preset " + request.fps);
     const bool corrections = FrameFixesOn();
+    if (table_fps.count(request.fps) && !corrections)
+        throw Error(request.fps + " FPS needs the frame-rate corrections (BB_FRAME_FIXES)");
+    if (preset_it == presets.end() && !scaled_fps.count(request.fps) && !table_fps.count(request.fps))
+        throw Error("invalid FPS preset " + request.fps);
     const bool own = corrections && request.fps != "30";      // our frame-rate table, not the patch file's lists
     const bool on_sixty = own && request.fps != "60";         // above 60 on it
     const std::vector<std::string> preset =
@@ -880,16 +932,24 @@ PatchResult CompilePatches(const PatchRequest& request) {
             request.fps == "uncap" ? "uncapped" : (request.fps + " FPS").c_str(), base.size(),
             on_sixty ? ": the engine sets the pace and the values for the rate" : "",
             request.fps == "uncap" ? "Uncap FPS++" : request.fps == "90" ? "90 FPS++"
-                                   : request.fps == "60" ? "60 FPS++" : "scaled 90 FPS++");
+                                   : request.fps == "60" ? "60 FPS++"
+                                   : table_fps.count(request.fps) ? "144 FPS scaled 90 FPS++" : "scaled 90 FPS++");
     if ((!preset.empty() && has(preset[0])) || !base.empty()) {
         std::optional<int> fps;
         if (request.fps == "60") fps = 60;
         else if (request.fps == "90") fps = 90;
         else if (scaled_fps.count(request.fps)) fps = scaled_fps.at(request.fps);
+        else if (table_fps.count(request.fps)) fps = table_fps.at(request.fps);
         else if (request.fps == "uncap" && on_sixty) fps = kUncappedReference;
-        const std::string tuning = Lower(Env("BB_CAMERA_TUNING", Setting(settings, "camera_tuning").value_or("original")));
-        writes = FrameRateFixes(writes, fps, elf, tuning != "fps++", corrections);
-        if (fps) Log("Patches: follow camera %s", tuning != "fps++" ? "as the game has it, its eases converted from 30 FPS"
+        const std::string tuning = Lower(Setting(settings, "camera_tuning").value_or("original"));
+        const bool per_frame = corrections && CameraPerFrame();
+        writes = FrameRateFixes(writes, fps, elf, tuning != "fps++", corrections, per_frame);
+        if (fps) Log("Patches: follow camera %s", per_frame ? (tuning != "fps++"
+                                                                   ? "as the game has it (the engine converts its weights "
+                                                                     "every frame)"
+                                                                   : "with the FPS++ retune (the engine converts its "
+                                                                     "weights every frame)")
+                                                  : tuning != "fps++" ? "as the game has it, its eases converted from 30 FPS"
                                                   : corrections && *fps > 60
                                                       ? "with the FPS++ retune, its weights converted from 60 FPS"
                                                       : "with the FPS++ retune (camera_tuning=fps++)");

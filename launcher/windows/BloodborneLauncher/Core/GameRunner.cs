@@ -5,9 +5,9 @@ using System.Text;
 namespace BloodborneLauncher.Core
 {
     /// <summary>
-    /// Starts and stops the game and streams its output. The Windows port's run.py does the
-    /// preparation (mods, patches, the linked image) and starts bin\bb-probe.exe; packaged builds
-    /// run it inside Bloodborne.exe (--run). A custom command can replace it.
+    /// Starts and stops the game and streams its output. engine\out\bb-start.exe does the
+    /// preparation (the boot image, mods, patches) and starts bb-probe.exe (Paths.Start). A custom
+    /// command can replace it.
     /// </summary>
     public sealed class GameRunner
     {
@@ -64,7 +64,7 @@ namespace BloodborneLauncher.Core
             {
                 var command = Paths.Expand(s.Str("custom_command").Trim());
                 if (command.Length == 0)
-                    return L.T("No custom command is set. Choose one in Settings › Launch.");
+                    return L.T("No custom command is set. Choose one in Settings › Start the game with.");
                 info = new ProcessStartInfo(command) { Arguments = s.Str("custom_args") };
             }
             else
@@ -72,25 +72,13 @@ namespace BloodborneLauncher.Core
                 // Linux (the Avalonia launcher): the package's out/bb-start, a script that runs the engine's
                 // run.sh with --game-dir and this same environment (engine/packaging/linux).
                 if (!Paths.IsPortDir(Paths.PortDir))
-                    return "The engine folder is not set. Choose it in Settings › Engine.";
+                    return "The engine folder is not set. Choose it in Settings › Engine folder.";
                 if (!Writable(Path.Combine(Paths.EngineDir, "out")))
                     return $"Windows does not let the game write into its own folder ({Paths.PortDir}), which it needs for its " +
                            "prepared files, logs and saves. This happens under Program Files: move the Hunter's Workshop folder " +
                            "somewhere else, such as C:\\Games or your Documents.";
-                if (File.Exists(Paths.Start))
-                {
-                    // The engine's native start: the boot image, mods, patches, then bb-probe.
-                    info = new ProcessStartInfo(Paths.Start);
-                }
-                else
-                {
-                    // An engine older than 0.9.32 (a launcher update before the engine's): its Python
-                    // runs scripts\run_windows.py.
-                    var python = File.Exists(Paths.Python) ? Paths.Python : "py";
-                    info = new ProcessStartInfo(python);
-                    if (python == "py") info.ArgumentList.Add("-3");
-                    info.ArgumentList.Add(Path.Combine(Paths.EngineDir, "scripts", "run_windows.py"));
-                }
+                // The engine's native start: the boot image, mods, patches, then bb-probe.
+                info = new ProcessStartInfo(Paths.Start);
                 info.ArgumentList.Add("--game-dir");
                 info.ArgumentList.Add(GameEnvironment.GameDir(s));
             }
@@ -98,6 +86,7 @@ namespace BloodborneLauncher.Core
             info.WorkingDirectory = Paths.IsPortDir(Paths.PortDir) ? Paths.EngineDir : Environment.CurrentDirectory;
             foreach (var (key, value) in GameEnvironment.Build(s))
                 info.Environment[key] = value;
+            // Linux's start runs the engine's Python scripts (run.sh): their output unbuffered, in UTF-8.
             info.Environment["PYTHONUNBUFFERED"] = "1";
             // UTF-8 whatever the Windows language: the game title (param.sfo) has a ™ that GBK and other
             // code pages cannot write.

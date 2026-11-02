@@ -10,7 +10,7 @@ that starts it is in [`../launcher/windows`](../launcher/windows).
 
 ## Where it comes from
 
-This engine is Lantern Engine's as of 0.9.37 beta 9 (commit `08173e6`), by Awaken. Lantern Engine
+This engine started from Lantern Engine 0.9.37 beta 9 (commit `08173e6`), by Awaken. Lantern Engine
 started from [DarkIzuku/bloodborne_pc](https://github.com/DarkIzuku/bloodborne_pc) (tag
 `v0.4.0-darkizuku-preview.1`), itself built on [bbport](https://github.com/deadinside28/bloodborne_pc)
 and [shadPS4](https://github.com/shadps4-emu/shadPS4), and added:
@@ -18,16 +18,21 @@ and [shadPS4](https://github.com/shadps4-emu/shadPS4), and added:
 - **its own start and runtime**: `start/` (bb-start: the game's executable prepared once and reused,
   mods, patches checked against the game's code, the GPU cache kept across updates) and `src/` (the
   runtime, saves, files read in place, pads with menu and keyboard bindings);
-- **a direct path away from emulation** ([docs/EMULATION_REMOVAL_PLAN.md](docs/EMULATION_REMOVAL_PLAN.md)):
-  draw calls taken from the game's graphics library as records, the PC memory model (the game's
-  memory used by the GPU in place; off by default since 0.4.0 beta 4, [docs/gpu-memory.md](docs/gpu-memory.md)),
-  and a native compiler for the game's shaders
+- **a direct path away from emulation** ([docs/archive/EMULATION_REMOVAL_PLAN.md](docs/archive/EMULATION_REMOVAL_PLAN.md)):
+  draw calls taken from the game's graphics library as records, the game's per-frame GPU memory
+  read in place ([docs/gpu-memory.md](docs/gpu-memory.md); Hunter's Workshop removed the wider PC
+  memory model in 0.4.4), and a native compiler for the game's shaders
   ([docs/native_shader_compiler.md](docs/native_shader_compiler.md));
 - **renderer performance work**: draw preparation on worker threads, cached render state, pipeline
   cache warm-up with a crash guard, occlusion culling and frame pacing;
 - **the PC version**: native PC menus and keyboard and mouse controls, high frame rates, widescreen,
-  HDR, DLSS, FSR 3.1, 4 and 4.1.1, frame generation, trophies, and online play through The Hunter's
-  Dream.
+  HDR, TAA, DLSS, AMD FSR (through AMD's FSR SDK), trophies, and online play through The
+  Hunter's Dream.
+
+Hunter's Workshop's own changes since then are recorded in
+[docs/community-fixes-plan.md](docs/community-fixes-plan.md) and the release notes
+(`docs/release-notes-*.md`). Among them, the game's per-frame GPU memory (its GX region) is read in
+place by default on Windows since 0.4.4 (`BB_GX_IN_PLACE=0` tracks it as before).
 
 The renderer and shader recompiler are still shadPS4's at their core (`gpu/shadps4`, where changes
 are marked `bbport:`).
@@ -47,7 +52,7 @@ The engine builds in [MSYS2](https://www.msys2.org)'s CLANG64 environment.
 2. Install the toolchain and libraries:
 
    ```sh
-   pacman -S --needed git mingw-w64-clang-x86_64-{clang,lld,libc++,cmake,ninja,pkgconf,python,sdl3,boost,fmt,glslang,spirv-cross,spirv-headers,vulkan-headers,vulkan-loader,vulkan-memory-allocator,xxhash,zydis,robin-map,ffmpeg,protobuf,nlohmann-json,openssl,miniupnpc,zlib,expat}
+   pacman -S --needed git mingw-w64-clang-x86_64-{clang,lld,libc++,cmake,ninja,pkgconf,python,sdl3,boost,fmt,glslang,spirv-cross,spirv-headers,vulkan-headers,vulkan-loader,vulkan-memory-allocator,xxhash,zydis,robin-map,ffmpeg,nlohmann-json,openssl,zlib,expat}
    ```
 
 3. In this folder, run `bash build.sh`. The programs land in `out/`: `bb-start.exe` (prepares the
@@ -74,13 +79,13 @@ Ubuntu 24.04, `packaging/linux/setup-ubuntu.sh` builds the libraries it needs on
 A Windows package is the launcher at the top, `package.json` (its version and engine build), and an
 `engine` folder with `out/` (the programs and their DLLs), `patches/`, `data/`, `licenses/`, the
 default settings, the shader catalogs (`shader-catalog/`: pipelines compiled ahead, so fewer
-shaders compile during play) and the upscalers' files (`fsr4_shaders/`, `fsr4vk/`). The shader
-catalogs and the upscalers' files are not kept in this repository; `tools/fetch_dlss.sh`,
-`tools/fetch_fsr4_assets.sh` and `tools/fetch_streamline.sh` download the NVIDIA and AMD parts.
+shaders compile during play) and AMD's FSR SDK runtime (`amd-fsr/`: AMD's signed DLLs and their
+licence). The shader catalogs and the upscalers' files are not kept in this repository;
+`tools/fetch_dlss.sh` and `tools/fetch_amd_fsr.sh` download DLSS and AMD's FSR SDK runtime.
 
 ## Tests and checks
 
-- `build.sh --test`, and the GPU library's tests (`ninja -C out/gpu pc-input-test frame-rate-test ...`).
+- `build.sh --test`, and the GPU library's tests (`ninja -C out/gpu pc-input-test frame-rate-test camera-rate-test ...`; `camera-wall-test out/eboot.elf` runs the game's own wall-turn code when the prepared executable is there).
 - `tools/re/frame_rate_base.py eboot.elf [--check]`: our frame-rate table (start/frame_rate_base.inc) from the 60 FPS++
   list and a 1.09 executable.
 - `tools/re/frame_rate_check.py [eboot.elf]`: the frame-rate corrections' table against the 60 FPS++ list
@@ -105,8 +110,8 @@ catalogs and the upscalers' files are not kept in this repository; `tools/fetch_
 | `patches/` | the community's game patches and their checks |
 | `tests/` | tests and the shader lab |
 | `tools/` | developer tools |
-| `packaging/` | the Linux package (`packaging/linux`); `default.nix` and `launcher/` are bbport's AppImage and GTK launcher, kept for NixOS |
-| `docs/` | design notes; `docs/history` keeps the notes of the projects it started from |
+| `packaging/` | the Linux package (`packaging/linux`: Ubuntu setup, build, the start script) |
+| `docs/` | design notes; `docs/archive` keeps notes that no longer describe the engine, many from the projects it started from |
 
 ## Credits and licenses
 
@@ -118,16 +123,17 @@ Engine), which allows distribution under version 3, with GPL-3.0-or-later ports 
 and widescreen plates). Copyright in each part stays with its authors.
 
 Also in the engine, under their own licenses: [shadPS4](https://github.com/shadps4-emu/shadPS4)'s
-video core and shader recompiler (GPL-2.0-or-later), shadNet's client (`licenses/SHADNET-PORT.md`),
+video core and shader recompiler (GPL-2.0-or-later), shadPS4's HTTP and SSL libraries (`licenses/SHADPS4-NETWORK.md`),
 [sirit](https://github.com/shadps4-emu/sirit), [half](https://half.sourceforge.net/),
-[FSR-Vulkan](https://github.com/FireBurn/FSR-Vulkan) and the AMD FidelityFX SDK (MIT),
+the AMD FSR SDK's API headers (MIT; AMD's DLLs are loaded at run time under AMD's licence,
+`licenses/AMD-FSR-SDK.md`),
 [LibAtrac9](https://github.com/Thealexbarney/LibAtrac9) (MIT),
-[Dear ImGui](https://github.com/ocornut/imgui) (MIT), NVIDIA Streamline (headers; DLSS and Reflex),
-cpp-httplib (MIT), wepoll (BSD), and the DejaVu and Lantern Menu SC fonts (the latter a Noto Sans SC
-subset, SIL OFL 1.1). VRAM cleanup and frame pacing were adapted from IFreemz's shadPS4 fork, and
-crash and controller fixes from AwesomeObserver, Supermedo and deadinside28.
+[Dear ImGui](https://github.com/ocornut/imgui) (MIT), cpp-httplib (MIT), and the
+DejaVu and Lantern Menu SC fonts (the latter a Noto Sans SC subset, SIL OFL 1.1). VRAM cleanup and
+frame pacing were adapted from IFreemz's shadPS4 fork, and crash and controller fixes from
+AwesomeObserver, Supermedo and deadinside28.
 
 The built-in game patches (`patches/Bloodborne.xml`) are the Bloodborne modding community's: Kyo,
 Lance McDonald, auser1337, illusion, Whitehawkx, emoose, Dasaav, bloo, Imedved, Foxy Hooligans,
-stagvant and yogesh1239, each credited on their patches. AMD's FSR 4 DLLs and NVIDIA's DLSS files
+stagvant and yogesh1239, each credited on their patches. AMD's FSR SDK DLLs and NVIDIA's DLSS files
 are not distributed in this repository.

@@ -29,6 +29,9 @@ FPS_PRESETS={'30':[],'60':['60 FPS++'],'90':['90 FPS++','Sprint Fix (High FPS)']
 # fell that much faster).
 SCALED_FPS={'120':120,'144':144}
 SCALED_BASE='90 FPS++'
+# 0.4.4 beta 22: 240 on the frame-rate table only (the corrections below): the patch file's lists have no
+# values for it (run.sh runs 144 without the corrections).
+TABLE_FPS={'240':240}
 # The frame-rate corrections (the engine's frame_rate.cpp; BB_FRAME_FIXES=0, the launcher's "Frame rate
 # corrections" off, or safe mode turns them off): every rate above 30 on the 60 FPS++ list, as bbhost runs
 # it, the engine setting the frame pacer's target, the values for the rate and the cloth (which the 90 FPS++
@@ -43,10 +46,19 @@ def frame_fixes_on(env=os.environ):
     return not env.get('BB_FRAME_FIXES','1').startswith('0')
 
 
+def camera_per_frame(env=os.environ):
+    """The engine converts the follow camera's weights every frame (camera_rate.cpp, 0.4.4 beta 24) with the frame
+    timer: the corrections on, neither camera nor timer in BB_FRAME_FIXES_SKIP."""
+    skip={''.join(n.split()).lower() for n in env.get('BB_FRAME_FIXES_SKIP','').split(',')}
+    return frame_fixes_on(env) and not skip&{'camera','timer'}
+
+
 def fps_preset(fps, corrections):
     """The FPS preset's patch names, and whether it is the 60 FPS++ list at a rate above 60."""
     if corrections and fps not in ('30','60'):
         return [SIXTY_BASE],True
+    if fps in TABLE_FPS:
+        raise SystemExit(f'{fps} FPS needs the frame-rate corrections (BB_FRAME_FIXES)')
     return (FPS_PRESETS[fps] if fps in FPS_PRESETS else [SCALED_BASE,'Sprint Fix (High FPS)']),False
 
 
@@ -121,17 +133,23 @@ CLOTH_LEFT_OUT=((0xB6FBD4,0xB6FBD8),(0xB73F84,0xB73F8D),(0xB73FA8,0xB73FC1),(0x4
 # it chased, turned and settled 1.5, 2 and 2.4 times as fast. They are converted from a 60 fps
 # frame: a weight w to 1-(1-w)^(60/fps), the pitch return's kept share k (+0x1a8) to k^(60/fps);
 # the direct pitch angle (+0x238) is an angle. Three weights no list tunes are the game's own for
-# a 30 fps frame, converted from it at every rate: the LockCamParam blend (+0x330, an immediate
-# no list writes), the distance ease (0x4D25E68, 0.1; the lists' 0.025 eased at half speed at 60)
-# and the chase-rate ease (0x4D25E94, 1/30). That conversion is BB_CAMERA_FIX=1 (below).
+# a 30 fps frame: the LockCamParam blend (+0x330, an immediate no list writes), the distance ease
+# (0x4D25E68, 0.1; the lists' 0.025 eased at half speed at 60) and the chase-rate ease (0x4D25E94,
+# 1/30).
 #
-# Original (camera_tuning in config.ini or BB_CAMERA_TUNING, the default) leaves Kyo's retune out: the
-# constructor's defaults, the stores (and the jumps after them: the per-area camera parameters load again),
-# the wall escape and the jump over the game's follow camera, converting the game's own eases from a 30 fps
-# frame, as bbhost's Camera tuning: Original (players saw the retune pull back, lag and widen while
-# sprinting, GitHub issue 32). FPS++ above 60 with the frame-rate corrections on: the retune's weights and
-# eases (the constructor's, the stores', the list's distance and chase-rate eases and LockCamParam's blend)
-# are a 60 fps frame's, converted from it, so the camera moves as it does at 60 (bbhost's camera_tuned_fps).
+# Original (camera_tuning in config.ini, the default) leaves Kyo's retune out: the
+# constructor's defaults, the stores (in place of two blocks of the camera's debug-menu sliders), the wall
+# escape and the older camera's jump target (players saw the retune pull back, lag and widen while
+# sprinting, GitHub issue 32).
+#
+# With the frame timer (camera_per_frame, 0.4.4 beta 24) the engine converts every per-frame weight of the
+# camera each frame from the game's 30 fps frame (camera_rate.cpp): Original is the game's camera at every rate,
+# and FPS++ keeps Kyo's constructor values, wall escape and jump as the list has them (the engine makes the values
+# the game's plus his changes, as a 30 fps frame's) without his debug-menu stores; nothing is converted here.
+# Without it ("timer" in BB_FRAME_FIXES_SKIP), as up to beta 23: Original converts the game's own eases from a 30 fps frame,
+# and FPS++ above 60 with the frame-rate corrections on: the retune's weights and eases (the constructor's, the
+# stores', the list's distance and chase-rate eases and LockCamParam's blend) are a 60 fps frame's, converted
+# from it once for the preset's rate (bbhost's camera_tuned_fps).
 CAMERA_FIELDS={0x183a4c3:0x19c,0x183a4cd:0x1a0,0x183a4d7:0x1a4,0x183a4e1:0x1a8,0x183a4f5:0x1b0,
                0x183a4ff:0x1b4,0x183a509:0x1b8,0x183a527:0x1c4,0x183a531:0x1c8,0x183a53b:0x1cc,
                0x183a649:0x238,0x183a653:0x23c,0x183a65d:0x240,0x183a8c1:0x19c,0x183a8cb:0x1a0,
@@ -140,7 +158,7 @@ CAMERA_FIELDS={0x183a4c3:0x19c,0x183a4cd:0x1a0,0x183a4d7:0x1a4,0x183a4e1:0x1a8,0
                0x183aa5b:0x240}
 CAMERA_STORES=((0x183FF29,0x183FF70),(0x1840799,0x18407EB))  # the stores and the jump after each, ends exclusive
 CAMERA_WALL_ESCAPE=0x183DCFE
-CAMERA_SKIP=0x183DC96  # the jump the retune puts over 1.5 KiB of the game's follow camera
+CAMERA_SKIP=0x183DC96  # the older camera's jump past the chase rates' update, which the retune points at it
 CAMERA_ANGLE,CAMERA_KEPT=0x238,0x1a8
 CAMERA_EASES={0x4D25E68:0.1,0x4D25E94:1/30}
 CAMERA_PARAM_EASE=(0x183A7DE,bytes.fromhex('cdcc4c3d'))  # mov dword [rbx+0x330], 0.05
@@ -171,16 +189,14 @@ def kyo_camera_site(address, size):
             any(address<hi and address+size>lo for lo,hi in CAMERA_STORES))
 
 
-def frame_rate_fixes(writes, fps, elf=None, original_camera=False, sixty_camera=False):
+def frame_rate_fixes(writes, fps, elf=None, original_camera=False, sixty_camera=False, per_frame=False):
     """The frame-rate preset's writes with the corrections above, for `fps` (None: uncapped on its own
     list, whose rate is not known here; only the effects' rate is put back). `original_camera`: the
-    game's follow camera; `sixty_camera`: the retune's weights converted from 60 above it."""
+    game's follow camera; `sixty_camera`: the retune's weights converted from 60 above it; `per_frame`: the
+    engine converts the camera every frame (nothing converted here)."""
     f=lambda v: struct.pack('<f',v)
-    # BB_CAMERA_FIX=1 (the launcher's Extra variables): the camera eases as far in a second as the
-    # game does at 30. Off by default: players found it trailing too far behind when running (#32);
-    # the camera keeps the FPS++ list's values, as up to 0.9.24.
-    camera=not original_camera and os.environ.get('BB_CAMERA_FIX','0')=='1'
-    sixty_camera=sixty_camera and not original_camera and not camera and bool(fps) and fps>60
+    per_frame=per_frame and bool(fps)
+    sixty_camera=sixty_camera and not per_frame and not original_camera and bool(fps) and fps>60
     original_camera=original_camera and bool(fps)
     out=[]
     for offset,data in writes:
@@ -191,32 +207,34 @@ def frame_rate_fixes(writes, fps, elf=None, original_camera=False, sixty_camera=
             if kyo_camera_site(a,len(data)):
                 continue
             if a in CAMERA_EASES:
-                out.append((offset,f(camera_value(None,CAMERA_EASES[a],30/fps))))
+                # Per frame the engine reads the eases from slots of its own: the game's constants stay.
+                if not per_frame: out.append((offset,f(camera_value(None,CAMERA_EASES[a],30/fps))))
                 continue
+        elif per_frame and any(a<hi and a+len(data)>lo for lo,hi in CAMERA_STORES):
+            continue  # FPS++ per frame: the debug menu's sliders as the game has them
         if fps and fps>60:
             left=next(((lo,hi) for lo,hi in CLOTH_LEFT_OUT if lo<=a<hi),None)
             if left:
                 if a+len(data)>left[1]: raise ValueError(f'frame-rate patch: {a:#x} reaches past {left[1]:#x}')
                 continue
             if a==CLOTH_STIFFNESS: data=f((60/fps)**2)*4
-        if fps and (camera or sixty_camera):
+        if sixty_camera:
             if a in CAMERA_FIELDS:
                 data=f(camera_value(CAMERA_FIELDS[a],struct.unpack('<f',data)[0],60/fps))
             elif any(lo<=a<hi for lo,hi in CAMERA_STORES) and len(data)==11 and data[:3]==bytes.fromhex('41c785'):
                 field,value=struct.unpack('<If',data[3:])
                 data=data[:7]+f(camera_value(field,value,60/fps))
             elif a in CAMERA_EASES:
-                data=(f(camera_value(None,CAMERA_EASES[a],30/fps)) if camera else
-                      f(camera_value(None,struct.unpack('<f',data)[0],60/fps)))
+                data=f(camera_value(None,struct.unpack('<f',data)[0],60/fps))
         out.append((offset,data))
     at,was,now=EFFECT_STEP_SECOND
     if any(offset+EBOOT_BASE==EFFECT_STEP_FIRST for offset,_ in out) and \
             (elf is None or original_bytes(elf,at-EBOOT_BASE,len(was))==was):
         out.append((at-EBOOT_BASE,now))
-    if fps and (camera or sixty_camera):
+    if sixty_camera:
         at,was=CAMERA_PARAM_EASE
         if elf is None or original_bytes(elf,at-EBOOT_BASE,len(was))==was:
-            out.append((at-EBOOT_BASE,f(camera_value(None,struct.unpack('<f',was)[0],(30 if camera else 60)/fps))))
+            out.append((at-EBOOT_BASE,f(camera_value(None,struct.unpack('<f',was)[0],60/fps))))
     return out
 
 
@@ -228,8 +246,15 @@ PRESET_SCALES=[1.0,1.5,1.7,2.0,3.0]
 PRESET_CUSTOM=len(PRESET_SCALES)
 
 
-def preset_scale(settings):
-    preset=int(settings.get('preset','0') or 0)
+def auto_preset(height):
+    """0.4.4 beta 27c: preset=auto (the default) by the output's height (BbSettings::AutoPreset): Native AA
+    up to 1200 lines, Quality up to 1600, Performance above."""
+    return 0 if height<=1200 else 1 if height<=1600 else 3
+
+
+def preset_scale(settings,out=None):
+    text=(settings.get('preset','auto') or 'auto').strip().lower()
+    preset=auto_preset((out or OUTPUT_SIZE)[1]) if text=='auto' else int(text)
     if preset==PRESET_CUSTOM:
         try:
             return min(3.0,max(1.0,float(settings.get('render_scale','1.3') or 1.3)))
@@ -333,13 +358,26 @@ def validate_patch_requirements(names, game):
                              'debug menu off (debug_menu in config.ini)')
 
 
-# A key config.ini doesn't have takes the engine's default (bbport_settings.h Effects): these start off.
-DEFAULT_OFF=('effect_chromatic_aberration','effect_dof','effect_motion_blur','effect_game_aa')
+# A key config.ini doesn't have takes the engine's default (bbport_settings.h Effects): these start off, and
+# the intro videos are skipped (0.4.4).
+DEFAULT_OFF=('effect_chromatic_aberration','effect_motion_blur')
+DEFAULT_ON=('skip_intro',)
+def no_upscaler(settings):
+    """0.4.4 beta 27b: the game's own anti-aliasing applies only without an upscaler (upscaler=off): AMD FSR,
+    DLSS and TAA anti-alias themselves (patches.cpp NoUpscaler). BB_UPSCALER decides as in the engine."""
+    env=os.environ.get('BB_UPSCALER')
+    if env: return env not in FSR_NAMES+('dlss','taa')
+    return settings.get('upscaler','off')=='off'
 def effect_patches(settings):
     names=[]
+    upscaled=not no_upscaler(settings)
     for key,(off,on) in EFFECTS.items():
+        if key=='effect_game_aa' and upscaled:
+            names.append(off)
+            continue
         if key not in settings:
             if key in DEFAULT_OFF and off: names.append(off)
+            if key in DEFAULT_ON and on: names.append(on)
             continue
         name=on if settings[key]=='1' else off
         if name: names.append(name)
@@ -366,7 +404,7 @@ def render_size(settings,override=''):
     if override:
         w,h=(int(v) for v in override.lower().split('x'))
         return (w,h)
-    if settings.get('upscaler','fsr3')=='off': return None
+    if settings.get('upscaler','off')=='off': return None
     scale=preset_scale(settings)
     if scale==1.0: return None
     # Even sizes (the game has half-resolution buffers).
@@ -375,7 +413,7 @@ def render_size(settings,override=''):
 
 def output_size(settings):
     """Output (UI) size from config.ini output_res, e.g. 3840x2160; "auto" is the display's own
-    (BB_DISPLAY_SIZE, from run_windows.py); 1920x1080 by default."""
+    (BB_DISPLAY_SIZE, from the start); 1920x1080 by default."""
     value=settings.get('output_res','').lower()
     if value=='auto': value=os.environ.get('BB_DISPLAY_SIZE','')
     try:
@@ -386,6 +424,27 @@ def output_size(settings):
     return OUTPUT_SIZE
 
 
+FSR_NAMES=('fsr','fsr3','fsr4','fsr411')
+
+
+def amd_fsr_files():
+    """AMD's FSR SDK DLLs for the engine (tools/fetch_amd_fsr.sh; vk_amd_fsr.cpp): Windows only, in
+    BB_AMD_FSR_DIR or the engine's amd-fsr folder. 0.4.4 beta 27."""
+    if os.name!='nt' or os.environ.get('BB_AMD_FSR')=='0': return False
+    folder=Path(os.environ.get('BB_AMD_FSR_DIR') or Path(__file__).resolve().parents[1]/'amd-fsr')
+    return all((folder/name).is_file() for name in
+               ('amd_fidelityfx_loader_vk.dll','amd_fidelityfx_upscaler_vk.dll'))
+
+
+def start_settings(settings):
+    """The settings the start's render size follows: without AMD's FSR files (or on Linux) the engine
+    runs TAA instead of AMD FSR (BbSettings::ConfigureUpscalerSupport), at the output size, as bb-start
+    decides (start/main.cpp)."""
+    if settings.get('upscaler','off') in FSR_NAMES and not amd_fsr_files():
+        return {**settings,'upscaler':'taa'}
+    return settings
+
+
 def scaled_sizes(settings):
     """(render, output) for an output other than 1080p (above it, or 720p for the Steam Deck):
     the game renders at output / preset scale (or at the output size without upscaler) and the
@@ -393,8 +452,8 @@ def scaled_sizes(settings):
     out=output_size(settings)
     if out==OUTPUT_SIZE or settings.get('upscaler')=='taa': return None
     scale=1.0
-    if settings.get('upscaler','fsr3')!='off':
-        scale=preset_scale(settings)
+    if settings.get('upscaler','off')!='off':
+        scale=preset_scale(settings,out)
     # A scene of at least 640x360 (start/patches.cpp ScaledSizes): 428x240 (Ultra Performance at a
     # 720p output) showed the world in half the picture on a ROG Ally.
     scale=max(1.0,min(scale,out[0]/640,out[1]/360))
@@ -779,7 +838,7 @@ def main():
     p.add_argument('--patches-dir',type=Path,help='third-party patch XML files (shadPS4 format)')
     p.add_argument('--patches-config',type=Path,help='patches.json: enabled/disabled external patches')
     p.add_argument('--xml',type=Path,default=Path(__file__).resolve().parent.parent/'patches/Bloodborne.xml')
-    p.add_argument('--fps',choices=sorted(FPS_PRESETS)+sorted(SCALED_FPS),default='uncap')
+    p.add_argument('--fps',choices=sorted(FPS_PRESETS)+sorted(SCALED_FPS)+sorted(TABLE_FPS),default='uncap')
     p.add_argument('--extra',default='',help='additional patch names, separated by ";"')
     p.add_argument('--app-version',default='01.09')
     p.add_argument('--out',type=Path,default=Path(__file__).resolve().parent.parent/'out')
@@ -797,15 +856,13 @@ def main():
         print(f'{len(write_site_table(a.xml,a.app_version,a.write_site_table))} patches in {site_table_path(a.xml)}')
         return
     if a.print_scaled:
-        sizes=scaled_sizes(read_settings(a.settings))
+        sizes=scaled_sizes(start_settings(read_settings(a.settings)))
         if sizes: print(f'{sizes[0][0]}x{sizes[0][1]} {sizes[1][0]}x{sizes[1][1]}')
         return
     if a.print_preset_size:
         settings=read_settings(a.settings)
         if 'BB_UPSCALER' in os.environ:
-            settings['upscaler']='fsr3' if os.environ['BB_UPSCALER']=='fsr3' else 'off'
-        if 'BB_UPSCALE_PRESET' in os.environ:
-            settings['preset']=os.environ['BB_UPSCALE_PRESET']
+            settings['upscaler']='fsr' if os.environ['BB_UPSCALER'] in FSR_NAMES else 'off'
         size=render_size(settings)
         if size: print(f'{size[0]}x{size[1]}')
         return
@@ -836,14 +893,18 @@ def main():
     if on_sixty and SIXTY_BASE in names:
         print(f'Patches: {"uncapped" if a.fps=="uncap" else a.fps+" FPS"} on the 60 FPS++ list: the engine sets the pace '
               f'and the values for the rate (frame-rate corrections; off, the '
-              f'{ {"uncap":"Uncap FPS++","90":"90 FPS++"}.get(a.fps,"scaled 90 FPS++") } list)')
+              f'{ {"uncap":"Uncap FPS++","90":"90 FPS++","240":"144 FPS scaled 90 FPS++"}.get(a.fps,"scaled 90 FPS++") } list)')
     if preset and preset[0] in names:
-        fps={'60':60,'90':90,**SCALED_FPS}.get(a.fps)
+        fps={'60':60,'90':90,**SCALED_FPS,**TABLE_FPS}.get(a.fps)
         if a.fps=='uncap' and on_sixty: fps=UNCAPPED_REFERENCE
-        tuning=os.environ.get('BB_CAMERA_TUNING',read_settings(a.settings).get('camera_tuning','original')).lower()
-        writes=frame_rate_fixes(writes,fps,elf,tuning!='fps++',corrections)
+        tuning=read_settings(a.settings).get('camera_tuning','original').lower()
+        per_frame=corrections and camera_per_frame()
+        writes=frame_rate_fixes(writes,fps,elf,tuning!='fps++',corrections,per_frame)
         if fps:
-            print('Patches: follow camera '+('as the game has it, its eases converted from 30 FPS' if tuning!='fps++' else
+            print('Patches: follow camera '+(
+                  ('as the game has it' if tuning!='fps++' else 'with the FPS++ retune')+
+                  ' (the engine converts its weights every frame)' if per_frame else
+                  'as the game has it, its eases converted from 30 FPS' if tuning!='fps++' else
                   'with the FPS++ retune, its weights converted from 60 FPS' if corrections and fps>60 else
                   'with the FPS++ retune (camera_tuning=fps++)'))
     writes+=old_hunters_writes(elf)
@@ -874,7 +935,7 @@ def main():
         writes+=compile_external(external_selection(external_patches(a.patches_dir,a.app_version,a.xml),
                                                     a.patches_config),segments,resolution)
     # Whether a patch enlarges the game's heaps (the built-in one, or a resolution patch above
-    # 1080p from a patches/ file): run_windows.py then gives the game the larger memory pool.
+    # 1080p from a patches/ file): the start then gives the game the larger memory pool.
     heap_bytes={offset+i for offset,data in compile_patches(a.xml,[HEAP_PATCH],a.app_version,segments)
                 for i in range(len(data))}
     heaps=any(offset+i in heap_bytes for offset,data in writes for i in range(len(data)))

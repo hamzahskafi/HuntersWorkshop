@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -94,39 +95,21 @@ void Set(Values& v, const std::string& key, const std::string& value) {
                         value.c_str());
         }
     } else if (key == "upscaler") {
-        for (int u = 0; u < UpscalerCount; ++u) {
-            if (value == UpscalerName(u)) {
-                v.upscaler = u;
-            }
+        if (const int u = UpscalerFromName(value.c_str()); u >= 0) {
+            v.upscaler = u;
+        } else {
+            std::printf("Settings: unknown upscaler '%s' (expected fsr, dlss, taa or off)\n", value.c_str());
         }
-    } else if (key == "frame_gen") {
-        // bbport: "off" / "fsr3" / "dlss"; 0 and 1 too (BB_FRAME_GEN=0).
-        v.frame_gen = value == "dlss"                     ? FrameGenDlss
-                      : (value == "fsr3" || value == "1") ? FrameGenFsr3
-                                                          : FrameGenOff;
-    } else if (key == "frame_gen_cap") {
-        v.frame_gen_cap = i != 0;
-    } else if (key == "frame_gen_frames") {
-        v.frame_gen_frames = std::clamp(i, 1, FrameGenFramesMax);
-    } else if (key == "reflex") {
-        int mode = -1;
-        for (int m = 0; m < ReflexCount; ++m) {
-            if (value == ReflexNames[m] || value == std::to_string(m)) {
-                mode = m;
-            }
-        }
-        if (mode < 0) {
-            std::printf("Settings: unknown reflex '%s' (expected off, on or boost); on\n", value.c_str());
-        }
-        v.reflex = mode < 0 ? ReflexOn : mode;
+    } else if (key == "fsr_version") {
+        // 0.4.4 beta 27c: "auto" or a version's name; 27a's "3.1" (and "31") the newest FSR 3.1.
+        SetFsrVersion(value == "31" ? std::string("3.1") : value);
     } else if (key == "render_scale") {
         v.render_scale = Clamp(std::isfinite(f) && f > 0.0f ? f : 1.3f, RenderScaleMin, RenderScaleMax);
     } else if (key == "mip_bias") {
         v.mip_bias = Clamp(std::isfinite(f) ? f : 0.0f, MipBiasMin, MipBiasMax);
-    } else if (key == "dlss_auto_exposure") {
-        v.dlss_auto_exposure = i != 0;
     } else if (key == "preset") {
-        v.preset = std::clamp(i, 0, PresetCount - 1);
+        // 0.4.4 beta 27c: "auto" (the default), or a preset's number as before.
+        v.preset = value == "auto" || value.empty() ? PresetAuto : std::clamp(i, 0, PresetCount - 1);
     } else if (key == "sharpen") {
         v.sharpen = i != 0;
     } else if (key == "sharpness") {
@@ -143,10 +126,6 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         v.reactive_threshold = Clamp(f, 0.0f, 1.0f);
     } else if (key == "reactive_max") {
         v.reactive_max = Clamp(f, 0.0f, 1.0f);
-    } else if (key == "frame_gen_dynamic") {
-        v.frame_gen_dynamic = i != 0;
-    } else if (key == "frame_gen_target_fps") {
-        v.frame_gen_target_fps = std::clamp(i, 0, 1000);
     } else if (key == "fsr3_velocity_factor") {
         v.fsr3_velocity_factor = Clamp(f, 0.0f, 1.0f);
     } else if (key == "fsr3_reactiveness_scale") {
@@ -202,20 +181,10 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         }
     } else if (key == "dlss_preset") {
         v.dlss_preset = DlssPresetFromText(value.c_str());
-    } else if (key == "dlss_mip_bias") {
-        v.dlss_mip_bias = i != 0;
     } else if (key == "optiscaler_compat") {
         v.optiscaler_compat = i != 0;
-    } else if (key == "optiscaler_ngx_lock") {
-        v.optiscaler_ngx_lock = i != 0;
-    } else if (key == "optiscaler_clean_thread") {
-        v.optiscaler_clean_thread = i != 0;
-    } else if (key == "optiscaler_sync_submit") {
-        v.optiscaler_sync_submit = value == "1" ? OptiSubmitOn : value == "0" ? OptiSubmitOff : OptiSubmitAuto;
-    } else if (key == "fsr4_auto_exposure") {
-        v.fsr4_auto_exposure = i != 0;
-    } else if (key == "fsr4_invert_jitter") {
-        v.fsr4_invert_jitter = i != 0;
+    } else if (key == "fsr_invert_jitter" || key == "fsr4_invert_jitter") { // 0.4.4 beta 28: was fsr4_
+        v.fsr_invert_jitter = i != 0;
     } else if (key == "widescreen") {
         v.widescreen=i!=0;
     } else if (key == "pc_controls") {
@@ -323,7 +292,13 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         }
         v.hdr_mode = mode < 0 ? HdrModeNative : mode;
     } else if (key == "live_resolution") {
-        v.live_resolution = value == "auto" ? -1 : std::clamp(i, 0, 1);
+        // 0.4.4 beta 25c: Off or On; "auto" (a GPU check that chose On for strong GPUs) is no longer offered.
+        if (value == "auto") {
+            std::printf("Settings: live_resolution=auto is no longer offered; off (recommended)\n");
+            v.live_resolution = 0;
+        } else {
+            v.live_resolution = std::clamp(i, 0, 1);
+        }
     } else if (key == "cheat_vials") {
         v.cheat_vials = CheatValue(key, value);
     } else if (key == "cheat_bullets") {
@@ -366,7 +341,7 @@ void Set(Values& v, const std::string& key, const std::string& value) {
     }
 }
 
-// The menu's language for the launcher's code (BB_MENU_LANGUAGE: en, ru, pt_BR...) or a locale
+// The menu's language for a launcher's code (en, ru, pt_BR...) or a locale
 // (ru_RU.UTF-8, de_DE...): its first two letters; Portuguese only as pt_BR. Else English.
 // Simplified Chinese is never picked from the locale, only chosen (menu_language=zh_CN).
 MenuLanguage LanguageOfLocale(const char* lang) {
@@ -390,7 +365,7 @@ MenuLanguage LanguageOfLocale(const char* lang) {
 
 } // namespace
 
-// The display's size for output_res = auto: BB_DISPLAY_SIZE ("WxH", from run_windows.py), even
+// The display's size for output_res = auto: BB_DISPLAY_SIZE ("WxH", from bb-start or run.sh), even
 // (the game has half-resolution buffers); 1920x1080 without it.
 static std::pair<int, int> DisplaySize() {
     static const std::pair<int, int> size = [] {
@@ -440,15 +415,13 @@ void Load() {
         v.effects[e] = Effects[e].default_on;
     }
     // bbport: the menu's language until one is chosen in it (menu_language in config.ini): the
-    // launcher's (BB_MENU_LANGUAGE), else the system's, as the launcher picks its own.
+    // system's, as the launcher picks its own.
     {
-        const char* lang = std::getenv("BB_MENU_LANGUAGE");
-        if (!lang || !*lang) {
-            for (const char* key : {"LC_ALL", "LC_MESSAGES", "LANG", "LANGUAGE"}) {
-                if (const char* value = std::getenv(key); value && *value) {
-                    lang = value;
-                    break;
-                }
+        const char* lang = nullptr;
+        for (const char* key : {"LC_ALL", "LC_MESSAGES", "LANG", "LANGUAGE"}) {
+            if (const char* value = std::getenv(key); value && *value) {
+                lang = value;
+                break;
             }
         }
         v.menu_language = LanguageOfLocale(lang);
@@ -467,37 +440,13 @@ void Load() {
         std::fclose(file);
         std::printf("Settings: %s\n", Path());
     }
-    // Environment overrides (scripts, A/B tests).
+    // The one environment override, for A/B runs: BB_UPSCALER (0.4.4 beta 28: the other settings'
+    // aliases went; config.ini decides them).
     if (const char* env = std::getenv("BB_UPSCALER")) {
-        v.upscaler = UpscalerOff;
-        for (int u = 0; u < UpscalerCount; ++u) {
-            if (std::strcmp(env, UpscalerName(u)) == 0) v.upscaler = u;
-        }
-    }
-    const std::pair<const char*, const char*> env_keys[] = {
-        {"BB_FSR_SHARPNESS", "sharpness"},        {"BB_JITTER", "jitter"},
-        {"BB_REACTIVE", "reactive"},              {"BB_REACTIVE_SCALE", "reactive_scale"},
-        {"BB_REACTIVE_THRESHOLD", "reactive_threshold"}, {"BB_REACTIVE_MAX", "reactive_max"},
-        {"BB_UPSCALE_PRESET", "preset"},            {"BB_OBJECT_MOTION", "object_motion"},
-        {"BB_HDR", "hdr"},                          {"BB_HDR_PAPER_WHITE", "hdr_paper_white"},
-        {"BB_HDR_PEAK", "hdr_peak"},                {"BB_HDR_BOOST", "hdr_boost"},
-        {"BB_HDR_MODE", "hdr_mode"},                {"BB_FRAME_GEN", "frame_gen"},
-        {"BB_FRAME_GEN_CAP", "frame_gen_cap"},     {"BB_DLSS_PRESET", "dlss_preset"},
-        {"BB_DLSS_MIP_BIAS", "dlss_mip_bias"},   {"BB_FRAME_GEN_FRAMES", "frame_gen_frames"},
-        {"BB_REFLEX", "reflex"},                   {"BB_RENDER_SCALE", "render_scale"},
-        {"BB_MIP_BIAS", "mip_bias"},
-    };
-    for (const auto& [env, key] : env_keys) {
-        if (const char* value = std::getenv(env)) {
-            Set(v, key, value);
-        }
-    }
-    if (std::getenv("BB_HDR_PEAK")) {
-        v.hdr_peak_auto = false; // a peak given for this run is meant
+        v.upscaler = std::max(UpscalerFromName(env), int(UpscalerOff)); // "none" (no upscaler path): off
     }
     v.startup_preset = v.preset;
     v.startup_render_scale = v.render_scale;
-    v.startup_frame_gen = v.frame_gen;
     v.startup_upscaler = v.upscaler;
     v.startup_object_motion = v.object_motion;
     for (int e = 0; e < EffectCount; ++e) {
@@ -507,32 +456,26 @@ void Load() {
     v.startup_output_res = v.output_res;
     v.startup_live_resolution = v.live_resolution;
     v.startup_hdr = v.hdr;
-    v.startup_optiscaler = {v.optiscaler_compat, v.optiscaler_ngx_lock, v.optiscaler_clean_thread,
-                            v.optiscaler_sync_submit};
+    v.startup_optiscaler_compat = v.optiscaler_compat;
 }
 
-void ConfigureUpscalerSupport(bool fsr4, bool fsr411, bool dlss) {
+void ConfigureUpscalerSupport(bool fsr, bool dlss) {
     auto& v = Get();
-    v.fsr4_supported = fsr4;
-    v.fsr411_supported = fsr4 && fsr411;
+    v.fsr_supported = fsr;
     v.dlss_supported = dlss;
     const int requested = v.upscaler;
+    // 0.4.4 beta 27: TAA when neither runs (community-fixes-plan.md, Decisions: "When AMD's or NVIDIA's
+    // runtime can't start"); bb-start chose the start's render size for TAA already when AMD's files
+    // are missing (start/main.cpp), so TAA runs at the output size.
     if (requested == UpscalerDlss && !dlss) {
-        v.fsr4_problem = "DLSS needs an NVIDIA RTX GPU, its driver's NGX and nvngx_dlss; using FSR 3.1";
-        std::printf("Upscaler: dlss unavailable; falling back to FSR 3.1 before the first frame\n");
-        v.upscaler = UpscalerFsr3;
-    } else if (requested == UpscalerFsr411 && !v.fsr411_supported && v.fsr4_supported) {
-        // FSR 4.1.1 needs mixed-precision dot products (VK_VALVE_shader_mixed_float_dot_product)
-        // that FSR 4 does not, and its fsr4_411 files: the next best is FSR 4, not 3.1.
-        v.fsr4_problem = "FSR 4.1.1 needs its fsr4_411 files and a GPU that runs its shaders; using FSR 4";
-        std::printf("Upscaler: fsr411 unavailable (GPU or fsr4_411 files); falling back to FSR 4 before the first frame\n");
-        v.upscaler = UpscalerFsr4;
-    } else if ((requested == UpscalerFsr4 && !v.fsr4_supported) ||
-        (requested == UpscalerFsr411 && !v.fsr411_supported)) {
-        v.fsr4_problem = "GPU does not support the selected FSR 4 shaders; using FSR 3.1";
-        std::printf("Upscaler: %s unsupported on this GPU; falling back to FSR 3.1 before the first frame\n",
-                    UpscalerName(requested));
-        v.upscaler = UpscalerFsr3;
+        v.fsr4_problem = fsr ? "DLSS needs an NVIDIA RTX GPU, its driver's NGX and nvngx_dlss; using AMD FSR"
+                             : "DLSS needs an NVIDIA RTX GPU, its driver's NGX and nvngx_dlss; using TAA";
+        std::printf("Upscaler: dlss unavailable; %s before the first frame\n", fsr ? "AMD FSR" : "TAA");
+        v.upscaler = fsr ? UpscalerFsr : UpscalerTaa;
+    } else if (requested == UpscalerFsr && !fsr) {
+        v.fsr4_problem = "AMD FSR cannot run here (its files, this GPU, or not Windows); using TAA";
+        std::printf("Upscaler: AMD FSR unavailable; TAA before the first frame\n");
+        v.upscaler = UpscalerTaa;
     }
 }
 
@@ -541,18 +484,41 @@ bool FixedRenderSession() {
     return size && size[0];
 }
 
+int ResolvePreset(int preset, int output) {
+    return preset == PresetAuto ? AutoPreset(OutputHeight(output)) : std::clamp(preset, 0, int(PresetCustom));
+}
+
 int RenderPreset() {
     const auto& v = Get();
-    return FixedRenderSession() ? v.startup_preset :
-        v.upscaler == UpscalerTaa ? NativeAA : v.preset.load();
+    if (FixedRenderSession()) {
+        return ResolvePreset(v.startup_preset, v.startup_output_res);
+    }
+    if (v.upscaler == UpscalerTaa) {
+        return NativeAA;
+    }
+    // The output the scene follows: the one at start while one chosen in game waits for a restart.
+    return ResolvePreset(v.preset, ResolutionNeedsRestart() ? v.startup_output_res : v.output_res.load());
+}
+
+bool OutputChangesLive() {
+    return !FixedRenderSession() && Get().startup_live_resolution == 1;
 }
 
 bool ResolutionNeedsRestart() {
     const auto& v = Get();
+    // 0.4.4 beta 26b: a start at 1920x1080 needs no startup patch, so the session was not fixed and
+    // an output chosen in game applied at once whatever Live resolution changes said (the tester's
+    // report): the scene stayed at 1080p and the upscaler took the finished frame, the slower way
+    // Off avoids. Off now means a restart wherever the game started; the quality preset at 1080p
+    // stays live (nothing is lost there: post-processing runs at the output size either way).
+    if (!FixedRenderSession())
+        return !OutputChangesLive() && v.output_res != v.startup_output_res;
     // TAA needs the live path (native guest targets): run.sh selects it on restart.
+    // 0.4.4 beta 27c: presets compared as they resolve (Auto at 1440p is Quality).
+    const int preset = ResolvePreset(v.preset, v.output_res);
     return FixedRenderSession() &&
-        (v.preset != v.startup_preset || v.output_res != v.startup_output_res ||
-         (v.preset == PresetCustom && v.render_scale != v.startup_render_scale) ||
+        (preset != ResolvePreset(v.startup_preset, v.startup_output_res) || v.output_res != v.startup_output_res ||
+         (preset == PresetCustom && v.render_scale != v.startup_render_scale) ||
          (v.upscaler == UpscalerOff) != (v.startup_upscaler == UpscalerOff) ||
          (v.upscaler == UpscalerTaa) != (v.startup_upscaler == UpscalerTaa));
 }
@@ -571,11 +537,8 @@ void Save() {
     const auto flag = [](bool value) { return std::string(value ? "1" : "0"); };
     put("menu_language", MenuLanguageCodes[int(v.menu_language.load())]);
     put("upscaler", UpscalerName(v.upscaler));
-    put("preset", std::to_string(v.preset.load()));
-    put("frame_gen", FrameGenNames[std::clamp(v.frame_gen.load(), 0, FrameGenCount - 1)]);
-    put("frame_gen_cap", flag(v.frame_gen_cap));
-    put("frame_gen_frames", std::to_string(std::clamp(v.frame_gen_frames.load(), 1, FrameGenFramesMax)));
-    put("reflex", ReflexNames[std::clamp(v.reflex.load(), 0, ReflexCount - 1)]);
+    put("fsr_version", FsrVersion());
+    put("preset", v.preset == PresetAuto ? std::string("auto") : std::to_string(v.preset.load()));
     put("render_scale", fixed(v.render_scale, 2));
     put("mip_bias", fixed(v.mip_bias, 2));
     put("sharpen", flag(v.sharpen));
@@ -586,8 +549,6 @@ void Save() {
     put("reactive_scale", fixed(v.reactive_scale, 2));
     put("reactive_threshold", fixed(v.reactive_threshold, 2));
     put("reactive_max", fixed(v.reactive_max, 2));
-    put("frame_gen_dynamic", flag(v.frame_gen_dynamic));
-    put("frame_gen_target_fps", std::to_string(v.frame_gen_target_fps.load()));
     put("fsr3_velocity_factor", fixed(v.fsr3_velocity_factor, 3));
     put("fsr3_reactiveness_scale", fixed(v.fsr3_reactiveness_scale, 3));
     put("fsr3_shading_change_scale", fixed(v.fsr3_shading_change_scale, 3));
@@ -613,16 +574,9 @@ void Save() {
     put("fps_text_opacity", fixed(v.fps_text_opacity, 2));
     put("fps_border", flag(v.fps_border));
     put("hide_cursor", flag(v.hide_cursor));
-    put("fsr4_auto_exposure", flag(v.fsr4_auto_exposure));
-    put("fsr4_invert_jitter", flag(v.fsr4_invert_jitter));
+    put("fsr_invert_jitter", flag(v.fsr_invert_jitter));
     put("dlss_preset", DlssPresetText(v.dlss_preset));
-    put("dlss_mip_bias", flag(v.dlss_mip_bias));
-    put("dlss_auto_exposure", flag(v.dlss_auto_exposure));
     put("optiscaler_compat", flag(v.optiscaler_compat));
-    put("optiscaler_ngx_lock", flag(v.optiscaler_ngx_lock));
-    put("optiscaler_clean_thread", flag(v.optiscaler_clean_thread));
-    put("optiscaler_sync_submit", v.optiscaler_sync_submit == OptiSubmitAuto ? std::string("auto")
-                                                                            : flag(v.optiscaler_sync_submit != 0));
     // Read by patches.py at start.
     for (int e = 0; e < EffectCount; ++e) {
         put(Effects[e].key, flag(v.effects[e]));
@@ -677,7 +631,7 @@ void Save() {
                                                   : std::to_string(OutputWidth(v.output_res)) + "x" +
                                                         std::to_string(OutputHeight(v.output_res)));
     // Read by run.sh at start.
-    put("live_resolution", v.live_resolution < 0 ? "auto" : flag(v.live_resolution != 0));
+    put("live_resolution", flag(v.live_resolution != 0));
     if (v.menu_x >= 0.0f && v.menu_y >= 0.0f) {
         put("menu_pos", fixed(v.menu_x, 4) + "," + fixed(v.menu_y, 4));
     }
@@ -697,11 +651,18 @@ void Save() {
                 std::string key = text.substr(0, eq);
                 key.erase(key.find_last_not_of(" \t") + 1);
                 key.erase(0, key.find_first_not_of(" \t"));
+                // A renamed key's old line becomes the new one (0.4.4 beta 28).
+                if (key == "fsr4_invert_jitter") {
+                    key = "fsr_invert_jitter";
+                }
                 const auto it = std::find_if(keys.begin(), keys.end(),
                                              [&](const auto& k) { return k.first == key; });
                 if (it != keys.end()) {
-                    out += it->first + "=" + it->second + "\n";
-                    written[size_t(it - keys.begin())] = true;
+                    // Once: a second line of the same key (an old and a new name) goes.
+                    if (!written[size_t(it - keys.begin())]) {
+                        out += it->first + "=" + it->second + "\n";
+                        written[size_t(it - keys.begin())] = true;
+                    }
                     continue;
                 }
             }
@@ -734,6 +695,7 @@ void Save() {
 
 float PresetScale(int preset) {
     static constexpr float scales[PresetCustom] = {1.0f, 1.5f, 1.7f, 2.0f, 3.0f};
+    preset = ResolvePreset(preset, Get().output_res); // Auto: for the output chosen
     if (preset == PresetCustom) {
         // The startup patch's render size is fixed for the session (BB_RENDER_RES, run.sh).
         const auto& v = Get();
@@ -744,12 +706,151 @@ float PresetScale(int preset) {
 }
 
 const char* PresetName(int preset) {
-    static constexpr const char* names[PresetCount] = {"Native AA", "Quality", "Balanced",
-                                                       "Performance", "Ultra Performance", "Custom"};
+    static constexpr const char* names[PresetCount] = {"Native AA", "Quality", "Balanced", "Performance",
+                                                       "Ultra Performance", "Custom", "Auto"};
     return names[std::clamp(preset, 0, PresetCount - 1)];
 }
 
+namespace {
+/// The output index the presets apply to: now in a live session (the one at start while a chosen one
+/// waits for a restart), the one chosen in a startup-patched session (its next start).
+int PresetOutputIndex() {
+    const auto& v = Get();
+    return !FixedRenderSession() && ResolutionNeedsRestart() ? v.startup_output_res : v.output_res.load();
+}
+} // namespace
+
+SceneSize PresetOutput() {
+    const int output = PresetOutputIndex();
+    return {OutputWidth(output), OutputHeight(output)};
+}
+
+int RenderPercentMin() {
+    const auto& v = Get();
+    const SceneSize out = PresetOutput();
+    const bool patched =
+        FixedRenderSession() && !(out.width == 1920 && out.height == 1080) && v.live_resolution != 1;
+    const double most = patched ? std::max(1.0, std::min({3.0, out.width / 640.0, out.height / 360.0})) : 3.0;
+    return int(std::lround(100.0 / most));
+}
+
+std::string NewestFsrVersion(const std::vector<std::string>& offered) {
+    const auto numbers = [](const std::string& name) {
+        std::vector<int> parts;
+        int part = -1;
+        for (const char c : FsrVersionKey(name)) {
+            if (std::isdigit(static_cast<unsigned char>(c))) {
+                part = (part < 0 ? 0 : part * 10) + (c - '0');
+            } else if (part >= 0) {
+                parts.push_back(part);
+                part = -1;
+            }
+        }
+        if (part >= 0) {
+            parts.push_back(part);
+        }
+        return parts;
+    };
+    std::string newest;
+    for (const auto& name : offered) {
+        if (newest.empty() || numbers(name) > numbers(newest)) {
+            newest = name;
+        }
+    }
+    return newest;
+}
+
+SceneSize PresetRenderSize(int preset) {
+    const auto& v = Get();
+    // The output it applies to (PresetOutputIndex); Auto resolves for it.
+    const bool fixed = FixedRenderSession();
+    const int output = PresetOutputIndex();
+    preset = ResolvePreset(preset, output);
+    double scale = PresetScale(std::min(preset, PresetCustom - 1));
+    if (preset == PresetCustom) {
+        const float custom = v.render_scale;
+        scale = std::clamp(std::isfinite(custom) ? double(custom) : 1.0, double(RenderScaleMin), double(RenderScaleMax));
+    }
+    const int w = OutputWidth(output), h = OutputHeight(output);
+    if (!fixed || (w == 1920 && h == 1080) || v.live_resolution == 1) {
+        const double s = std::clamp(scale, 1.0, 3.0);
+        return SceneSize{int(std::max(1l, std::lround(w / s / 4)) * 4), int(std::max(1l, std::lround(h / s / 4)) * 4)};
+    }
+    const double s = std::max(1.0, std::min({scale, w / 640.0, h / 360.0}));
+    SceneSize size{std::max(4, int(std::nearbyint(w / s / 4)) * 4), std::max(4, int(std::nearbyint(h / s / 4)) * 4)};
+    if (size.width == 1920 && size.height == 1080) {
+        size = {1916, 1076};
+    }
+    return size;
+}
+
+namespace {
+std::mutex fsr_version_mutex;
+std::string fsr_version_wanted = "auto";
+std::vector<std::string> fsr_versions_offered;
+} // namespace
+
+std::string FsrVersionKey(const std::string& name) {
+    std::string key = name;
+    while (!key.empty() && (key.back() == '*' || key.back() == ' ')) {
+        key.pop_back(); // AMD's " *": provided by the driver
+    }
+    key.erase(0, key.find_first_not_of(' '));
+    for (char& c : key) {
+        c = char(std::tolower(static_cast<unsigned char>(c)));
+    }
+    if (key.rfind("fsr", 0) == 0) {
+        key.erase(0, 3);
+        key.erase(0, key.find_first_not_of(' '));
+    }
+    return key.empty() ? std::string("auto") : key;
+}
+
+int FsrVersionMatch(const std::vector<std::string>& offered, const std::string& wanted) {
+    const std::string want = FsrVersionKey(wanted);
+    if (want == "auto") {
+        return -1;
+    }
+    int found = -1;
+    bool found_driver = false;
+    for (int i = 0; i < int(offered.size()); ++i) {
+        const std::string name = FsrVersionKey(offered[i]);
+        const bool same = name == want || (name.size() > want.size() && name.compare(0, want.size(), want) == 0 &&
+                                           name[want.size()] == '.');
+        if (!same) {
+            continue;
+        }
+        const bool driver = offered[i].find('*') != std::string::npos;
+        if (found < 0 || (found_driver && !driver)) {
+            found = i;
+            found_driver = driver;
+        }
+    }
+    return found;
+}
+
+std::string FsrVersion() {
+    std::lock_guard lock{fsr_version_mutex};
+    return fsr_version_wanted;
+}
+
+void SetFsrVersion(const std::string& version) {
+    std::lock_guard lock{fsr_version_mutex};
+    fsr_version_wanted = FsrVersionKey(version);
+}
+
+std::vector<std::string> FsrVersionsOffered() {
+    std::lock_guard lock{fsr_version_mutex};
+    return fsr_versions_offered;
+}
+
+void SetFsrVersionsOffered(std::vector<std::string> names) {
+    std::lock_guard lock{fsr_version_mutex};
+    fsr_versions_offered = std::move(names);
+}
+
 int ModelPreset(int preset) {
+    preset = ResolvePreset(preset, Get().output_res);
     if (preset != PresetCustom) {
         return std::clamp(preset, 0, PresetCustom - 1);
     }
@@ -765,8 +866,9 @@ int ModelPreset(int preset) {
 }
 
 bool DlssPresetValid(int preset) {
-    // NVSDK_NGX_DLSS_Hint_Render_Preset (DLSS SDK 310.9): E, F, J, K, L, M.
-    return preset == DlssPresetDefault || preset == 5 || preset == 6 || (preset >= 10 && preset <= 13);
+    // NVSDK_NGX_DLSS_Hint_Render_Preset, as NVIDIA's DLSS Programming Guide 310.6.0 has it: A-D
+    // removed, E and F (the CNN models) deprecated, G-I reserved; J, K, L, M (the transformers).
+    return preset == DlssPresetDefault || (preset >= 10 && preset <= 13);
 }
 
 int DlssPresetFromText(const char* text) {
@@ -778,17 +880,22 @@ int DlssPresetFromText(const char* text) {
     }
     const char letter = char(std::tolower(static_cast<unsigned char>(text[0])));
     if (letter >= 'a' && letter <= 'z' && text[1] == '\0') {
+        // 0.4.4 beta 25b: E and F, the CNN models NVIDIA deprecated (310.6.0; F "should not be used"),
+        // are no longer offered: a saved one runs Auto, NVIDIA's model for each quality mode.
+        if (letter == 'e' || letter == 'f') {
+            std::printf("Settings: DLSS preset '%s' (a CNN model) is deprecated by NVIDIA; auto\n", text);
+            return DlssPresetAuto;
+        }
         // bbport: letters NVIDIA removed (A-D) or ignores (G-I, N, O) ran the DLL's default
         // while the menu showed the letter: K instead, said once here.
         if (!DlssPresetValid(letter - 'a' + 1)) {
-            std::printf("Settings: DLSS preset '%s' is not in NVIDIA's DLSS 310.9 (E, F, J, K, L, M); k\n",
-                        text);
-            return DlssPresetK;
+            std::printf("Settings: DLSS preset '%s' is not one of NVIDIA's (J, K, L, M); auto\n", text);
+            return DlssPresetAuto;
         }
         return letter - 'a' + 1;
     }
-    std::printf("Settings: unknown dlss_preset '%s' (expected default or a letter); k\n", text);
-    return DlssPresetK;
+    std::printf("Settings: unknown dlss_preset '%s' (expected auto, default or a letter); auto\n", text);
+    return DlssPresetAuto;
 }
 
 const char* DlssPresetText(int preset) {
@@ -802,9 +909,32 @@ const char* DlssPresetText(int preset) {
 }
 
 const char* UpscalerName(int upscaler) {
-    static constexpr const char* names[UpscalerCount] = {"off", "fsr3", "fsr4", "fsr411", "taa",
-                                                                  "dlss"};
+    static constexpr const char* names[UpscalerCount] = {"off", "fsr", "taa", "dlss"};
     return names[std::clamp(upscaler, 0, UpscalerCount - 1)];
+}
+
+int UpscalerFromName(const char* name) {
+    if (!name) {
+        return -1;
+    }
+    for (int u = 0; u < UpscalerCount; ++u) {
+        if (std::strcmp(name, UpscalerName(u)) == 0) {
+            return u;
+        }
+    }
+    // 0.4.4 beta 27: FSR 3.1 (FireBurn's), FSR 4 and FSR 4.1.1 are AMD's FSR now, which picks the version.
+    for (const char* old : {"fsr3", "fsr4", "fsr411"}) {
+        if (std::strcmp(name, old) == 0) {
+            static bool told = false;
+            if (!told) {
+                told = true;
+                std::printf("Settings: upscaler=%s is AMD FSR from 0.4.4 beta 27 (AMD's FSR SDK picks the version)\n",
+                            name);
+            }
+            return UpscalerFsr;
+        }
+    }
+    return -1;
 }
 
 } // namespace BbSettings

@@ -37,6 +37,8 @@ uintptr_t runtime_memory_resolve(const char *name);
 void runtime_memory_report(void);
 /* bbport: entries in the guest memory map now (it splits as the game maps and protects). */
 uint64_t runtime_memory_regions(void);
+/* 0.4.4 beta 20: mapped and host-readable under the game's own protection. */
+int runtime_memory_readable(uintptr_t address, uint64_t size);
 int runtime_memory_is_mapped(uintptr_t address, uint64_t size);
 /* Guest memory whose guest protection allows writing, all of the range. */
 int runtime_memory_guest_writable(uintptr_t address, uint64_t size);
@@ -45,7 +47,6 @@ int runtime_memory_guest_writable(uintptr_t address, uint64_t size);
 int runtime_memory_restore_access(void *context, uintptr_t address, int repeated);
 /* The CPU is about to write the range outside guest code (a file read): tells the GPU side. */
 void runtime_memory_note_write(uintptr_t address, uint64_t size);
-void runtime_memory_note_cpu_write(uintptr_t address, uint64_t size);
 /* bbport (frame stats): a guest thread was blocked `ns` in the runtime (0 cond, 1 mutex, 2 sema, 3 sleep). */
 void runtime_wait_note(int kind, uint64_t ns);
 void runtime_wait_report(double frames);
@@ -113,12 +114,6 @@ int runtime_file_translate(const char *guest, char *out, size_t size);
 int64_t runtime_file_open(const char *path, int flags, int mode);
 int64_t runtime_file_close(int fd);
 int64_t runtime_file_read(int fd, void *buffer, uint64_t size);
-int64_t runtime_file_pread(int fd, void *buffer, uint64_t size, int64_t offset);
-int64_t runtime_file_write(int fd, const void *buffer, uint64_t size);
-int64_t runtime_file_lseek(int fd, int64_t offset, int whence);
-int64_t runtime_file_stat(const char *path, void *guest_stat);
-int64_t runtime_file_fstat(int fd, void *guest_stat);
-int64_t runtime_file_getdents(int fd, char *buffer, uint64_t size, int64_t *base);
 void runtime_thread_keys_cleanup(void);
 /* Guest-visible errno values are FreeBSD's. */
 int32_t runtime_guest_errno(int host_errno);

@@ -76,6 +76,8 @@ extern "C" const unsigned char bb_font_cjk_end[];
 #endif
 
 extern "C" void runtime_restart(void); // bb-probe (probe.c)
+extern "C" void bbnet_exit_begin(int timeout_ms); // bbnet_glue.cpp: out of a co-op room at exit
+extern "C" void bbnet_exit_wait(void);
 
 namespace Vulkan {
 extern std::atomic<u64> g_bb_compile_ns_total; // vk_pipeline_cache.cpp
@@ -479,7 +481,7 @@ void HdrSection() {
     }
     // bbport: hdr_mode, live (docs/hdr.md).
     int mode = std::clamp(s.hdr_mode.load(), 0, BbSettings::HdrModeCount - 1);
-    if (const char* label = Item("HDR mode", "Режим HDR")) {
+    if (const char* label = Item("HDR source", "Источник HDR")) {
         const char* modes[BbSettings::HdrModeCount] = {
             BbSettings::MenuText("Native (from the game's HDR scene)", "Нативный (из HDR-сцены игры)"),
             BbSettings::MenuText("Expand (from the SDR picture)", "Расширение (из SDR-картинки)"),
@@ -584,12 +586,12 @@ void PictureSection() {
         Hint(BbSettings::MenuText(
             "Changes apply live, Picture tuning too, to the game's own colour, fog and lighting of each area "
             "(the HUD and menus keep theirs). Moving one turns Picture tuning on; off: the game's own picture. 1.00 and Hue 0 are the game's. Fog 0 clears the haze over distant streets. The "
-            "same settings are in the game's System menu (PC Graphics, PC Effects, PC Colour) and the "
+            "same settings are in the game's System menu (Graphics, Effects, Colour) and the "
             "launcher. Ctrl+click a slider to type any value, beyond its ends too (brightness, saturation and fog "
             "up to 5, contrast 0.5-1.5, hue -180-180, bloom up to 10, shadow distance 0.25-8).",
             "Меняются сразу, как и сама настройка: собственные цвет, туман и освещение каждой области "
             "(интерфейс и меню не меняются). Выкл. — картинка игры. 1.00 и оттенок 0 — как в игре. Туман 0 убирает дымку над дальними улицами. Те же "
-            "настройки есть в системном меню игры (PC Graphics, PC Effects, PC Colour) и в лаунчере. "
+            "настройки есть в системном меню игры (Graphics, Effects, Colour) и в лаунчере. "
             "Ctrl+клик по ползунку — ввести любое значение, в том числе за его краями (яркость, "
             "насыщенность и туман до 5, контраст 0.5-1.5, оттенок -180-180, bloom до 10, дальность теней "
             "0.25-8)."));
@@ -636,30 +638,18 @@ void PictureSection() {
     ImGui::EndDisabled();
 }
 
-// Game effects switched by patches at start (restart required), and the model detail.
+// Game effects switched by patches at start (restart required): what the game has and a switch leaves
+// out. 0.4.4 beta 28 (the tester's call, as the launcher's Graphics page): model detail and screen-space
+// reflections, which go past the game or below it, in an Enhancements section of their own.
 void EffectsSection() {
     auto& s = BbSettings::Get();
     Section("Game effects (restart required)", "Эффекты игры (после перезапуска)");
-    if (const char* label = Item("Model detail", "Детализация моделей")) {
-        const char* lods[] = {BbSettings::MenuText("Highest (-2)", "Максимальная (-2)"),
-                              BbSettings::MenuText("Game default", "Как в игре"),
-                              BbSettings::MenuText("Lower (1)", "Ниже (1)"),
-                              BbSettings::MenuText("Lowest (2)", "Минимальная (2)")};
-        static constexpr int lod_values[] = {-2, 0, 1, 2};
-        int lod_index = 1;
-        for (int i = 0; i < 4; ++i) {
-            if (lod_values[i] == s.model_lod) lod_index = i;
-        }
-        if (ImGui::BeginCombo(label, lods[lod_index])) {
-            for (int i = 0; i < 4; ++i) {
-                if (ImGui::Selectable(lods[i], i == lod_index)) {
-                    Store(s.model_lod, lod_values[i], true);
-                }
-            }
-            ImGui::EndCombo();
-        }
-    }
     for (int e = 0; e < BbSettings::EffectCount; ++e) {
+        // 0.4.4 beta 27b: the game's own anti-aliasing is in Upscaling › Anti-aliasing.
+        // 0.4.4 beta 28: screen-space reflections are an enhancement (below).
+        if (e == BbSettings::EffectGameAa || std::strcmp(BbSettings::Effects[e].key, "effect_ssr") == 0) {
+            continue;
+        }
         const auto& effect = BbSettings::Effects[e];
         const char* label = Item(effect.label, effect.label_ru);
         if (!label) {
@@ -682,346 +672,195 @@ void EffectsSection() {
                 "в dvdroot_ps4/font из мода Nexus #253. Правый touchpad: Backspace."));
         }
     }
+    Section("Enhancements (restart required)", "Улучшения (после перезапуска)");
+    if (const char* label = Item("Model detail", "Детализация моделей")) {
+        // Lowest first, as the launcher's list (0.4.4 beta 28).
+        const char* lods[] = {BbSettings::MenuText("Lowest (2)", "Минимальная (2)"),
+                              BbSettings::MenuText("Lower (1)", "Ниже (1)"),
+                              BbSettings::MenuText("Game default", "Как в игре"),
+                              BbSettings::MenuText("Highest (-2)", "Максимальная (-2)")};
+        static constexpr int lod_values[] = {2, 1, 0, -2};
+        int lod_index = 2;
+        for (int i = 0; i < 4; ++i) {
+            if (lod_values[i] == s.model_lod) lod_index = i;
+        }
+        if (ImGui::BeginCombo(label, lods[lod_index])) {
+            for (int i = 0; i < 4; ++i) {
+                if (ImGui::Selectable(lods[i], i == lod_index)) {
+                    Store(s.model_lod, lod_values[i], true);
+                }
+            }
+            ImGui::EndCombo();
+        }
+    }
+    for (int e = 0; e < BbSettings::EffectCount; ++e) {
+        const auto& effect = BbSettings::Effects[e];
+        if (std::strcmp(effect.key, "effect_ssr") != 0) {
+            continue;
+        }
+        if (const char* label = Item(effect.label, effect.label_ru)) {
+            Checkbox(label, s.effects[e]);
+        }
+    }
 }
 
-// The upscaler, its preset and sharpening, frame generation.
-void UpscalerSection() {
+// 0.4.4 beta 27c: the upscaler's quality (Auto first: by the output's height, BbSettings::AutoPreset)
+// and under it the render resolution: a slider showing the share of the output the scene renders at
+// (the engine's sizes, PresetRenderSize), which only Custom moves. As the launcher's Graphics page.
+void QualityRows() {
     auto& s = BbSettings::Get();
-    Section("Temporal upscaler", "Временной апскейлер");
-    if (const char* label = Item("Upscaler", "Апскейлер")) {
-        const char* upscalers[] = {
-            BbSettings::MenuText("Off", "Выкл"), "FSR 3.1", "FSR 4 (INT8)", "FSR 4.1.1 (INT8)",
-            BbSettings::MenuText("TAA (native anti-aliasing)", "TAA (нативное сглаживание)"), "DLSS (NVIDIA)"};
-        static const char* later[] = {"XeSS"};
-        const int upscaler = s.upscaler;
-        if (ImGui::BeginCombo(label, upscalers[upscaler])) {
-            for (int i = 0; i < BbSettings::UpscalerCount; ++i) {
-                const bool supported = i == BbSettings::UpscalerFsr4     ? s.fsr4_supported.load()
-                                       : i == BbSettings::UpscalerFsr411 ? s.fsr411_supported.load()
-                                       : i == BbSettings::UpscalerDlss   ? s.dlss_supported.load()
-                                                                         : true;
-                ImGui::BeginDisabled(!supported);
-                if (ImGui::Selectable(upscalers[i], i == upscaler)) {
-                    Store(s.upscaler, i, true);
-                }
-                ImGui::EndDisabled();
-                if (!supported) {
-                    ImGui::SameLine();
-                    ImGui::TextDisabled("%s", BbSettings::MenuText("— not supported by this GPU",
-                                                                   "— не поддерживается видеокартой"));
-                }
-            }
-            for (const char* name : later) {
-                ImGui::BeginDisabled();
-                ImGui::Selectable(name, false);
-                ImGui::EndDisabled();
-                ImGui::SameLine();
-                ImGui::TextDisabled("%s", BbSettings::MenuText("— in development", "— в работе"));
-            }
-            ImGui::EndCombo();
-        }
-        if (s.upscaler == BbSettings::UpscalerFsr411) {
-            Hint(BbSettings::MenuText(
-                "FSR 4.1.1 in INT8 mode: the model from AMD's 4.1.1 DLL, reproduced in Vulkan "
-                "(output matches the DLL). One model for Native through Performance and another "
-                "for Ultra Performance. Assets: tools/fsr4cap/build_assets.sh (requires the DLL "
-                "and Proton).",
-                "FSR 4.1.1 в режиме INT8: модель из DLL AMD 4.1.1, воспроизведённая в Vulkan "
-                "(результат совпадает с DLL). Одна модель для Native..Performance и отдельная "
-                "для Ultra Performance. Ассеты: tools/fsr4cap/build_assets.sh (нужны DLL и "
-                "Proton)."));
-        } else if (s.upscaler == BbSettings::UpscalerFsr4) {
-            Hint(BbSettings::MenuText(
-                "FSR 4 in INT8 mode (v07 model from AMD FidelityFX SDK sources). Higher quality "
-                "than FSR 3.1, but the pass is more demanding. Changing the preset rebuilds the "
-                "model (a brief pause). Assets: tools/fetch_fsr4_assets.sh.",
-                "FSR 4 в режиме INT8 (модель v07 из исходников AMD FidelityFX SDK). Качество выше, "
-                "чем у FSR 3.1, но проход тяжелее. Смена пресета пересобирает модель (короткая "
-                "пауза). Ассеты: tools/fetch_fsr4_assets.sh."));
-        }
-        if (const char* problem = s.fsr4_problem.load()) {
-            ImGui::PushTextWrapPos();
-            ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), BbSettings::MenuText("Upscaler unavailable: %s"),
-                               BbSettings::MenuText(problem));
-            if (!BbSettings::IsFsr4(s.upscaler))
-                ImGui::TextUnformatted(
-                    BbSettings::MenuText("The mode selected above is active. You can select it again to retry."));
-            ImGui::PopTextWrapPos();
-        }
-    }
-    if (BbSettings::IsFsr4(s.upscaler)) {
-        if (const char* label = Item("FSR 4: auto exposure", "FSR 4: авто-экспозиция")) {
-            Checkbox(label, s.fsr4_auto_exposure);
-        }
-        if (const char* label = Item("FSR 4: invert jitter sign", "FSR 4: обратный знак jitter")) {
-            Checkbox(label, s.fsr4_invert_jitter);
-            Hint(BbSettings::MenuText(
-                "For diagnosing ghosting: the FSR 4 network normalizes color by exposure and uses "
-                "it to decide when to discard previous frames. Changes apply immediately, without a "
-                "restart.",
-                "Проверка при гостинге: сеть FSR 4 нормирует цвет по экспозиции и по ней решает, "
-                "когда отбросить прошлые кадры. Меняются сразу, без перезапуска."));
-        }
-    }
-    // bbport: frame generation (vk_frame_generation.h, vk_streamline.h); live, DLSS loaded at start.
-    const char* frame_gens[] = {BbSettings::MenuText("Off", "Выкл"), "FSR 3.1", "DLSS (NVIDIA)"};
-    static_assert(std::size(frame_gens) == BbSettings::FrameGenCount);
-    const int frame_gen = std::clamp(s.frame_gen.load(), 0, BbSettings::FrameGenCount - 1);
-    const bool dlss_loaded = s.streamline_loaded.load();
-    const bool dlss_fg = s.dlss_fg_supported.load();
-    if (const char* label = Item("Frame generation", "Генерация кадров")) {
-        if (ImGui::BeginCombo(label, frame_gens[frame_gen])) {
-            for (int i = 0; i < BbSettings::FrameGenCount; ++i) {
-                // DLSS: selectable to load it on the next start; not when it was loaded and this GPU
-                // has none.
-                const bool unavailable = i == BbSettings::FrameGenDlss && dlss_loaded && !dlss_fg;
-                ImGui::BeginDisabled(unavailable);
-                if (ImGui::Selectable(frame_gens[i], i == frame_gen)) {
-                    Store(s.frame_gen, i, true);
-                }
-                ImGui::EndDisabled();
-                if (unavailable) {
-                    ImGui::SameLine();
-                    ImGui::TextDisabled("%s", BbSettings::MenuText("— not supported by this GPU",
-                                                                   "— не поддерживается видеокартой"));
-                }
-            }
-            ImGui::EndCombo();
-        }
-        if (frame_gen == BbSettings::FrameGenDlss) {
-            Hint(BbSettings::MenuText(
-                "NVIDIA DLSS Frame Generation: generated frames from the game's depth, motion vectors "
-                "and the frame without its UI, paced by the driver, with NVIDIA Reflex. RTX 40 (one "
-                "frame) or RTX 50 (up to five); Hardware-accelerated GPU scheduling on. Loads when the "
-                "game starts with it selected. Off in menus, movies and with HDR output.",
-                "NVIDIA DLSS Frame Generation: кадры из глубины, векторов движения и кадра без "
-                "интерфейса игры, подачу ведёт драйвер, с NVIDIA Reflex. RTX 40 (один кадр) или RTX 50 "
-                "(до пяти); должно быть включено аппаратное планирование GPU. Загружается, если игра "
-                "запущена с этим выбором. Не работает в меню, роликах и с HDR."));
+    const bool dlss = s.upscaler == BbSettings::UpscalerDlss;
+    const auto name = [&](int preset) {
+        return preset == BbSettings::NativeAA && dlss ? "DLAA" : BbSettings::MenuText(BbSettings::PresetName(preset));
+    };
+    const BbSettings::SceneSize out = BbSettings::PresetOutput();
+    // Auto with what it picks for an output this tall: "Auto (Quality)".
+    const auto describe = [&](int preset, int height, char* text, std::size_t size) {
+        if (preset == BbSettings::PresetAuto) {
+            std::snprintf(text, size, "%s (%s)", BbSettings::MenuText("Auto"), name(BbSettings::AutoPreset(height)));
         } else {
-            Hint(BbSettings::MenuText(
-                "Shows an extra frame between the game's own (2x smoother motion). Adds a little input "
-                "lag. Needs an upscaler; off in menus, movies and with HDR output.",
-                "Показывает дополнительный кадр между кадрами игры (движение в 2 раза плавнее). Немного "
-                "увеличивает задержку ввода. Нужен апскейлер; не работает в меню, роликах и с HDR."));
+            std::snprintf(text, size, "%s", name(preset));
         }
-        if (frame_gen == BbSettings::FrameGenDlss) {
-            ImGui::PushTextWrapPos();
-            if (!dlss_loaded) {
-                ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "%s",
-                                   BbSettings::MenuText("Restart the game to load DLSS Frame Generation.",
-                                                        "Перезапустите игру, чтобы загрузить DLSS Frame Generation."));
-            }
-            if (const char* problem = s.dlss_fg_problem.load()) {
-                ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f),
-                                   BbSettings::MenuText("DLSS Frame Generation unavailable: %s",
-                                                        "DLSS Frame Generation недоступна: %s"),
-                                   BbSettings::MenuText(problem));
-            }
-            ImGui::PopTextWrapPos();
-        }
-    }
-    if (frame_gen == BbSettings::FrameGenDlss || Searching()) {
-        if (const char* label = Item("DLSS: generated frames", "DLSS: сгенерированных кадров")) {
-            const int max_frames = dlss_fg ? std::max(1, s.dlss_fg_max_frames.load()) : BbSettings::FrameGenFramesMax;
-            int frames = std::clamp(s.frame_gen_frames.load(), 1, max_frames);
-            char shown[16];
-            std::snprintf(shown, sizeof(shown), "%d (%dx)", frames, frames + 1);
-            if (ImGui::SliderInt(label, &frames, 1, max_frames, shown, ImGuiSliderFlags_AlwaysClamp)) {
-                Store(s.frame_gen_frames, frames, true);
-            }
-            Hint(BbSettings::MenuText(
-                "Generated frames per frame the game renders: 1 doubles the frames shown, 3 is 4x. More "
-                "than one needs an RTX 50 GPU (DLSS multi frame generation). Live.",
-                "Сгенерированных кадров на каждый кадр игры: 1 удваивает число кадров, 3 — это 4x. "
-                "Больше одного — только RTX 50 (DLSS Multi Frame Generation). Меняется сразу."));
-        }
-        // bbport: DLSS dynamic multi frame generation (vk_streamline.cpp SetMode), as OptiScaler's
-        // ForceDMFG: the driver adds only the frames the target needs.
-        const bool dynamic_ok = s.dlss_fg_dynamic_supported.load();
-        if (const char* label = Item("DLSS: dynamic multi frame generation",
-                                     "DLSS: динамическая генерация кадров")) {
-            ImGui::BeginDisabled(!dynamic_ok && !Searching());
-            Checkbox(label, s.frame_gen_dynamic);
-            ImGui::EndDisabled();
-            Hint(dynamic_ok
-                     ? BbSettings::MenuText(
-                           "The driver picks 2x, 3x or 4x moment by moment to reach the target (up to "
-                           "the generated frames above): fewer generated frames when the game is fast, "
-                           "less lag and fewer artifacts. Live.",
-                           "Драйвер сам выбирает 2x, 3x или 4x, чтобы достичь цели (не больше числа "
-                           "кадров выше): меньше сгенерированных кадров, когда игра быстрая, меньше "
-                           "задержка и артефактов. Меняется сразу.")
-                     : BbSettings::MenuText("Needs an RTX 50 GPU, a recent driver and DLSS Frame Generation loaded.",
-                                            "Нужна RTX 50, свежий драйвер и загруженная DLSS Frame Generation."));
-        }
-        if (const char* label = Item("DLSS: dynamic target FPS", "DLSS: целевой FPS")) {
-            ImGui::BeginDisabled(!s.frame_gen_dynamic.load());
-            int target = s.frame_gen_target_fps.load();
-            char shown[32];
-            if (target == 0) {
-                std::snprintf(shown, sizeof(shown), "%s", BbSettings::MenuText("Refresh rate", "Частота экрана"));
-            } else {
-                std::snprintf(shown, sizeof(shown), "%d FPS", target);
-            }
-            if (ImGui::SliderInt(label, &target, 0, 360, shown, ImGuiSliderFlags_AlwaysClamp)) {
-                Store(s.frame_gen_target_fps, target, true);
-            }
-            ImGui::EndDisabled();
-        }
-    }
-    if (const char* label = Item("Frame generation: game at a share of the refresh rate",
-                                 "Генерация кадров: игра на доле частоты экрана")) {
-        ImGui::BeginDisabled(frame_gen == BbSettings::FrameGenOff);
-        Checkbox(label, s.frame_gen_cap);
-        ImGui::EndDisabled();
-        Hint(BbSettings::MenuText(
-            "Every generated frame reaches the screen evenly: the game at the refresh rate divided by "
-            "the frames shown per game frame (60 + 60 at 120 Hz with one generated frame). Off: the "
-            "game runs faster, but the screen skips some generated frames.",
-            "Каждый сгенерированный кадр равномерно попадает на экран: игра на частоте экрана, "
-            "делённой на число показанных кадров (60 + 60 при 120 Гц с одним сгенерированным). Выкл: "
-            "игра быстрее, но часть сгенерированных кадров экран пропускает."));
-    }
-    if (dlss_loaded || Searching()) {
-        if (const char* label = Item("NVIDIA Reflex")) {
-            const char* modes[] = {BbSettings::MenuText("Off", "Выкл"), BbSettings::MenuText("On", "Вкл"),
-                                   BbSettings::MenuText("On + Boost", "Вкл + Boost")};
-            static_assert(std::size(modes) == BbSettings::ReflexCount);
-            int mode = std::clamp(s.reflex.load(), 0, BbSettings::ReflexCount - 1);
-            if (ImGui::Combo(label, &mode, modes, BbSettings::ReflexCount)) {
-                Store(s.reflex, mode, true);
-            }
-            Hint(BbSettings::MenuText(
-                "Lower input lag: the GPU's queue is kept short. On (at least) whenever DLSS Frame "
-                "Generation runs; Boost also keeps the GPU clocks up. Only with DLSS Frame Generation "
-                "loaded.",
-                "Меньше задержка ввода: очередь GPU остаётся короткой. Включается всегда, когда "
-                "работает DLSS Frame Generation; Boost ещё держит частоты GPU. Только когда DLSS Frame "
-                "Generation загружена."));
-        }
-    }
-    const bool upscaler_on = s.upscaler != BbSettings::UpscalerOff;
-    const bool taa = s.upscaler == BbSettings::UpscalerTaa;
-    ImGui::BeginDisabled(!upscaler_on);
-    if (const char* label = Item("Preset", "Пресет")) {
-        ImGui::BeginDisabled(taa);
-        const int preset = taa ? BbSettings::NativeAA : s.preset.load();
-        char preset_label[64];
-        std::snprintf(preset_label, sizeof(preset_label), "%s (x%.1f)",
-                      BbSettings::MenuText(BbSettings::PresetName(preset)), BbSettings::PresetScale(preset));
-        if (ImGui::BeginCombo(label, preset_label)) {
-            for (int i = 0; i < BbSettings::PresetCount; ++i) {
+    };
+    const int saved = std::clamp(s.preset.load(), 0, BbSettings::PresetCount - 1);
+    if (const char* label = Item("Upscaling quality", "Качество апскейлинга")) {
+        static constexpr int order[] = {BbSettings::PresetAuto,   BbSettings::NativeAA,    BbSettings::Quality,
+                                        BbSettings::Balanced,     BbSettings::Performance, BbSettings::UltraPerformance,
+                                        BbSettings::PresetCustom};
+        char shown[64];
+        describe(saved, out.height, shown, sizeof(shown));
+        if (ImGui::BeginCombo(label, shown)) {
+            for (const int preset : order) {
                 char choice[64];
-                const float scale = BbSettings::PresetScale(i);
-                const int output = s.output_res;
-                std::snprintf(
-                    choice, sizeof(choice),
-                    BbSettings::MenuText("%s (x%.1f, render %dx%d)", "%s (x%.1f, рендер %dx%d)"),
-                    BbSettings::MenuText(BbSettings::PresetName(i)), scale,
-                    int(std::lround(BbSettings::OutputWidth(output) / scale / 4) * 4),
-                    int(std::lround(BbSettings::OutputHeight(output) / scale / 4) * 4));
-                if (ImGui::Selectable(choice, i == preset)) {
-                    Store(s.preset, i, true);
+                describe(preset, out.height, choice, sizeof(choice));
+                if (ImGui::Selectable(choice, preset == saved)) {
+                    Store(s.preset, preset, true);
                 }
             }
             ImGui::EndCombo();
         }
+        Hint(BbSettings::MenuText(
+            "How far below the output the game renders: lower is faster and softer. Auto: Native AA up "
+            "to 1200 lines, Quality up to 1600, Performance above.",
+            "Насколько ниже вывода рендерит игра: ниже — быстрее и мягче. Авто: Native AA до 1200 строк, "
+            "Quality до 1600, выше — Performance."));
+    }
+    ImGui::Indent();
+    if (const char* label = Item("Render resolution", "Разрешение рендера")) {
+        const bool custom = saved == BbSettings::PresetCustom;
+        const auto scene = BbSettings::PresetRenderSize(saved);
+        int percent = out.width > 0 ? int(std::lround(100.0 * scene.width / out.width)) : 100;
+        char format[64];
+        std::snprintf(format, sizeof(format), "%%d%%%% — %d x %d", scene.width, scene.height);
+        ImGui::BeginDisabled(!custom);
+        if (ImGui::SliderInt(label, &percent, BbSettings::RenderPercentMin(), 100, format,
+                             ImGuiSliderFlags_AlwaysClamp) &&
+            custom) {
+            Store(s.render_scale,
+                  std::clamp(100.0f / float(std::max(percent, 1)), BbSettings::RenderScaleMin, BbSettings::RenderScaleMax),
+                  true);
+        }
         ImGui::EndDisabled();
-        if (taa) {
-            ImGui::TextWrapped("%s", BbSettings::MenuText(
-                                         "TAA anti-aliases the scene at the output resolution, without an FSR "
-                                         "model or upscaling. The saved preset returns when an upscaler is selected."));
-        }
-        // bbport: the Custom preset's ratio (render_scale), like OptiScaler's ratio override.
-        if (!taa && s.preset == BbSettings::PresetCustom) {
-            if (const char* scale_label = Item("Render scale (Custom)", "Масштаб рендера (Custom)")) {
-                Slider(scale_label, s.render_scale, BbSettings::RenderScaleMin, BbSettings::RenderScaleMax, "x%.2f");
-                Hint(BbSettings::MenuText(
-                    "Output / render size for the Custom preset: 1.00 renders at the output (DLAA, Native "
-                    "AA), 1.30 is between Native and Quality, 3.00 is Ultra Performance. FSR 4 and DLSS run "
-                    "the model of the nearest preset. Ctrl+click to type a value.",
-                    "Отношение вывода к рендеру для пресета Custom: 1.00 — рендер в разрешении вывода "
-                    "(DLAA, Native AA), 1.30 — между Native и Quality, 3.00 — Ultra Performance. FSR 4 и "
-                    "DLSS берут модель ближайшего пресета. Ctrl+клик — ввести значение."));
-            }
-        }
-        ImGui::Text(BbSettings::MenuText("Active scene render: %d x %d"), s.active_render_width.load(),
-                    s.active_render_height.load());
-        if (BbSettings::FixedRenderSession()) {
-            ImGui::Text(BbSettings::MenuText("Preset at startup: %s"),
-                        BbSettings::MenuText(BbSettings::PresetName(s.startup_preset)));
-            if (const char* automatic = std::getenv("BB_AUTO_RENDER_RES");
-                automatic && automatic[0] == '1') {
-                Hint(BbSettings::MenuText(
-                    "With an output other than 1080p the whole game renders at the preset resolution "
-                    "(patched at startup): fastest on the Steam Deck and weaker GPUs. Preset or output "
-                    "changes apply after a restart. \"Live resolution changes\" below allows changing "
-                    "without a restart (post-processing then stays at 1080p, slower)."));
-            } else {
-                Hint(BbSettings::MenuText(
-                    "BB_RENDER_RES fixes the scene size at startup. Remove this explicit variable "
-                    "to change resolution and presets without restarting the game."));
-            }
+        Hint(custom ? BbSettings::MenuText(
+                          "The share of the output's width and height the game renders at. DLSS runs the "
+                          "nearest quality's model. Ctrl+click to type a value.",
+                          "Доля ширины и высоты вывода, в которой рендерит игра. DLSS берёт модель "
+                          "ближайшего качества. Ctrl+клик — ввести значение.")
+                    : BbSettings::MenuText("Choose Custom to set your own.", "Выберите Custom, чтобы задать своё."));
+    }
+    ImGui::Text(BbSettings::MenuText("Active scene render: %d x %d"), s.active_render_width.load(),
+                s.active_render_height.load());
+    if (BbSettings::FixedRenderSession()) {
+        char startup[64];
+        describe(std::clamp(s.startup_preset, 0, BbSettings::PresetCount - 1),
+                 BbSettings::OutputHeight(s.startup_output_res), startup, sizeof(startup));
+        ImGui::Text(BbSettings::MenuText("Quality at startup: %s", "Качество при запуске: %s"), startup);
+        if (const char* automatic = std::getenv("BB_AUTO_RENDER_RES"); automatic && automatic[0] == '1') {
+            Hint(BbSettings::MenuText(
+                "Patched at startup for this output: quality and output changes apply after a restart, or "
+                "at once with Live resolution changes on (slower).",
+                "Задано при запуске для этого вывода: смена качества и вывода — после перезапуска, или "
+                "сразу с «Живой сменой разрешения» (медленнее)."));
         } else {
             Hint(BbSettings::MenuText(
-                "Native AA: the upscaler works as anti-aliasing. The other presets lower the scene "
-                "render resolution relative to the output. The UI is drawn at the output resolution. "
-                "The preset applies from the next frame without restarting the game."));
+                "BB_RENDER_RES fixes the scene size at startup. Remove this explicit variable "
+                "to change resolution and presets without restarting the game."));
         }
     }
-    if (const char* label = Item("Sharpening (RCAS)")) {
-        Checkbox(label, s.sharpen);
-    }
-    if (const char* label = Item("Sharpness")) {
-        ImGui::BeginDisabled(!s.sharpen);
-        Slider(label, s.sharpness, 0.0f, 2.0f);
-        ImGui::EndDisabled();
-        Hint(BbSettings::MenuText(
-            "Up to 1: the upscaler's own sharpening (RCAS). Above 1 another RCAS pass is added. "
-            "DLSS has no sharpening of its own: an RCAS pass does all of it. "
-            "Ctrl+click the slider to type an exact value."));
-    }
-    if (const char* label = Item("Texture mip bias", "Mip bias текстур")) {
-        Slider(label, s.mip_bias, BbSettings::MipBiasMin, BbSettings::MipBiasMax, "%+.2f");
-        Hint(BbSettings::MenuText(
-            "Added to the texture detail the upscaler already asks for (the render-to-output ratio, "
-            "and DLSS's extra level): below 0 sharper textures (more shimmer), above 0 softer. 0: "
-            "the upscaler's own. Live.",
-            "Добавляется к детализации текстур, которую уже задаёт апскейлер (соотношение рендера и "
-            "вывода и лишний уровень DLSS): меньше 0 — чётче (больше мерцания), больше 0 — мягче. 0 — "
-            "как у апскейлера. Меняется сразу."));
-    }
-    if (const char* label = Item("Sub-pixel jitter")) {
-        Checkbox(label, s.jitter);
-        Hint(BbSettings::MenuText(
-            "Each frame the scene shifts by a fraction of a pixel, and the upscaler gathers more "
-            "detail from several frames. Without it you only get history-based anti-aliasing."));
-    }
-    ImGui::EndDisabled(); // upscaler off
+    ImGui::Unindent();
 }
 
-// bbport: DLSS's own options (vk_dlss.cpp), live; shown with DLSS selected (and to a search).
-void DlssSection() {
+// 0.4.4 beta 27c: AMD FSR's version: Automatic (the newest AMD runs here) or any AMD's SDK lists for this
+// GPU (fsr_version by name, BbSettings::FsrVersionMatch); live, the context made again.
+void FsrVersionRow() {
     auto& s = BbSettings::Get();
-    if (s.upscaler != BbSettings::UpscalerDlss && !Searching()) {
+    const char* label = Item("FSR version", "Версия FSR");
+    if (!label) {
         return;
     }
-    Section("DLSS");
+    const auto offered = BbSettings::FsrVersionsOffered();
+    const std::string wanted = BbSettings::FsrVersion();
+    const int match = BbSettings::FsrVersionMatch(offered, wanted);
+    const auto shown_name = [](const std::string& name) {
+        std::string text = "FSR " + BbSettings::FsrVersionKey(name);
+        if (name.find('*') != std::string::npos) {
+            text += std::string(" ") + BbSettings::MenuText("(driver)", "(драйвер)");
+        }
+        return text;
+    };
+    std::string automatic = BbSettings::MenuText("Automatic", "Автоматически");
+    if (const std::string newest = BbSettings::NewestFsrVersion(offered); !newest.empty()) {
+        automatic += " (" + shown_name(newest) + ")";
+    }
+    const std::string preview = match >= 0 ? shown_name(offered[size_t(match)]) : automatic;
+    if (ImGui::BeginCombo(label, preview.c_str())) {
+        if (ImGui::Selectable(automatic.c_str(), match < 0)) {
+            BbSettings::SetFsrVersion("auto");
+            dirty = true;
+        }
+        for (int i = 0; i < int(offered.size()); ++i) {
+            const std::string text = shown_name(offered[size_t(i)]);
+            if (ImGui::Selectable(text.c_str(), i == match)) {
+                BbSettings::SetFsrVersion(BbSettings::FsrVersionKey(offered[size_t(i)]));
+                dirty = true;
+            }
+        }
+        ImGui::EndCombo();
+    }
+    Hint(BbSettings::MenuText(
+        "The versions AMD's FSR SDK offers on this GPU; Automatic runs the newest. A change builds the "
+        "upscaler again (a few seconds at full size, without it).",
+        "Версии, которые FSR SDK от AMD предлагает для этой видеокарты; «Автоматически» — новейшая. "
+        "Смена пересобирает апскейлер (несколько секунд в полном разрешении без него)."));
+    if (const char* running = s.fsr_running.load()) {
+        ImGui::TextDisabled(s.fsr_running_driver.load()
+                                ? BbSettings::MenuText("Running: %s (from AMD's driver)", "Работает: %s (из драйвера AMD)")
+                                : BbSettings::MenuText("Running: %s", "Работает: %s"),
+                            running);
+    }
+    if (match < 0 && wanted != "auto" && !offered.empty()) {
+        ImGui::TextDisabled(BbSettings::MenuText("FSR %s is not offered on this GPU: Automatic runs",
+                                                 "FSR %s нет для этой видеокарты: работает автоматический выбор"),
+                            wanted.c_str());
+    }
+}
+
+// 0.4.4 beta 27c: DLSS's model, under the upscaler (was the DLSS section's first row); live.
+void DlssModelRow() {
+    auto& s = BbSettings::Get();
     if (const char* label = Item("DLSS model", "Модель DLSS")) {
         // The letters NVIDIA's DLSS 4 and 4.5 DLLs know; a preset the DLL refuses runs its default.
-        static constexpr int presets[] = {BbSettings::DlssPresetAuto, 11, 10, 13, 12, 5, 6,
+        // 0.4.4 beta 25b: E and F (CNN) left out: NVIDIA deprecated them (DLSS 310.6.0).
+        static constexpr int presets[] = {BbSettings::DlssPresetAuto, 11, 10, 13, 12,
                                           BbSettings::DlssPresetDefault};
         const char* names[] = {
             BbSettings::MenuText("Auto: K, M for Performance, L for Ultra Performance",
                                  "Авто: K, M для Performance, L для Ultra Performance"),
-            BbSettings::MenuText("K: transformer (default)", "K: трансформер (по умолчанию)"),
+            BbSettings::MenuText("K: transformer", "K: трансформер"),
             BbSettings::MenuText("J: transformer", "J: трансформер"),
             BbSettings::MenuText("M: transformer, 2nd generation", "M: трансформер 2-го поколения"),
             BbSettings::MenuText("L: transformer, 2nd generation (Ultra Performance)",
                                  "L: трансформер 2-го поколения (Ultra Performance)"),
-            BbSettings::MenuText("E: CNN", "E: CNN"),
-            BbSettings::MenuText("F: CNN (Ultra Performance, DLAA)", "F: CNN (Ultra Performance, DLAA)"),
             BbSettings::MenuText("The DLL's default", "По умолчанию DLL"),
         };
         static_assert(std::size(presets) == std::size(names));
@@ -1042,18 +881,25 @@ void DlssSection() {
             ImGui::EndCombo();
         }
         Hint(BbSettings::MenuText(
-            "Which NVIDIA model DLSS runs; it changes at once (a brief pause). K keeps thin and moving "
-            "objects steadier; E is a little faster on RTX 20 and 30 cards but softer in motion. M and L "
-            "need a DLSS 4.5 nvngx_dlss.dll (310.5 or newer). A preset the DLL refuses runs its default. "
-            "The launcher's Graphics page has the same setting.",
-            "Какую модель NVIDIA запускает DLSS; меняется сразу (короткая пауза). K устойчивее на тонких "
-            "и движущихся объектах; E чуть быстрее на RTX 20 и 30, но мягче в движении. Для M и L нужен "
-            "nvngx_dlss.dll из DLSS 4.5 (310.5 или новее). Пресет, который DLL не принимает, заменяется "
-            "её пресетом по умолчанию. Та же настройка есть на странице «Графика» лаунчера."));
+            "Which NVIDIA model DLSS runs; it changes at once (a brief pause). Auto, the default, is "
+            "NVIDIA's pairing for each quality. M and L need DLSS 310.5 or newer; a model the DLL refuses "
+            "runs its default.",
+            "Какую модель NVIDIA запускает DLSS; меняется сразу (короткая пауза). Авто, по умолчанию, — "
+            "выбор NVIDIA для каждого качества. Для M и L нужен DLSS 310.5 или новее; модель, которую DLL "
+            "не принимает, заменяется её моделью по умолчанию."));
+        // 0.4.4 beta 27c: with the DLSS file's version (BbSettings::dlss_version).
         const int applied = s.dlss_applied_preset;
-        if (applied > 0) {
+        const char* version = s.dlss_version.load();
+        if (applied > 0 && version) {
+            ImGui::TextDisabled(BbSettings::MenuText("Running: DLSS %s, model %c", "Работает: DLSS %s, модель %c"),
+                                version, char('A' + applied - 1));
+        } else if (applied > 0) {
             ImGui::TextDisabled(BbSettings::MenuText("Running: preset %c", "Работает: пресет %c"),
                                 char('A' + applied - 1));
+        } else if (applied == 0 && version) {
+            ImGui::TextDisabled(BbSettings::MenuText("Running: DLSS %s, the DLL's default model",
+                                                     "Работает: DLSS %s, модель DLL по умолчанию"),
+                                version);
         } else if (applied == 0) {
             ImGui::TextDisabled("%s", BbSettings::MenuText("Running: the DLL's default preset",
                                                            "Работает: пресет DLL по умолчанию"));
@@ -1067,29 +913,194 @@ void DlssSection() {
             ImGui::PopTextWrapPos();
         }
     }
-    if (const char* label = Item("DLSS: auto exposure", "DLSS: авто-экспозиция")) {
-        Checkbox(label, s.dlss_auto_exposure);
-        Hint(BbSettings::MenuText(
-            "DLSS works out the frame's exposure itself, for the game's tonemapped frame too (the HDR "
-            "scene at 1080p always has it). Can steady dark scenes that ghost. Live (a brief pause).",
-            "DLSS сам определяет экспозицию кадра, и для готового кадра игры (HDR-сцена при 1080p — "
-            "всегда). Может успокоить тёмные сцены с гостингом. Меняется сразу (короткая пауза)."));
-    }
-    if (const char* label = Item("DLSS: sharper textures (mip bias -1)", "DLSS: чётче текстуры (mip bias -1)")) {
-        Checkbox(label, s.dlss_mip_bias);
-        Hint(BbSettings::MenuText(
-            "Textures one mip level sharper than the render resolution alone gives, as NVIDIA's DLSS "
-            "guide asks. Off: only the render-to-output ratio. Live.",
-            "Текстуры на один mip-уровень чётче, чем даёт само разрешение рендера, как советует "
-            "руководство NVIDIA по DLSS. Выкл.: только соотношение рендера и вывода. Меняется сразу."));
-    }
 }
 
-// bbport: FSR 3.1's tuning constants (vk_temporal_upscaler.cpp ApplyFsr3Tuning), as OptiScaler
-// offers them, with presets; live. Shown with FSR 3.1 selected (and to a search).
+// The anti-aliasing, the upscaler with its quality, version or model, sharpening, and the fine settings
+// (Advanced).
+void UpscalerSection() {
+    auto& s = BbSettings::Get();
+    Section("Temporal upscaler", "Временной апскейлер");
+    const bool upscaling = BbSettings::IsFrameUpscaler(s.upscaler);
+    // 0.4.4 beta 27b: the anti-aliasing without an upscaler, as the launcher's (27c: first, as there): TAA (live), the game's
+    // own pass (a patch at start) or none. An upscaler anti-aliases itself; the game's pass is left out
+    // under it (patches.cpp NoUpscaler).
+    if (const char* label = Item("Anti-aliasing", "Сглаживание")) {
+        // 0.4.4 beta 28 (the tester): Off first, then the game's own and TAA.
+        enum { AaOff, AaGame, AaTaa };
+        const char* modes[] = {BbSettings::MenuText("Off", "Выкл"),
+                               BbSettings::MenuText("The game's own", "Собственное игры"), "TAA"};
+        const bool game_aa = s.effects[BbSettings::EffectGameAa];
+        const int mode = s.upscaler == BbSettings::UpscalerOff ? (game_aa ? AaGame : AaOff)
+                         : s.upscaler == BbSettings::UpscalerTaa ? AaTaa
+                                                                 : (game_aa ? AaGame : AaTaa); // what None goes back to
+        int picked = mode;
+        // 0.4.4 beta 27d (the tester): with an upscaler the box names it, greyed, as the launcher's; the
+        // choice is kept for Upscaler None.
+        char instead[64] = {};
+        if (upscaling) {
+            std::snprintf(instead, sizeof(instead), BbSettings::MenuText("Upscaler (%s)", "Апскейлер (%s)"),
+                          s.upscaler == BbSettings::UpscalerDlss ? "DLSS" : "AMD FSR");
+        }
+        ImGui::BeginDisabled(upscaling);
+        if (ImGui::BeginCombo(label, upscaling ? instead : modes[mode])) {
+            for (int i = 0; i < int(std::size(modes)); ++i) {
+                if (ImGui::Selectable(modes[i], i == mode)) {
+                    picked = i;
+                }
+            }
+            ImGui::EndCombo();
+        }
+        if (picked != mode) {
+            Store(s.upscaler, picked == AaTaa ? int(BbSettings::UpscalerTaa) : int(BbSettings::UpscalerOff), true);
+            Store(s.effects[BbSettings::EffectGameAa], picked == AaGame, true);
+        }
+        ImGui::EndDisabled();
+        if (!upscaling) {
+            Hint(BbSettings::MenuText(
+                "Off: the sharpest picture, with jagged edges. The game's own: its anti-aliasing pass, "
+                "as on the PS4, after a restart. TAA: smooth edges at the output resolution, live "
+                "(sharpening helps).",
+                "Выкл: самая резкая картинка, с лесенками. Собственное игры: её проход сглаживания, "
+                "как на PS4, после перезапуска. TAA: гладкие края в разрешении вывода, сразу "
+                "(поможет резкость)."));
+        }
+    }
+    if (const char* label = Item("Upscaler", "Апскейлер")) {
+        // 0.4.4 beta 27: one FSR, AMD's (AMD's FSR SDK picks the version); FSR 3.1 (FireBurn's), FSR 4
+        // and FSR 4.1.1 went. 27b: the upscalers or None, as the launcher's Graphics page; with None,
+        // Anti-aliasing below decides (none, the game's own pass or TAA).
+        // 0.4.4 beta 28 (the tester): None first.
+        const char* upscalers[] = {BbSettings::MenuText("None", "Нет"), "AMD FSR", "DLSS (NVIDIA)"};
+        const int kinds[] = {BbSettings::UpscalerOff, BbSettings::UpscalerFsr, BbSettings::UpscalerDlss};
+        const int upscaler = s.upscaler;
+        const int shown = upscaler == BbSettings::UpscalerFsr ? 1 : upscaler == BbSettings::UpscalerDlss ? 2 : 0;
+        if (ImGui::BeginCombo(label, upscalers[shown])) {
+            for (int i = 0; i < int(std::size(upscalers)); ++i) {
+                const bool supported = kinds[i] == BbSettings::UpscalerFsr    ? s.fsr_supported.load()
+                                       : kinds[i] == BbSettings::UpscalerDlss ? s.dlss_supported.load()
+                                                                              : true;
+                ImGui::BeginDisabled(!supported);
+                if (ImGui::Selectable(upscalers[i], i == shown) && i != shown) {
+                    // None: TAA, or no upscaler with the game's own anti-aliasing on.
+                    Store(s.upscaler, kinds[i] != BbSettings::UpscalerOff ? kinds[i]
+                                      : BbSettings::NoUpscaling(s.effects[BbSettings::EffectGameAa]),
+                          true);
+                }
+                ImGui::EndDisabled();
+                if (!supported) {
+                    ImGui::SameLine();
+                    ImGui::TextDisabled("%s", kinds[i] == BbSettings::UpscalerFsr
+                                                  ? BbSettings::MenuText("— not available here (AMD's files, or not Windows)",
+                                                                         "— недоступен (нет файлов AMD или не Windows)")
+                                                  : BbSettings::MenuText("— not supported by this GPU",
+                                                                         "— не поддерживается видеокартой"));
+                }
+            }
+            ImGui::EndCombo();
+        }
+        if (const char* problem = s.fsr4_problem.load()) {
+            ImGui::PushTextWrapPos();
+            ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), BbSettings::MenuText("Upscaler unavailable: %s"),
+                               BbSettings::MenuText(problem));
+            if (!BbSettings::IsFrameUpscaler(s.upscaler))
+                ImGui::TextUnformatted(BbSettings::MenuText(
+                    "Anti-aliasing above runs instead. Select the upscaler again to retry.",
+                    "Вместо него работает сглаживание выше. Выберите апскейлер снова, чтобы повторить."));
+            ImGui::PopTextWrapPos();
+        }
+    }
+    // 0.4.4 beta 27b/27c: the upscaler's own rows, under it: its quality and render resolution, then
+    // the chosen upscaler's version or model (the DLSS section's model moved here).
+    ImGui::Indent();
+    if (upscaling || Searching()) {
+        QualityRows();
+    }
+    if (s.upscaler == BbSettings::UpscalerFsr || Searching()) {
+        // 0.4.4 beta 27d: its auto exposure as AMD advises (no checkbox), the jitter sign check in
+        // config.ini only (fsr_invert_jitter): neither a player's choice.
+        FsrVersionRow();
+    }
+    if (s.upscaler == BbSettings::UpscalerDlss || Searching()) {
+        DlssModelRow();
+    }
+    ImGui::Unindent();
+    const bool temporal = s.upscaler != BbSettings::UpscalerOff; // an upscaler or TAA
+    // Sharpening after an upscaler or TAA, its strength under it. 0.4.4 beta 27d (the tester): their
+    // hints say where it runs for what runs, as the launcher's lines: FSR sharpens up to 1 itself and an
+    // RCAS pass adds the rest; DLSS has none of its own, so the pass does it all; TAA's runs after it.
+    const bool fsr = s.upscaler == BbSettings::UpscalerFsr;
+    const char* where = s.upscaler == BbSettings::UpscalerDlss
+                            ? BbSettings::MenuText("After DLSS (it has none of its own).", "После DLSS (своей у него нет).")
+                        : fsr ? BbSettings::MenuText("FSR's own sharpening.", "Собственная резкость FSR.")
+                        : s.upscaler == BbSettings::UpscalerTaa ? BbSettings::MenuText("After TAA.", "После TAA.")
+                                                                : BbSettings::MenuText("Needs an upscaler or TAA.",
+                                                                                       "Нужен апскейлер или TAA.");
+    ImGui::BeginDisabled(!temporal);
+    if (const char* label = Item("Sharpening (RCAS)")) {
+        Checkbox(label, s.sharpen);
+        char hint[384];
+        std::snprintf(hint, sizeof(hint), "%s %s", where,
+                      BbSettings::MenuText("AMD's RCAS: brings back detail that upscaling softens.",
+                                           "RCAS от AMD: возвращает детали, которые смягчает апскейлинг."));
+        Hint(hint);
+    }
+    ImGui::Indent();
+    if (const char* label = Item("Sharpening strength", "Сила резкости")) {
+        ImGui::BeginDisabled(!s.sharpen);
+        Slider(label, s.sharpness, 0.0f, 2.0f);
+        ImGui::EndDisabled();
+        char hint[384];
+        std::snprintf(hint, sizeof(hint), "%s %s",
+                      fsr ? BbSettings::MenuText("Above 1 adds a second pass.", "Выше 1 добавляется второй проход.")
+                          : BbSettings::MenuText("Higher is sharper.", "Чем выше, тем резче."),
+                      BbSettings::MenuText("0.20 is light; high values can halo edges and show grain. Ctrl+click to "
+                                           "type a value.",
+                                           "0.20 — слегка; высокие значения дают ореолы по краям и зерно. Ctrl+щелчок — "
+                                           "ввести значение."));
+        Hint(hint);
+    }
+    ImGui::Unindent();
+    ImGui::EndDisabled(); // no upscaler or TAA
+
+    // 0.4.4 beta 27b: the fine settings most players leave alone, as the launcher's Advanced (character
+    // motion vectors were in Motion vectors, with the debug view).
+    Section("Advanced", "Дополнительно");
+    if (const char* label = Item("Character motion vectors", "Векторы движения персонажей")) {
+        ImGui::BeginDisabled(!temporal);
+        Checkbox(label, s.object_motion);
+        ImGui::EndDisabled();
+        Hint(BbSettings::MenuText(
+            "Accurate vectors for animated objects: clothing and weapons break up less "
+            "during movement, at about 10% of the frame rate. The static scene does not get an "
+            "additional pass. With an upscaler or TAA. Changes apply after restarting the game.",
+            "Точные векторы для анимированных объектов: одежда и оружие меньше рассыпаются "
+            "при движении, ценой около 10% частоты кадров. Статичная сцена не получает "
+            "дополнительный проход. С апскейлером или TAA. Изменение применяется после "
+            "перезапуска игры."));
+    }
+    // 0.4.4 beta 27d: with an upscaler only (TemporalUpscaler::SceneMipBias: TAA renders at the output).
+    // DLSS's sharper textures folded in (the extra level NVIDIA and AMD both advise, always); DLSS's auto
+    // exposure as NVIDIA advises, without a checkbox; sub-pixel jitter in config.ini only (jitter=0).
+    ImGui::BeginDisabled(!upscaling);
+    if (const char* label = Item("Texture mip bias", "Mip bias текстур")) {
+        Slider(label, s.mip_bias, BbSettings::MipBiasMin, BbSettings::MipBiasMax, "%+.2f");
+        Hint(BbSettings::MenuText(
+            "Added to the texture detail the upscaler asks for: the render-to-output ratio and one "
+            "level more, as NVIDIA and AMD advise. Below 0 sharper textures (more shimmer), above 0 "
+            "softer. Live.",
+            "Добавляется к детализации текстур, которую задаёт апскейлер: соотношение рендера и вывода "
+            "и ещё один уровень, как советуют NVIDIA и AMD. Меньше 0 — чётче (больше мерцания), больше "
+            "0 — мягче. Меняется сразу."));
+    }
+    ImGui::EndDisabled(); // no upscaler
+}
+
+
+// bbport: FSR 3.1's tuning constants (AMD's key-value configuration, AmdFsr::Tune), as OptiScaler
+// offers them, with presets; live. Shown while AMD FSR runs FSR 3.1 (and to a search).
 void Fsr3Section() {
     auto& s = BbSettings::Get();
-    if (s.upscaler != BbSettings::UpscalerFsr3 && !Searching()) {
+    if ((s.upscaler != BbSettings::UpscalerFsr || !s.fsr_runs_31.load()) && !Searching()) {
         return;
     }
     Section("FSR 3.1 tuning", "Настройка FSR 3.1");
@@ -1104,7 +1115,8 @@ void Fsr3Section() {
         {"Less ghosting", "Меньше шлейфов", 1.0f, 1.5f, 1.5f, 0.25f, -0.333f},
         {"Less flicker", "Меньше мерцания", 1.0f, 1.0f, 1.0f, 0.4f, -0.1f},
     };
-    if (const char* label = Item("Preset", "Пресет")) {
+    // 0.4.4 beta 27c: "Tuning" (was "Preset", now the quality's word elsewhere).
+    if (const char* label = Item("Tuning", "Настройка")) {
         int index = -1;
         for (int i = 0; i < int(std::size(presets)); ++i) {
             const auto& p = presets[i];
@@ -1161,26 +1173,24 @@ void MaskSection() {
     auto& s = BbSettings::Get();
     const bool upscaler_on = s.upscaler != BbSettings::UpscalerOff;
     const bool taa = s.upscaler == BbSettings::UpscalerTaa;
+    // 0.4.4 beta 25b: DLSS takes no mask (ReactiveOn): its bias mask is one NVIDIA advises against.
+    const bool dlss = s.upscaler == BbSettings::UpscalerDlss;
     ImGui::BeginDisabled(!upscaler_on);
     Section("Reactive mask");
-    ImGui::BeginDisabled(taa);
+    ImGui::BeginDisabled(taa || dlss);
     if (const char* label = Item("Enable mask")) {
         Checkbox(label, s.reactive);
         Hint(BbSettings::MenuText(
             "Marks transparent effects (particles, haze) so the upscaler relies less on past "
             "frames. Fewer trails behind effects, but shimmer returns underneath them."));
         // What the selected upscaler does with it.
-        const char* use = s.upscaler == BbSettings::UpscalerFsr3
-                              ? BbSettings::MenuText("FSR 3.1 uses it as its reactive mask.",
-                                                     "FSR 3.1 берёт её как свою реактивную маску.")
-                          : s.upscaler == BbSettings::UpscalerDlss
-                              ? BbSettings::MenuText("DLSS uses it to trust the current frame more (its bias mask).",
-                                                     "DLSS по ней больше доверяет текущему кадру (маска смещения).")
-                          : BbSettings::IsFsr4(s.upscaler)
-                              ? BbSettings::MenuText("FSR 4 has no mask input: the marked pixels are blended with "
-                                                     "this frame after it.",
-                                                     "У FSR 4 нет входа для маски: отмеченные пиксели смешиваются "
-                                                     "с текущим кадром после него.")
+        const char* use = s.upscaler == BbSettings::UpscalerFsr
+                              ? BbSettings::MenuText("AMD FSR takes it as its reactive mask (FSR 3.1 uses it; FSR 4 "
+                                                     "may).",
+                                                     "AMD FSR берёт её как реактивную маску (FSR 3.1 её использует; "
+                                                     "FSR 4 может).")
+                          : dlss
+                              ? BbSettings::MenuText("DLSS does not use it.", "DLSS её не использует.")
                               : BbSettings::MenuText("TAA does not use it.", "TAA её не использует.");
         ImGui::PushTextWrapPos();
         ImGui::TextDisabled("%s", use);
@@ -1213,16 +1223,6 @@ void MaskSection() {
     ImGui::EndDisabled();
 
     Section("Motion vectors", "Векторы движения");
-    if (const char* label = Item("Character motion vectors", "Векторы движения персонажей")) {
-        Checkbox(label, s.object_motion);
-        Hint(BbSettings::MenuText(
-            "Accurate vectors for animated objects: clothing and weapons break up less "
-            "during movement. The static scene does not get an additional pass. "
-            "Changes apply after restarting the game.",
-            "Точные векторы для анимированных объектов: одежда и оружие меньше рассыпаются "
-            "при движении. Статичная сцена не получает дополнительный проход. "
-            "Изменение применяется после перезапуска игры."));
-    }
     if (const char* label = Item("Show motion vectors (debug)", "Показать векторы движения (отладка)")) {
         bool show_motion = s.debug_view == BbSettings::DebugMotion;
         if (ImGui::Checkbox(label, &show_motion)) {
@@ -1242,7 +1242,7 @@ void MaskSection() {
 }
 
 // bbport: OptiScaler (vk_optiscaler.h): what was found at start, and the engine's compatibility
-// mode for it (optiscaler_* in config.ini, applied on restart).
+// mode for it (optiscaler_compat in config.ini, applied on restart).
 void OptiScalerSection() {
     auto& s = BbSettings::Get();
     const auto& opti = Vulkan::OptiScaler::Detect();
@@ -1268,10 +1268,9 @@ void OptiScalerSection() {
                 ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f),
                                    BbSettings::MenuText(
                                        "Its own frame generation is on (%s). If the GPU is lost, set Frame "
-                                       "Generation to none in OptiScaler's menu and use Frame generation above.",
+                                       "Generation to none in OptiScaler's menu.",
                                        "Включена его собственная генерация кадров (%s). Если GPU теряется, "
-                                       "выберите none для Frame Generation в меню OptiScaler и используйте "
-                                       "генерацию кадров выше."),
+                                       "выберите none для Frame Generation в меню OptiScaler."),
                                    opti.frame_generation.c_str());
             }
         }
@@ -1297,33 +1296,6 @@ void OptiScalerSection() {
                                           "compatibility."));
         }
     }
-    ImGui::BeginDisabled(!s.optiscaler_compat);
-    ImGui::Indent();
-    if (const char* label = Item("DLSS calls wait for the GPU queue", "Вызовы DLSS ждут очередь GPU")) {
-        Checkbox(label, s.optiscaler_ngx_lock);
-    }
-    if (const char* label = Item("Vulkan device on a thread of its own", "Устройство Vulkan в отдельном потоке")) {
-        Checkbox(label, s.optiscaler_clean_thread);
-    }
-    if (const char* label = Item("One GPU submit thread", "Один поток отправки GPU")) {
-        const char* modes[] = {BbSettings::MenuText("With its frame generation only", "Только с его генерацией кадров"),
-                               BbSettings::MenuText("Always", "Всегда"), BbSettings::MenuText("Off", "Выкл.")};
-        const int current = s.optiscaler_sync_submit;
-        int index = current == BbSettings::OptiSubmitOn ? 1 : current == BbSettings::OptiSubmitOff ? 2 : 0;
-        if (ImGui::Combo(label, &index, modes, 3)) {
-            Store(s.optiscaler_sync_submit,
-                  index == 1 ? int(BbSettings::OptiSubmitOn)
-                             : index == 2 ? int(BbSettings::OptiSubmitOff) : int(BbSettings::OptiSubmitAuto),
-                  true);
-        }
-        Hint(BbSettings::MenuText(
-            "The parts of the compatibility mode, each applied after a restart. Turn one off only to "
-            "find which one a crash with OptiScaler comes from, and post your log either way.",
-            "Части режима совместимости, каждая применяется после перезапуска. Выключайте их по одной, "
-            "только чтобы найти, из-за какой падает игра с OptiScaler, и в любом случае пришлите лог."));
-    }
-    ImGui::Unindent();
-    ImGui::EndDisabled();
 }
 
 // Output resolution and live resolution changes.
@@ -1347,7 +1319,7 @@ void OutputSection() {
             }
             ImGui::EndCombo();
         }
-        if (BbSettings::FixedRenderSession()) {
+        if (!BbSettings::OutputChangesLive()) { // 0.4.4 beta 26b: Live resolution changes off, 1080p starts too
             Hint(BbSettings::MenuText(
                 "Size of the final frame and UI. The preset sets the scene size relative to "
                 "the output: 4K Performance = 1920x1080. Applies after restarting the game.",
@@ -1364,14 +1336,14 @@ void OutputSection() {
         }
     }
     if (const char* label = Item("Live resolution changes", "Смена разрешения на лету")) {
-        const char* live_modes[] = {BbSettings::MenuText("Auto (based on GPU)", "Авто (по видеокарте)"),
-                                    BbSettings::MenuText("Off (faster)", "Выключена (быстрее)"),
+        // 0.4.4 beta 25c: Off (recommended) or On; no "Auto".
+        const char* live_modes[] = {BbSettings::MenuText("Off (recommended)", "Выключена (рекомендуется)"),
                                     BbSettings::MenuText("On", "Включена")};
-        const int live = s.live_resolution + 1;
+        const int live = std::clamp(s.live_resolution.load(), 0, 1);
         if (ImGui::BeginCombo(label, live_modes[live])) {
-            for (int i = 0; i < 3; ++i) {
+            for (int i = 0; i < 2; ++i) {
                 if (ImGui::Selectable(live_modes[i], i == live)) {
-                    Store(s.live_resolution, i - 1, true);
+                    Store(s.live_resolution, i, true);
                 }
             }
             ImGui::EndCombo();
@@ -1379,20 +1351,23 @@ void OutputSection() {
         Hint(BbSettings::MenuText(
             "On: output resolution and preset change without restarting, but game post-processing "
             "stays at 1080p, which is noticeably slower on Steam Deck and older GPUs. "
-            "Off: everything renders at the preset resolution, and changes require a restart. Auto "
-            "enables this on powerful discrete GPUs. Applies after restarting the game.",
+            "Off (recommended): everything renders at the preset resolution, and changes require a "
+            "restart. Applies after restarting the game.",
             "Включена: разрешение вывода и пресет меняются без перезапуска, но постобработка игры "
             "остаётся в 1080p — на Steam Deck и старых видеокартах это заметно медленнее. "
-            "Выключена: всё рисуется в разрешении пресета, смена — через перезапуск. Авто включает "
-            "её на мощных дискретных видеокартах. Применяется после перезапуска игры."));
+            "Выключена (рекомендуется): всё рисуется в разрешении пресета, смена — через "
+            "перезапуск. Применяется после перезапуска игры."));
     }
 }
 
 void CameraSection() {
     auto& s = BbSettings::Get();
-    Section("PC Camera");
-    if (WholeSection() && Shown("PC Camera")) {
-        ImGui::TextDisabled("%s", BbSettings::MenuText("Enable PC Camera in the launcher before starting; changes here are live."));
+    // 0.4.4 beta 26: the launcher's name for it (Gameplay › Camera tuning), was "PC Camera".
+    Section("Camera tuning", "Настройка камеры");
+    if (WholeSection() && Shown("Camera tuning")) {
+        ImGui::TextDisabled("%s", BbSettings::MenuText(
+            "Turn on Camera tuning in the launcher (Gameplay) before starting; changes here are live.",
+            "Включите настройку камеры в лаунчере (Игровой процесс) перед запуском; изменения здесь применяются сразу."));
     }
     if (const char* label = Item("Camera FOV scale")) {
         Slider(label, s.camera_fov_scale, 1.0f, 1.5f);
@@ -1497,7 +1472,7 @@ void MouseSection();
 void FpsSection() {
     auto& s = BbSettings::Get();
     Section("FPS counter", "Счётчик FPS");
-    if (const char* label = Item("FPS counter in corner", "Счётчик FPS в углу")) {
+    if (const char* label = Item("FPS counter", "Счётчик FPS")) {
         Checkbox(label, s.show_fps);
     }
     if (const char* label = Item("Note while shaders build", "Надпись при сборке шейдеров")) {
@@ -1616,7 +1591,6 @@ void DrawTab(int tab) {
     switch (tab) {
     case TabUpscaling:
         UpscalerSection();
-        DlssSection();
         Fsr3Section();
         MaskSection();
         OptiScalerSection();
@@ -1767,14 +1741,13 @@ void Menu() {
         s.live_resolution != s.startup_live_resolution || s.hdr != s.startup_hdr ||
         BbSettings::ResolutionNeedsRestart();
     for (int e = 0; e < BbSettings::EffectCount; ++e) {
-        restart |= s.effects[e] != s.startup_effects[e];
+        restart |= e != BbSettings::EffectGameAa && s.effects[e] != s.startup_effects[e];
     }
+    // 0.4.4 beta 27b: the game's own anti-aliasing, patched at start, applies only without an upscaler.
+    restart |= BbSettings::GameAaApplies(s.effects[BbSettings::EffectGameAa], s.upscaler) !=
+               BbSettings::GameAaApplies(s.startup_effects[BbSettings::EffectGameAa], s.startup_upscaler);
     // OptiScaler's switches matter only with it loaded.
-    restart |= Vulkan::OptiScaler::Detect().loaded &&
-               (s.optiscaler_compat != s.startup_optiscaler.compat ||
-                s.optiscaler_ngx_lock != s.startup_optiscaler.ngx_lock ||
-                s.optiscaler_clean_thread != s.startup_optiscaler.clean_thread ||
-                s.optiscaler_sync_submit != s.startup_optiscaler.sync_submit);
+    restart |= Vulkan::OptiScaler::Detect().loaded && s.optiscaler_compat != s.startup_optiscaler_compat;
     if (restart) {
         ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "%s",
                            BbSettings::MenuText("Changes apply after restarting the game",
@@ -1783,6 +1756,10 @@ void Menu() {
         if (ImGui::Button(
                 BbSettings::MenuText("Apply and restart game", "Применить и перезапустить игру"))) {
             BbSettings::Save();
+            // Out of a co-op room first, as closing the window is (bbgpu.cpp): the new process
+            // signs in as a new member, and the server kept the old one until its heartbeat aged.
+            bbnet_exit_begin(2000);
+            bbnet_exit_wait();
             runtime_restart();
         }
     }
@@ -1902,18 +1879,28 @@ void FpsCounter() {
     if (s.show_fps_rate) {
         n += std::snprintf(text + n, sizeof(text) - n, "%.0f FPS",
                            frame_ms_avg > 0.0f ? 1000.0f / frame_ms_avg : 0.0f);
-        // bbport: with frame generation the frames shown and the game's own.
-        if (s.frame_gen_active) {
-            n += std::snprintf(text + n, sizeof(text) - n, " (game %.0f, frame gen 2x)",
-                               s.frame_gen_game_fps.load());
-        }
     }
     if (s.show_fps_frame_time) {
         n += std::snprintf(text + n, sizeof(text) - n, "%s%.1f ms", n ? "  " : "", frame_ms_avg);
     }
     if (s.show_fps_upscaler) {
-        n += std::snprintf(text + n, sizeof(text) - n, "%s%s", n ? "  " : "",
-                           BbSettings::UpscalerName(s.upscaler));
+        // 0.4.4 beta 27c: what runs: AMD's version name ("FSR 3.1.6"), DLSS with its model ("DLSS K"),
+        // TAA; "off" without.
+        const int upscaler = s.upscaler;
+        const int model = s.dlss_applied_preset;
+        const char* fsr = s.fsr_running.load();
+        char running[48];
+        if (upscaler == BbSettings::UpscalerFsr) {
+            std::snprintf(running, sizeof(running), "%s", fsr ? fsr : "AMD FSR");
+        } else if (upscaler == BbSettings::UpscalerDlss && model > 0) {
+            std::snprintf(running, sizeof(running), "DLSS %c", char('A' + model - 1));
+        } else {
+            std::snprintf(running, sizeof(running), "%s",
+                          upscaler == BbSettings::UpscalerDlss ? "DLSS"
+                          : upscaler == BbSettings::UpscalerTaa ? "TAA"
+                                                                : BbSettings::UpscalerName(upscaler));
+        }
+        n += std::snprintf(text + n, sizeof(text) - n, "%s%s", n ? "  " : "", running);
     }
     if (s.show_fps_cpu || s.show_fps_gpu) {
         const BbUsage::Sample use = BbUsage::Get(s.show_fps_cpu, s.show_fps_gpu);
@@ -1928,7 +1915,7 @@ void FpsCounter() {
         return;
     }
     // bbport: the text changes twice a second: redrawn every frame its numbers flickered too fast
-    // to read (100+ frames a second with frame generation).
+    // to read (at 100+ frames a second).
     static char shown[sizeof(text)] = "";
     static auto shown_at = std::chrono::steady_clock::time_point{};
     const auto now = std::chrono::steady_clock::now();
@@ -1955,8 +1942,7 @@ void FpsCounter() {
     static size_t min_width_key = 0;
     const size_t width_key = size_t(s.show_fps_rate) | size_t(s.show_fps_frame_time) << 1 |
                              size_t(s.show_fps_upscaler) << 2 | size_t(s.show_fps_cpu) << 3 |
-                             size_t(s.show_fps_gpu) << 4 | size_t(s.frame_gen_active) << 5 |
-                             size_t(s.upscaler) << 6 | size_t(s.fps_scale * 100.0f) << 12;
+                             size_t(s.show_fps_gpu) << 4 | size_t(s.upscaler) << 6 | size_t(s.fps_scale * 100.0f) << 12;
     if (width_key != min_width_key) {
         min_width = 0.0f;
         min_width_key = width_key;

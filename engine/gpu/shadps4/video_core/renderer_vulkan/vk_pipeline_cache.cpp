@@ -480,12 +480,6 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
     profile.uniform_dword_layout = profile.uniform_constant_buffers &&
                                    instance.IsUniformBufferStandardLayoutSupported() &&
                                    switch_on("BB_UBO_DWORDS");
-    // Opt-in: the constant buffers the GPU wrote (500-650 a frame at the test spot) then need a
-    // GPU copy each, which ends the render pass: more passes and stalls than the offsets cost.
-    profile.uniform_exact_base = profile.uniform_constant_buffers && [] {
-        const char* env = std::getenv("BB_UBO_EXACT");
-        return env && env[0] == '1';
-    }();
     // Opt-in: measured slower at the test spot (Profile::early_fragment_tests).
     profile.early_fragment_tests = [] {
         const char* env = std::getenv("BB_EARLY_Z");
@@ -519,11 +513,9 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
     profile.manual_interpolation_all = profile.needs_manual_interpolation && !switch_on("BB_INTERP_HW");
     if (profile.uniform_constant_buffers) {
         std::printf("Native shaders: constant buffers as uniform buffers (BB_NATIVE_SHADERS=0: "
-                    "legacy), %s, %s, stages: %s (BB_UBO_STAGES), user data in %s "
+                    "legacy), %s, offset in push data, stages: %s (BB_UBO_STAGES), user data in %s "
                     "(BB_UBO_FLATBUF)\n",
                     profile.uniform_dword_layout ? "dwords (BB_UBO_DWORDS=0: uvec4s)" : "uvec4s",
-                    profile.uniform_exact_base ? "bound at the V# (BB_UBO_EXACT=1)"
-                                               : "offset in push data (BB_UBO_EXACT=1: bound at the V#)",
                     ubo_stages ? ubo_stages : "all",
                     profile.flatbuf_storage ? "a storage buffer" : "a uniform buffer");
     }
@@ -836,13 +828,7 @@ bool PipelineCache::RefreshGraphicsKey(PipelineSelection& sel) {
         key.motion_vectors = 1;
         key.mrt_mask |= 1u << mv;
         key.num_color_attachments = mv + 1;
-        auto& color_buffer = key.color_buffers[mv];
-        color_buffer.data_format = AmdGpu::DataFormat::Format32_32_32_32;
-        color_buffer.num_format = AmdGpu::NumberFormat::Float;
-        color_buffer.swizzle = AmdGpu::IdentityMapping;
-        key.write_masks[mv] = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
-                              vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA;
-        key.color_samples[mv] = 1;
+        GraphicsPipelineKey::SetMotionTarget(key);
     }
 
     // Force all color samples to match depth samples to avoid unsupported MSAA configuration

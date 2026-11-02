@@ -27,8 +27,8 @@ namespace BloodborneLauncher.Core
         /// flexible memory.</summary>
         public static long PoolMiB(IniFile ini)
         {
-            // As scripts/run_windows.py: 9152 MiB of direct memory for a scene above 1080p, unless
-            // Live resolution is On (Auto is off on most GPUs; a missing value counts as off).
+            // As bb-start: 9152 MiB of direct memory for a scene above 1080p, unless
+            // Live resolution is On (a missing value, or "auto" from before 0.4.4 beta 25c, counts as off).
             return (ini.Get("live_resolution") != "1" && LargeScene(ini) ? 9152 : 5056) + 1024;
         }
 
@@ -43,12 +43,13 @@ namespace BloodborneLauncher.Core
         private static bool LargeScene(IniFile ini)
         {
             var (w, h) = Choices.OutputSize(ini.Get("output_res", "1920x1080"));
-            var upscaler = ini.Get("upscaler", "fsr3");
+            var upscaler = ini.Get("upscaler", "off");
             if ((w, h) == (1920, 1080) || upscaler == "taa") return false;
             var scale = 1.0;
             if (upscaler != "off")
             {
-                int.TryParse(ini.Get("preset", "0"), out var preset);
+                // 0.4.4 beta 27c: Auto resolved by the output's height; Custom as Quality's ratio or more.
+                var preset = Choices.ResolvePreset(ini.Get("preset", "auto"), h);
                 scale = PresetScales[Math.Clamp(preset, 0, PresetScales.Length - 1)];
             }
             long rw = (long)Math.Round(w / scale / 4) * 4, rh = (long)Math.Round(h / scale / 4) * 4;

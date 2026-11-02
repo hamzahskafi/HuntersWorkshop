@@ -220,7 +220,7 @@ def expand(directory):
 
 
 def remove_stale_overlays(out):
-    """Deletes the overlays earlier starts left in `out`: run_windows.py removes its own when the
+    """Deletes the overlays earlier starts left in `out`: the start removes its own when the
     game ends, but not when the launcher's Stop (or its "still running" prompt) kills it with the
     game. One still in use (an in-game restart's previous run, stopping) is left for the next start."""
     for overlay in Path(out).glob('mod-game-*'):

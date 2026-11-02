@@ -125,6 +125,8 @@ namespace BloodborneLauncher.Core
                         SignInRefused?.Invoke(name, refused.Reason);
                     }
                 }
+                // What the game's menus changed, with what was changed here meanwhile written over it.
+                ReloadIni();
                 GameStateChanged?.Invoke();
             });
         }
@@ -156,14 +158,6 @@ namespace BloodborneLauncher.Core
             }
 
             Ini.Load();
-            // The DLSS model moved from the launcher's settings to config.ini (dlss_preset), where the
-            // in-game menu changes it live: an older launcher's choice is carried over once.
-            if (Paths.IsPortDir(Paths.PortDir) && Settings.Str("dlss_preset") is { Length: > 0 } dlss && dlss != "k")
-            {
-                Ini.Set("dlss_preset", dlss);
-                Settings.Set("dlss_preset", "k");
-                SaveSoon();
-            }
             _iniWarned = false;
             PortChanged?.Invoke();
         }
@@ -226,6 +220,21 @@ namespace BloodborneLauncher.Core
             TrophiesChanged?.Invoke();
         }
 
+        /// <summary>Game settings changed here while the game runs, held for its next start (SaveNow).</summary>
+        public bool IniHeld { get; private set; }
+
+        /// <summary>config.ini was read again (after the game exited): the pages show what it holds now.</summary>
+        public event Action? IniReloaded;
+
+        /// <summary>Reads config.ini again after the game or someone else changed it, keeping the changes made
+        /// here that are not written yet (they go over it).</summary>
+        public void ReloadIni()
+        {
+            SaveNow();
+            if (!Ini.Pending && !Game.Running) Ini.Load();
+            IniReloaded?.Invoke();
+        }
+
         public void SaveSoon()
         {
             if (_saveTimer == null)
@@ -241,18 +250,29 @@ namespace BloodborneLauncher.Core
             _saveTimer.Start();
         }
 
-        public void SaveNow()
+        /// <summary>
+        /// Saves settings.json, and config.ini unless the game is running: the game reads config.ini only
+        /// when it starts, and its in-game menus write theirs over the file, so a change made here meanwhile
+        /// was lost. It is held until the game exits and then written over what the game saved (0.4.4 beta
+        /// 26b). <paramref name="final"/>: written anyway (the launcher is closing).
+        /// </summary>
+        public void SaveNow(bool final = false)
         {
             _saveTimer?.Stop();
             try
             {
                 Settings.Save();
-                if (Paths.IsPortDir(Paths.PortDir) || Environment.GetEnvironmentVariable("BB_CONFIG") is { Length: > 0 })
+                if (Game.Running && !final)
+                    IniHeld = Ini.Pending;
+                else if (Paths.IsPortDir(Paths.PortDir) || Environment.GetEnvironmentVariable("BB_CONFIG") is { Length: > 0 })
+                {
                     Ini.Save();
+                    IniHeld = false;
+                }
                 else if (!_iniWarned)
                 {
                     _iniWarned = true;
-                    Log("config.ini not written: the engine folder is not set (Settings › Engine).", LogLevel.Warn);
+                    Log("config.ini not written: the engine folder is not set (Settings › Engine folder).", LogLevel.Warn);
                 }
                 Saved?.Invoke();
             }
@@ -334,12 +354,6 @@ namespace BloodborneLauncher.Core
                 return error;
             }
             Log(GameRunner.Custom(Settings) ? L.T("Started the game with the custom command.") : L.T("Started Bloodborne."), LogLevel.Step);
-            if (Settings.Bool("section_stats"))
-            {
-                // Timing every render stage costs frame rate: one game only.
-                Settings.Set("section_stats", false);
-                SaveSoon();
-            }
             if (safeMode)
             {
                 // One run only: the next start uses the settings as chosen again.

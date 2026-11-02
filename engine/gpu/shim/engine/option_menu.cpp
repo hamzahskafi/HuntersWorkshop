@@ -3,11 +3,11 @@
 // The existing renderer and config.ini remain authoritative.
 #include "option_menu.h"
 #include "engine_hooks.h"
+#include "engine_state.h"
 #include <SDL3/SDL.h>
 #include "menu_memory.h"
 #include "graphics.h"
 #include "../input/bindings.h"
-extern bool debug_menu_active();
 extern std::uint32_t menu_confirm_button();
 extern std::uint32_t menu_back_button();
 extern std::uint32_t input_delivered_buttons();
@@ -38,7 +38,6 @@ constexpr std::uint64_t kListRedraw=0x1ed06e0,kLayoutRows=0x1f28de0,kMsgReposito
 constexpr std::uint32_t kDefaultsRowId=0x9d8a,kMsgMenuText=200,kMsgLineHelp=201;
 constexpr std::uint64_t kAddCommandRow=0x1f4e2a0,kSystemFinalize=0x1fea630;
 constexpr std::uint64_t kOpenSectionFlow=0x1fb4c70,kRowFunctorVTable=0x573d120,kOpenerFunctorVTable=0x5743880;
-constexpr int kSectionSlots=6;
 char g_open_name[32]="PCCamera";
 std::uint64_t guest(std::uint64_t bn) { return g_slide+(bn-kPreferredGuestSlide); }
 void* guest_fn(std::uint64_t bn) { return reinterpret_cast<void*>(guest(bn)); }
@@ -306,17 +305,15 @@ void key_message(char16_t (&out)[N], std::uint32_t id, const char* fallback, boo
     else to_utf16(out, fallback);  // an older/modded message bundle
 }
 constexpr std::uint32_t kKeyActionText = 119100, kKeyPageText = 119200;
-static_assert(kBindCount == 30 && kBindPages == 5, "Update pc_option_messages.tsv for new binding rows");
+static_assert(kBindCount == 29 && kBindPages == 5, "Update pc_option_messages.tsv for new binding rows");
 
 // The page names, as the tabs read. Plain ASCII: the line help and values
 // are drawn as HTML text, where an ampersand is not a character.
 const char* const kKeyPageNames[kBindPages] = {"Movement", "Combat", "Items and Gestures", "Camera and Menus",
                                                "Other"};
 
-// The actions listed: the Debug Menu key only when the menu is there (the
-// Debug Menu plugin, engine/debug_menu.h); it is the last.
-static_assert(kBindDebugMenu == kBindCount - 1, "the Debug Menu key is the last action");
-int keys_listed() { return debug_menu_active() ? kBindCount : kBindDebugMenu; }
+// The actions listed: all of them (0.4.4 beta 28: bbhost's Debug Menu key, hidden here, went).
+int keys_listed() { return kBindCount; }
 
 // The row's action; keys_listed() or more for a row the last, short page
 // leaves blank, which shows nothing and takes no capture.
@@ -627,18 +624,26 @@ Slider camera[] = {
 };
 bool seeded=false;
 bool camera_page=false,graphics_page=false,input_page=false;
-Slider graphics_sliders[]={{nullptr,117007,0,0.2f,5},{nullptr,117006,1,0.2f,0}};
-Slider effect_sliders[]={{nullptr,120000,0,0.1f,10}};
-Slider fog_slider[]={{nullptr,117008,0,0.1f,10}};  // after the output list: the list stays row 4
+// 0.4.4 beta 26b: the 11 positions span what the launcher offers wherever the game's own value can sit
+// on one of them (fog and bloom were 0 to the game's own, contrast +-5%, hue +-20 degrees, shadow
+// distance 1 to 3): a value set in the launcher shows at its place here instead of at an end.
+Slider graphics_sliders[]={{nullptr,117007,0,0.2f,5},{nullptr,117006,0.5f,0.25f,2}};  // AO 0-2, shadows 0.5-3
+Slider effect_sliders[]={{nullptr,120000,0,0.2f,5}};  // bloom 0-2
+Slider fog_slider[]={{nullptr,117008,0,0.2f,5}};  // fog 0-2; after the output list: the list stays row 4
 // Brightness, contrast, saturation and hue (bbport): 5 is the area's own.
-Slider color_sliders[]={{nullptr,125000,0.5f,0.1f,5},{nullptr,125001,0.95f,0.01f,5},{nullptr,125002,0,0.2f,5},
-                        {nullptr,125003,-20.0f,4.0f,5}};
+Slider color_sliders[]={{nullptr,125000,0,0.2f,5},{nullptr,125001,0.8f,0.04f,5},{nullptr,125002,0,0.2f,5},
+                        {nullptr,125003,-180.0f,36.0f,5}};
 struct StartupToggle { std::atomic<bool>* setting=nullptr; std::uint32_t id; std::uint8_t value=0,last=0; };
 StartupToggle color_toggle[]={{nullptr,125004}};  // Picture tuning, live
 bool color_seeded=false;
 StartupToggle enhancements[]={{nullptr,124001},{nullptr,124002},{nullptr,124004}};
 bool enhancements_seeded=false;
 StartupToggle graphics_toggles[]={{nullptr,117001},{nullptr,117000}};
+// 0.4.4 beta 27d (the tester: On with DLAA): the game's own anti-aliasing shows what applies. An upscaler
+// or TAA anti-aliases itself and the game's pass is left out then (patches.cpp NoUpscaler), so the row
+// shows Off, does not move, and its help line (117009) says why; the choice is kept for Upscaler None.
+constexpr std::uint32_t kAaLockedId=117009;
+bool AaLocked() { return BbSettings::Get().upscaler!=BbSettings::UpscalerOff; }
 StartupToggle effect_toggles[]={{nullptr,117005},{nullptr,117002},{nullptr,117003},{nullptr,120001}};
 bool graphics_seeded=false,effects_seeded=false;
 std::int32_t output_resolution=BbSettings::OutputDefault,last_resolution=BbSettings::OutputDefault;
@@ -693,7 +698,11 @@ GUEST_ABI void GraphicsHandler(void* dialog,void* params) {
     host_log("pc-options: PCGraphics opened, dialog=%p params=%p",dialog,params);
     alignas(16) std::uint8_t scratch[0x100]{};
     hle_call_guest<std::int64_t>(guest_fn(kScratchInit),&scratch);
-    for (auto& t:graphics_toggles) { t.value=t.last=t.setting->load()?1:0;add_toggle_row(dialog,&t.value,t.id,DefaultOf(t.setting)); }
+    for (auto& t:graphics_toggles) {
+        const bool locked=t.setting==&BbSettings::Get().effects[BbSettings::EffectGameAa] && AaLocked();
+        t.value=t.last=!locked && t.setting->load()?1:0;
+        add_toggle_row(dialog,&t.value,locked?kAaLockedId:t.id,DefaultOf(t.setting));
+    }
     SeedSliders(graphics_sliders);
     for (auto& s:graphics_sliders) add_slider_row(dialog,&s.value,s.id,s.def);
     output_resolution=last_resolution=BbSettings::Get().output_res;
@@ -769,10 +778,11 @@ GUEST_ABI void* OpenControlsRow(void* out,void* ctx) {GuestFunction f(kOpenerFun
 GUEST_ABI void* OpenKeysRow(void* out,void* ctx) {GuestFunction f(kOpenerFunctorVTable,reinterpret_cast<void*>(&OpenKeys));hle_call_guest<std::int64_t>(guest_fn(kOpenSectionFlow),out,ctx,f.buf);return out;}
 constexpr std::uint32_t kQuitRowId=122000,kSystemQuitRowId=110015,kQuitQuestion=920001;
 void AddQuitRow(void* builder,std::uint32_t caption);
+bool title_quit=false;  // the title menu has its own Quit Game (TitleFinalize routed)
 GUEST_ABI void* SystemFinalize(void* out,void* builder,void* arg3) {
     std::int64_t flag=0;
-    { Captions c(110013);GuestFunction f(kRowFunctorVTable,reinterpret_cast<void*>(&OpenEnhancementsRow));
-      hle_call_guest<std::int64_t>(guest_fn(kAddCommandRow),builder,c.buf,f.buf,&flag); }
+    // 0.4.4 beta 26b: Graphics, Effects and Colour first, then Camera Tuning, PC Controls and Key
+    // Bindings, then Extras (was PC Enhancements, first), then Quit to Desktop.
     if (graphics_page) {
         { Captions c(110007);GuestFunction f(kRowFunctorVTable,reinterpret_cast<void*>(&OpenGraphicsRow));
           hle_call_guest<std::int64_t>(guest_fn(kAddCommandRow),builder,c.buf,f.buf,&flag); }
@@ -781,20 +791,26 @@ GUEST_ABI void* SystemFinalize(void* out,void* builder,void* arg3) {
         { Captions c(110014);GuestFunction f(kRowFunctorVTable,reinterpret_cast<void*>(&OpenColorRow));
           hle_call_guest<std::int64_t>(guest_fn(kAddCommandRow),builder,c.buf,f.buf,&flag); }
     }
+    if (camera_page) { Captions c(110011);GuestFunction f(kRowFunctorVTable,reinterpret_cast<void*>(&OpenCameraRow));
+      hle_call_guest<std::int64_t>(guest_fn(kAddCommandRow),builder,c.buf,f.buf,&flag); }
     if(input_page) {
         {Captions c(110008);GuestFunction f(kRowFunctorVTable,reinterpret_cast<void*>(&OpenControlsRow));hle_call_guest<std::int64_t>(guest_fn(kAddCommandRow),builder,c.buf,f.buf,&flag);}
         {Captions c(110009);GuestFunction f(kRowFunctorVTable,reinterpret_cast<void*>(&OpenKeysRow));hle_call_guest<std::int64_t>(guest_fn(kAddCommandRow),builder,c.buf,f.buf,&flag);}
     }
-    if (camera_page) { Captions c(110011);GuestFunction f(kRowFunctorVTable,reinterpret_cast<void*>(&OpenCameraRow));
+    { Captions c(110013);GuestFunction f(kRowFunctorVTable,reinterpret_cast<void*>(&OpenEnhancementsRow));
       hle_call_guest<std::int64_t>(guest_fn(kAddCommandRow),builder,c.buf,f.buf,&flag); }
-    // Quit to Desktop, last: the game's own Exit Game only goes back to the title.
-    AddQuitRow(builder,kSystemQuitRowId);
+    // Quit to Desktop, last: the game's own Exit Game only goes back to the title. 0.4.4 beta 27b (the
+    // tester): in the world only. The System menu opened from the title had it twice over, beside the
+    // title's own Quit Game (TitleFinalize); kept there only when that one could not be added.
+    const bool quit=world_player_block(nullptr) || !title_quit;
+    if (quit) AddQuitRow(builder,kSystemQuitRowId);
     hle_call_guest<std::int64_t>(guest_fn(kSystemFinalize),out,builder,arg3);
     // Each time the System menu opens: logged when its rows differ from the last time's.
     static int logged=-1;
-    if (const int rows=(graphics_page?1:0)|(camera_page?2:0); rows!=logged) {
+    if (const int rows=(graphics_page?1:0)|(camera_page?2:0)|(quit?4:0); rows!=logged) {
         logged=rows;
-        host_log("pc-options: System list includes PC Enhancements%s%s, Quit to Desktop",graphics_page?", PC Graphics / PC Effects / PC Colour":"",camera_page?", PC Camera":"");
+        host_log("pc-options: System list includes %s%sExtras%s",graphics_page?"Graphics / Effects / Colour, ":"",
+                 camera_page?"Camera Tuning, ":"",quit?", Quit to Desktop":" (title: its own Quit Game)");
     }
     return out;
 }
@@ -939,7 +955,8 @@ bool Install(std::uint8_t* image,std::size_t size) {
     const auto target=reinterpret_cast<std::uint64_t>(&SystemFinalize);
     std::memcpy(p,&target,8); p+=8; *p++=0x41; *p++=0xff; *p=0xe3;
     const std::int32_t to_pad=pad-(call+5); std::memcpy(image+call+1,&to_pad,4);
-    if (!route_call(image,size,0x1b4adb3,kTitleFinalize,0x1b49ac0,reinterpret_cast<void*>(&TitleFinalize)))
+    title_quit=route_call(image,size,0x1b4adb3,kTitleFinalize,0x1b49ac0,reinterpret_cast<void*>(&TitleFinalize));
+    if (!title_quit)
         host_log("pc-options: the title menu's Quit Game left out (bytes differ from verified 1.09)");
     g_installed=true;
     host_log("pc-options: native System pages installed (%u local assets): Enhancements%s%s",installed,graphics_page?", Graphics / Effects / Colour":"",camera_page?", Camera":"");
@@ -997,7 +1014,8 @@ void Tick() {
     auto push_sliders=[&](auto& rows,bool active) {
         bool moved=false;
         if (!active) return moved;
-        for (auto& s:rows) if (s.value!=s.last) { s.last=std::min<std::uint8_t>(s.value,10);*s.setting=s.base+s.last*s.step;changed=moved=true; }
+        // Rounded, so the game's own position gives the game's own value exactly (0.8 + 5 * 0.04 is not 1 in floats).
+        for (auto& s:rows) if (s.value!=s.last) { s.last=std::min<std::uint8_t>(s.value,10);*s.setting=std::round((s.base+s.last*s.step)*10000.0f)/10000.0f;changed=moved=true; }
         return moved;
     };
     auto push_toggles=[&](auto& rows,bool active) {
@@ -1015,7 +1033,18 @@ void Tick() {
     if(controls_seeded && sensitivity!=last_sensitivity){last_sensitivity=std::min<std::uint8_t>(sensitivity,10);BbSettings::Get().mouse_sensitivity=last_sensitivity;changed=true;}
     if(controls_seeded && prompts!=last_prompts){last_prompts=std::clamp(prompts,0,BbSettings::PromptsCount-1);BbSettings::Get().button_prompts=last_prompts;changed=true;}
     if(controls_seeded && pad_icons!=last_pad_icons){last_pad_icons=std::clamp(pad_icons,0,BbSettings::PadIconsCount-1);BbSettings::Get().pad_icons=last_pad_icons;changed=true;}
-    picture|=push_toggles(graphics_toggles,graphics_seeded);picture|=push_toggles(effect_toggles,effects_seeded);
+    // Anti-aliasing, ambient occlusion, motion blur, depth of field and chromatic aberration are effects
+    // of their own, which Picture Tuning does not gate: they no longer turn it on (0.4.4 beta 26b; the
+    // tester saw it on after changing effects). Of the toggles only the vignette is a picture setting.
+    // The game's anti-aliasing while an upscaler or TAA runs: back to Off, nothing saved (AaLocked).
+    if (AaLocked()) {
+        for (auto& t:graphics_toggles)
+            if (t.setting==&BbSettings::Get().effects[BbSettings::EffectGameAa]) t.value=t.last;
+    }
+    push_toggles(graphics_toggles,graphics_seeded);
+    const std::uint8_t vignette=effect_toggles[3].last;
+    push_toggles(effect_toggles,effects_seeded);
+    picture|=effect_toggles[3].last!=vignette;
     if (picture && !BbSettings::Get().graphics_controls) {
         BbSettings::Get().graphics_controls=true;
         for (auto& t:color_toggle) t.value=t.last=1;

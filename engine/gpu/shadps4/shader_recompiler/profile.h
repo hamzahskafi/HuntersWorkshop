@@ -63,12 +63,10 @@ struct Profile {
     /// one load at its own address rather than a vector load and a dynamic component pick.
     /// BB_UBO_DWORDS=0 keeps the uvec4s.
     bool uniform_dword_layout{};
-    /// bbport: and they are bound at the exact address of the guest's V# (the rasterizer copies
-    /// those it cannot bind there), so their reads add no offset from the push data and a
-    /// constant index stays a constant: NVIDIA then reads it as an operand of the instruction
-    /// that uses it. Off unless BB_UBO_EXACT=1: the copies of GPU-written constants end render
-    /// passes, which cost more than the offsets at the test spot.
-    bool uniform_exact_base{};
+    /// Unused, always false (uniform buffers bound at the exact address of the guest's V#, opt-in
+    /// until 0.4.4 beta 28: the copies of GPU-written constants ended render passes). Kept so that
+    /// the profiles in caches and shader captures keep their layout.
+    bool unused_exact_base{};
     /// bbport: a pixel shader drawn with DB_SHADER_CONTROL.DEPTH_BEFORE_SHADER runs after the
     /// depth and stencil tests, as on the console (EarlyFragmentTests). Off unless BB_EARLY_Z=1:
     /// at the test spot it cost frames (57.8 against 60.2 FPS) and the driver orders them itself.

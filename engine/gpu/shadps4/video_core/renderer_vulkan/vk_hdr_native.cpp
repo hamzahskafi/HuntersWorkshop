@@ -275,7 +275,7 @@ vk::ImageView HdrNative::CachedView(const VideoCore::Image& image, vk::Format fo
 HdrNative::Source HdrNative::Guest(VideoCore::ImageId id, vk::Format format) {
     auto& image = texture_cache.GetImage(id);
     const vk::ImageView view = CachedView(image, format);
-    scheduler.EndRendering();
+    scheduler.EndRendering(Vulkan::GpuSavings::PassBreak::Upscaler);
     // NativeAccess (in Transit) resolves a reduced-size scene proxy into the image first, as the
     // game's own compute passes reading it do.
     runtime.Transit(&image, vk::ImageLayout::eGeneral, Compute, vk::AccessFlagBits2::eShaderRead);
@@ -454,7 +454,7 @@ void HdrNative::RecordExposure(const Source& frame, bool copy) {
     };
     const bool clear_state = !state_cleared;
     state_cleared = true;
-    scheduler.EndRendering();
+    scheduler.EndRendering(Vulkan::GpuSavings::PassBreak::Upscaler);
     scheduler.RecordCrumb(
         {.name = "HDR native exposure"},
         [frame_view = frame.view, luma = *luma.view, snapshot_image = vk::Image(snapshot.image),
@@ -539,7 +539,7 @@ void HdrNative::RecordGain(const Source& frame, const Source& before_ui, const H
         .knee = Knee,
         .rolloff = RollOffStart,
     };
-    scheduler.EndRendering();
+    scheduler.EndRendering(Vulkan::GpuSavings::PassBreak::Upscaler);
     scheduler.RecordCrumb(
         {.name = "HDR native gain map"},
         [frame_view = frame.view, before_view = before_ui.view, luma = *luma.view,

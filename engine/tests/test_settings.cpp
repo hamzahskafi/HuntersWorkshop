@@ -8,6 +8,7 @@
 #include <chrono>
 #include <sstream>
 #include <string>
+#include <vector>
 #include "gpu/shim/bbport_settings.h"
 
 static std::string Read(const char* path) {
@@ -31,11 +32,62 @@ int main() {
     setenv("BB_CONFIG", path, 1);
 #endif
 
+    // 0.4.4 beta 27c: the shipped settings (engine/config.default.ini, which a new install's config.ini
+    // is copied from) give the engine's own defaults; the launcher's agree with them
+    // (tests/test_engine_defaults.py). Kept apart on purpose: fullscreen (a new install starts
+    // fullscreen), menu_language (the launcher's English), menu_pos and the online keys (bb-start's).
+    {
+        // Beside tests/ (an absolute __FILE__ in CMake builds), else from the engine or gpu folder.
+        std::filesystem::path shipped;
+        for (const auto& at : {std::filesystem::path(__FILE__).parent_path().parent_path() / "config.default.ini",
+                               std::filesystem::path("config.default.ini"), std::filesystem::path("../config.default.ini")}) {
+            if (shipped.empty() && std::filesystem::is_regular_file(at)) {
+                shipped = at;
+            }
+        }
+        assert(!shipped.empty());
+        std::filesystem::copy_file(shipped, temporary, std::filesystem::copy_options::overwrite_existing);
+        static const BbSettings::Values fresh;
+        BbSettings::Load();
+        auto& v = BbSettings::Get();
+        assert(v.upscaler == fresh.upscaler.load() && v.preset == fresh.preset.load() &&
+               v.dlss_preset == fresh.dlss_preset.load() && BbSettings::FsrVersion() == "auto");
+        assert(v.sharpen == fresh.sharpen.load() && v.sharpness == fresh.sharpness.load() && v.jitter == fresh.jitter.load());
+        assert(v.reactive == fresh.reactive.load() && v.object_motion == fresh.object_motion.load());
+        assert(v.reactive_scale == fresh.reactive_scale.load() && v.reactive_threshold == fresh.reactive_threshold.load() &&
+               v.reactive_max == fresh.reactive_max.load() && v.debug_view == fresh.debug_view.load());
+        assert(v.show_fps == fresh.show_fps.load() && v.live_resolution == fresh.live_resolution.load() &&
+               v.model_lod == fresh.model_lod.load() && v.output_res == fresh.output_res.load());
+        for (int e = 0; e < BbSettings::EffectCount; ++e) {
+            assert(v.effects[e] == BbSettings::Effects[e].default_on);
+        }
+        assert(v.graphics_controls == fresh.graphics_controls.load() && v.graphics_vignette == fresh.graphics_vignette.load() &&
+               v.graphics_ao_strength == fresh.graphics_ao_strength.load() &&
+               v.graphics_shadow_scale == fresh.graphics_shadow_scale.load() &&
+               v.graphics_bloom == fresh.graphics_bloom.load() && v.graphics_saturation == fresh.graphics_saturation.load());
+        assert(v.camera_controls == fresh.camera_controls.load() && v.camera_fov_scale == fresh.camera_fov_scale.load() &&
+               v.camera_distance_scale == fresh.camera_distance_scale.load() &&
+               v.camera_height_scale == fresh.camera_height_scale.load());
+        assert(v.widescreen == fresh.widescreen.load() && v.pc_controls == fresh.pc_controls.load() &&
+               v.mouse_camera == fresh.mouse_camera.load() && v.mouse_menu == fresh.mouse_menu.load() &&
+               v.menu_move == fresh.menu_move.load() && v.mouse_invert_x == fresh.mouse_invert_x.load() &&
+               v.mouse_invert_y == fresh.mouse_invert_y.load() && v.mouse_auto_rotation == fresh.mouse_auto_rotation.load() &&
+               v.mouse_sensitivity == fresh.mouse_sensitivity.load());
+        assert(v.change_appearance == fresh.change_appearance.load() && v.rebirth == fresh.rebirth.load());
+        assert(v.fsr_invert_jitter == fresh.fsr_invert_jitter.load());
+        v.fullscreen = fresh.fullscreen.load();
+        v.menu_x = fresh.menu_x.load();
+        v.menu_y = fresh.menu_y.load();
+        v.menu_language = fresh.menu_language.load();
+        { std::ofstream file(path); file << ini; assert(file.good()); }
+    }
+
     BbSettings::Load();
     auto& s = BbSettings::Get();
-    assert(s.upscaler == BbSettings::UpscalerFsr3 && !s.show_fps && s.menu_x < 0.0f);
+    // 0.4.4 beta 27: the older FSR names read as AMD's FSR.
+    assert(s.upscaler == BbSettings::UpscalerFsr && !s.show_fps && s.menu_x < 0.0f);
     s.show_fps = true;
-    s.upscaler = BbSettings::UpscalerFsr411;
+    s.upscaler = BbSettings::UpscalerTaa;
     s.menu_x = 0.625f;
     s.menu_y = 0.125f;
     s.fullscreen = true;
@@ -44,7 +96,7 @@ int main() {
     const std::string saved = Read(path);
     // The launcher's controls, its other keys and comments stay; the menu's keys are replaced
     // in place, new ones appended.
-    assert(saved.find("# launcher\nupscaler=fsr411\nkey.cross=X, Space\npad.circle=a\nshow_fps=1\n"
+    assert(saved.find("# launcher\nupscaler=taa\nkey.cross=X, Space\npad.circle=a\nshow_fps=1\n"
                       "fullscreen_hint=1\n") == 0);
     assert(saved.find("menu_pos=0.6250,0.1250\n") != std::string::npos);
     assert(saved.find("upscaler=fsr3") == std::string::npos);
@@ -53,24 +105,52 @@ int main() {
     s.menu_x = -1.0f;
     s.menu_y = -1.0f;
     BbSettings::Load();
-    assert(s.menu_x == 0.625f && s.menu_y == 0.125f && s.upscaler == BbSettings::UpscalerFsr411);
+    assert(s.menu_x == 0.625f && s.menu_y == 0.125f && s.upscaler == BbSettings::UpscalerTaa);
     // Replacing an existing file works on Windows too, and must not erase key bindings.
     s.upscaler = BbSettings::UpscalerDlss;
     BbSettings::Save();
     assert(Read(path).find("upscaler=dlss\n") != std::string::npos);
     assert(Read(path).find("key.cross=X, Space\n") != std::string::npos);
-    BbSettings::ConfigureUpscalerSupport(false, false, false);
-    assert(s.upscaler == BbSettings::UpscalerFsr3 && !s.dlss_supported);
+    // 0.4.4 beta 27: DLSS where it cannot run gives way to AMD FSR, AMD FSR to TAA.
+    BbSettings::ConfigureUpscalerSupport(true, false);
+    assert(s.upscaler == BbSettings::UpscalerFsr && !s.dlss_supported && s.fsr_supported);
     s.upscaler = BbSettings::UpscalerDlss;
-    BbSettings::ConfigureUpscalerSupport(false, false, true);
+    BbSettings::ConfigureUpscalerSupport(false, true);
     assert(s.upscaler == BbSettings::UpscalerDlss && s.dlss_supported);
-    // FSR 4.1.1 without its dot products, on a GPU with FSR 4: FSR 4, not 3.1.
-    s.upscaler = BbSettings::UpscalerFsr411;
-    BbSettings::ConfigureUpscalerSupport(true, false, false);
-    assert(s.upscaler == BbSettings::UpscalerFsr4);
-    s.upscaler = BbSettings::UpscalerFsr411;
-    BbSettings::ConfigureUpscalerSupport(false, false, false);
-    assert(s.upscaler == BbSettings::UpscalerFsr3);
+    BbSettings::ConfigureUpscalerSupport(false, false);
+    assert(s.upscaler == BbSettings::UpscalerTaa);
+    s.upscaler = BbSettings::UpscalerFsr;
+    BbSettings::ConfigureUpscalerSupport(false, true);
+    assert(s.upscaler == BbSettings::UpscalerTaa);
+    // fsr_version: AMD's choice by default; 0.4.4 beta 27c: a version's name, 27a's "3.1" kept.
+    assert(BbSettings::FsrVersion() == "auto");
+    BbSettings::SetFsrVersion("3.1");
+    BbSettings::Save();
+    assert(Read(path).find("fsr_version=3.1\n") != std::string::npos);
+    BbSettings::SetFsrVersion("auto");
+    BbSettings::Load();
+    assert(BbSettings::FsrVersion() == "3.1");
+    BbSettings::SetFsrVersion("FSR 2.3.4 *");
+    assert(BbSettings::FsrVersion() == "2.3.4");
+    BbSettings::Save();
+    assert(Read(path).find("fsr_version=2.3.4\n") != std::string::npos);
+    BbSettings::SetFsrVersion("");
+    assert(BbSettings::FsrVersion() == "auto");
+    {
+        // AMD's names: the newest first, " *" for the driver's.
+        const std::vector<std::string> nvidia{"3.1.6", "2.3.4"};
+        const std::vector<std::string> radeon{"4.1.2 *", "4.0.3 *", "3.1.6", "3.1.5 *", "2.3.4"};
+        assert(BbSettings::FsrVersionMatch(nvidia, "auto") == -1 && BbSettings::FsrVersionMatch(nvidia, "4.1.2") == -1);
+        assert(BbSettings::FsrVersionMatch(nvidia, "3.1") == 0 && BbSettings::FsrVersionMatch(nvidia, "2.3.4") == 1);
+        assert(BbSettings::FsrVersionMatch(radeon, "4.1.2") == 0 && BbSettings::FsrVersionMatch(radeon, "4") == 0);
+        assert(BbSettings::FsrVersionMatch(radeon, "3.1") == 2);      // shipped before the driver's
+        assert(BbSettings::FsrVersionMatch(radeon, "3.1.5") == 3);
+        assert(BbSettings::FsrVersionMatch(radeon, "3.1.60") == -1);  // a whole name, not a prefix
+        assert(BbSettings::FsrVersionMatch(radeon, "FSR 3.1.6") == 2);
+        BbSettings::SetFsrVersionsOffered(radeon);
+        assert(BbSettings::FsrVersionsOffered().size() == 5);
+        BbSettings::SetFsrVersionsOffered({});
+    }
     s.camera_controls = true;
     s.camera_fov_scale = 1.25f;
     s.camera_distance_scale = 0.80f;
@@ -183,7 +263,7 @@ int main() {
     { std::ofstream file(path); file << "hdr_mode=native\n"; }
     BbSettings::Load();
     assert(s.hdr_mode == BbSettings::HdrModeNative);
-    // BB_HDR* override the file.
+    // 0.4.4 beta 28: the BB_HDR* aliases went; the file decides.
 #ifdef _WIN32
     _putenv_s("BB_HDR", "1");
     _putenv_s("BB_HDR_PEAK", "600");
@@ -194,8 +274,7 @@ int main() {
     setenv("BB_HDR_MODE", "expand", 1);
 #endif
     BbSettings::Load();
-    assert(s.hdr && s.startup_hdr && s.hdr_peak == 600.0f && s.hdr_paper_white == 10.0f &&
-           s.hdr_mode == BbSettings::HdrModeExpand);
+    assert(s.hdr_mode == BbSettings::HdrModeNative && s.hdr_peak != 600.0f);
 #ifdef _WIN32
     _putenv_s("BB_HDR", "");
     _putenv_s("BB_HDR_PEAK", "");
@@ -208,8 +287,7 @@ int main() {
     BbSettings::Load();
     assert(s.hdr_mode == BbSettings::HdrModeNative);
     // hdr_peak_auto: the peak the display reports (window.cpp sets hdr_display_peak) when it
-    // reports one, else hdr_peak; BB_HDR_PEAK (a peak for this run) turns it off.
-    assert(!s.hdr_peak_auto); // BB_HDR_PEAK was set above
+    // reports one, else hdr_peak.
     { std::ofstream file(path); file << "hdr_peak=800\nhdr_peak_auto=1\n"; }
     BbSettings::Load();
     assert(s.hdr_peak_auto && s.hdr_peak == 800.0f);
@@ -235,55 +313,88 @@ int main() {
     assert(Read(path).find("hdr_compare") == std::string::npos);
     s.hdr_compare = false;
     s.hdr_display_peak = 0.0f;
-    // The DLSS model and its mip bias (live in the menu), the OptiScaler switches (read at start).
+    // Live resolution: off or on; "auto" (no longer offered, 0.4.4 beta 25c) reads as off and saves as 0.
     {
         std::ofstream file(path);
-        file << "dlss_preset=e\ndlss_mip_bias=0\noptiscaler_compat=0\noptiscaler_sync_submit=1\n";
+        file << "live_resolution=auto\n";
     }
     BbSettings::Load();
-    assert(s.dlss_preset == 5 && !s.dlss_mip_bias && !s.optiscaler_compat &&
-           s.optiscaler_sync_submit == BbSettings::OptiSubmitOn);
-    assert(!s.startup_optiscaler.compat && s.startup_optiscaler.sync_submit == BbSettings::OptiSubmitOn);
+    assert(s.live_resolution == 0 && s.startup_live_resolution == 0);
+    BbSettings::Save();
+    assert(Read(path).find("live_resolution=0") != std::string::npos);
+    assert(Read(path).find("live_resolution=auto") == std::string::npos);
+    {
+        std::ofstream file(path);
+        file << "live_resolution=1\n";
+    }
+    BbSettings::Load();
+    assert(s.live_resolution == 1);
+    s.live_resolution = 0;
+    // 0.4.4 beta 28: fsr4_invert_jitter is read as fsr_invert_jitter and saved under the new name, once
+    // (a file with both lines keeps one).
+    {
+        std::ofstream file(path);
+        file << "fsr4_invert_jitter=1\nfsr_invert_jitter=1\n";
+    }
+    BbSettings::Load();
+    assert(s.fsr_invert_jitter);
+    BbSettings::Save();
+    {
+        const std::string text = Read(path);
+        assert(text.find("fsr4_invert_jitter") == std::string::npos);
+        assert(text.find("fsr_invert_jitter=1\n") != std::string::npos &&
+               text.find("fsr_invert_jitter=1\n") == text.rfind("fsr_invert_jitter=1\n"));
+    }
+    s.fsr_invert_jitter = false;
+    // The DLSS model (live in the menu), OptiScaler's compatibility mode (read at start). dlss_mip_bias
+    // went in 0.4.4 beta 27d (NVIDIA's extra level always), the OptiScaler parts' own keys in beta 28
+    // (they follow the mode): read as nothing, left in the file as they were.
+    {
+        std::ofstream file(path);
+        file << "dlss_preset=j\ndlss_mip_bias=0\noptiscaler_compat=0\noptiscaler_sync_submit=1\n";
+    }
+    BbSettings::Load();
+    assert(s.dlss_preset == 10 && !s.optiscaler_compat && !s.startup_optiscaler_compat);
     s.dlss_preset = BbSettings::DlssPresetDefault;
     s.optiscaler_compat = true;
-    s.optiscaler_sync_submit = BbSettings::OptiSubmitAuto;
     BbSettings::Save();
     {
         const std::string text = Read(path);
         assert(text.find("dlss_preset=default\n") != std::string::npos);
         assert(text.find("dlss_mip_bias=0\n") != std::string::npos);
         assert(text.find("optiscaler_compat=1\n") != std::string::npos);
-        assert(text.find("optiscaler_sync_submit=auto\n") != std::string::npos);
+        assert(text.find("optiscaler_sync_submit=1\n") != std::string::npos);
     }
-    assert(!s.startup_optiscaler.compat); // the menu's change waits for a restart
-#ifdef _WIN32
-    _putenv_s("BB_DLSS_PRESET", "K");
-#else
-    setenv("BB_DLSS_PRESET", "K", 1);
-#endif
+    assert(!s.startup_optiscaler_compat); // the menu's change waits for a restart
     BbSettings::Load();
-    assert(s.dlss_preset == BbSettings::DlssPresetK && s.optiscaler_compat && s.startup_optiscaler.compat);
-#ifdef _WIN32
-    _putenv_s("BB_DLSS_PRESET", "");
-#else
-    unsetenv("BB_DLSS_PRESET");
-#endif
+    assert(s.optiscaler_compat && s.startup_optiscaler_compat);
     assert(BbSettings::DlssPresetFromText("m") == 13 && std::string(BbSettings::DlssPresetText(13)) == "m");
+    // 0.4.4 beta 27c: Auto (NVIDIA's model for each quality mode) by default and for unknown text.
+    {
+        static const BbSettings::Values fresh;
+        assert(fresh.dlss_preset == BbSettings::DlssPresetAuto);
+    }
+    assert(BbSettings::DlssPresetFromText("auto") == BbSettings::DlssPresetAuto);
+    assert(BbSettings::DlssPresetFromText("xyz") == BbSettings::DlssPresetAuto);
+    assert(std::string(BbSettings::DlssPresetText(BbSettings::DlssPresetAuto)) == "auto");
     assert(std::string(BbSettings::DlssPresetText(BbSettings::DlssPresetDefault)) == "default");
-    // Letters DLSS 310.9 removed (A-D) or ignores (G-I, N, O): K.
-    assert(BbSettings::DlssPresetFromText("a") == BbSettings::DlssPresetK);
-    assert(BbSettings::DlssPresetFromText("h") == BbSettings::DlssPresetK);
-    assert(BbSettings::DlssPresetFromText("j") == 10 && BbSettings::DlssPresetFromText("f") == 6);
-    // DLSS Frame Generation, Reflex, the Custom preset's ratio, the mip bias offset.
+    // Letters DLSS 310.9 removed (A-D) or ignores (G-I, N, O): Auto (0.4.4 beta 27c; K before).
+    assert(BbSettings::DlssPresetFromText("a") == BbSettings::DlssPresetAuto);
+    assert(BbSettings::DlssPresetFromText("h") == BbSettings::DlssPresetAuto);
+    assert(BbSettings::DlssPresetFromText("j") == 10);
+    // The CNN presets NVIDIA deprecated read as Auto (0.4.4 beta 25b).
+    assert(BbSettings::DlssPresetFromText("e") == BbSettings::DlssPresetAuto);
+    assert(BbSettings::DlssPresetFromText("F") == BbSettings::DlssPresetAuto);
+    assert(!BbSettings::DlssPresetValid(5) && !BbSettings::DlssPresetValid(6) && BbSettings::DlssPresetValid(13));
+    // The Custom preset's ratio, the mip bias offset. 0.4.4 beta 28: frame generation and Reflex are
+    // gone; their old keys are ignored and kept as they are.
     {
         std::ofstream file(path);
         file << "frame_gen=dlss\nframe_gen_frames=9\nreflex=boost\npreset=5\nrender_scale=1.3\n"
-                "mip_bias=-5\ndlss_auto_exposure=1\n";
+                "mip_bias=-5\n";
     }
     BbSettings::Load();
-    assert(s.frame_gen == BbSettings::FrameGenDlss && s.startup_frame_gen == BbSettings::FrameGenDlss);
-    assert(s.frame_gen_frames == BbSettings::FrameGenFramesMax && s.reflex == BbSettings::ReflexBoost);
-    assert(s.preset == BbSettings::PresetCustom && s.render_scale == 1.3f && s.dlss_auto_exposure);
+    assert(s.preset == BbSettings::PresetCustom && s.render_scale == 1.3f);
     assert(s.mip_bias == BbSettings::MipBiasMin);
     assert(BbSettings::PresetScale(BbSettings::PresetCustom) == 1.3f);
     assert(BbSettings::ModelPreset(BbSettings::PresetCustom) == BbSettings::Quality);
@@ -294,16 +405,107 @@ int main() {
     {
         const std::string text = Read(path);
         assert(text.find("frame_gen=dlss\n") != std::string::npos);
-        assert(text.find("frame_gen_frames=5\n") != std::string::npos);
+        assert(text.find("frame_gen_frames=9\n") != std::string::npos);
         assert(text.find("reflex=boost\n") != std::string::npos);
         assert(text.find("render_scale=1.10\n") != std::string::npos);
         assert(text.find("mip_bias=-2.00\n") != std::string::npos);
-        assert(text.find("dlss_auto_exposure=1\n") != std::string::npos);
     }
-    { std::ofstream file(path); file << "frame_gen=fsr3\nreflex=sometimes\nrender_scale=9\n"; }
+    { std::ofstream file(path); file << "render_scale=9\n"; }
     BbSettings::Load();
-    assert(s.frame_gen == BbSettings::FrameGenFsr3 && s.reflex == BbSettings::ReflexOn &&
-           s.render_scale == BbSettings::RenderScaleMax);
+    assert(s.render_scale == BbSettings::RenderScaleMax);
+    // 0.4.4 beta 26b: Live resolution changes off holds at a 1920x1080 start too (no startup patch,
+    // BB_RENDER_RES unset): an output chosen in game waits for a restart; with it on, it is live.
+    {
+#ifdef _WIN32
+        _putenv_s("BB_RENDER_RES", "");
+#else
+        unsetenv("BB_RENDER_RES");
+#endif
+        { std::ofstream file(path); file << "output_res=1920x1080\nlive_resolution=0\n"; }
+        BbSettings::Load();
+        assert(!BbSettings::FixedRenderSession() && !BbSettings::OutputChangesLive());
+        assert(!BbSettings::ResolutionNeedsRestart());
+        s.output_res = BbSettings::OutputDefault == 2 ? 3 : 2; // another named size
+        assert(BbSettings::ResolutionNeedsRestart());
+        s.output_res = s.startup_output_res;
+        s.preset = BbSettings::Performance; // the preset at a 1080p start stays live
+        assert(!BbSettings::ResolutionNeedsRestart());
+        { std::ofstream file(path); file << "output_res=1920x1080\nlive_resolution=1\n"; }
+        BbSettings::Load();
+        assert(BbSettings::OutputChangesLive());
+        s.output_res = BbSettings::OutputDefault == 2 ? 3 : 2;
+        assert(!BbSettings::ResolutionNeedsRestart());
+    }
+    // 0.4.4 beta 27b: the Render resolution list's sizes, as the engine makes them (the launcher's
+    // Choices.RenderSize works them out the same): live at a 1920x1080 start; in a startup-patched
+    // session the next start's, never below 640x360 and never exactly 1920x1080.
+    {
+        const auto size = [](int preset) {
+            const auto scene = BbSettings::PresetRenderSize(preset);
+            return std::pair{scene.width, scene.height};
+        };
+        const auto render_res = [](const char* value) {
+#ifdef _WIN32
+            _putenv_s("BB_RENDER_RES", value);
+#else
+            if (value[0]) setenv("BB_RENDER_RES", value, 1); else unsetenv("BB_RENDER_RES");
+#endif
+        };
+        render_res("");
+        { std::ofstream file(path); file << "output_res=1920x1080\nlive_resolution=0\nrender_scale=1.3\n"; }
+        BbSettings::Load();
+        assert(size(BbSettings::NativeAA) == std::pair(1920, 1080));
+        assert(size(BbSettings::Quality) == std::pair(1280, 720));
+        assert(size(BbSettings::Balanced) == std::pair(1128, 636));
+        assert(size(BbSettings::Performance) == std::pair(960, 540));
+        assert(size(BbSettings::UltraPerformance) == std::pair(640, 360));
+        assert(size(BbSettings::PresetCustom) == std::pair(1476, 832));
+        render_res("852x532");
+        { std::ofstream file(path); file << "output_res=1280x800\nlive_resolution=0\n"; }
+        BbSettings::Load();
+        assert(BbSettings::FixedRenderSession());
+        assert(size(BbSettings::NativeAA) == std::pair(1280, 800));
+        assert(size(BbSettings::Quality) == std::pair(852, 532));
+        assert(size(BbSettings::UltraPerformance) == std::pair(640, 400)); // the Steam Deck: x2, not x3
+        { std::ofstream file(path); file << "output_res=2880x1620\nlive_resolution=0\n"; }
+        BbSettings::Load();
+        assert(size(BbSettings::Quality) == std::pair(1916, 1076)); // the game's 1080p patch site is left alone
+        { std::ofstream file(path); file << "output_res=2560x1440\nlive_resolution=1\n"; }
+        BbSettings::Load();
+        assert(size(BbSettings::Quality) == std::pair(1708, 960)); // the next start is live
+        // 0.4.4 beta 27c: Auto, the default, by the output's height (Native AA up to 1200 lines, Quality up
+        // to 1600, Performance above); resolved for the session's output, saved as "auto".
+        static const BbSettings::Values fresh;
+        assert(fresh.preset == BbSettings::PresetAuto && fresh.startup_preset == BbSettings::PresetAuto);
+        assert(BbSettings::AutoPreset(800) == BbSettings::NativeAA && BbSettings::AutoPreset(1200) == BbSettings::NativeAA);
+        assert(BbSettings::AutoPreset(1440) == BbSettings::Quality && BbSettings::AutoPreset(1600) == BbSettings::Quality);
+        assert(BbSettings::AutoPreset(2160) == BbSettings::Performance);
+        render_res("");
+        { std::ofstream file(path); file << "output_res=1920x1080\nlive_resolution=0\npreset=auto\n"; }
+        BbSettings::Load();
+        assert(s.preset == BbSettings::PresetAuto && BbSettings::RenderPreset() == BbSettings::NativeAA);
+        assert(size(BbSettings::PresetAuto) == std::pair(1920, 1080));
+        render_res("1708x960");
+        { std::ofstream file(path); file << "output_res=2560x1440\nlive_resolution=0\npreset=auto\n"; }
+        BbSettings::Load();
+        assert(BbSettings::RenderPreset() == BbSettings::Quality && size(BbSettings::PresetAuto) == std::pair(1708, 960));
+        assert(BbSettings::PresetScale(BbSettings::PresetAuto) == 1.5f && BbSettings::ModelPreset(BbSettings::PresetAuto) == BbSettings::Quality);
+        s.preset = BbSettings::Quality; // what Auto runs: no restart
+        assert(!BbSettings::ResolutionNeedsRestart());
+        s.preset = BbSettings::PresetAuto;
+        BbSettings::Save();
+        assert(Read(path).find("preset=auto\n") != std::string::npos);
+        { std::ofstream file(path); file << "output_res=3840x2160\nlive_resolution=0\npreset=auto\n"; }
+        BbSettings::Load();
+        assert(BbSettings::RenderPreset() == BbSettings::Performance && size(BbSettings::PresetAuto) == std::pair(1916, 1076));
+        render_res("");
+    }
+    // Upscaler None is TAA, or no upscaler with the game's own anti-aliasing, which applies only then.
+    assert(BbSettings::NoUpscaling(true) == BbSettings::UpscalerOff);
+    assert(BbSettings::NoUpscaling(false) == BbSettings::UpscalerTaa);
+    assert(BbSettings::GameAaApplies(true, BbSettings::UpscalerOff));
+    assert(!BbSettings::GameAaApplies(true, BbSettings::UpscalerFsr) && !BbSettings::GameAaApplies(true, BbSettings::UpscalerTaa));
+    assert(!BbSettings::GameAaApplies(false, BbSettings::UpscalerOff));
     std::filesystem::remove(temporary);
     std::puts("PASS: settings save keeps other keys, menu position");
 }

@@ -31,17 +31,14 @@ static size_t created, deleted, acquired, signaled, timed_out;
 static uint64_t lookups, lookup_steps;
 /* bbport: a found semaphore moves to the front. New ones went in front, so the ones made at boot
  * sat behind every one made since, each wait and signal walking past them under the one lock.
- * Not for the freeze report's lookups (describe), which leave the order alone.
- * BB_SEMA_FRONT=0: the list keeps its order, as before. */
+ * Not for the freeze report's lookups (describe), which leave the order alone. */
 static Sema *find_ordered(uint32_t id,int reorder) {
-    static int front=-1;
-    if (front<0) { const char *e=getenv("BB_SEMA_FRONT"); front=!(e && e[0]=='0'); }
     ++lookups;
     Sema **link=&registry;
     for (Sema *s=registry;s;link=&s->next,s=s->next) {
         ++lookup_steps;
         if (s->id!=id) continue;
-        if (reorder && front && link!=&registry) { *link=s->next; s->next=registry; registry=s; }
+        if (reorder && link!=&registry) { *link=s->next; s->next=registry; registry=s; }
         return s;
     }
     return NULL;

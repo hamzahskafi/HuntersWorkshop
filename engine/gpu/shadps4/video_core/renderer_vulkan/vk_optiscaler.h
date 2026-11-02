@@ -3,9 +3,11 @@
 // vkCreateDevice, vkGetDeviceProcAddr, vkQueueSubmit and takes over the NGX entry points: our
 // DLSS runs through its own feature, which may call vkDeviceWaitIdle from the thread recording
 // the evaluate (a release, or a backend change from its menu). It is allowed; while it is loaded
-// a compatibility mode keeps the engine on the paths it handles. BB_OPTISCALER_COMPAT=0 turns
-// the whole mode off; each part has its own switch as well. Unset, they come from config.ini
-// (optiscaler_*, the in-game menu; BbSettings::Values::startup_optiscaler).
+// a compatibility mode keeps the engine on the paths it handles: NGX calls under the queue lock,
+// the Vulkan instance and device made on a thread of their own, and one submit thread while its
+// frame generation is on. One switch for all of it (0.4.4 beta 28: its parts' own switches went):
+// optiscaler_compat in config.ini (the in-game menu, read at start), or BB_OPTISCALER_COMPAT=0
+// (the launcher's Engine switch) for a run.
 #pragma once
 
 #include <optional>
@@ -24,12 +26,9 @@ struct Info {
 
 /// Looks once for a loaded OptiScaler and prints one line about it and the compatibility mode.
 const Info& Detect();
-/// OptiScaler is loaded and BB_OPTISCALER_COMPAT is not 0.
+/// OptiScaler is loaded and its compatibility mode is on.
 bool Compat();
-/// Compat() and the part's own switch (`name`, e.g. "BB_OPTISCALER_SYNC_SUBMIT") is not 0.
-bool Part(const char* name);
-/// One submit thread: Part("BB_OPTISCALER_SYNC_SUBMIT") with its frame generation on, or the
-/// switch set to 1.
+/// One submit thread: Compat() with its frame generation on.
 bool SyncSubmit();
 
 /// OptiScaler keeps a per-thread "a D3D device is being created" flag and skips its vkCreateInstance
@@ -37,11 +36,10 @@ bool SyncSubmit();
 /// thread that creates our Vulkan objects (2026-10-21 log: both hooks "Skipping because DXVK/VKD3D
 /// is creating a D3D device"), so its frame generation never prepared our device or hooked its
 /// swapchain, yet started its D3D12 side and lost the GPU. With OptiScaler loaded the instance and
-/// the device are created on a thread of their own, where that flag starts clear
-/// (BB_OPTISCALER_CLEAN_THREAD=0: on the calling thread).
+/// the device are created on a thread of their own, where that flag starts clear.
 template <typename F>
 auto OnCleanThread(F&& create) {
-    if (!Part("BB_OPTISCALER_CLEAN_THREAD")) {
+    if (!Compat()) {
         return create();
     }
     std::optional<decltype(create())> result;

@@ -13,7 +13,6 @@
 #include "common/shared_first_mutex.h"
 #include "video_core/buffer_cache/buffer_cache.h"
 #include "video_core/page_manager.h"
-#include "video_core/renderer_vulkan/vk_bind_helper.h"
 #include "video_core/renderer_vulkan/vk_camera_motion.h"
 #include "video_core/renderer_vulkan/vk_constant_ring.h"
 #include "video_core/renderer_vulkan/vk_scene_resolution.h"
@@ -127,32 +126,12 @@ public:
     void WaitBeforeDmaStore(VAddr dst, u32 num_bytes, VAddr src, u32 src_size);
     u32 ReadDataFromGds(u32 gsd_offset);
     bool InvalidateMemory(VAddr addr, u64 size, bool assume_locks = false);
-    /// bbport: data written into GPU memory by a path we hear of (file reads, the game's resource
-    /// loaders, DMA on the CPU): invalidated, and an asset for the buffer cache.
+    /// bbport: data written into GPU memory by a path we hear of (file reads into it): invalidated.
     void NoteAssetWrite(VAddr addr, u64 size);
-    /// bbport: the CPU has written [addr, addr + size): invalidated, its bytes kept over GPU data that
-    /// is read back first.
-    void InvalidateAfterWrite(VAddr addr, u64 size);
-    /// bbport (any thread): the command processor wrote these bytes outside the command stream
-    /// (labels, timestamps, occlusion results): VRAM copies of them get them too.
-    void NoteLateCommandWrite(VAddr addr, const void* data, u64 size) {
-        buffer_cache.NoteLateCommandWrite(addr, data, size);
-    }
-    /// bbport: the command processor wrote `size` bytes of `data` at addr with the CPU in decode order
-    /// (WriteData, a constant RAM dump; the decoder reads them there). Where the GPU's own data there
-    /// is in VRAM the bytes go into it in stream order, else the caches are invalidated (no write
-    /// tracking). `recording_thread`: the draw recording thread, which owns the caches (no drain).
-    void NoteCommandWrite(VAddr addr, const void* data, u64 size, bool recording_thread);
     /// bbport (stage A, BB_CONSTRAM_PIPE, default on): before the command processor writes guest
     /// memory with the CPU (a constant RAM dump), waits until the recording thread has run the
     /// queued packets that read those bytes (their buffer bindings, DMA), not all of them.
     void WaitForPendingReads(VAddr address, u64 size);
-    /// NoteCommandWrite for a write made on stage A: handed to the recording thread in order (a copy
-    /// of the bytes) instead of draining it first.
-    void NoteCommandWriteInOrder(VAddr addr, const void* data, u64 size);
-    /// bbport: a guest thread wrote [addr, addr + size) with a libc import (memcpy, memset, memmove)
-    /// over pages the caches watch (no write tracking): what a write fault did.
-    void OnCpuWrite(VAddr addr, u64 size);
     /// GPU thread, before a write the guest can observe (see Scheduler::WaitHostCopies).
     /// `site`: the caller (BbStats::WaitSite, frame statistics).
     void WaitHostCopies(u32 site = BbStats::WaitOther) {
@@ -242,24 +221,44 @@ public:
     /// bbport BB_HONEST_LABELS=1: runs `signal` once the GPU has finished every command recorded
     /// before this call (the submission of the current tick), in call order, on a thread that
     /// waits on the work semaphore: fences the guest sees when the work is done, not when it is
-    /// recorded. `label` and `value`: the fence it writes (PendingSignalValue).
-    void SignalAfterGpu(std::function<void()> signal, VAddr label = 0, u64 value = 0);
+    /// recorded. `label` and `value`: the fence it writes (PendingSignalWord).
+    /// 0.4.4 beta 20: `size`, the bytes it writes (4 or 8): a wait on label+4 is answered from
+    /// an 8-byte fence only (the engine map's fence-1). `known` false: it writes a value not
+    /// known here (a clock or counter), so waits on its bytes read memory (PendingSignalWord).
+    void SignalAfterGpu(std::function<void()> signal, VAddr label = 0, u64 value = 0,
+                        u32 size = 8, bool known = true);
     /// Whether signals wait for work not submitted yet (the GPU command thread submits it when
     /// it runs out of work, or the guest could wait for them forever).
     bool HasUnsubmittedSignals();
-    /// bbport BB_GUEST_IN_PLACE (draw recording thread): `data` written into the game's memory by the
-    /// GPU in stream order, like the command processor's writes; false when the range is not
-    /// bound in place (the caller writes it with the CPU).
-    bool WriteGuestMemory(VAddr address, const void* data, u32 size);
-    /// bbport BB_GUEST_IN_PLACE (in stream order: the recording thread): a WRITE_DATA performed by
-    /// the GPU, as the command processor does, instead of a CPU store now (ahead of the GPU work
+    /// bbport BB_GX_IN_PLACE (in stream order: the recording thread): a WRITE_DATA performed by the
+    /// GPU, as the command processor does, instead of a CPU store now (ahead of the GPU work
     /// recorded before it). Values of up to 8 bytes are registered for WAIT_REG_MEM until the GPU
     /// has written them. False: not in place (or BB_GPU_COMMAND_WRITES=0), the caller stores it.
     bool WriteDataOnGpu(VAddr address, const void* data, u32 size);
-    /// End of a guest submission: submits the work recorded so far when signals wait for it and
-    /// the last submission is BB_HONEST_FLUSH_US (1000) old: the GPU starts on it as the hardware
-    /// would, instead of at the end of the frame, and the guest's mid-frame waits end sooner.
+    /// End of a guest submission (graphics or compute): submits the work recorded so far when
+    /// signals wait for it and the GPU has got to the last of its submissions, else has the GPU
+    /// announce when it does (SubmitForSignalsNow): the GPU starts on it as the hardware would,
+    /// instead of at the end of the frame, and never runs out of work recorded already.
     void SubmitForSignals();
+    /// bbport BB_HONEST_LABELS: the GPU has announced it got to its last submission (Announce),
+    /// and no submission has taken that yet; or will announce it (work held for it).
+    bool GpuAnnounced() const {
+        return gpu_wants_work.load(std::memory_order_acquire) != 0;
+    }
+    bool GpuWillAnnounce() const {
+        return GpuAnnounced() || watch_tick.load(std::memory_order_acquire) != 0;
+    }
+    /// GPU command thread, with nothing more on its way: the work waiting for the GPU goes, here
+    /// with the draw pipe idle, else on the recording thread after what it still has
+    /// (SubmitForGpu), one request at a time.
+    void RequestSubmitForGpu();
+    /// Recording thread (or the GPU command thread with the draw pipe drained): takes the GPU's
+    /// announcement when nothing more is on its way (`nothing_coming`), submitting the work
+    /// recorded since the last submission; otherwise the end of the game's next submission does.
+    void SubmitForGpu(bool nothing_coming);
+    /// The tick a signal registered now waits for: the current one, or with nothing recorded
+    /// since the last submission (BB_HONEST_LABELS), that submission's.
+    [[nodiscard]] u64 SignalTick() const;
     /// bbport BB_PIPE_SIGNALS (default on with honest labels; 0: off): on the GPU command thread with
     /// the draw pipe, fences, the GPU idle and frame signals and the submissions for them are
     /// handed to the draw recording thread as ordered tasks instead of that thread being drained
@@ -274,16 +273,16 @@ public:
     u64 CurrentTick() const {
         return scheduler.CurrentTick();
     }
-    /// The newest queued value of the fence at `address` (a WaitRegMem in the same stream is met
-    /// by it in stream order).
-    bool PendingSignalValue(VAddr address, u64& value);
+    /// 0.4.4 beta 20: the 4 bytes at `address` as the newest queued fence over them writes them
+    /// (a 4-byte fence at `address`, or either half of an 8-byte one); false when none does or
+    /// that one's value is not known here. `next_to_short`: a 4-byte fence just below was passed
+    /// over (it does not write there).
+    bool PendingSignalWord(VAddr address, u32& value, bool& next_to_short);
     static bool HonestLabels();
     /// The GPU command thread or the draw recording thread (fault handling runs inline there).
     bool IsGpuSideThread() const;
-    bool IsGpuSideThreadId(u32 tid) const;
     /// A guest write hit a protected page.
-    /// `guest_rip`: the guest instruction that wrote (0: unknown), see BufferCache::NoteCpuWrite.
-    bool OnWriteFault(VAddr addr, bool assume_locks, u64 guest_rip = 0);
+    bool OnWriteFault(VAddr addr, bool assume_locks);
     /// bbport: write faults on pages no tracked image watches skip the texture cache
     /// (BB_FAULT_SKIP_TEXTURES=0: they take its lock as before).
     static bool FaultSkipsTextureCache();
@@ -440,10 +439,8 @@ private:
     void BindBuffers(const Shader::Info& stage, const PreparedStage* prepared,
                      Shader::Backend::Bindings& binding,
                      Shader::PushData& push_data, u32& write_index);
-    /// `on_helper`: run by the texture binding helper; out-of-date images are not refreshed.
     void BindTextures(const Shader::Info& stage, const PreparedStage* prepared,
-                      Shader::Backend::Bindings& binding, u32& write_index, bool& barrier,
-                      bool on_helper = false);
+                      Shader::Backend::Bindings& binding, u32& write_index, bool& barrier);
     /// BB_SECTIONS: a full texture lookup over 0.3 ms, per texture (BindTextures' timestamps).
     void ReportSlowTextureBind(const Shader::Info& stage, u64 start, std::span<const u64> pass1,
                                std::span<const u64> pass2);
@@ -514,14 +511,6 @@ private:
     /// The same for any prepared draw (the lookahead thread).
     static const PreparedStage* FindPreparedStage(const PreparedDraw* prepared,
                                                   const Shader::Info& stage);
-    /// Whether the helper may bind textures for this pipeline at all (fixed descriptor layout,
-    /// no storage writes that invalidate cached images).
-    bool HelperEligible(const Pipeline* pipeline) const;
-    /// Whether every texture of `stage` takes the memoized path without refreshing, creating or
-    /// redirecting anything that records commands or touches the buffer cache.
-    bool TexturesBindableOnHelper(const Shader::Info& stage, const PreparedStage* prepared);
-    static void RunTextureTask(void* rasterizer);
-    static void JoinBindHelper(void* rasterizer);
 
     /// Display pass: counts the frame (BbStats::gpu_frames) and, with BB_BUFFER_STATS, the lag.
     void NoteFrameStart();
@@ -529,8 +518,7 @@ private:
     void MarkPass(const GraphicsPipeline* pipeline, const RenderState& state);
     void BindVertexBuffers(const GraphicsPipeline* pipeline,
                            const PreparedDraw* prepared = nullptr);
-    void BindIndexBuffer(u32 index_offset = 0);
-    /// bbport: BindVertexBuffers/BindIndexBuffer in two halves: obtaining the buffers
+    /// bbport: the vertex and index buffer binds in two halves: obtaining the buffers
     /// (vertex_binds, index_bind) and recording the binds.
     void ResolveVertexBuffers(const GraphicsPipeline* pipeline, const PreparedDraw* prepared);
     void EmitVertexBuffers();
@@ -592,15 +580,11 @@ private:
     };
     boost::container::static_vector<BoundBuffer, Shader::NUM_BUFFERS> bound_buffers;
     /// bbport: uniform buffers bound by BindBuffers outside the constant ring (BB_FRAME_STATS):
-    /// at an aligned offset, with an offset in the push data, or copied by the CPU or the GPU to an
-    /// aligned place
-    /// (Profile::uniform_exact_base). Ring bindings are counted too.
+    /// at an aligned offset, or with an offset in the push data. Ring bindings are counted too.
     struct UboStats {
         u64 ring = 0;
         u64 in_place = 0;
         u64 offset = 0;
-        u64 staged = 0;
-        u64 copied = 0;
     } ubo_stats;
     void ReportUboStats();
 
@@ -703,32 +687,6 @@ private:
         u64 offset;
         vk::IndexType type;
     } index_bind{};
-    /// The direct draw whose vertex/index buffers BindResources may resolve early.
-    struct DrawInputs {
-        const GraphicsPipeline* pipeline;
-        const PreparedDraw* prepared;
-        u32 index_offset;
-        bool is_indexed;
-        bool pending;
-        bool resolved;
-    } draw_inputs{};
-    // bbport: textures of a draw bound on the helper thread while this thread binds buffers.
-    static bool BindHelperWanted();
-    BindHelper bind_helper{BindHelperWanted()};
-    struct TextureTask {
-        struct Stage {
-            const Shader::Info* info;
-            const PreparedStage* prepared;
-            Shader::Backend::Bindings binding;
-            u32 write_index;
-        };
-        std::array<Stage, Shader::MaxStageTypes> stages;
-        u32 count = 0;
-        u32 completed = 0; ///< stages the helper bound; the rest are bound after the join
-        bool barrier = false;
-    } texture_task;
-    /// Draws whose textures the helper bound completely, partly or not at all (BB_FRAME_STATS).
-    u64 helper_full = 0, helper_partial = 0, helper_serial = 0;
     /// The memoized cache entry of each image binding (FindImage memo taken), else null.
     boost::container::static_vector<ImageDescCacheEntry*, Shader::NUM_IMAGES> image_binding_entries;
     bool fault_process_pending{};
@@ -872,6 +830,8 @@ private:
         std::function<void()> signal;
         VAddr label;
         u64 value;
+        u32 size = 8; ///< 0.4.4 beta 20: the bytes the fence writes at `label`
+        bool known = true; ///< 0.4.4 beta 20: `value` is what it writes
     };
     void GpuSignalLoop(std::stop_token token);
     /// bbport: GpuSignalLoop has waited 10 s for `tick`: prints whether the GPU or the port is stuck.
@@ -891,8 +851,15 @@ private:
     std::atomic<bool> signal_flush_requested{false};
     std::jthread gpu_signal_thread;
     void SubmitForSignalsNow();
-    /// steady_clock nanoseconds of the last submission (written by both pipeline stages).
-    std::atomic<s64> last_flush_ns{0};
+    /// The submission whose end puts the GPU on its last one while work is held for it (0: none):
+    /// set by a submission queued behind unfinished work (Flush) and by a decision to hold
+    /// (SubmitForSignalsNow); GpuSignalLoop announces it once the GPU has finished it.
+    std::atomic<u64> watch_tick{0};
+    /// The announced submission (0: none), until a submission answers it.
+    std::atomic<u64> gpu_wants_work{0};
+    std::atomic<bool> gpu_submit_requested{false};
+    void ArmWatch(u64 tick);
+    void Announce(u64 tick);
 };
 
 } // namespace Vulkan

@@ -246,10 +246,6 @@ void EmitContext::DefineBufferProperties() {
         if (buffer.buffer_type != BufferType::Guest) {
             continue;
         }
-        // bbport: bound at the guest's address itself (Rasterizer::BindBuffers): no offset.
-        if (desc.is_uniform && profile.uniform_exact_base) {
-            continue;
-        }
 
         const u32 half = PushData::BufOffsetIndex + (binding >> 4);
         const u32 comp = (binding & 0xf) >> 2;
@@ -751,7 +747,7 @@ void EmitContext::DefineOutputs() {
             ++num_render_targets;
         }
         if (FragmentMotion() && !Sirit::ValidId(frag_outputs[MotionVectors::Output].id)) {
-            motion_frag_out = DefineOutput(F32[4], MotionVectors::Output);
+            motion_frag_out = DefineOutput(U32[2], MotionVectors::Output); // R32G32_UINT
             motion_in_cur = DefineInput(F32[4], MotionVectors::CurrentLocation);
             motion_in_prev = DefineInput(F32[4], MotionVectors::PreviousLocation);
             Name(motion_frag_out, "motion_vector");

@@ -780,7 +780,7 @@ volatile int runtime_restarting;
 void runtime_restart(void) {
     fflush(NULL);
 #ifdef _WIN32
-    /* scripts/run_windows.py sets its own command line here; the new process prepares the
+    /* bb-start sets its own command line here; the new process prepares the
      * patches again. Our GPU device goes away with this process. */
     const char *command = getenv("BB_RESTART_COMMAND");
     puts("Runtime: restarting through the launcher");

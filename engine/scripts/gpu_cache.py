@@ -56,22 +56,21 @@ def recompile(cache, lab):
     return ok
 
 
-def reset_stale(cache, identity, legacy, lab):
+def reset_stale(cache, identity, lab):
+    """The cache made ready for this engine's shader compiler (`identity`, gpu-cache.id), as bb-start's
+    ResetStaleGpuCache: kept when stamped with it, recompiled or cleared otherwise. True when it was."""
+    if not identity:
+        return False
     stamp = cache / 'engine.txt'
     try:
-        stamped = stamp.read_text().strip()
+        if stamp.read_text().strip() == identity:
+            return False
     except OSError:
-        stamped = None
-    if stamped is not None:
-        if not identity or stamped == identity:
-            return
-        if legacy and stamped == legacy:  # an earlier engine built from these same sources
-            stamp.write_text(identity + '\n')
-            return
+        pass
     if cache.is_dir() and recompile(cache, lab):
         stamp.write_text(identity + '\n')
         log(f'GPU cache: the shader compiler changed ({identity}); recompiled before the start')
-        return
+        return True
     removed = False
     if cache.is_dir():
         for entry in cache.iterdir():
@@ -86,6 +85,7 @@ def reset_stale(cache, identity, legacy, lab):
     stamp.write_text(identity + '\n')
     if removed:
         log(f'GPU cache: cleared ({identity}: the shader compiler changed); shaders compile again on this start')
+    return removed
 
 
 def gpu_vendors():
@@ -170,7 +170,7 @@ if __name__ == '__main__':
     p.add_argument('--game', type=Path, help='the game folder: the shader catalogs are seeded too (out/eboot.elf)')
     a = p.parse_args()
     lab = a.out / 'bb-shader-lab'
-    identity, legacy = '', ''
+    identity = ''
     try:
         identity = json.loads(a.package.read_text()).get('engine', '') if a.package else ''
     except (OSError, ValueError):
@@ -179,11 +179,8 @@ if __name__ == '__main__':
         gpu_id = (a.out / 'gpu-cache.id').read_text().strip()
         if gpu_id:
             identity = 'gpu ' + gpu_id
-        old = (a.out / 'gpu-cache.legacy.id').read_text().strip()
-        if old:
-            legacy = 'gpu ' + old
     except OSError:
         pass
-    reset_stale(a.cache, identity, legacy, lab)
+    reset_stale(a.cache, identity, lab)
     if a.game:
         seed(a.cache, a.engine / 'shader-catalog', a.game, a.out / 'eboot.elf', lab)

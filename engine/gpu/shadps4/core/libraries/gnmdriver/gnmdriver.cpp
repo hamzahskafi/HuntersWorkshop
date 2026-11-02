@@ -119,25 +119,16 @@ void NoteFramesRetired(u64 frames) {
 // sceGnmSubmitDone returns once the GPU has finished the frame before (the game frees that frame's
 // memory then: without it, its heap ran out after ~7 minutes) - but the work is handed over first,
 // so the GPU starts the next frame instead of draining between frames.
-// BB_SUBMIT_LOCK=ahead (an experiment): submissions do not wait, sceGnmSubmitDone(F) waits for
-// frame F-1 (the guest runs up to a frame ahead of the GPU).
-static bool RunAhead() {
-    static const bool on = [] {
-        const char* env = std::getenv("BB_SUBMIT_LOCK");
-        return env && std::string_view{env} == "ahead";
-    }();
-    return on;
-}
-
 static void WaitPreviousFrame();
 
 // BB_SUBMIT_AHEAD=K (default 2): the first K submissions of a frame do not wait for the previous
 // frame, the next ones do. The game keeps two frame contexts and builds the next frame in the one
 // of the frame before the previous: the first submissions are translated while the GPU finishes
 // the previous frame instead of after it (1080p, Yahar'gul: 101 -> 154 FPS). Further on it
-// assumes the previous frame finished: K 8 or more, or no wait at all, and its heap leaked (~2
-// resource objects a frame, out of memory after minutes). Should the heap grow anyway (the game
-// asks for more memory with mmap, which it never does otherwise), K becomes 0 for the session.
+// assumes the previous frame finished: K 8 or more, or no wait at all (the BB_SUBMIT_LOCK=ahead
+// experiment, removed in 0.4.4 beta 21), and its heap leaked (~2 resource objects a frame, out of
+// memory after minutes). Should the heap grow anyway (the game asks for more memory with mmap,
+// which it never does otherwise), K becomes 0 for the session.
 extern "C" std::uint64_t runtime_heap_growths(void);
 static u32 submits_this_frame = 0;
 static bool overlap_off = false;
@@ -157,6 +148,23 @@ static void WatchOverlapLeak() {
     }
     if (!BbHeapSites::Counting()) {
         BbHeapSites::InstallCounters();
+        // 0.4.4 beta 20: without the allocation counters (Windows: a stub; Linux when the malloc
+        // table is refused) the heap's growth was never looked at (the engine map's gnm-1). Said
+        // once, not acted on yet: whether area streaming grows it too decides whether it may
+        // turn the overlap off.
+        static u64 frames_uncounted = 0;
+        static std::uint64_t growths_at_start = 0;
+        static bool said = false;
+        if (++frames_uncounted == 600) {
+            growths_at_start = runtime_heap_growths(); // warmed up: area loads
+        } else if (frames_uncounted > 600 && !said &&
+                   runtime_heap_growths() > growths_at_start) {
+            said = true;
+            std::printf("Gnm: the game's heap asked for more memory (%llu times since warm-up): "
+                        "with the allocation counters frame overlap would stop now "
+                        "(BB_SUBMIT_AHEAD 0); without them it is only said (0.4.4 beta 20)\n",
+                        static_cast<unsigned long long>(runtime_heap_growths() - growths_at_start));
+        }
         return;
     }
     static u64 frames = 0;
@@ -174,7 +182,7 @@ static void WatchOverlapLeak() {
     }
 }
 static void WaitPreviousFrameAtSubmit() {
-    if (RunAhead() || ++submits_this_frame <= SubmitsAhead()) {
+    if (++submits_this_frame <= SubmitsAhead()) {
         return;
     }
     WaitPreviousFrame();

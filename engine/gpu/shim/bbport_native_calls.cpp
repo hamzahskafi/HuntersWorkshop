@@ -15,7 +15,10 @@ namespace {
 
 Mode ReadMode() {
     const char* env = std::getenv("BB_NATIVE_CALLS");
-    if (!env || !env[0] || std::strcmp(env, "0") == 0) {
+    if (!env || !env[0]) {
+        return Mode::Native; // 0.4.4 beta 28: the default, as the launcher had it
+    }
+    if (std::strcmp(env, "0") == 0) {
         return Mode::Off;
     }
     if (std::strcmp(env, "verify") == 0) {

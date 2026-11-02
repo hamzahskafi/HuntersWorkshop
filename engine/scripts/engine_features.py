@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """The engine's own features for run.sh (the Linux start), as bb-start.exe prepares them on Windows
-(start/main.cpp; run_windows.py before it): the executable checked, whose identity
+(start/main.cpp): the executable checked, whose identity
 (BB_ENGINE_IMAGE_SHA256) every engine hook checks before it goes in - keyboard and mouse, the PC
 menus, camera, widescreen, live graphics, cheats, fast loading - then the Dream mirror and the PC
 menus made from the player's own files. Without it, from the first Linux build (0.9.37 beta 5) to

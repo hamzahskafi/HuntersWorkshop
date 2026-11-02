@@ -38,7 +38,7 @@ enum BindAction : int {
     // Camera and menus
     kBindLookU, kBindLookD, kBindLookL, kBindLookR, kBindMenu, kBindConfirm, kBindBack,
     // Other
-    kBindL3, kBindDebugMenu,
+    kBindL3,
     kBindCount,
 };
 constexpr int kBindPages = 5, kBindPerPage = 7;
@@ -60,8 +60,6 @@ void host_bindings_load_defaults();
 // One `name = value` line from the options file's [keys]. False when the name
 // is not an action.
 bool host_bindings_parse(const char* name, const char* value);
-// Writes the [keys] section.
-void host_bindings_save(std::FILE* f);
 
 // Bumped whenever any binding changes, so what a consumer built from them
 // (engine/key_prompts.h caches rewritten message text) knows to build again.
@@ -72,11 +70,6 @@ int host_binding_key(int action);    // an SDL scancode, 0 when unbound
 int host_binding_mouse(int action);  // 1..5 the buttons, 6 and 7 the wheel up and down; 0 when unbound
 // What the screen shows: "E", "X  /  Right Button", "Unbound". UTF-8.
 void host_binding_describe(int action, char* out, std::size_t n);
-// What a button prompt in the game's own text shows, which has to be short
-// because it sits inside a sentence: the bound key, or the mouse button as
-// "L Mouse", and nothing at all when the action has neither
-// (engine/key_prompts.h). UTF-8.
-void host_binding_prompt(int action, char* out, std::size_t n);
 
 // The movement keys' direction, turned toward the keys' instead of jumping to it,
 // after ayozetr's 523c88e and Supermedo's 4b930b1 (Lantern PR #67 by
@@ -136,7 +129,5 @@ void host_bind_capture_note_held(bool any_down);
 // the key; the Key Bindings screen takes it if an action row is selected
 // (a press nobody takes within a quarter second is dropped).
 void host_bind_note_clear_key();
-// The Debug Menu key was pressed since the last call (engine/debug_menu.h).
-bool host_bind_take_debug_toggle();
 bool host_bind_take_clear_key();
 void host_binding_clear(int action);

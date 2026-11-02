@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// bbport: NVIDIA DLSS Super Resolution as an alternative to FSR 3.1/4, through the NGX core the
+// bbport: NVIDIA DLSS Super Resolution as an alternative to AMD FSR, through the NGX core the
 // NVIDIA driver installs (_nvngx.dll, libnvidia-ngx.so.1), loaded at run time: no NVIDIA SDK
 // headers or libraries at build time. The DLSS model itself is NVIDIA's redistributable
 // nvngx_dlss.dll / libnvidia-ngx-dlss.so (tools/fetch_dlss.sh), searched next to the
 // executable and in BB_DLSS_DIR.
 //
-// It consumes the FSR 4 frame (vk_fsr4.h): scene color, depth, motion vectors in render pixels
+// It consumes one frame's inputs (vk_frame_upscaler.h): scene color, depth, motion vectors in render pixels
 // (previous - current, without jitter) and the jitter offset; the output is written in General.
 
 #pragma once
 
 #include <memory>
-#include "video_core/renderer_vulkan/vk_fsr4.h"
+#include "video_core/renderer_vulkan/vk_frame_upscaler.h"
 
 namespace Vulkan {
 
@@ -28,7 +28,7 @@ public:
 
     /// Records DLSS into `frame.cmdbuf` (the frame's preset picks the DLSS quality mode).
     /// False when DLSS cannot run; Problem() says why.
-    bool Record(const Fsr4Upscaler::Frame& frame);
+    bool Record(const UpscaleInput::Frame& frame);
 
     [[nodiscard]] const char* Problem() const noexcept;
     [[nodiscard]] bool Fatal() const noexcept;

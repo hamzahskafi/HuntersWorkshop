@@ -783,7 +783,9 @@ void GraphicsPipeline::BuildDescSetLayout(bool preloading) {
             });
         }
     }
-    uses_push_descriptors = binding < instance.MaxPushDescriptors();
+    // 0.4.4 beta 20: up to and including the limit, as Vulkan allows (it said below it: a
+    // pipeline of exactly the limit fell back to descriptor sets; the engine map's shader-9).
+    uses_push_descriptors = binding <= instance.MaxPushDescriptors();
     const auto flags = uses_push_descriptors
                            ? vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptorKHR
                            : vk::DescriptorSetLayoutCreateFlagBits{};

@@ -18,7 +18,8 @@ mods/
 
 Also accepted:
 
-- `Mod name/app0/dvdroot_ps4/...` and `Mod name/CUSA03173/dvdroot_ps4/...`;
+- `Mod name/app0/dvdroot_ps4/...` and `Mod name/CUSA03173/dvdroot_ps4/...` (the other
+  editions' serials, such as CUSA00207, too);
 - an extra wrapper folder, as after unpacking an archive into a folder of its name:
   `Mod name/Mod name v1.2/dvdroot_ps4/...` (readmes and pictures may lie next to it);
 - a mod without `dvdroot_ps4` that holds the game's folders directly: `Mod name/chr/...`,
@@ -42,20 +43,30 @@ was checked against
 [shadPS4's source](https://github.com/shadps4-emu/shadPS4/blob/main/src/core/file_sys/fs.cpp).
 
 The game's originals are not overwritten. For the run, a separate merged tree of links is made in
-the data folder's `out/mod-game-*`; reads, stat and directory listings see the chosen replacements
-and the remaining original files. The game's `/app0` and `/hostapp` are read-only. Saves stay in
-their usual folder and are writable. On a normal exit or a stop from the launcher the temporary
-tree is removed. After SIGKILL or a power loss it may remain; such folders are not used by the next
-start.
+the data folder's `out/mod-game-*` (on Windows, when the data folder is on another drive than the
+game, in `.bbport-overlays` beside the game folder: hard links work within one drive only); reads,
+stat and directory listings see the chosen replacements and the remaining original files. The
+game's `/app0` and `/hostapp` are read-only. Saves stay in their usual folder and are writable. On
+a normal exit or a stop from the launcher the temporary tree is removed. After SIGKILL or a power
+loss it may remain; the next start removes such folders.
+
+A dumped game update beside the game folder, named as shadPS4 keeps it (`CUSA03173-UPDATE` or
+`CUSA03173-patch` for a folder `CUSA03173`, any case) and holding an `eboot.bin`, is laid over the
+game first, the mods over it; the log says `Game update: ...`. It is left out when the game folder
+already has the update's version.
+
+Mod files that other players of a co-op session read too (parameters, map layouts, events, AI and
+talk scripts, actions, character animations) are counted in the log: co-op partners need the same
+files, or enemies and items desync between them.
 
 On drives without links (exFAT, FAT32; Windows junctions need NTFS) the start writes the list of
 replaced files to `out/mod-files.txt` instead (`BB_MOD_FILES`), and the runtime reads the mod files
-in place (since 0.9.37 beta 7).
+in place.
 
 Mods that replace `eboot.bin`, `sce_module` or `sce_sys`, DLL injectors and script plugins are not
 supported by this loader. Patches of executable code stay in the existing `patches/` /
-`BB_PATCHES` system. Symbolic links inside a mod are not accepted. Whether a mod works with
-CUSA03173 1.09 is up to its author.
+`BB_PATCHES` system. Links inside a mod (symbolic links, junctions) are skipped, never followed,
+with a line in the log. Whether a mod works with CUSA03173 1.09 is up to its author.
 
 From a terminal:
 
@@ -89,7 +100,10 @@ says `isEnabled`; the choice made in the launcher is saved in the data folder's 
 Lines of type `bytes`, `bytes16/32/64`, `float32/64`, `utf8` and `utf16` are supported. A patch
 with `mask` lines (pattern search) or with an address outside the eboot is skipped whole, with a
 message in the log. Third-party patches are applied after the built-in ones
-(`patches/Bloodborne.xml`): where they overlap, the third-party one wins. From a terminal:
+(`patches/Bloodborne.xml`): where they overlap, the third-party one wins. Two kinds are left out
+unless the launcher's question at Play is answered "keep": a patch that changes the game's region
+while online is on (`BB_REGION_PATCH_ONLINE`), and a resolution patch while the output is not
+1920x1080 (`BB_RESOLUTION_PATCH`); the log says why. From a terminal:
 `BB_PATCHES_DIR=/path BB_PATCHES_CONFIG=/path/patches.json bash run.sh`.
 
 Patches that replace pointers in tables (such as `60 FPS++` and `90 FPS++`) are moved by the loader
@@ -99,7 +113,8 @@ to the image's real address. Such patches used to stop the start with the error
 # TAA sharpening
 
 The `sharpen` and `sharpness` settings also work for TAA, in the launcher and the in-game menu. The
-range is **0…1**; at 0, or with the switch off, there is no extra pass. RCAS is applied to the
-finished scene before the HUD. The TAA history keeps the colour before sharpening, so that
-sharpening does not build up over repeated accumulation. Flat areas keep their original colour,
-HDR included; no extra buffer is needed.
+range is **0…2** (above 1 the RCAS change is extrapolated, stronger than AMD's maximum); at 0, or
+with the switch off, there is no extra pass. RCAS is applied to the finished scene before the HUD.
+The TAA history keeps the colour before sharpening, so that sharpening does not build up over
+repeated accumulation. Flat areas keep their original colour, HDR included; no extra buffer is
+needed.

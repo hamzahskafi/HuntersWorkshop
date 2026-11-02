@@ -35,15 +35,9 @@
 // camera turns reach 0x183ce67 by other paths and never through the store, so
 // the store is also how the step knows the free camera ran.
 //
-// Where the step runs (engine/mouse_camera_step.h holds it):
-// - Our source of the update in place (the decomp list, decomp/camera/
-//   follow_camera.cpp): ours takes the counts first thing and turns after the
-//   stick, where DS3 does. No hooks.
-// - The game's update in place: hooks on its prologue, the free camera's
-//   store and the fast turn's two exits, as below.
-// - A compare run (BBHOST_DECOMP_COMPARE=1): the stand-in runs the game's
-//   update and ours on the same input, so the game's gets the store hooks and
-//   the stand-in takes the counts for both (mouse_camera_compare_begin).
+// Where the step runs (engine/mouse_camera_step.h holds it): in the game's
+// update, by hooks on its prologue, the free camera's store and the fast
+// turn's two exits, as below.
 //
 // Auto-rotation: as the character moves, the game turns the camera by itself
 // - it reads the yaw back from where the lagging camera is, the pitch return's
@@ -51,9 +45,8 @@
 // of kHoldSites, the community patch's four stores; its fourth, the auto
 // turn's step, only R3's recentre reaches, and the mouse leaves it be. While
 // the keyboard and mouse were used last and the mouse turns the camera, the
-// three are held (unless the setting says otherwise): ours skips them, and
-// where the game's update runs they are swapped for nops - the patch's bytes -
-// and back when a controller is picked up.
+// three are held (unless the setting says otherwise): they are swapped for
+// nops - the patch's bytes - and back when a controller is picked up.
 
 
 #include <atomic>
@@ -94,11 +87,7 @@ constexpr float kFlickCooldown = 0.5f;  // seconds, as DS3 sets it after a switc
 // to see a push and a release.
 constexpr auto kFlickHold = std::chrono::milliseconds(80);
 
-enum class Mode { None, Ours, Hooks, Compare };
-Mode g_mode = Mode::None;
-const char* mode_name() {
-    return g_mode == Mode::Ours ? "ours" : g_mode == Mode::Compare ? "a compare run" : "hooks";
-}
+bool g_installed = false;
 
 const bool g_log = [] {
     const char* e = std::getenv("BBHOST_MOUSE_CAMERA_LOG");
@@ -191,36 +180,26 @@ bool redirect(ElfImage* image, std::uint64_t va, std::size_t n, const void* dest
 
 float mouse_camera_degrees_per_count(int sensitivity) { return mouse_camera::degrees_per_count(sensitivity); }
 
-bool mouse_camera_installed() { return g_mode != Mode::None; }
+bool mouse_camera_installed() { return g_installed; }
 
 void mouse_camera_install(ElfImage* image) {
     if (!image || image->sha256 != kEboot109Sha256) return;
     const auto at = [&](std::uint64_t bn) { return image->mem.slide + (bn - kPreferredGuestSlide); };
-    const int placed = 0; // This runtime executes the validated game camera.
-    if (placed == 1) {
-        g_mode = Mode::Ours;
-        host_log("mouse camera: as Dark Souls III turns it - %.3f degrees a count at sensitivity 5, after the stick and "
-                 "only without it; a flick switches the lock-on target - in our follow camera",
-                 mouse_camera_degrees_per_count(5));
-        return;
-    }
-    // The game's update runs, alone or beside ours: its free camera's store.
+    // The game's update: its free camera's store.
     auto* store = static_cast<std::uint8_t*>(guest_ptr(image->mem, at(kTurnStore)));
     if (!store || std::memcmp(store, kTurnStoreBytes, sizeof(kTurnStoreBytes)) != 0) {
         host_log("mouse camera: refused, 0x%llx is not the follow camera's store; the mouse turns it through the stick",
                  static_cast<ull>(kTurnStore));
         return;
     }
-    // Its prologue takes the counts, unless ours is a compare run's stand-in
-    // there, which takes them for both.
-    // Check every displaced block before committing any camera hook.
+    // Its prologue takes the counts. Every displaced block is checked before any camera hook goes in.
     for(int i=0;i<2;i++) {
         const auto* exit=static_cast<const std::uint8_t*>(guest_ptr(image->mem,at(kRampExits[i])));
         if(!exit || std::memcmp(exit,kRampExitBytes[i],14)) {
             host_log("mouse camera: refused, fast-turn bytes differ; camera left untouched");return;
         }
     }
-    if (placed == 0 && !input_prologue_hook(image, at(kUpdate), kUpdatePrologue, sizeof(kUpdatePrologue), update_hook)) {
+    if (!input_prologue_hook(image, at(kUpdate), kUpdatePrologue, sizeof(kUpdatePrologue), update_hook)) {
         host_log("mouse camera: refused, 0x%llx is not the follow camera's update; the mouse turns it through the stick",
                  static_cast<ull>(kUpdate));
         return;
@@ -252,10 +231,10 @@ void mouse_camera_install(ElfImage* image) {
         }
     }
     if (g_hold_fixed) host_log("mouse camera: a patch holds the camera's auto-rotation already, with any device");
-    g_mode = placed == 2 ? Mode::Compare : Mode::Hooks;
+    g_installed = true;
     host_log("mouse camera: as Dark Souls III turns it - %.3f degrees a count at sensitivity 5, after the stick and only "
-             "without it; a flick switches the lock-on target - by hooks on the game's follow camera%s",
-             mouse_camera_degrees_per_count(5), placed == 2 ? " (beside ours, compared)" : "");
+             "without it; a flick switches the lock-on target - by hooks on the game's follow camera",
+             mouse_camera_degrees_per_count(5));
 }
 
 void mouse_camera_publish(int sensitivity, bool invert_x, bool invert_y, bool hold_auto_rotation) {
@@ -312,16 +291,3 @@ bool mouse_camera_flick(float& x, float& y) {
     return true;
 }
 
-void mouse_camera_compare_begin() {
-    mouse_camera::begin_update();
-    sync_hold(mouse_camera::held());
-}
-
-void mouse_camera_report() {
-    if (g_mode == Mode::None) return;
-    host_log("mouse camera (%s): %llu camera updates, %llu turned by the mouse, %llu where the stick had the camera, %llu "
-             "lock-on flicks; auto-rotation held in %llu",
-             mode_name(), static_cast<ull>(mouse_camera::g_updates.load()), static_cast<ull>(mouse_camera::g_turns.load()),
-             static_cast<ull>(mouse_camera::g_stick_frames.load()), static_cast<ull>(g_flicks.load()),
-             static_cast<ull>(mouse_camera::g_held.load()));
-}

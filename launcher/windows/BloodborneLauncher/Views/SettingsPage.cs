@@ -11,7 +11,9 @@ using TextBlock = System.Windows.Controls.TextBlock;
 
 namespace BloodborneLauncher.Views
 {
-    /// <summary>The launcher itself: where the port is, how the game is started, and rebuilding.</summary>
+    /// <summary>The launcher itself: its look, where the engine is, how the game is started, its files,
+    /// shared settings and updates (0.4.4 beta 26: the engine's performance and sound settings went to
+    /// Engine switches, the log's to Log).</summary>
     public sealed class SettingsPage : LauncherPage
     {
         private readonly TextBlock _portHint, _buildHint;
@@ -23,10 +25,10 @@ namespace BloodborneLauncher.Views
         private readonly TextBlock _versionHint;
         private IReadOnlyList<Updater.Release>? _releases;
         private bool _versionsLoading;
-        private readonly StackPanel _themeColour = new(), _picture = new(), _iconPicture = new();
+        private readonly StackPanel _themeColour = new(), _picture = new(), _blur = new(), _iconPicture = new();
         private TextBlock _pictureHint = null!, _iconPictureHint = null!;
 
-        public SettingsPage() : base(L.T("Settings"), L.T("The engine, how the game is started, and keeping this launcher up to date."))
+        public SettingsPage()
         {
             Group(L.T("Appearance"));
             ComboRow(SymbolRegular.LocalLanguage24, L.T("Launcher language"), L.T("Restart the launcher to apply the language."),
@@ -35,7 +37,7 @@ namespace BloodborneLauncher.Views
                 {
                     Ws.SaveNow();
                     if (Prompt.Confirm(L.T("Change language"), L.T("Restart the launcher to apply the language."), L.T("Restart now"))) Restart();
-                });
+                }, defaultValue: "en");
             FrameworkElement layout = null!;
             var reverting = false;
             layout = ComboRow(SymbolRegular.PanelLeft24, L.T("Layout"), L.T("Classic: the sidebar and one card per setting. Modern: tabs and compact rows"),
@@ -52,21 +54,21 @@ namespace BloodborneLauncher.Views
                     if (layout is Segmented segmented) segmented.Select(index, notify: false);
                     else if (layout is ComboBox box) box.SelectedIndex = index;
                     reverting = false;
-                });
+                }, line: L.T("Classic: sidebar and cards; Modern: tabs and compact rows"), defaultValue: "classic");
 
             // The Modern layout's pages: tabs across the top, or a sidebar in groups (live).
             if (!SettingRow.Classic)
                 ComboRow(SymbolRegular.TextBulletListSquare24, L.T("Navigation"), L.T("Tabs across the top, or a sidebar with the pages in groups"),
                     new[] { new Choice(L.T("Tabs"), "tabs"), new Choice(L.T("Sidebar"), "sidebar") },
                     () => S.Str("ui_navigation") == "sidebar" ? "sidebar" : "tabs", v => S.Set("ui_navigation", v),
-                    changed: () => MainWindow.Instance?.ApplyNavigation());
+                    changed: () => MainWindow.Instance?.ApplyNavigation(), defaultValue: "tabs");
 
             SettingCombo(SymbolRegular.PaintBrush24, L.T("Theme"), L.T("The accent colour, and a faint tint of it in the launcher's surfaces"),
                 LauncherTheme.Themes, "ui_theme", changed: () =>
                 {
                     ShowAppearance();
                     MainWindow.Instance?.ApplyTheme();
-                });
+                }, line: L.T("The accent colour, and a faint tint of it"));
             var swatch = new Border
             {
                 Width = 22, Height = 22, CornerRadius = new CornerRadius(11), BorderThickness = new Thickness(1),
@@ -106,20 +108,25 @@ namespace BloodborneLauncher.Views
                 L.T("Pick a dot or type a colour as #RRGGBB"), presets, out _), _themeColour);
             Body.Children.Add(_themeColour);
 
-            SettingCombo(SymbolRegular.ImageEdit24, L.T("Background"),
-                SettingRow.Classic ? L.T("Shown in the Modern layout (Classic's panes are solid)") : L.T("The picture behind the glass panes"),
-                new[] { new Choice(L.T("Game artwork"), "game"), new Choice(L.T("Your picture"), "custom"), new Choice(L.T("None"), "none") },
-                "ui_background", changed: () =>
-                {
-                    ShowAppearance();
-                    MainWindow.Instance?.ApplyBackdrop();
-                });
-            Add(Card(SymbolRegular.ImageEdit24, L.T("Picture"), L.T("A PNG, JPG or BMP; it fills the window"),
-                SmallButton(L.T("Choose"), SymbolRegular.FolderOpen24, (_, _) => ChoosePicture()), out _pictureHint), _picture);
-            Body.Children.Add(_picture);
-            SettingCombo(SymbolRegular.Blur24, L.T("Background blur"), null,
-                new[] { new Choice(L.T("Strong"), "strong"), new Choice(L.T("Light"), "light"), new Choice(L.T("Off"), "off") },
-                "ui_background_blur", changed: () => MainWindow.Instance?.ApplyBackdrop());
+            // The picture behind the Modern layout's glass panes: nothing to show in Classic, whose panes
+            // are solid (0.4.4 beta 26: the rows were there, doing nothing).
+            if (!SettingRow.Classic)
+            {
+                SettingCombo(SymbolRegular.ImageEdit24, L.T("Background"), L.T("The picture behind the glass panes"),
+                    new[] { new Choice(L.T("None"), "none"), new Choice(L.T("Game artwork"), "game"), new Choice(L.T("Your picture"), "custom") },
+                    "ui_background", changed: () =>
+                    {
+                        ShowAppearance();
+                        MainWindow.Instance?.ApplyBackdrop();
+                    });
+                Add(Card(SymbolRegular.ImageEdit24, L.T("Picture"), L.T("A PNG, JPG or BMP; it fills the window"),
+                    SmallButton(L.T("Choose"), SymbolRegular.FolderOpen24, (_, _) => ChoosePicture()), out _pictureHint), _picture);
+                Body.Children.Add(_picture);
+                SettingCombo(SymbolRegular.Blur24, L.T("Background blur"), null,
+                    new[] { new Choice(L.T("Off"), "off"), new Choice(L.T("Light"), "light"), new Choice(L.T("Strong"), "strong") },
+                    "ui_background_blur", changed: () => MainWindow.Instance?.ApplyBackdrop(), into: _blur);
+                Body.Children.Add(_blur);
+            }
             SettingCombo(SymbolRegular.Image24, L.T("App icon"), L.T("The launcher's and the game window's icon. The game window takes it at its next start"),
                 AppIcon.Choices, "app_icon", changed: () =>
                 {
@@ -137,7 +144,9 @@ namespace BloodborneLauncher.Views
                 "ui_window_buttons_side", changed: () => MainWindow.Instance?.ApplyWindowButtons());
             ShowAppearance();
 
-            Group(L.T("Engine"));
+            // The engine's folder and how the game is started (0.4.4 beta 26: two groups, of one row and
+            // three). The engine's own settings are on the Engine switches page, its log's on Log.
+            Group(L.T("Engine and launch"));
             Add(Card(SymbolRegular.FolderLink24, L.T("Engine folder"), "", Row(
                 SmallButton(L.T("Browse"), SymbolRegular.FolderOpen24, (_, _) => ChoosePort()),
                 IconButton(SymbolRegular.Open24, L.T("Open in Explorer"), (_, _) => Paths.OpenFolder(Paths.PortDir)),
@@ -148,53 +157,14 @@ namespace BloodborneLauncher.Views
                     Ws.SaveSoon();
                     Refresh();
                 })), out _portHint));
-
-            Group(L.T("Launch"));
             SettingCombo(SymbolRegular.Rocket24, L.T("Start the game with"), null, Choices.LaunchMethods, "launch_method", changed: () => { ShowMethod(); Ws.SaveSoon(); });
 
-            TextRow(SymbolRegular.Code24, L.T("Command"), L.T("A program to run instead of Bloodborne.exe --run, with the settings as environment variables"),
-                @"C:\path\to\game.exe", () => S.Str("custom_command"), v => S.Set("custom_command", v), _customRows, 380);
+            TextRow(SymbolRegular.Code24, L.T("Command"), L.T("A program to run instead of bb-start.exe, with the settings as environment variables"),
+                @"C:\path\to\game.exe", () => S.Str("custom_command"), v => S.Set("custom_command", v), _customRows, 380,
+                line: L.T("A program to run instead of bb-start.exe"));
             TextRow(SymbolRegular.TextDescription24, L.T("Arguments"), null, L.T("Optional"),
                 () => S.Str("custom_args"), v => S.Set("custom_args", v), _customRows, 380);
             Body.Children.Add(_customRows);
-
-            Group(L.T("Performance"));
-            SettingCombo(SymbolRegular.Flow20, L.T("Two-stage GPU pipeline"), L.T("20–30% faster; turn off if the game is unstable"),
-                Choices.DrawPipe, "draw_pipe");
-            SettingCombo(SymbolRegular.Speaker224, L.T("Sound output"),
-                L.T("If the sound jitters or crackles, try DirectSound. The larger buffer is steadier but the sound comes a little later"),
-                Choices.SoundOutput, "sound_output");
-            var perfMore = Advanced();
-            SettingCombo(SymbolRegular.ArrowSwap24, L.T("CPU reads of GPU data"), L.T("Relaxed is the default"), Choices.Readbacks, "readbacks", perfMore);
-            SettingToggle(SymbolRegular.Speaker224, L.T("Sound threads first"),
-                L.T("For CPUs with many slower cores (older Xeons and similar): the game's sound runs before its other threads, against late or stuttering sound. Off by default"),
-                "audio_priority", perfMore);
-
-            Group(L.T("Diagnostics"));
-            Add(Card(SymbolRegular.Wrench24, L.T("Engine switches"),
-                L.T("The engine's other player-facing BB_ variables (GPU choice, texture filtering, memory, sound, fixes) as switches, sliders and lists at the engine's defaults: no typing needed"),
-                SmallButton(L.T("Open"), SymbolRegular.Open24, (_, _) => MainWindow.Instance?.Show("engine")), out _));
-            var logs = Advanced(L.T("Log, capture and extra variables"));
-            SettingCombo(SymbolRegular.DocumentText24, L.T("Log level"),
-                L.T("How much the game writes into its log: Standard for everyday play, Detailed when asked for a log of something odd, Debug only to chase a specific bug"),
-                Choices.LogLevels, "log_level", logs);
-            SettingToggle(SymbolRegular.TextBulletListSquare24, L.T("Frame statistics in the log"), "BB_FRAME_STATS", "frame_stats", logs);
-            SettingCombo(SymbolRegular.Pulse24, L.T("Hitch reports"),
-                L.T("A frame slower than this puts every thread's wait and stack in the log, for stutter reports. Pick about twice your frame time: 50 ms at 30 FPS, 40 at 60, 25 at 90, 20 at 120, 16 at 144 or uncapped. Each report pauses the game about 0.2 s; at most 12 a session, none in the first 20 s or just after a loading screen"),
-                Choices.HitchReports, "hitch_report_ms", logs);
-            SettingToggle(SymbolRegular.XboxController24, L.T("Controller details in the log"),
-                L.T("BB_PAD_LOG: each controller's USB ids, connection and rumble support, disconnects, the game's first vibration request and sticks past their round gate. For controller problems"),
-                "pad_log", logs);
-            SettingToggle(SymbolRegular.DeveloperBoard24, L.T("FSR 4 profile in the log"), "BB_FSR4_PROFILE", "fsr_profile", logs);
-            SettingToggle(SymbolRegular.Speaker224, L.T("Audio statistics in the log"), "BB_AUDIO_STATS", "audio_stats", logs);
-            SettingToggle(SymbolRegular.HourglassHalf24, L.T("Loading profile in the log"),
-                L.T("BB_SAMPLE_THREADS: where the game's main, render and file threads spend their time, every 5 seconds. For slow loading; costs a little speed"), "load_profile", logs);
-            SettingToggle(SymbolRegular.Timer24, L.T("Render stage timings in the log"), L.T("BB_SECTIONS: where each frame's CPU time goes (with frame statistics). It costs FPS, so it applies to the next game only"), "section_stats", logs);
-            SettingToggle(SymbolRegular.Camera24, L.T("Capture shaders"),
-                "BB_SHADER_CAPTURE: every shader the game uses is saved once to logs\\shaders (a few MB), for testing the new native shader compiler offline. Costs a little time the first time each shader is seen", "shader_capture", logs);
-            TextRow(SymbolRegular.Code24, L.T("Extra variables"),
-                L.T("NAME=value pairs separated by spaces, passed to the game. For anything Engine switches doesn't list; a variable set here wins over its switch there"),
-                "BB_EXAMPLE=1", () => S.Str("extra_env"), v => S.Set("extra_env", v.Trim()), logs, width: 300);
 
             Group(L.T("Files"));
             Add(Card(SymbolRegular.DocumentSettings20, L.T("Launcher settings"), Paths.ConfigFile,
@@ -204,19 +174,21 @@ namespace BloodborneLauncher.Views
             Add(Card(SymbolRegular.Broom24, L.T("Shader cache"),
                 L.T("The game's compiled shaders, kept between starts (a new engine version clears them itself). Clear them if ") +
                 L.T("something draws wrong in every save, such as missing skin or hair; the next start compiles them again and stutters for a while"),
-                SmallButton(L.T("Clear"), SymbolRegular.Broom24, (_, _) => ClearShaderCache()), out _));
+                SmallButton(L.T("Clear"), SymbolRegular.Broom24, (_, _) => ClearShaderCache()), out _, line: L.T("The game's compiled shaders, kept between starts")));
             Add(Card(SymbolRegular.Share24, L.T("Shader catalog"),
-                L.T("Save your shaders as a catalog file, or add someone else's: areas they have played don't pop in or stutter for you. ") +
+                L.T("Save your shaders as a catalog file, or add someone else's: areas they have played need fewer new shaders the first time, so less pop-in and stutter. ") +
                 L.T("It works with the same kind of graphics card; a catalog adds to your shaders, it never replaces them"),
                 Row(SmallButton(L.T("Export catalog"), SymbolRegular.Save24, (_, _) => ExportShaderCache()),
-                    SmallButton(L.T("Add catalog"), SymbolRegular.FolderOpen24, (_, _) => ImportShaderCache())), out _));
+                    SmallButton(L.T("Add catalog"), SymbolRegular.FolderOpen24, (_, _) => ImportShaderCache())), out _, line: L.T("Shares shader catalogs to reduce first-visit stutter")));
 
             Group(L.T("Share settings"));
             Add(Card(SymbolRegular.Share24, L.T("Share your settings"),
-                L.T("Graphics, effects, camera, controls, cheats and engine options, as a code to paste in Discord or a file. ") +
-                L.T("Not included: display and HDR, the online account, folders and languages"),
+                L.T("Everything that sets how the game looks, runs and plays, as a code to paste in Discord or a file. ") +
+                L.T("Not included: what belongs to this PC (folders, monitor, output resolution, window mode, HDR, graphics card, sound device, " +
+                    "preferred controller, and fixes or tuning for its hardware), to you (the online account, languages, profiles, the launcher's look, " +
+                    "trophy notifications) or to one session (log options, Extra variables)"),
                 Row(SmallButton(L.T("Copy code"), SymbolRegular.Copy24, (_, _) => CopySettingsCode()),
-                    SmallButton(L.T("Save as file"), SymbolRegular.Save24, (_, _) => SaveSettingsFile())), out _));
+                    SmallButton(L.T("Save as file"), SymbolRegular.Save24, (_, _) => SaveSettingsFile())), out _, line: L.T("Your settings as a code for Discord, or a file")));
             Add(Card(SymbolRegular.ArrowImport24, L.T("Import settings"), L.T("Someone's code or file. You see what changes before anything is applied"),
                 Row(SmallButton(L.T("Paste code"), SymbolRegular.ClipboardPaste24, (_, _) => ImportSettingsCode()),
                     SmallButton(L.T("Open file"), SymbolRegular.FolderOpen24, (_, _) => ImportSettingsFile())), out _));
@@ -240,7 +212,7 @@ namespace BloodborneLauncher.Views
                     Ws.SaveSoon();
                     Ws.Log(v == "beta" ? L.T("Update channel: beta.") : L.T("Update channel: stable."), LogLevel.Step);
                     _ = Ws.CheckForUpdatesAsync(quiet: false);
-                });
+                }, line: L.T("Tested releases (Stable), or every change (Beta)"));
             SettingToggle(SymbolRegular.Alert24, L.T("Check for updates at start"), L.F($"Looks at github.com/{Updater.Repository}/releases"), "check_updates");
             _installVersion = SmallButton(L.T("Install"), SymbolRegular.ArrowDownload24, async (_, _) => await InstallChosenVersionAsync());
             _installVersion.IsEnabled = false;
@@ -328,8 +300,8 @@ namespace BloodborneLauncher.Views
         private void Refresh()
         {
             SetHint(_portHint, Paths.IsPortDir(Paths.PortDir)
-                ? Paths.PortDir + (Paths.DetectPortDir() == Paths.PortDir ? L.T("  ·  the package this launcher is in") : "") + L.T("\nThe engine that runs your game: out\\bb-probe.exe, its scripts and Python. Your game files stay where they are")
-                : L.T("Not found. It is normally the folder this launcher is in (with bin\\bb-probe.exe and run.py)"));
+                ? Paths.PortDir + (Paths.DetectPortDir() == Paths.PortDir ? L.T("  ·  the package this launcher is in") : "") + L.T("\nThe engine that runs your game: engine\\out\\bb-start.exe. Your game files stay where they are")
+                : L.T("Not found. It is normally the folder this launcher is in"));
             SetHint(_buildHint, BuildStatus());
         }
 
@@ -351,8 +323,9 @@ namespace BloodborneLauncher.Views
         {
             _themeColour.Visibility = S.Str("ui_theme") == "custom" ? Visibility.Visible : Visibility.Collapsed;
             _picture.Visibility = S.Str("ui_background") == "custom" ? Visibility.Visible : Visibility.Collapsed;
+            _blur.IsEnabled = S.Str("ui_background") != "none";
             var own = S.Str("ui_background_image");
-            SetHint(_pictureHint, own.Length == 0 ? L.T("None chosen yet: the game artwork shows")
+            if (_pictureHint != null) SetHint(_pictureHint, own.Length == 0 ? L.T("None chosen yet: the game artwork shows")
                 : File.Exists(own) ? own : L.F($"{own} is missing: the game artwork shows"));
             _iconPicture.Visibility = S.Str("app_icon") == "custom" ? Visibility.Visible : Visibility.Collapsed;
             SetHint(_iconPictureHint, S.Str("app_icon_image") is { Length: > 0 } icon && File.Exists(AppIcon.CustomFile)
@@ -410,7 +383,7 @@ namespace BloodborneLauncher.Views
         }
 
         /// <summary>Deletes the engine's shader and pipeline caches (user\cache beside the engine;
-        /// scripts\run_windows.py also clears them when the engine changes).</summary>
+        /// bb-start also clears or recompiles them when the engine's shader compiler changes).</summary>
         private static async void ClearShaderCache()
         {
             if (Process.GetProcessesByName("bb-probe").Length > 0)
@@ -495,19 +468,9 @@ namespace BloodborneLauncher.Views
                 }
                 return;
             }
-            var mine = ShaderCacheShare.Pipelines(Path.Combine(ShaderCacheShare.CacheDir, "CUSA03173"));
-            if (mine > 0 && !Prompt.Confirm(L.T("Replace your shader cache?"),
-                    L.F($"Yours has {mine} pipelines; it is kept as a backup (user\\cache\\CUSA03173.bak)."), L.T("Replace")))
-                return;
-            try
-            {
-                var count = ShaderCacheShare.Import(dialog.FileName);
-                Ws.Log(L.F($"Shader cache: {count} pipelines taken; the game loads them at the next start."), LogLevel.Good);
-            }
-            catch (Exception e)
-            {
-                Prompt.Tell(L.T("Shader cache not used"), L.T("This file doesn't fit: ") + e.Message + ".");
-            }
+            // 0.4.4 beta 28: a whole cache (what launchers before Lantern 0.9.37 beta 4 shared) is no longer
+            // taken; its stamp never matched this engine's compiler anyway.
+            Prompt.Tell(L.T("Shader catalog not used"), L.T("This file doesn't fit: ") + "it is not a shader catalog.");
         }
 
         // ---------------------------------------------------------------- shared settings
@@ -644,11 +607,11 @@ namespace BloodborneLauncher.Views
 
         private void ChoosePort()
         {
-            var path = PickFolder(L.T("Engine folder (with run.py and bin\\bb-probe.exe)"), Paths.PortDir);
+            var path = PickFolder(L.T("Engine folder (with engine\\out\\bb-start.exe)"), Paths.PortDir);
             if (path == null) return;
             if (!Paths.IsPortDir(path))
             {
-                System.Windows.MessageBox.Show(Application.Current.MainWindow!, L.T("That folder has no run.py with Bloodborne.exe or bin\\bb-probe.exe."),
+                System.Windows.MessageBox.Show(Application.Current.MainWindow!, L.T("That folder has no engine\\out\\bb-start.exe."),
                     L.T("Engine folder"), MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }

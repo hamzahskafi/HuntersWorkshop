@@ -21,19 +21,13 @@ namespace Vulkan::OptiScaler {
 
 namespace {
 
-/// The switch `name` (BB_OPTISCALER_*): its variable when set (0: off), else config.ini's value at
-/// start (the in-game menu's optiscaler_*).
-bool EnvOn(const char* name) {
-    if (const char* env = std::getenv(name)) {
+/// The compatibility mode wanted: BB_OPTISCALER_COMPAT when set (0: off), else config.ini's
+/// optiscaler_compat at start (the in-game menu's).
+bool CompatWanted() {
+    if (const char* env = std::getenv("BB_OPTISCALER_COMPAT")) {
         return env[0] != '0';
     }
-    const auto& ini = BbSettings::Get().startup_optiscaler;
-    const std::string_view key{name};
-    return key == "BB_OPTISCALER_COMPAT"         ? ini.compat
-           : key == "BB_OPTISCALER_NGX_LOCK"     ? ini.ngx_lock
-           : key == "BB_OPTISCALER_CLEAN_THREAD" ? ini.clean_thread
-           : key == "BB_OPTISCALER_SYNC_SUBMIT"  ? ini.sync_submit != BbSettings::OptiSubmitOff
-                                                 : true;
+    return BbSettings::Get().startup_optiscaler_compat;
 }
 
 #ifdef _WIN32
@@ -174,19 +168,18 @@ const Info& Detect() {
                         found.version.empty() ? "" : "v",
                         found.version.empty() ? "(version unknown)" : found.version.c_str(),
                         found.module.c_str(),
-                        EnvOn("BB_OPTISCALER_COMPAT")
-                            ? "on - submissions from one thread while its frame generation is on "
-                              "(BB_OPTISCALER_SYNC_SUBMIT), NGX calls under the queue lock "
-                              "(BB_OPTISCALER_NGX_LOCK); "
-                              "BB_OPTISCALER_COMPAT=0 turns it off"
+                        CompatWanted()
+                            ? "on - submissions from one thread while its frame generation is on, "
+                              "NGX calls under the queue lock, the device made on a thread of its own; "
+                              "optiscaler_compat=0 or BB_OPTISCALER_COMPAT=0 turns it off"
                             : "off (BB_OPTISCALER_COMPAT=0 or optiscaler_compat=0)");
             if (!found.frame_generation.empty()) {
                 // Its Vulkan frame generation runs on a D3D12 device of its own (Vulkan w/Dx12),
                 // created when the first upscaled frame arrives. It needs its vkCreateDevice hook
                 // to prepare our device (OnCleanThread), and one submit thread.
                 std::printf("OptiScaler: its frame generation is on (FGOutput=%s in OptiScaler.ini): "
-                            "the Vulkan device is created where OptiScaler can prepare it "
-                            "(BB_OPTISCALER_CLEAN_THREAD), submissions from one thread; if the GPU "
+                            "the Vulkan device is created where OptiScaler can prepare it, "
+                            "submissions from one thread; if the GPU "
                             "is still lost, set Frame Generation to none in OptiScaler's menu\n",
                             found.frame_generation.c_str());
             }
@@ -197,19 +190,12 @@ const Info& Detect() {
 }
 
 bool Compat() {
-    static const bool on = Detect().loaded && EnvOn("BB_OPTISCALER_COMPAT");
+    static const bool on = Detect().loaded && CompatWanted();
     return on;
 }
 
-bool Part(const char* name) {
-    return Compat() && EnvOn(name);
-}
-
 bool SyncSubmit() {
-    const char* env = std::getenv("BB_OPTISCALER_SYNC_SUBMIT");
-    const bool always = env ? env[0] == '1'
-                            : BbSettings::Get().startup_optiscaler.sync_submit == BbSettings::OptiSubmitOn;
-    return Part("BB_OPTISCALER_SYNC_SUBMIT") && (!Detect().frame_generation.empty() || always);
+    return Compat() && !Detect().frame_generation.empty();
 }
 
 } // namespace Vulkan::OptiScaler

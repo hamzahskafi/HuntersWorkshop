@@ -23,6 +23,13 @@ def load(d, f, name):
         return np.frombuffer(raw, np.float16).astype(np.float32).reshape(h, w, 2)
     if fmt == 'rgba32f':
         return np.frombuffer(raw, np.float32).reshape(h, w, 4)
+    if fmt == 'rg32ui':
+        # objects since 0.4.4 beta 15: x = the vector as two halves, y = depth, sign = written.
+        packed = np.frombuffer(raw, np.uint32).reshape(h, w, 2)
+        vector = packed[..., 0].copy().view(np.float16).reshape(h, w, 2).astype(np.float32)
+        valid = ((packed[..., 1] >> 31) & 1).astype(np.float32)
+        depth = (packed[..., 1] & 0x7fffffff).view(np.float32)
+        return np.concatenate([vector, valid[..., None], depth[..., None]], -1)
     raise ValueError(fmt)
 
 def affine(v):

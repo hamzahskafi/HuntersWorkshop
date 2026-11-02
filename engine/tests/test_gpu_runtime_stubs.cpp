@@ -25,13 +25,13 @@ uint64_t runtime_experiment_bits = 0;
 uint64_t runtime_tsc_frequency() { return 1000000000; }
 int runtime_file_translate(const char*, char*, size_t) { std::abort(); }
 uint64_t runtime_memory_clamp(uintptr_t, uint64_t) { std::abort(); }
+int runtime_memory_readable(uintptr_t, uint64_t) { std::abort(); } // 0.4.4 beta 20 (bbgpu.cpp)
 uint64_t runtime_process_time_us() { return std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
 int runtime_memory_region(uintptr_t, uintptr_t*, uintptr_t*, int*) { std::abort(); }
 void runtime_memory_set_gpu_hooks(void (*)(uintptr_t, uint64_t),
     void (*)(uintptr_t, uint64_t), void (*)(uintptr_t, uint64_t)) { std::abort(); }
 void runtime_thread_attach_host(const char*) {}
 int32_t runtime_thread_spawn(void**, void* (*)(void*), void*, uint64_t, const char*) { std::abort(); }
-int32_t runtime_thread_join_spawned(void*, void**) { std::abort(); }
 void runtime_memory_gpu_protect(uintptr_t, uint64_t, int, int) { std::abort(); }
 void runtime_restart() { std::abort(); }
 uint64_t runtime_process_time_counter() { return runtime_process_time_us() * 1000; }
@@ -41,11 +41,7 @@ void runtime_memory_read_backing(uintptr_t, void*, uint64_t) { std::abort(); }
 const uint64_t* runtime_memory_generation() { static const uint64_t generation = 0; return &generation; }
 void runtime_memory_note_write(uintptr_t, uint64_t) { std::abort(); }
 void runtime_memory_set_note_write_hook(void (*)(uintptr_t, uint64_t)) {}
-void runtime_memory_set_cpu_write_hook(void (*)(uintptr_t, uint64_t)) {}
-void runtime_memory_set_write_watch(uintptr_t, uint64_t, int) { std::abort(); }
 int runtime_memory_restore_access(void*, uintptr_t, int) { return 0; }
-void runtime_memory_set_guest_chunk_allocator(int (*)(uint64_t, uint64_t)) {}
-void runtime_memory_set_guest_chunk_whole(int) {}
 unsigned char* runtime_memory_backing(uint64_t* direct_size) {
     *direct_size = 0;
     return nullptr;
@@ -64,5 +60,10 @@ void runtime_thread_census(uint64_t* made, uint64_t* finished, uint64_t* found, 
     *made = *finished = *found = *steps = 0;
 }
 uint64_t runtime_memory_regions() { return 0; }
+// The GPU library calls these from its freeze and hitch reports (bbport_freeze.cpp) and the key
+// prompts (key_prompts.cpp); every test that links it needs them.
+void runtime_blocked_report(const char*) {}
+int runtime_pad_type(void) { return 0; }
+int runtime_pad_button(uint32_t, int) { return 0; }
 }
 

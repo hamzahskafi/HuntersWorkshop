@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Linux build environment of the Hunter's Workshop on Ubuntu 24.04 (WSL, a VM, a CI runner): the same
-# packages and libraries as packaging/linux/Dockerfile, installed directly. Run as root once;
+# Linux build environment of the Hunter's Workshop on Ubuntu 24.04 (WSL, a VM, a CI runner, a
+# container): the packages and libraries the engine builds with. Run as root once;
 # packaging/linux/build.sh then builds and packages the engine.
 #
 # The libraries the Windows build takes from MSYS2 are built at the same versions into /opt/deps,
@@ -79,21 +79,6 @@ if ! built zydis-zycore; then
     rm -rf zydis
     stamp zydis-zycore
 fi
-# miniupnpc (bbnet's port mapping), static as on Windows: its CMake project is a subfolder.
-if ! built miniupnpc; then
-    echo 'deps: miniupnpc 2.2.8'
-    fetch miniupnp miniupnpc_2_2_8 https://github.com/miniupnp/miniupnp.git
-    cmake -S miniupnp/miniupnpc -B miniupnp/b "${deps[@]}" -DUPNPC_BUILD_STATIC=ON \
-        -DUPNPC_BUILD_SHARED=OFF -DUPNPC_BUILD_TESTS=OFF -DUPNPC_BUILD_SAMPLE=OFF >/dev/null
-    cmake --build miniupnp/b -j "$jobs" >/dev/null
-    cmake --install miniupnp/b >/dev/null
-    rm -rf miniupnp
-    stamp miniupnpc
-fi
-# Protobuf (bbnet's shadNet messages), with its Abseil.
-cmake_dep protobuf v29.5 https://github.com/protocolbuffers/protobuf.git \
-    -Dprotobuf_BUILD_TESTS=OFF -Dprotobuf_ABSL_PROVIDER=module -DABSL_PROPAGATE_CXX_STD=ON \
-    -Dprotobuf_INSTALL=ON -Dutf8_range_ENABLE_INSTALL=ON
 # SDL3: shared (its video, audio and input backends are loaded at run time from the system).
 if ! built sdl3; then
     echo 'deps: SDL3 release-3.4.18'

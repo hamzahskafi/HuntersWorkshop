@@ -8,12 +8,13 @@ import os
 import struct
 import tempfile
 import unittest
+from unittest import mock
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import patches
 
-from patches import (DEFAULT_OFF, EBOOT_BASE, OUTPUT_SIZE, RESOLUTION_TEMPLATE, SCENE_HEIGHT,
+from patches import (DEFAULT_OFF, DEFAULT_ON, EBOOT_BASE, OUTPUT_SIZE, RESOLUTION_TEMPLATE, SCENE_HEIGHT,
                      SCENE_WIDTH, UI_HEIGHT, UI_WIDTH, compile_patches,
                      render_size, resolution_writes, scaled_sizes, effect_patches,
                      validate_patch_requirements, external_patches, external_selection,
@@ -83,23 +84,38 @@ class NativeUiTests(unittest.TestCase):
         self.assertIsNone(render_size({'upscaler': 'off', 'preset': '3'}))
 
     def test_output_other_than_1080p_scales_the_scene(self):
-        self.assertIsNone(scaled_sizes({'output_res': '1920x1080', 'preset': '2'}))
+        self.assertIsNone(scaled_sizes({'output_res': '1920x1080', 'upscaler': 'fsr', 'preset': '2'}))
+        # No upscaler (0.4.4 beta 28: the default): the scene at the output, whatever the preset.
+        self.assertEqual(scaled_sizes({'output_res': '1280x720', 'preset': '2'}), ((1280, 720), (1280, 720)))
         # Steam Deck: below 1080p the scene is still the preset's fraction of the output, down to
         # 640x360 (Ultra Performance at 720p would be 428x240).
         for preset, expected in [(0, (1280, 720)), (2, (752, 424)), (4, (640, 360))]:
             with self.subTest(preset=preset):
-                self.assertEqual(scaled_sizes({'output_res': '1280x720', 'preset': str(preset)}),
+                self.assertEqual(scaled_sizes({'output_res': '1280x720', 'upscaler': 'fsr', 'preset': str(preset)}),
                                  (expected, (1280, 720)))
-        self.assertEqual(scaled_sizes({'output_res': '3840x2160', 'preset': '3'}),
+        self.assertEqual(scaled_sizes({'output_res': '3840x2160', 'upscaler': 'fsr', 'preset': '3'}),
                          ((1916, 1076), (3840, 2160)))
         # TAA is native-only and uses the live host targets.
         self.assertIsNone(scaled_sizes({'output_res': '1280x720', 'upscaler': 'taa', 'preset': '3'}))
+
+    def test_auto_preset_follows_the_output_height(self):
+        # 0.4.4 beta 27c: preset=auto, the default (BbSettings::AutoPreset): Native AA up to 1200 lines,
+        # Quality up to 1600, Performance above.
+        for preset in ({}, {'preset': 'auto'}, {'preset': 'Auto'}):
+            with self.subTest(preset=preset):
+                self.assertIsNone(render_size(preset))
+                self.assertEqual(scaled_sizes({'upscaler': 'fsr', 'output_res': '1280x800', **preset}), ((1280, 800), (1280, 800)))
+                self.assertEqual(scaled_sizes({'upscaler': 'fsr', 'output_res': '1920x1200', **preset}), ((1920, 1200), (1920, 1200)))
+                self.assertEqual(scaled_sizes({'upscaler': 'fsr', 'output_res': '2560x1440', **preset}), ((1708, 960), (2560, 1440)))
+                self.assertEqual(scaled_sizes({'upscaler': 'fsr', 'output_res': '3440x1440', **preset}), ((2292, 960), (3440, 1440)))
+                self.assertEqual(scaled_sizes({'upscaler': 'fsr', 'output_res': '3840x2160', **preset}), ((1916, 1076), (3840, 2160)))
 
 
 class DebugPatchTests(unittest.TestCase):
     def test_camera_patch_is_optional_and_compatible_with_fps_and_debug_menu(self):
         on = {key: '1' for key in DEFAULT_OFF}
-        self.assertEqual(effect_patches({'debug_camera': '0', 'debug_menu': '0', **on}), [])
+        off = {key: '0' for key in DEFAULT_ON}
+        self.assertEqual(effect_patches({'debug_camera': '0', 'debug_menu': '0', 'upscaler': 'off', **on, **off}), [])
         camera = effect_patches({'debug_camera': '1'})
         writes = compile_patches(XML, camera, '01.09', SEGMENTS)
         self.assertGreater(len(writes), 0)
@@ -111,9 +127,22 @@ class DebugPatchTests(unittest.TestCase):
                         self.assertEqual(camera_bytes[offset+i], byte, patch)
 
     def test_missing_effect_keys_follow_the_engine_defaults(self):
-        self.assertEqual(effect_patches({}), ['Disable Chromatic Aberration', 'Disable DoF',
-                                              'Disable Motion Blur (perf increase)', 'Disable AA'])
-        self.assertNotIn('Disable DoF', effect_patches({'effect_dof': '1'}))
+        # 0.4.4 beta 28: no upscaler and the game's own anti-aliasing by default.
+        self.assertEqual(effect_patches({}), ['Disable Chromatic Aberration',
+                                              'Disable Motion Blur (perf increase)', 'Skip Intro'])
+        self.assertIn('Disable DoF', effect_patches({'effect_dof': '0'}))
+        self.assertNotIn('Skip Intro', effect_patches({'skip_intro': '0'}))
+
+    def test_game_anti_aliasing_only_without_an_upscaler(self):
+        # 0.4.4 beta 27b: AMD FSR, DLSS and TAA anti-alias themselves; the game's pass is left out under them.
+        for upscaler in ('fsr', 'fsr4', 'dlss', 'taa'):
+            self.assertIn('Disable AA', effect_patches({'effect_game_aa': '1', 'upscaler': upscaler}), upscaler)
+        # 0.4.4 beta 28: no upscaler is the default, so the game's pass applies without one.
+        self.assertNotIn('Disable AA', effect_patches({'effect_game_aa': '1'}))
+        self.assertNotIn('Disable AA', effect_patches({'effect_game_aa': '1', 'upscaler': 'off'}))
+        self.assertIn('Disable AA', effect_patches({'effect_game_aa': '0', 'upscaler': 'off'}))
+        with mock.patch.dict(os.environ, {'BB_UPSCALER': 'none'}):
+            self.assertNotIn('Disable AA', effect_patches({'effect_game_aa': '1', 'upscaler': 'fsr'}))
 
     def test_debug_menu_checks_both_fonts_but_camera_does_not_need_them(self):
         names = effect_patches({'debug_menu': '1'})
@@ -347,29 +376,9 @@ class FrameRateFixTests(unittest.TestCase):
         self.assertIn(0xB6FBD4, self.fixed(['60 FPS++'], 60))  # 60 keeps its list's cloth
 
     def test_camera_kept_as_the_list_has_it_by_default(self):
-        os.environ.pop('BB_CAMERA_FIX', None)
         at60 = self.fixed(['60 FPS++'], 60)
         plain = {o + EBOOT_BASE: d for o, d in patches.compile_patches(XML, ['60 FPS++'], '01.09', self.WIDE)}
         self.assertEqual(at60.get(0x4D25E68), plain.get(0x4D25E68))
-
-    def test_camera_weights_follow_the_rate(self):
-        os.environ['BB_CAMERA_FIX'] = '1'
-        self.addCleanup(os.environ.pop, 'BB_CAMERA_FIX', None)
-        at60 = self.fixed(['60 FPS++'], 60)
-        self.assertAlmostEqual(self.value(at60, 0x183A4D7), 0.05)  # Kyo's 60 values stay at 60
-        self.assertAlmostEqual(self.value(at60, 0x4D25E68), 1 - 0.9 ** 0.5, places=6)
-        self.assertAlmostEqual(self.value(at60, 0x4D25E94), 1 - (1 - 1 / 30) ** 0.5, places=6)
-        for fps in (90, 120, 144):
-            with self.subTest(fps=fps):
-                image = self.fixed([patches.SCALED_BASE], fps)
-                frames = 60 / fps
-                self.assertAlmostEqual(self.value(image, 0x183A4D7), 1 - 0.95 ** frames, places=6)  # +0x1a4
-                self.assertAlmostEqual(self.value(image, 0x183A4E1), 0.05 ** frames, places=6)  # +0x1a8 kept
-                self.assertAlmostEqual(self.value(image, 0x183A649), 0.698132, places=5)  # an angle
-                store = image[0x183FF29]
-                self.assertEqual(store[:7], bytes.fromhex('41c7859c010000'))
-                self.assertAlmostEqual(struct.unpack('<f', store[7:])[0], 1 - 0.95 ** frames, places=6)
-                self.assertAlmostEqual(self.value(image, patches.CAMERA_PARAM_EASE[0]), 1 - 0.95 ** (30 / fps), places=6)
 
     def test_30_runs_the_game_without_a_frame_rate_patch(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -404,7 +413,6 @@ class FrameRateFixTests(unittest.TestCase):
 
     def test_the_retune_keeps_its_60_fps_feel_above_60(self):
         # FPS++ with the corrections: Kyo's weights are a 60 FPS frame's, converted from it; at 60 as the list.
-        os.environ.pop('BB_CAMERA_FIX', None)
         writes = patches.compile_patches(XML, ['60 FPS++'], '01.09', self.WIDE)
         at60 = {o + EBOOT_BASE: d for o, d in patches.frame_rate_fixes(writes, 60, sixty_camera=True)}
         plain = {o + EBOOT_BASE: d for o, d in writes}
@@ -432,6 +440,32 @@ class FrameRateFixTests(unittest.TestCase):
                 self.assertAlmostEqual(self.value(image, 0x4D25E68), 1 - 0.9 ** (30 / fps), places=6)
                 self.assertAlmostEqual(self.value(image, 0x4D25E94), 1 - (1 - 1 / 30) ** (30 / fps), places=6)
 
+    def test_the_camera_per_frame_is_the_engines(self):
+        # With the frame timer (0.4.4 beta 24) the engine converts the camera every frame: FPS++ keeps Kyo's
+        # constructor values, wall escape and jump as the list has them, without his debug-menu stores, and nothing
+        # is converted here; Original leaves his retune out and the game's eases as they are.
+        writes = patches.compile_patches(XML, ['60 FPS++'], '01.09', self.WIDE)
+        plain = {o + EBOOT_BASE: d for o, d in writes}
+        for fps in (60, 120, 144):
+            with self.subTest(fps=fps):
+                fpp = {o + EBOOT_BASE: d for o, d in patches.frame_rate_fixes(writes, fps, sixty_camera=True,
+                                                                               per_frame=True)}
+                for at in (0x183A4D7, 0x183A8D5, 0x183AA47, 0x4D25E68, 0x4D25E94, patches.CAMERA_SKIP,
+                           patches.CAMERA_WALL_ESCAPE):
+                    self.assertEqual(fpp[at], plain[at], hex(at))
+                self.assertFalse([at for at in fpp if any(lo <= at < hi for lo, hi in patches.CAMERA_STORES)])
+                self.assertNotIn(patches.CAMERA_PARAM_EASE[0], fpp)
+                original = patches.frame_rate_fixes(writes, fps, original_camera=True, per_frame=True)
+                self.assertFalse([o for o, d in original if patches.kyo_camera_site(o + EBOOT_BASE, len(d))])
+                self.assertFalse([o for o, _ in original if o + EBOOT_BASE in patches.CAMERA_EASES])
+
+    def test_camera_per_frame_follows_the_timer(self):
+        self.assertTrue(patches.camera_per_frame({}))
+        self.assertTrue(patches.camera_per_frame({'BB_FRAME_FIXES_SKIP': 'cloth, steps'}))
+        self.assertFalse(patches.camera_per_frame({'BB_FRAME_FIXES': '0'}))
+        self.assertFalse(patches.camera_per_frame({'BB_FRAME_FIXES_SKIP': 'cloth, Camera'}))
+        self.assertFalse(patches.camera_per_frame({'BB_FRAME_FIXES_SKIP': ' timer '}))
+
     def test_status_effects_follow_the_frame_time_twice(self):
         # Issue 15: the second advance of a character's effects (0x1cbc50d) reads the frame's
         # time wherever a list points the first (0x1cbc4f7) at it; the list's own 1/60 was right at 60 only.
@@ -444,7 +478,7 @@ class FrameRateFixTests(unittest.TestCase):
 
 class FpsPresetTests(unittest.TestCase):
     def test_every_rate_takes_the_60_list_with_the_corrections(self):
-        for fps in ('90', '120', '144', 'uncap'):
+        for fps in ('90', '120', '144', '240', 'uncap'):
             with self.subTest(fps=fps):
                 self.assertEqual(patches.fps_preset(fps, True), (['60 FPS++'], True))
         self.assertEqual(patches.fps_preset('60', True), (['60 FPS++'], False))
@@ -454,6 +488,9 @@ class FpsPresetTests(unittest.TestCase):
         self.assertEqual(patches.fps_preset('90', False), (['90 FPS++', 'Sprint Fix (High FPS)'], False))
         self.assertEqual(patches.fps_preset('144', False), ([patches.SCALED_BASE, 'Sprint Fix (High FPS)'], False))
         self.assertEqual(patches.fps_preset('uncap', False), (['Uncap FPS++', 'Sprint Fix (High FPS)'], False))
+        # 240 has no list of its own (the start runs 144 without the corrections).
+        with self.assertRaises(SystemExit):
+            patches.fps_preset('240', False)
         self.assertFalse(patches.frame_fixes_on({'BB_FRAME_FIXES': '0'}))
         self.assertTrue(patches.frame_fixes_on({}))
 
@@ -566,7 +603,7 @@ class GxRegionTests(unittest.TestCase):
 
 class HeapPoolTests(unittest.TestCase):
     """An external resolution patch above 1080p enlarges the game's heaps with a 1080p output:
-    patches-info.json tells run_windows.py to give the game the larger memory pool."""
+    patches-info.json tells the start to give the game the larger memory pool."""
 
     def run_patches(self, directory, external):
         import shutil, subprocess, sys

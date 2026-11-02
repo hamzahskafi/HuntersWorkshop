@@ -8,6 +8,23 @@ Vulkan.
 > 1.09, dumped from your own PS4. This project is not affiliated with Sony Interactive Entertainment
 > or FromSoftware.
 
+## What it does
+
+- **Higher frame rates done properly:** 30 (as on PS4), 60, 90, 120, 144 or 240 FPS, or uncapped. Built
+  on Kyo's 60 FPS++, with the engine's own corrections so physics, cloth, animation and the follow
+  camera keep the game's speed at every rate.
+- **Upscaling and picture:** DLSS on NVIDIA RTX cards, AMD FSR through AMD's own FSR SDK (FSR 4.1 on
+  Radeon RX 6000 and newer, FSR 3.1 on other cards), TAA or the game's own anti-aliasing; HDR output,
+  widescreen, and picture tuning.
+- **A PC version of the game:** keyboard and mouse controls, the game's System menu with PC pages, and
+  an in-game settings menu (Insert, or L3 + R3 on a controller).
+- **Online and co-op** through [The Hunter's Dream](https://thehuntersdream.com).
+- **The rest of the workshop:** mods and the community's game patches, cheats, trophies, save backups,
+  and a launcher in 13 languages with a setup guide that checks your game files.
+
+What changed in the latest version: [release notes 0.4.4](engine/docs/release-notes-0.4.4.md)
+(earlier ones are beside it).
+
 ## Install
 
 1. Download `HuntersWorkshop-v<version>-win64.zip` from
@@ -43,19 +60,23 @@ Hunter's Workshop started from [Lantern Engine](https://github.com/Awakenchan/La
 | VRAM cleanup and frame pacing | adapted from [IFreemz/shadPS4-Bloodborne-DLSS-FSR](https://github.com/IFreemz/shadPS4-Bloodborne-DLSS-FSR) |
 | Character creation by mouse, and the check on the menus the engine holds open (Hunter's Dream) | adapted from [Lantern Engine](https://github.com/Awakenchan/LanternEngine) 0.9.37 by Awaken |
 | Motion vectors kept finite, the motion of skeletons the GPU writes, and Menu Confirm / Menu Back in menus only | adapted from [Lantern Engine](https://github.com/Awakenchan/LanternEngine) 0.9.38 by Awaken; DLSS 310.9.16 after EthanBlazkowicz's Lantern pull request #81; the launcher's window fitted to the screen from GHusr-y5's Lantern pull request #78 |
-| Lamp shadows cleared a face at a time; motion vectors for foliage and for an object in a culled one's place; the scene's camera over a reflection's; the character creator's turning speed; the frame limiter after a late frame; the physics hit collector's cap and the GX occlusion query guard; Havok's cloth stiffness factor, found | adapted from [bbport](https://github.com/deadinside28/bloodborne_pc) 0.7 by deadinside28; the hit collector cap from SrShadowy's fork; the occlusion query guard from whp199 (bbport PR #343) |
+| Cached pipelines checked against their motion setting | found by [Lantern Engine](https://github.com/Awakenchan/LanternEngine) 0.9.39 beta 26 by Awaken |
+| Lamp shadows cleared a face at a time; motion vectors for foliage and for an object in a culled one's place; the scene's camera over a reflection's; the character creator's turning speed; the frame limiter after a late frame; the physics hit collector's cap and the GX occlusion query guard; Havok's cloth stiffness factor, found; the game's render target copies through memory done as image copies; the 8-byte object motion target, and between the scene's reduced-size proxies | adapted from [bbport](https://github.com/deadinside28/bloodborne_pc) 0.7 by deadinside28; the hit collector cap from SrShadowy's fork; the occlusion query guard from whp199 (bbport PR #343) |
 | Crash, renderer and controller fixes | adapted from [AwesomeObserver](https://github.com/AwesomeObserver/bloodborne_pc), [Supermedo](https://github.com/Supermedo/bloodborne_pc) (pipeline failures) and [deadinside28](https://github.com/deadinside28/bloodborne_pc) (bbport 0.6: render job slots, the blur kernel, pipeline cache state); [DarkIzuku](https://github.com/DarkIzuku/bloodborne_pc) (the tiler's staging read); bmy (bbport-mac: flexible memory); [ayozetr](https://github.com/ayozetr/bloodborne_linux) with emurphy04 (the movie queue); artemkaVG (stencil linking, from [shadPS4 #5118](https://github.com/shadps4-emu/shadPS4/issues/5118)); ported through ayozetr's fork by ayozetr, 0xCydral and Mrsuss60; the keyboard sprint through direction changes from [Supermedo](https://github.com/Supermedo/bloodborne_pc) and ayozetr, with Lantern PR #67 by ikeeasianboy, measured by cassioKenji; controller sticks within a round gate from ayozetr; the PS4's floating-point state on the game's threads from [shadPS4 #3568](https://github.com/shadps4-emu/shadPS4/issues/3568) (StevenMiller123, found by red-prig), via ayozetr |
-| PC controls, camera, menus, cheats, online sign-in, occlusion culling, trophy research, the frame-rate corrections (with findings from Kyo's later FPS++ lists and yogesh1239), the work pools' lock and node cache, the FMOD sound-ring guard, the play recording's compression level, the wind's pace and the Bloodletter's L2 above 30 FPS | [droogie/bbhost](https://github.com/droogie/bbhost) |
+| PC controls, camera, menus, cheats, online sign-in, occlusion culling, trophy research, the frame-rate corrections (with findings from Kyo's later FPS++ lists and yogesh1239), the work pools' lock and node cache, the FMOD sound-ring guard, the play recording's compression level, the wind's pace and the Bloodletter's L2 above 30 FPS, co-op's leave off the game's thread and dead connections not announced as live | [droogie/bbhost](https://github.com/droogie/bbhost) |
 | Linux online start and the bound on runaway particle work | [Lena Różalska](https://github.com/DecayingEagle) |
 | Online servers | [The Hunter's Dream](https://thehuntersdream.com) |
-| FSR 3.1 and FSR 4 on Vulkan | [FireBurn/FSR-Vulkan](https://github.com/FireBurn/FSR-Vulkan) and the AMD FidelityFX SDK |
-| FSR 4.1.1 | [fsr4vk](https://github.com/dvj5411/fsr4vk), with the AMD driver fix from [0xCydral](https://github.com/0xCydral/bloodborne_pc) |
-| DLSS | NVIDIA DLSS SDK and Streamline |
+| AMD FSR | [AMD FSR SDK](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK) 2.4: AMD's signed DLLs, used as AMD ships them, and its API headers (MIT) |
+| DLSS | NVIDIA DLSS SDK (the driver's NGX core) |
 | Sound | [LibAtrac9](https://github.com/Thealexbarney/LibAtrac9) |
 | In-game menu | [Dear ImGui](https://github.com/ocornut/imgui) |
 | Controller mappings | [SDL_GameControllerDB](https://github.com/mdqinc/SDL_GameControllerDB) |
 | Trophy list | [pyL1nx/bloodborne_pc](https://github.com/pyL1nx/bloodborne_pc) |
 | Launcher UI library | [WPF-UI](https://github.com/lepoco/wpfui) |
+
+Earlier versions used [FireBurn/FSR-Vulkan](https://github.com/FireBurn/FSR-Vulkan) for FSR 3.1 and FSR 4,
+and [fsr4vk](https://github.com/dvj5411/fsr4vk) by dvj5411, with the AMD driver fix from
+[0xCydral](https://github.com/0xCydral/bloodborne_pc), for FSR 4.1.1.
 
 ### Game patches
 
@@ -91,4 +112,3 @@ part stays with its authors; the third-party licenses are in [`engine/licenses`]
 |---|---|
 | [`engine/`](engine) | the engine: start program, runtime and renderer (see its [README](engine/README.md) for building) |
 | [`launcher/windows/`](launcher/windows) | the launcher |
-| [`tools/`](tools) | release tooling |

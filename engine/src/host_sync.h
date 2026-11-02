@@ -20,7 +20,6 @@ typedef SRWLOCK HostMutex;
 #define HOST_MUTEX_INIT SRWLOCK_INIT
 static inline void host_mutex_init(HostMutex *m) { InitializeSRWLock(m); }
 static inline void host_lock(HostMutex *m) { AcquireSRWLockExclusive(m); }
-static inline int host_trylock(HostMutex *m) { return TryAcquireSRWLockExclusive(m) != 0; }
 static inline void host_unlock(HostMutex *m) { ReleaseSRWLockExclusive(m); }
 
 /* SRW locks are not recursive: the owner and depth make this one so. */
@@ -41,12 +40,9 @@ static inline void host_recursive_unlock(HostRecursiveMutex *m) {
 
 typedef SRWLOCK HostRwlock;
 #define HOST_RWLOCK_INIT SRWLOCK_INIT
-static inline void host_rwlock_init(HostRwlock *l) { InitializeSRWLock(l); }
 static inline void host_read_lock(HostRwlock *l) { AcquireSRWLockShared(l); }
-static inline int host_try_read_lock(HostRwlock *l) { return TryAcquireSRWLockShared(l) != 0; }
 static inline void host_read_unlock(HostRwlock *l) { ReleaseSRWLockShared(l); }
 static inline void host_write_lock(HostRwlock *l) { AcquireSRWLockExclusive(l); }
-static inline int host_try_write_lock(HostRwlock *l) { return TryAcquireSRWLockExclusive(l) != 0; }
 static inline void host_write_unlock(HostRwlock *l) { ReleaseSRWLockExclusive(l); }
 
 typedef CONDITION_VARIABLE HostCond;
@@ -61,7 +57,6 @@ static inline int host_cond_timedwait(HostCond *c, HostMutex *m, uint64_t ns) {
     return GetLastError() == ERROR_TIMEOUT ? ETIMEDOUT : EINVAL;
 }
 static inline void host_cond_signal(HostCond *c) { WakeConditionVariable(c); }
-static inline void host_cond_broadcast(HostCond *c) { WakeAllConditionVariable(c); }
 
 typedef uint64_t HostThreadId;
 static inline HostThreadId host_thread_id(void) { return GetCurrentThreadId(); }
@@ -80,7 +75,6 @@ typedef pthread_mutex_t HostMutex;
 #define HOST_MUTEX_INIT PTHREAD_MUTEX_INITIALIZER
 static inline void host_mutex_init(HostMutex *m) { pthread_mutex_init(m, NULL); }
 static inline void host_lock(HostMutex *m) { pthread_mutex_lock(m); }
-static inline int host_trylock(HostMutex *m) { return pthread_mutex_trylock(m) == 0; }
 static inline void host_unlock(HostMutex *m) { pthread_mutex_unlock(m); }
 
 typedef pthread_mutex_t HostRecursiveMutex;
@@ -90,12 +84,9 @@ static inline void host_recursive_unlock(HostRecursiveMutex *m) { pthread_mutex_
 
 typedef pthread_rwlock_t HostRwlock;
 #define HOST_RWLOCK_INIT PTHREAD_RWLOCK_INITIALIZER
-static inline void host_rwlock_init(HostRwlock *l) { pthread_rwlock_init(l, NULL); }
 static inline void host_read_lock(HostRwlock *l) { pthread_rwlock_rdlock(l); }
-static inline int host_try_read_lock(HostRwlock *l) { return pthread_rwlock_tryrdlock(l) == 0; }
 static inline void host_read_unlock(HostRwlock *l) { pthread_rwlock_unlock(l); }
 static inline void host_write_lock(HostRwlock *l) { pthread_rwlock_wrlock(l); }
-static inline int host_try_write_lock(HostRwlock *l) { return pthread_rwlock_trywrlock(l) == 0; }
 static inline void host_write_unlock(HostRwlock *l) { pthread_rwlock_unlock(l); }
 
 typedef pthread_cond_t HostCond;
@@ -103,7 +94,6 @@ typedef pthread_cond_t HostCond;
 static inline void host_cond_init(HostCond *c) { pthread_cond_init(c, NULL); }
 static inline void host_cond_wait(HostCond *c, HostMutex *m) { pthread_cond_wait(c, m); }
 static inline void host_cond_signal(HostCond *c) { pthread_cond_signal(c); }
-static inline void host_cond_broadcast(HostCond *c) { pthread_cond_broadcast(c); }
 
 typedef pthread_t HostThreadId;
 static inline HostThreadId host_thread_id(void) { return pthread_self(); }

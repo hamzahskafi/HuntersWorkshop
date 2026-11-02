@@ -8,7 +8,7 @@
 // cloth (frame_rate_sites.inc says what each one is). Every byte is checked before anything is written; a
 // group with a mismatch is left out whole, the others still go in.
 //
-// The rates: 60, 90, 120 and 144 as they are; uncapped with the pacer's target at its limit and, for what
+// The rates: 60, 90, 120, 144 and 240 as they are; uncapped with the pacer's target at its limit and, for what
 // cannot follow the frame's time (code immediates, frame counts), the values of 120, as bbhost and Kyo's
 // uncapped list take them. The list's fixed steps (1/30 made 1/60) follow the frame here, at 60 too: each one
 // was read and is either the frame's step now (the step-infos handed to updates, "steps") or, where it is
@@ -24,9 +24,10 @@
 // frame into 0x575a908, which the list's sites read. Without the frame timer the values here follow that
 // copy, worked out at the start of the next frame (the frame hook, at the pacer's entry): a frame late and
 // eased, so after a long frame they catch up over 10 to 15 frames while the task step has already. With it
-// (BB_FRAME_TIMER=1) the cave calls ours: the same step as the task step's, from the same measurement, into
+// (the default; "timer" in BB_FRAME_FIXES_SKIP leaves it out) the cave calls ours: the same step as the task step's, from the same measurement, into
 // the task step, 0x575a908 and every value here before the frame's tasks run - one step for all of it.
 #include "frame_rate.h"
+#include "camera_rate.h"
 #include "engine_hooks.h"
 #include "engine_state.h"
 #include "skip_list.h"
@@ -231,7 +232,7 @@ struct Rate {
 };
 bool RateOf(const char* fps, Rate& rate) {
     if (!fps) return false;
-    for (const double fixed : {60.0, 90.0, 120.0, 144.0}) {
+    for (const double fixed : {60.0, 90.0, 120.0, 144.0, 240.0}) {
         if (std::to_string(int(fixed)) == fps) {
             rate = {fixed, fixed, fixed, false};
             return true;
@@ -328,7 +329,7 @@ std::array<std::uint8_t, 55> ClothCave(std::uint64_t slot, std::uint64_t resume)
     return cave;
 }
 constexpr std::uint64_t kCave = 0x2418e3d;           // the 60 FPS++ cave, kRequire's first
-constexpr std::uint64_t kCameraSkip = 0x183dc96;     // the FPS++ retune's jump over the game's follow camera
+constexpr std::uint64_t kCameraSkip = 0x183dc96;     // the FPS++ retune's target for the older camera's jump
 constexpr std::uint8_t kCameraSkipped[] = {0xe9, 0xd6, 0x05, 0x00, 0x00};
 constexpr double kShortest = 1.0 / 480;              // a step's floor without a target (a loading screen)
 constexpr double kLongest = 1.0 / 30;                // and its ceiling, as the cave's (the game slows below 30)
@@ -369,6 +370,7 @@ void WriteSlot(const Slot& s, double seconds);
 
 // A frame of `seconds`: the cloth's substep, the slots, the play time and the eases.
 void Update(double seconds) {
+    CameraRate::Frame(seconds);
     if (g_cloth_last) {
         // A whole 1/30 s of frame time since the last: this frame's solves are the last substep's.
         constexpr double kThirtieth = 1.0 / 30;
@@ -477,7 +479,7 @@ bool Install(std::uint8_t* image, std::size_t size) {
     const char* fps = std::getenv("BB_FPS");
     Rate rate;
     if (!RateOf(fps, rate)) {
-        host_log("Frame rate fixes: not at %s FPS (60, 90, 120, 144 or uncapped)", fps ? fps : "an unknown");
+        host_log("Frame rate fixes: not at %s FPS (60, 90, 120, 144, 240 or uncapped)", fps ? fps : "an unknown");
         return false;
     }
     const auto at = [&](std::uint64_t address) { return image + (address - kBase); };
@@ -499,14 +501,15 @@ bool Install(std::uint8_t* image, std::size_t size) {
     on.fill(true);
     for (const std::string& name : SkipList("BB_FRAME_FIXES_SKIP", kGroupNames, on))
         host_log("Frame rate fixes: no group \"%s\" to skip", name.c_str());
-    // The cloth's last substep: BB_CLOTH_STEP=0 leaves it out too (the launcher's Game fixes, for its A/B test).
-    if (const char* cloth = std::getenv("BB_CLOTH_STEP"); cloth && cloth[0] == '0') {
-        on[std::size_t(Group::ClothStep)] = false;
-    }
-    // The frame timer and the camera's per-frame eases with it: only when asked for (the launcher's Experimental).
-    if (const char* timer = std::getenv("BB_FRAME_TIMER"); !timer || timer[0] != '1') {
-        on[std::size_t(Group::Timer)] = on[std::size_t(Group::Camera)] = false;
-    }
+    // The cloth's last substep is one of the groups, with the other corrections (0.4.4 beta 28: its own A/B switch,
+    // BB_CLOTH_STEP, went; the tester's call).
+    // The frame timer and the camera's per-frame eases with it: on unless "timer" is skipped (0.4.4: the default,
+    // after every log from 0.3.0 to 0.4.3 ran with it; beta 28: BB_FRAME_TIMER=0, the same as skipping timer and
+    // camera, went).
+    // The start program left the follow camera to us (patches.cpp CameraPerFrame: the same switches): if its
+    // conversion does not go in, CameraRate::Fallback converts it once for the rate instead.
+    const bool camera_wanted = on[std::size_t(Group::Timer)] && on[std::size_t(Group::Camera)];
+    bool camera_done = false;
     const auto fail = [&](Group g, std::uint64_t address) {
         if (!on[std::size_t(g)]) return;
         on[std::size_t(g)] = false;
@@ -587,6 +590,18 @@ bool Install(std::uint8_t* image, std::size_t size) {
     }
     for (const Ease& e : kEases) {
         if (!holds(e.insn, Hex(e.bytes)) || !inside(e.constant, 4)) fail(Group::Camera, e.insn);
+    }
+    // The follow camera's weights every frame (camera_rate.cpp), with the eases: its sites, and the constructor's
+    // values as the tuning has them. FPS++: the retune's jump target is in (Kyo's values there).
+    const auto skipped = std::vector<std::uint8_t>(std::begin(kCameraSkipped), std::end(kCameraSkipped));
+    const bool fpp = holds(kCameraSkip, skipped);
+    if (on[std::size_t(Group::Camera)]) {
+        std::uint64_t bad = 0;
+        if (!CameraRate::Check(image, size, fpp, &bad)) {
+            on[std::size_t(Group::Camera)] = false;
+            host_log("Frame rate fixes: camera left out: 0x%llx is not as 1.09 has it with the %s tuning",
+                     (unsigned long long)bad, fpp ? "FPS++" : "Original");
+        }
     }
 
     // The slots: from the first 16-byte boundary past the game's data to the end of that page, which must
@@ -708,21 +723,34 @@ bool Install(std::uint8_t* image, std::size_t size) {
             g_timer = true;
             next += kSlot;
             ++applied[std::size_t(Group::Timer)];
-            // The camera's eases: the retune's (its jump over the game's camera is in) a 60 FPS frame's, unless
-            // BB_CAMERA_FIX=1; the game's a 30 FPS frame's otherwise. As a 30 FPS frame's: 1 - (1 - w)^2.
-            const auto skipped = std::vector<std::uint8_t>(std::begin(kCameraSkipped), std::end(kCameraSkipped));
-            const char* fix = std::getenv("BB_CAMERA_FIX");
-            const bool sixty = holds(kCameraSkip, skipped) && !(fix && fix[0] == '1');
+            // The follow camera, all or none: its weights converted where the game uses them (camera_rate.cpp),
+            // and its two eases from slots. FPS++: Kyo's values as a 30 FPS frame's (1 - (1 - w)^2), only those he
+            // changed (the chase-rate ease, which he left, is the game's); the game's otherwise.
+            if (on[std::size_t(Group::Camera)] && !CameraRate::Install(image, size, fpp)) {
+                on[std::size_t(Group::Camera)] = false;
+                host_log("Frame rate fixes: camera left out: its caves could not be placed");
+            }
+            // The caves read a frame at the rate until the first Step (and from then on, should the slots' page
+            // turn out not writable, which stops Step).
+            camera_done = on[std::size_t(Group::Camera)];
+            if (camera_done) CameraRate::Frame(step);
             for (const Ease& e : kEases) {
                 if (!on[std::size_t(Group::Camera)]) break;
-                const double w = FromBits(sixty ? e.listed : e.game);
+                const bool kyo = fpp && e.listed != e.game;
+                const double w = FromBits(kyo ? e.listed : e.game);
                 const auto ease_disp = std::int32_t(next - (at(e.insn) + e.length));
                 if (!write(e.insn + e.disp, &ease_disp, sizeof ease_disp)) continue;
-                g_eases.push_back({next, sixty ? 1 - (1 - w) * (1 - w) : w});
+                g_eases.push_back({next, kyo ? 1 - (1 - w) * (1 - w) : w});
                 const float now = Rated(Kind::Decay, float(g_eases.back().was), step);
                 std::memcpy(next, &now, sizeof now);
                 next += kSlot;
                 ++applied[std::size_t(Group::Camera)];
+            }
+            if (on[std::size_t(Group::Camera)]) {
+                applied[std::size_t(Group::Camera)] += int(CameraRate::Sites().size());
+                host_log("Frame rate fixes: the follow camera's weights every frame, %zu sites (%s)",
+                         CameraRate::Sites().size(),
+                         fpp ? "FPS++: Kyo's changes as a 30 FPS frame's on the game's camera" : "Original");
             }
         }
     }
@@ -744,6 +772,10 @@ bool Install(std::uint8_t* image, std::size_t size) {
         }
     }
 
+    if (camera_wanted && !camera_done) {
+        if (const int n = CameraRate::Fallback(image, size, fpp, rate.values))
+            host_log("Frame rate fixes: the follow camera converted once for %.0f FPS instead (%d values)", rate.values, n);
+    }
     std::string list;
     for (std::size_t g = 0; g < applied.size(); ++g) {
         if (!applied[g]) continue;

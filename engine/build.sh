@@ -4,20 +4,12 @@ cd -- "$(dirname -- "$0")"
 mkdir -p out
 if [[ -z ${CC:-} ]]; then
     CC=$(command -v cc || command -v gcc || true)
-    if [[ -z $CC ]]; then
-        for candidate in /nix/store/*-gcc-wrapper-*/bin/gcc; do
-            if [[ -x $candidate ]]; then CC=$candidate; break; fi
-        done
-    fi
 fi
 if [[ -z ${CC:-} ]]; then echo 'Install GCC/Clang or set CC.' >&2; exit 1; fi
-# Dependencies come from pkg-config (Vulkan loader/headers, SDL3). On NixOS the
-# environment is provided by shell.nix; re-enter it automatically if needed.
+# Dependencies come from pkg-config (Vulkan loader/headers, SDL3): MSYS2 CLANG64 on Windows (README),
+# packaging/linux/setup-ubuntu.sh on Linux. 0.4.4 beta 28: the NixOS shell went with the AppImage.
 if ! { command -v pkg-config >/dev/null && pkg-config --exists vulkan sdl3 && command -v cmake >/dev/null && command -v ninja >/dev/null; }; then
-    if [[ -z ${BB_IN_NIX_SHELL:-} ]] && command -v nix-shell >/dev/null; then
-        exec env BB_IN_NIX_SHELL=1 nix-shell shell.nix --run "bash build.sh $*"
-    fi
-    echo 'Need pkg-config with vulkan and sdl3, cmake and ninja (see shell.nix).' >&2; exit 1
+    echo 'Need pkg-config with vulkan and sdl3, cmake and ninja (packaging/linux/setup-ubuntu.sh lists them).' >&2; exit 1
 fi
 read -r -a includes <<< "$(pkg-config --cflags vulkan sdl3)"
 read -r -a libraries <<< "$(pkg-config --libs vulkan sdl3)"
@@ -63,19 +55,6 @@ if [[ -z $pgo ]]; then
         pgo=off
     fi
 fi
-# Submodules (git clone --recursive, or: git submodule update --init) and this port's changes
-# to FSR-Vulkan (gpu/patches/fsr-vulkan), applied to its working tree once.
-if [[ ! -f gpu/third_party/fsr-vulkan/CMakeLists.txt || ! -f gpu/third_party/imgui/imgui.h ]]; then
-    git submodule update --init --recursive
-fi
-# A plain source copy (no submodule checkout) already has them applied.
-if [[ -e gpu/third_party/fsr-vulkan/.git ]]; then
-    for patch in gpu/patches/fsr-vulkan/*.patch; do
-        if ! git -C gpu/third_party/fsr-vulkan apply --reverse --check "$PWD/$patch" 2>/dev/null; then
-            git -C gpu/third_party/fsr-vulkan apply "$PWD/$patch"
-        fi
-    done
-fi
 # Line tables only (not full debug info): crash offsets still resolve to function and
 # file:line with llvm-symbolizer, and compiling and linking take much less time.
 gpu_config=(-G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBB_PGO="$pgo" -DBB_LTO="${BB_LTO:-ON}"
@@ -115,9 +94,6 @@ gpu_cache_sources | grep -v -E 'vk_(graphics|compute)_pipeline\.cpp$|vk_pipeline
     xargs cat | tr -d '\r' | grep -v -E 'Shader::Native::Capture|shader_recompiler/native/capture\.h|lab_flat|fetch_override' |
     sed -E 's#^[[:space:]]*//.*$##; s/[[:space:]]+$//' | grep -v '^$' |
     sha256sum | cut -c1-16 > out/gpu-cache.id
-# The identity as earlier engines computed it (whole files): a cache stamped with it for these same
-# sources is kept and stamped again with the new one.
-gpu_cache_sources | xargs cat | sha256sum | cut -c1-16 > out/gpu-cache.legacy.id
 # $ORIGIN/gpu: packaged copies keep the library next to the binary without patching it.
 gpu=(-Lout/gpu -lbbgpu -Wl,-rpath,'$ORIGIN/gpu' -Wl,-rpath,"$PWD/out/gpu" -rdynamic)
 runtime=(src/runtime*.c)
@@ -145,7 +121,7 @@ if [[ ! -f out/libatrac9.a || -n $(find third_party/LibAtrac9/C/src -newer out/l
     ar rcs out/libatrac9.a out/atrac9/*.o
 fi
 # Windows: the link includes the GPU library's link-time optimization (a minute or more), and
-# run.bat builds before every start, so an up-to-date executable is kept.
+# an engine built in a checkout is linked again only when something it uses changed.
 gpu_inputs=(out/gpu/libbbgpu.a out/gpu/bbgpu_link.txt)
 if [[ -n $windows ]]; then
     # Native bridge dependencies can change without changing libbbgpu.a itself.
@@ -161,7 +137,8 @@ else
 "$CC" "${cstd[@]}" -O2 -g -Wall -Wextra -Werror "${threads[@]}" "${includes[@]}" -I. -Isrc src/probe.c "${runtime[@]}" src/vulkan_smoke.c out/libatrac9.a -lm "${gpu[@]}" "${libraries[@]}" "${link[@]}" -o out/bb-probe
 echo "Built $PWD/out/bb-probe"
 # GPU and controller inventory; keep the Windows C dialect and include SDL headers.
-"$CC" "${cstd[@]}" -O2 -Wall -Wextra -Werror "${includes[@]}" tools/gpu_capabilities.c "${libraries[@]}" -o out/bb-gpu-capabilities
+# --fsr-versions (0.4.4 beta 27c) reads AMD's FSR API headers (MIT, gpu/third_party/amd-fsr-sdk).
+"$CC" "${cstd[@]}" -O2 -Wall -Wextra -Werror "${includes[@]}" -Igpu/third_party/amd-fsr-sdk tools/gpu_capabilities.c "${libraries[@]}" -o out/bb-gpu-capabilities
 fi
 # The native start (Windows): boot image, mods, patches, engine assets, then bb-probe. One static
 # program: it runs before bb-probe's DLLs are found, and replaces the Python scripts.

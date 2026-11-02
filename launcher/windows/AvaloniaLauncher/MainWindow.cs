@@ -855,7 +855,7 @@ namespace BloodborneLauncher
 
         private void OnClosing(object? sender, WindowClosingEventArgs e)
         {
-            Workspace.Current.SaveNow();
+            Workspace.Current.SaveNow(final: true); // config.ini too, the game running or not (0.4.4 beta 26b)
             if (_closing || !Workspace.Current.Game.Running)
                 return;
             e.Cancel = true;
@@ -1275,7 +1275,7 @@ namespace BloodborneLauncher
             var progress = new Progress<double>(p => _titleUpdateText.Text = L.F($"Downloading {p:P0}"));
             try
             {
-                ws.SaveNow();
+                ws.SaveNow(final: true);
                 var skipped = await Updater.InstallAsync(release, package, progress);
                 if (skipped.Count > 0)
                     Prompt.Tell(L.T("Updated, with files left out"),

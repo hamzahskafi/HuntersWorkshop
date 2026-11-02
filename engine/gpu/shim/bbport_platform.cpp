@@ -163,8 +163,8 @@ void MakeBackground() {
 // The game runs dozens of threads at normal priority (cloth, character, Havok, job pools); on
 // 12 or fewer hardware threads Windows gives a ready thread of equal priority a core only when
 // another one's quantum ends (tens of ms), so a render-chain thread queued behind them delays
-// the frame. Its idle spins are bounded (BB_GPU_SPIN_US, BB_PIPE_SPIN_US, recording: 200 us)
-// before it sleeps, so the higher priority takes no lasting time from the game's threads.
+// the frame. Its idle spins are bounded (CapSpinUs below; BB_SPIN_US lowers them all) before it
+// sleeps, so the higher priority takes no lasting time from the game's threads.
 namespace {
 bool Raising() {
     static const bool enabled = [] {
@@ -182,7 +182,7 @@ void MakeCritical(bool bulk) {
 }
 
 unsigned CapSpinUs(unsigned wanted) {
-    return Raising() && Available() < 16 ? std::min(wanted, 50u) : wanted;
+    return SpinLimitUs(Raising() && Available() < 16 ? std::min(wanted, 50u) : wanted);
 }
 
 } // namespace BbThreads

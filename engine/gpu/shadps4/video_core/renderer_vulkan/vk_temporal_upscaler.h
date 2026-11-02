@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// bbport: temporal upscaling of Bloodborne's HDR scene color (docs/upscaler.md). BB_UPSCALER=fsr3
-// runs FSR 3.1 (FireBurn/FSR-Vulkan, native Vulkan) on the scene color right before the
-// post-processing combine pass, with the scene depth and camera motion vectors, and writes the
-// result back so the game's own post, tonemap and UI continue unchanged (Native AA preset).
+// bbport: temporal upscaling of Bloodborne's HDR scene color (docs/upscaler.md). AMD FSR (AMD's FSR
+// SDK, vk_amd_fsr.h), DLSS (vk_dlss.h) or TAA runs on the scene color right before the
+// post-processing combine pass, with the scene depth and camera motion vectors, and the result is
+// written back so the game's own post, tonemap and UI continue unchanged. 0.4.4 beta 27: FireBurn's
+// FSR 3.1 (the one in place here before) and the FSR 4 models went for AMD's SDK.
 //
 // Guest targets stay at 1920x1080. Host scene targets use output/preset dimensions,
 // resized at frame boundaries. At 1080p HDR reconstruction precedes post; other outputs
@@ -15,17 +16,17 @@
 #include <chrono>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
 #include "common/types.h"
 #include "video_core/renderer_vulkan/vk_common.h"
+#include "video_core/renderer_vulkan/vk_amd_fsr.h"
 #include "video_core/renderer_vulkan/vk_dlss.h"
-#include "video_core/renderer_vulkan/vk_fsr4.h"
+#include "video_core/renderer_vulkan/vk_frame_upscaler.h"
 #include "video_core/renderer_vulkan/vk_hdr_native.h"
 #include "video_core/texture_cache/image.h"
-
-struct FfxVkPortableUpscaleContext;
 
 namespace VideoCore {
 class TextureCache;
@@ -38,7 +39,6 @@ class Scheduler;
 class Runtime;
 class CameraMotion;
 class SceneTargets;
-class FrameGenerator;
 
 /// bbport BB_FINAL_DUMP_TRIGGER: the frame as presented (after FSR and post processing) is saved
 /// as final_<w>x<h> in BB_DUMP_DIR when the trigger file exists (consumed). `image` in General.
@@ -55,12 +55,6 @@ public:
 
     [[nodiscard]] bool Enabled() const noexcept {
         return enabled;
-    }
-
-    /// bbport: frame generation (vk_frame_generation.h) takes its inputs from the upscaled
-    /// frames: depth, motion and camera after the motion pass, the frame before its UI.
-    void SetFrameGenerator(FrameGenerator* generator) noexcept {
-        frame_gen = generator;
     }
 
     /// A draw into a full-size RGBA16F target with the scene depth: the scene color.
@@ -181,11 +175,6 @@ private:
     /// bbport: native HDR output: the output-size UI image as a native HDR source (UNORM view:
     /// the display-encoded values, whatever its format).
     HdrNative::Source HdrUiImage();
-    /// bbport: frame generation: this frame's depth and motion (after the motion pass), and the
-    /// frame before its UI (a guest render target, or the output-size UI image).
-    void CaptureFrameGenInputs(vk::ImageView depth_view, u32 w, u32 h);
-    void CaptureFrameGenHudless(VideoCore::ImageId id);
-    void CaptureFrameGenUiImage();
     /// The scene's size inside a `w` x `h` render target: the game's viewport.
     [[nodiscard]] std::array<u32, 2> SceneSize(u32 w, u32 h) const;
     // The scene color is drawn into a reduced SceneTargets proxy (live presets).
@@ -193,25 +182,60 @@ private:
     /// Available and switched on (menu setting, toggle 1 << 24).
     [[nodiscard]] bool Active() const;
     [[nodiscard]] bool ReactiveOn() const;
+    /// 0.4.4 beta 25b: after the motion pass (which commits this frame's camera), before the upscaler
+    /// is recorded: the history reset on a camera cut (camera_cut.h), with its log lines and counts.
+    void CheckCameraCut();
     bool EnsureResources(u32 width, u32 height, u32 out_width, u32 out_height, bool hdr);
+    /// 0.4.4 beta 21: makes `image` (render size) if it has none: the images only some features
+    /// use (reactive mask, FSR 4's linear input, TAA's diagnostics) are made on first need, not
+    /// by EnsureResources, which drops them with the rest. Unwritten; each use starts it from the
+    /// undefined layout. `what`: for the log.
+    void EnsureImage(VideoCore::UniqueImage& image, vk::UniqueImageView& view, vk::Format format,
+                     vk::ImageUsageFlags usage, const char* what);
+    /// 0.4.4 beta 21: the reactive mask's view for the bindings that read it only when this frame
+    /// has a mask (the merge, the debug view): a 1x1 stand-in in General while it has no image.
+    vk::ImageView MaskBinding();
     void CreatePipelines();
     /// Records the reactive mask pass; false when there is no snapshot this frame.
     bool RecordReactive(vk::ImageView color_view);
-    /// FSR 4 is selected, possible in this session (not BB_RENDER_RES) and has not failed.
-    [[nodiscard]] bool UseFsr4() const;
-    /// Records FSR 4 into output_image; on a permanent failure FSR 3 takes over. `reactive`: this
-    /// frame's reactive mask is ready, given to DLSS as its bias-current-colour mask.
-    bool RecordFsr4(vk::CommandBuffer cmdbuf, Fsr4Upscaler::Image color, Fsr4Upscaler::Image depth,
-                    u32 w, u32 h, u32 ow, u32 oh, float frame_ms, bool reactive = false);
+    /// 0.4.4 beta 21: ClampSceneEdges (the .cpp) in RGB only, a compute pass (edge_clamp.comp)
+    /// over `view` (RGBA16F, storage, General): the scene's alpha stays as the game wrote it. The
+    /// caller's barrier for the image must already include this pass's write.
+    void ClampEdgesRgb(vk::ImageView view, u32 w, u32 h);
+    /// AMD FSR or DLSS is selected, ready (AMD FSR's context made) and has not failed.
+    [[nodiscard]] bool UseFrameUpscaler() const;
+    /// The upscaler that runs now, for the log and the GPU profile: TAA, DLSS (DLAA at 1:1), or AMD
+    /// FSR by AMD's name of the version ("FSR 4.1.2", "FSR 3.1.6"; "FSR" before it runs).
+    [[nodiscard]] std::string BackendName() const;
+    /// 0.4.4 beta 27: AMD FSR is selected and its context for this output is not made yet (being
+    /// made on a worker thread): the scene renders at full size, without the upscaler, meanwhile.
+    [[nodiscard]] bool FsrBuilding() const;
+    /// Asks AMD FSR for its context for this output and the menu's settings (fsr_version, exposure)
+    /// when AMD FSR is selected; sets `fsr_building` while it is being made.
+    void PrepareFsr();
+    /// Records AMD FSR (or DLSS) into output_image; on a permanent failure DLSS gives way to AMD FSR,
+    /// and AMD FSR to TAA. `reactive`: the mask is made this frame (AMD FSR takes it).
+    bool RecordFrameUpscaler(vk::CommandBuffer cmdbuf, UpscaleInput::Image color, UpscaleInput::Image depth,
+                             u32 w, u32 h, u32 ow, u32 oh, float frame_ms, bool hdr, bool reactive);
     void RecordTaa(vk::CommandBuffer cmdbuf, vk::ImageView color, vk::ImageView depth);
+    /// 0.4.4 beta 21: BB_DUMP_TRIGGER's images of frame `dump` (Run and RunScaled had a copy
+    /// each): `input` (none: null) and `depth` as the upscaler read them (`sw` x `sh`), the motion
+    /// vectors and the result, TAA's history and diagnostic image (`taa_diagnostics`), and the
+    /// object motion when it has the render size. `input_alone`: the input in a copy of its own
+    /// (Run), else with the motion and the result (RunScaled).
+    void DumpUpscale(vk::CommandBuffer cmdbuf, int dump, vk::Image input, u32 input_bytes,
+                     const char* input_format, bool input_alone, vk::Image depth, u32 sw, u32 sh,
+                     u32 w, u32 h, u32 ow, u32 oh, bool taa_diagnostics);
     /// Additional RCAS sharpening; DLSS applies the whole requested range here.
-    void ExtraSharpen(vk::Image target, bool ldr, u32 w, u32 h);
-    /// bbport: the menu's mask / motion debug view over the scaled path's output (ldr: the 8-bit
-    /// UI image), in place; upscale_merge.comp draws it on the 1080p path. `reactive`: a mask
-    /// was made this frame.
-    void DebugView(vk::Image target, bool ldr, u32 w, u32 h, u32 ow, u32 oh, bool reactive);
-    /// The UI image as a UNORM storage view (its own format may be sRGB).
-    vk::ImageView UiStorageView(vk::Image target);
+    void ExtraSharpen(vk::Image target, u32 w, u32 h);
+    /// The strength ExtraSharpen applies (0: none): the menu's 0..2, less what the backend's own
+    /// RCAS already did (FSR 3 and 4 up to 1; DLSS none).
+    [[nodiscard]] float ExtraSharpenAmount() const;
+    /// 0.4.4 beta 20: Run's profiler label for one of its steps (GPU profile).
+    void MarkRunStep(const char* label);
+    /// bbport: the menu's mask / motion debug view over the scaled path's output, in place;
+    /// upscale_merge.comp draws it on the 1080p path. `reactive`: a mask was made this frame.
+    void DebugView(vk::Image target, u32 w, u32 h, u32 ow, u32 oh, bool reactive);
 
     const Instance& instance;
     Scheduler& scheduler;
@@ -220,7 +244,6 @@ private:
     CameraMotion& camera_motion;
     SceneTargets& scene_targets;
     HdrNative& hdr_native;
-    FrameGenerator* frame_gen = nullptr; ///< bbport: SetFrameGenerator
     /// bbport: native HDR output: the game's UI target this frame's UI-free copy came from.
     VideoCore::ImageId hdr_ui_target{};
     int applied_preset = -1;
@@ -232,8 +255,6 @@ private:
 
     bool enabled = false;
     bool failed = false;
-    /// An FSR 3 dispatch recorded on a recording thread failed; `failed` at the next frame.
-    std::atomic<bool> dispatch_failed{false};
     u64 trigger_hash = 0x9a9cf8a9;
     VideoCore::ImageId scene_color{};
     bool done_this_frame = false;
@@ -245,11 +266,17 @@ private:
     std::array<float, 2> jitter{};
     u32 jitter_index = 0;
     bool reset = true;
-    u64 frame_id = 0;
+    /// 0.4.4 beta 25b: CheckCameraCut's counts since its last stats line (frame statistics), and the
+    /// camera cuts logged one by one (the first 100).
+    struct CutStats {
+        u32 frames = 0, cuts = 0, other_resets = 0;
+        float max_turn = 0.0f, max_move = 0.0f; ///< the largest of the frames that were not reset
+    } cut_stats;
+    u32 cut_lines = 0;
     std::chrono::steady_clock::time_point last_frame{};
 
     u32 width = 0, height = 0;             ///< render size
-    u32 out_width = 0, out_height = 0;     ///< output size of the context
+    u32 out_width = 0, out_height = 0;     ///< output size of the images
     bool context_hdr = true;
     u32 target_width = 1920, target_height = 1080; ///< output size of scaled presets
     u64 ui_trigger_vs = 0x34e8a281;
@@ -287,20 +314,15 @@ private:
     std::mutex display_mutex;
     int present_dump_remaining = 0, present_dump_index = 0;
     std::unordered_map<VAddr, DisplayImage> displays;
-    FfxVkPortableUpscaleContext* context = nullptr;
-    /// bbport: FSR 3.1's tuning constants last given to `fsr3_tuned` (ApplyFsr3Tuning).
-    std::array<float, 5> fsr3_tuning{};
-    FfxVkPortableUpscaleContext* fsr3_tuned = nullptr;
-    /// The menu's FSR 3.1 tuning (fsr3_* settings) given to the context when they changed or the
-    /// context is new; kept by it for the dispatches that follow.
-    void ApplyFsr3Tuning();
     bool resources_ready = false; ///< images below match width/height/out size
-    bool resources_fsr4 = false;  ///< made for FSR 4 (no FSR 3 context)
+    bool resources_frame = false; ///< made for AMD FSR or DLSS (they write output_image)
     bool resources_taa = false;
-    std::unique_ptr<Fsr4Upscaler> fsr4;
-    std::unique_ptr<DlssUpscaler> dlss; ///< NVIDIA devices only; records the FSR 4 frame
-    bool fsr4_failed = false;
-    bool fsr4_building = false; ///< FSR 4's model is built in the background: FSR 3.1 until then
+    /// 0.4.4 beta 27: AMD FSR (AMD's FSR SDK; Windows); probed once at start.
+    std::unique_ptr<AmdFsr> amd_fsr;
+    bool amd_fsr_available = false;
+    std::unique_ptr<DlssUpscaler> dlss; ///< NVIDIA devices only
+    bool fsr_building = false; ///< AMD FSR's context is being made (PrepareFsr)
+    u32 fsr_width = 0, fsr_height = 0; ///< AMD FSR's output when a frame's differs from the target (0: the target)
     VideoCore::UniqueImage motion_image;
     VideoCore::UniqueImage output_image;
     vk::UniqueImageView motion_view;
@@ -309,9 +331,14 @@ private:
     VideoCore::UniqueImage reactive_image; ///< R8 reactive mask
     vk::UniqueImageView opaque_view;
     vk::UniqueImageView reactive_view;
+    VideoCore::UniqueImage mask_stand_in; ///< 0.4.4 beta 21: MaskBinding, kept for the session
+    vk::UniqueImageView mask_stand_in_view;
     vk::UniqueDescriptorSetLayout reactive_desc_layout;
     vk::UniquePipelineLayout reactive_pipeline_layout;
     vk::UniquePipeline reactive_pipeline;
+    vk::UniqueDescriptorSetLayout edge_clamp_desc_layout; ///< 0.4.4 beta 21: ClampEdgesRgb
+    vk::UniquePipelineLayout edge_clamp_pipeline_layout;
+    vk::UniquePipeline edge_clamp_pipeline;
     vk::UniqueDescriptorSetLayout merge_desc_layout;
     vk::UniquePipelineLayout merge_pipeline_layout;
     vk::UniquePipeline merge_pipeline;
@@ -325,14 +352,13 @@ private:
     vk::UniqueDescriptorSetLayout taa_sharpen_desc_layout;
     vk::UniquePipelineLayout taa_sharpen_pipeline_layout;
     vk::UniquePipeline taa_sharpen_pipeline;
-    vk::UniquePipeline taa_sharpen_ldr_pipeline;
     vk::UniqueDescriptorSetLayout debug_desc_layout;
     vk::UniquePipelineLayout debug_pipeline_layout;
-    vk::UniquePipeline debug_pipeline, debug_ldr_pipeline;
-    // bbport: FSR 4 in linear light on the scaled presets (fsr4_color.comp): the decoded input
-    // and the passes that decode it and encode the output again.
+    vk::UniquePipeline debug_pipeline;
+    // bbport: AMD FSR in linear light on the scaled presets (fsr4_decode.comp, fsr4_encode.comp,
+    // written for FSR 4): the decoded input and the passes that decode it and encode the output again.
     VideoCore::UniqueImage fsr4_linear_image;
-    bool fsr4_linear_frame = false; ///< this frame's FSR 4 input was decoded (and the output encoded)
+    bool fsr4_linear_frame = false; ///< this frame's AMD FSR input was decoded (and the output encoded)
     vk::UniqueImageView fsr4_linear_view;
     vk::UniqueDescriptorSetLayout fsr4_decode_desc_layout;
     vk::UniquePipelineLayout fsr4_decode_pipeline_layout;
@@ -340,20 +366,11 @@ private:
     vk::UniqueDescriptorSetLayout fsr4_encode_desc_layout;
     vk::UniquePipelineLayout fsr4_encode_pipeline_layout;
     vk::UniquePipeline fsr4_encode_pipeline;
-    vk::UniqueSampler fsr4_linear_sampler;
-    vk::UniqueDescriptorSetLayout fsr4_reactive_desc_layout;
-    vk::UniquePipelineLayout fsr4_reactive_pipeline_layout;
-    vk::UniquePipeline fsr4_reactive_pipeline;
-    /// bbport: FSR 4 takes no reactive mask: its output is blended with `color` (the frame it
-    /// upscaled, render size, General layout, same colour space as the output) where the mask
-    /// marks blended effects (fsr4_reactive.comp). Recorded after FSR 4 into `cmdbuf`.
-    void RecordFsr4Reactive(vk::CommandBuffer cmdbuf, vk::ImageView color, u32 w, u32 h, u32 ow,
-                            u32 oh);
-    // ExtraSharpen: a copy of the upscaled frame (RCAS reads neighbours) and the target views.
+    // ExtraSharpen: a copy of the upscaled frame (RCAS reads neighbours).
+    // 0.4.4 beta 21: the copy is released by EnsureResources (made again when next needed).
     VideoCore::UniqueImage extra_sharpen_image;
     vk::UniqueImageView extra_sharpen_view;
     u32 extra_sharpen_width = 0, extra_sharpen_height = 0;
-    vk::UniqueImageView ui_storage_view;
 };
 
 } // namespace Vulkan

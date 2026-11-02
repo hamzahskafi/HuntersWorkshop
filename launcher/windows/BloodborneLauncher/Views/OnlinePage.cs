@@ -16,12 +16,14 @@ namespace BloodborneLauncher.Views
         private readonly StackPanel _results = new();
         private readonly Button _test;
 
-        public OnlinePage() : base(L.T("Online"),
-            L.T("1. Turn on Play online. 2. Connect your Hunter's Dream account below (with Discord, or without it). ") +
-            L.T("3. In the game, choose online at the title screen: The Hunter's Dream's welcome message means you are online. ") +
-            L.T("Everyone needs game version 1.09."))
+        public OnlinePage()
         {
-            // One server now: the bbbridge pool and custom servers are gone (scripts/online.py defaults).
+            // How to get online (0.4.4 beta 28: the page's subtitle, never shown before).
+            Body.Children.Add(Text(L.T("1. Turn on Play online. 2. Connect your Hunter's Dream account below (with Discord, or without it). ") +
+                L.T("3. In the game, choose online at the title screen: The Hunter's Dream's welcome message means you are online. ") +
+                L.T("Everyone needs game version 1.09."), "Faint"));
+            // One server: The Hunter's Dream (0.4.4 beta 28: the engine's shadNet path, custom servers with an
+            // account password, went). Their keys are cleared from config.ini.
             foreach (var key in new[] { "online_host", "online_port", "online_webapi", "online_game_api", "online_thd_account" })
                 if (Ini.Get(key).Length > 0) Ini.Set(key, "");
             // With a Hunter's Dream account: its own co-op (the engine's thd backend, with bbhost players).
@@ -31,29 +33,26 @@ namespace BloodborneLauncher.Views
                 Body.Children.Add(Text(L.T("Online play is paused in this version. The game starts offline whatever is set here; ") +
                                        L.T("your settings are kept for when it returns."), "Faint"));
 
-            Group(L.T("Play"));
+            // One group for the one server (0.4.4 beta 26: three groups of one or two rows, and a Server
+            // choice with nothing else to choose).
+            Group(L.T("The Hunter's Dream"));
             _online = ToggleRow(SymbolRegular.Globe24, L.T("Play online"), L.T("Off: the game stays offline"),
-                () => Ini.Get("online_enabled") == "1", v => Ini.Set("online_enabled", v ? "1" : "0"));
-
-            Group(L.T("Server"));
-            ComboRow(SymbolRegular.Server24, L.T("Server"), L.T("Messages, bloodstains, ghosts, co-op and invasions"),
-                Choices.OnlineServers, () => "huntersdream", _ => { });
-            Add(Card(SymbolRegular.Globe24, L.T("The Hunter's Dream"), L.T("Players online, the map and your hunter's profile"),
+                () => Ini.Get("online_enabled") == "1", v => Ini.Set("online_enabled", v ? "1" : "0"), line: L.T("Co-op, messages and bloodstains on The Hunter's Dream"));
+            _hdButton = SmallButton(L.T("Connect"), SymbolRegular.Person24, async (_, _) => await LinkAsync());
+            Add(Card(SymbolRegular.PersonAccounts24, L.T("Hunter's Dream account"), null, _hdButton, out _hdHint));
+            ShowLink();
+            Add(Card(SymbolRegular.Server24, L.T("Website"), L.T("Players online, the map and your hunter's profile"),
                 SmallButton(L.T("Open website"), SymbolRegular.Open24, (_, _) =>
                     System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(LauncherSettings.OnlineCommunity) { UseShellExecute = true })),
                 out _));
 
-            Group(L.T("The Hunter's Dream account"));
-            _hdButton = SmallButton(L.T("Connect"), SymbolRegular.Person24, async (_, _) => await LinkAsync());
-            Add(Card(SymbolRegular.PersonAccounts24, L.T("Hunter's Dream account"), null, _hdButton, out _hdHint));
-            ShowLink();
-
             Group(L.T("Connection"));
-            IniText(SymbolRegular.Router24, L.T("Local P2P port"), L.T("Empty: 3658, the PS4's"), "3658", "online_p2p_port", 120);
+            IniText(SymbolRegular.Router24, L.T("Local P2P port"), L.T("Empty: 3658, the PS4's"), "3658", "online_p2p_port", 120,
+                line: L.T("The port co-op connects through"));
             ComboRow(SymbolRegular.Timer24, L.T("Summon sign timeout"), L.T("How long a sign you touched waits for its host before giving up"),
-                Choices.SignTimeout, () => Ini.Get("online_sign_timeout", "30"), v => Ini.Set("online_sign_timeout", v));
+                Choices.SignTimeout, () => Ini.Get("online_sign_timeout", "30"), v => Ini.Set("online_sign_timeout", v), line: L.T("How long a touched sign waits for its host"));
             _test = SmallButton(L.T("Test"), SymbolRegular.PlayCircle24, async (_, _) => await TestAsync());
-            Add(Card(SymbolRegular.Pulse24, L.T("Test the connection"), L.T("Checks The Hunter's Dream: game server, co-op sessions and the relay summons use"), _test, out _));
+            Add(Card(SymbolRegular.Pulse24, L.T("Test the connection"), L.T("Checks The Hunter's Dream: game server, co-op sessions and the relay summons use"), _test, out _, line: L.T("Checks that the game server and summon relay answer")));
             Body.Children.Add(_results);
         }
 
@@ -174,8 +173,8 @@ namespace BloodborneLauncher.Views
             }
         }
 
-        private void IniText(SymbolRegular icon, string title, string? hint, string placeholder, string key, double width = 300) =>
-            TextRow(icon, title, hint, placeholder, () => Ini.Get(key), v => Ini.Set(key, v.Trim()), width: width);
+        private void IniText(SymbolRegular icon, string title, string? hint, string placeholder, string key, double width = 300, string? line = null) =>
+            TextRow(icon, title, hint, placeholder, () => Ini.Get(key), v => Ini.Set(key, v.Trim()), width: width, line: line);
 
         public override void OnShown()
         {

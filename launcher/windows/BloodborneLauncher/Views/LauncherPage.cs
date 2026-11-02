@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -20,8 +20,27 @@ namespace BloodborneLauncher.Views
         public SymbolIcon Icon { get; }
         public TextBlock Hint { get; }
         public string Title { get; }
-        /// <summary>The description (the ⓘ tooltip, or the line under the title in Classic).</summary>
-        public string? Info { get; }
+        /// <summary>The description, on hover (Classic) and behind the ⓘ (Modern); SetInfo changes it
+        /// (0.4.4 beta 27d: a line that follows what runs, Sharpening's).</summary>
+        public string? Info { get; private set; }
+        /// <summary>
+        /// The line under the title in Classic (0.4.4 beta 28's text pass): its own short text, or else the
+        /// description's first sentence (the whole description when it is 64 characters or less), without
+        /// its full stop. It wraps instead of being cut. A description that only repeats it is not shown
+        /// again on hover.
+        /// </summary>
+        public string? Line { get; private set; }
+        /// <summary>The setting's default as its list or switch names it ("On", "English"): the hover
+        /// text ends with "Default: …" unless the row's texts already say what the default is.</summary>
+        public string? DefaultLabel { get; private set; }
+        /// <summary>A choice row whose option names already mark the default ("Relaxed (default)").</summary>
+        public bool ChoicesSayDefault { get; set; }
+        /// <summary>Advice shown on hover only, after the description (0.4.4 beta 27d, the tester: the short
+        /// lines left nothing to advise with).</summary>
+        public string? Tip { get; private set; }
+        private readonly SymbolIcon? _mark;
+        private readonly TextBlock? _description;
+        private readonly StackPanel _text;
 
         /// <summary>A setting the settings search finds: set for rows a page puts in with LauncherPage.Add,
         /// not for list entries such as trophies, mods or connection test results.</summary>
@@ -40,10 +59,11 @@ namespace BloodborneLauncher.Views
         /// <summary>Classic layout: one card per setting with its icon and description, as before 0.9.4.</summary>
         public static bool Classic { get; set; }
 
-        public SettingRow(SymbolRegular icon, string title, string? info, object? control, bool wide)
+        public SettingRow(SymbolRegular icon, string title, string? info, object? control, bool wide, string? line = null)
         {
             Title = title;
             Info = info;
+            Line = line;
             Padding = Classic ? new Thickness(14, 9, 14, 9) : new Thickness(14, 7, 14, 7);
             MinHeight = Classic ? 52 : 38;
             BorderThickness = Classic ? new Thickness(1) : new Thickness(0, 1, 0, 0);
@@ -61,29 +81,33 @@ namespace BloodborneLauncher.Views
             var name = new TextBlock { Text = title, FontSize = 13.5, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
             var titleLine = new StackPanel { Orientation = Orientation.Horizontal };
             titleLine.Children.Add(name);
-            if (!string.IsNullOrWhiteSpace(info) && !Classic)
+            if (!Classic)
             {
-                var mark = new SymbolIcon { Symbol = SymbolRegular.Info16, FontSize = 12, Margin = new Thickness(6, 1, 0, 0), VerticalAlignment = VerticalAlignment.Center, ToolTip = info, Cursor = Cursors.Help };
-                mark.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "TextFillColorTertiaryBrush");
-                ToolTipService.SetInitialShowDelay(mark, 150);
-                titleLine.Children.Add(mark);
+                _mark = new SymbolIcon { Symbol = SymbolRegular.Info16, FontSize = 12, Margin = new Thickness(6, 1, 0, 0), VerticalAlignment = VerticalAlignment.Center, Cursor = Cursors.Help };
+                _mark.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "TextFillColorTertiaryBrush");
+                ToolTipService.SetInitialShowDelay(_mark, 150);
+                ToolTipService.SetShowOnDisabled(_mark, true);
+                titleLine.Children.Add(_mark);
             }
 
             Hint = new TextBlock { FontSize = 11.5, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 0), Visibility = Visibility.Collapsed };
             Hint.SetResourceReference(TextBlock.ForegroundProperty, "TextFillColorTertiaryBrush");
 
-            var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+            var text = _text = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
             text.Children.Add(titleLine);
-            if (Classic && !string.IsNullOrWhiteSpace(info))
+            if (Classic)
             {
                 // Classic shows the description under the title instead of in a tooltip: its first
-                // sentence there, the whole text when the mouse is on it.
-                var brief = LauncherPage.Brief(info);
-                var description = new TextBlock { Text = brief, FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 1, 0, 0),
-                    ToolTip = brief == info ? null : info };
-                description.SetResourceReference(TextBlock.ForegroundProperty, "TextFillColorSecondaryBrush");
-                text.Children.Add(description);
+                // sentence there, the whole text and the advice when the mouse is on the row's text.
+                _description = new TextBlock { FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 1, 0, 0) };
+                _description.SetResourceReference(TextBlock.ForegroundProperty, "TextFillColorSecondaryBrush");
+                text.Children.Add(_description);
+                ToolTipService.SetShowOnDisabled(text, true); // a greyed row still says why
             }
+            ShowInfo();
+            // 0.4.4 beta 27d (the tester): a row another choice switches off looks it, on every page
+            // (WPF UI's controls grey, the title and description did not).
+            IsEnabledChanged += (_, e) => Opacity = (bool)e.NewValue ? 1.0 : 0.45;
 
             var grid = new Grid();
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -123,6 +147,79 @@ namespace BloodborneLauncher.Views
                 text.Children.Add(Hint);
 
             Child = grid;
+        }
+
+        /// <summary>A new description (Info), shown as the row shows it.</summary>
+        public void SetInfo(string? info)
+        {
+            Info = info;
+            ShowInfo();
+        }
+
+        /// <summary>Advice for the tooltip, after the description.</summary>
+        public void SetTip(string? tip)
+        {
+            Tip = tip;
+            ShowInfo();
+        }
+
+        /// <summary>A new line under the title (null: the description's first sentence).</summary>
+        public void SetLine(string? line)
+        {
+            Line = line;
+            ShowInfo();
+        }
+
+        /// <summary>The setting's default, for the hover text's last line (null: none shown).</summary>
+        public void SetDefault(string? label)
+        {
+            DefaultLabel = label;
+            ShowInfo();
+        }
+
+        /// <summary>The line a description gives: its first sentence, or all of it when it is short
+        /// (64 characters or less, as Classic's line was), without the final full stop.</summary>
+        public static string LineOf(string text)
+        {
+            var line = text.Trim();
+            if (line.Length > LauncherPage.BriefLength)
+            {
+                var end = line.IndexOfAny(new[] { '\n', '。' });
+                var stop = line.IndexOf(". ", StringComparison.Ordinal);
+                if (stop >= 0 && (end < 0 || stop < end)) end = stop;
+                if (end > 0) line = line[..end];
+            }
+            return line.TrimEnd().TrimEnd('.', '。');
+        }
+
+        /// <summary>Whether a text says what the default is, in the language it was written in.</summary>
+        private static bool SaysDefault(string? text) =>
+            !string.IsNullOrEmpty(text) && L.Source(text).Contains("default", StringComparison.OrdinalIgnoreCase);
+
+        private void ShowInfo()
+        {
+            var info = string.IsNullOrWhiteSpace(Info) ? null : Info!.Trim();
+            var line = !string.IsNullOrWhiteSpace(Line) ? Line!.Trim().TrimEnd('.', '。') : info == null ? null : LineOf(info);
+            // A description that is only the line again is not repeated on hover.
+            var described = info != null && info.TrimEnd('.', '。') != line ? info : null;
+            var said = ChoicesSayDefault || SaysDefault(Info) || SaysDefault(Tip);
+            var dflt = string.IsNullOrEmpty(DefaultLabel) || said ? null : L.F($"Default: {DefaultLabel}");
+            string Join(params string?[] parts) => string.Join("\n\n", parts.Where(p => !string.IsNullOrWhiteSpace(p)));
+            if (_mark != null)
+            {
+                // Modern has no line under the title: the ⓘ shows it first, unless the description starts with it.
+                var lead = line != null && (described == null || !described.StartsWith(line, StringComparison.Ordinal)) ? line : null;
+                var full = Join(lead, described, Tip, dflt);
+                _mark.ToolTip = full.Length > 0 ? full : null;
+                _mark.Visibility = full.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+            }
+            if (_description != null)
+            {
+                _description.Text = line ?? "";
+                _description.Visibility = line != null ? Visibility.Visible : Visibility.Collapsed;
+                var hover = Join(described, Tip, dflt);
+                _text.ToolTip = hover.Length > 0 ? hover : null;
+            }
         }
 
         /// <summary>A picture in the icon's place (a trophy's own), <paramref name="size"/> pixels
@@ -187,18 +284,18 @@ namespace BloodborneLauncher.Views
     public sealed class Segmented : Border
     {
         private readonly List<Border> _items = new();
-        private readonly IReadOnlyList<Choice> _choices;
+        private readonly Grid _grid = new();
+        private Border? _instead;
         public int SelectedIndex { get; private set; } = -1;
         public event Action<int>? Changed;
 
         public Segmented(IReadOnlyList<Choice> choices, Func<Choice, bool>? enabled = null)
         {
-            _choices = choices;
             CornerRadius = new CornerRadius(14);
             Padding = new Thickness(3);
             SetResourceReference(BackgroundProperty, "PillTrackBrush");
 
-            var grid = new Grid();
+            var grid = _grid;
             for (var i = 0; i < choices.Count; i++)
             {
                 grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -241,6 +338,23 @@ namespace BloodborneLauncher.Views
         public static string Short(string label) =>
             label.IndexOfAny(new[] { '(', '（' }) is > 0 and var i ? label[..i].TrimEnd() : label;
 
+        /// <summary>One label in the options' place while another setting decides (0.4.4 beta 27d: "Upscaler
+        /// (DLSS)" for the anti-aliasing an upscaler does itself); null puts the options back.</summary>
+        public void ShowInstead(string? text)
+        {
+            if (text == null)
+            {
+                Child = _grid;
+                return;
+            }
+            _instead ??= new Border { CornerRadius = new CornerRadius(11), Padding = new Thickness(8, 5, 8, 5),
+                Child = new TextBlock { FontSize = 12.5, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center } };
+            _instead.SetResourceReference(BackgroundProperty, "SegmentSelectedBrush");
+            ((TextBlock)_instead.Child).Text = text;
+            ((TextBlock)_instead.Child).Foreground = Brushes.White;
+            Child = _instead;
+        }
+
         public void Select(int index, bool notify)
         {
             if (index < 0 || index >= _items.Count || !_items[index].IsEnabled) return;
@@ -267,6 +381,13 @@ namespace BloodborneLauncher.Views
 
     /// <summary>The rows inside an Advanced section (folded away until it is opened).</summary>
     public sealed class AdvancedRows : StackPanel { }
+
+    /// <summary>The settings a switch folds away (LauncherPage.FoldToggle). The settings search still
+    /// finds them, and Open shows them for it.</summary>
+    public sealed class FoldRows : StackPanel
+    {
+        public Action? Open { get; set; }
+    }
 
     /// <summary>
     /// A folded part of a group: an "Advanced (n)" line that opens and closes the rows under it.
@@ -342,7 +463,10 @@ namespace BloodborneLauncher.Views
         protected ScrollViewer Scroller { get; }
         private bool _sectioned;
 
-        protected LauncherPage(string title, string subtitle)
+        /// <summary>A page. The tab or sidebar names it (no page title since 0.9.12); 0.4.4 beta 28: the title
+        /// and subtitle the constructor took and never showed went, and the subtitles that told the player
+        /// what to do (Online's steps, Cheats', Mods') are shown on their pages.</summary>
+        protected LauncherPage()
         {
             Background = Brushes.Transparent;
             // A Frame does not pass inherited properties on to its page: the window's crisp text
@@ -403,6 +527,8 @@ namespace BloodborneLauncher.Views
                         frame.Clip = new RectangleGeometry(new Rect(0, 0, e.NewSize.Width, e.NewSize.Height), 16, 16);
                     frame.SetResourceReference(Border.BackgroundProperty, "GlassPaneBrush");
                     frame.SetResourceReference(Border.BorderBrushProperty, "GlassPaneStrokeBrush");
+                    // A group shown only for one choice (its header hidden): its box goes with it.
+                    frame.SetBinding(VisibilityProperty, new System.Windows.Data.Binding(nameof(Visibility)) { Source = child });
                     Body.Children.Add(frame);
                     continue;
                 }
@@ -452,8 +578,11 @@ namespace BloodborneLauncher.Views
         }
 
         /// <summary>The first sentence of a long description, for a line under a row (the whole
-        /// text goes in its tooltip). Short text is returned as it is.</summary>
-        public static string Brief(string text, int max = 90)
+        /// text goes in its tooltip). Short text is returned as it is. 0.4.4 beta 27c: one short line
+        /// (64 characters, was 90; the tester: the texts were too long), in every language.</summary>
+        public const int BriefLength = 64;
+
+        public static string Brief(string text, int max = BriefLength)
         {
             if (text.Length <= max) return text;
             foreach (var end in new[] { ". ", "; ", ": " })
@@ -471,9 +600,10 @@ namespace BloodborneLauncher.Views
         public static SymbolIcon Icon(SymbolRegular symbol) => new() { Symbol = symbol };
 
         /// <summary>A setting row. info goes in the ⓘ tooltip; hintBlock is a visible status line, empty until set.</summary>
-        public static SettingRow Card(SymbolRegular icon, string title, string? info, object? control, out TextBlock hintBlock, bool wide = false)
+        public static SettingRow Card(SymbolRegular icon, string title, string? info, object? control, out TextBlock hintBlock, bool wide = false,
+            string? line = null)
         {
-            var row = new SettingRow(icon, title, info, control, wide);
+            var row = new SettingRow(icon, title, info, control, wide, line);
             hintBlock = row.Hint;
             return row;
         }
@@ -494,6 +624,21 @@ namespace BloodborneLauncher.Views
             return row;
         }
 
+        /// <summary>The row put on the page last (Add), wherever it went.</summary>
+        protected SettingRow LastRow => _searchRows[^1];
+
+        /// <summary>
+        /// Shows the row put on the page last as a setting of the row above it (0.4.4 beta 27b, the
+        /// tester's: sharpening strength under Sharpening, the render scale under Custom): indented one
+        /// step, the rest of its margins kept. Returns it.
+        /// </summary>
+        protected SettingRow Nest()
+        {
+            var row = LastRow;
+            row.Margin = new Thickness(row.Margin.Left + 28, row.Margin.Top, row.Margin.Right, row.Margin.Bottom);
+            return row;
+        }
+
         // ---------------------------------------------------------------- settings search
 
         /// <summary>Every row put in with Add, in page order: the settings search's index of this
@@ -511,8 +656,8 @@ namespace BloodborneLauncher.Views
         private bool Shown(DependencyObject? at)
         {
             for (; at != null && !ReferenceEquals(at, this); at = LogicalTreeHelper.GetParent(at))
-                if (at is UIElement { Visibility: not Visibility.Visible } && at is not AdvancedRows)
-                    return false; // a folded Advanced section still counts: the search opens it
+                if (at is UIElement { Visibility: not Visibility.Visible } && at is not AdvancedRows && at is not FoldRows)
+                    return false; // a folded Advanced section or switch fold still counts: the search opens it
             return at != null;
         }
 
@@ -523,7 +668,10 @@ namespace BloodborneLauncher.Views
         public bool Reveal(SettingRow row)
         {
             for (DependencyObject? at = row; at != null; at = LogicalTreeHelper.GetParent(at))
+            {
                 if (at is AdvancedSection section) section.IsOpen = true;
+                if (at is FoldRows fold) fold.Open?.Invoke();
+            }
             UpdateLayout();
             if (!row.IsVisible) return false;
             // Focus first: focusing scrolls the control into view, and the centring below comes after it.
@@ -583,16 +731,28 @@ namespace BloodborneLauncher.Views
         // ---------------------------------------------------------------- bound rows
 
         /// <summary>A choice: segmented buttons for a few short options, a drop-down otherwise.
-        /// The chosen option's note shows under the row.</summary>
+        /// The chosen option's note shows under the row: its first sentence, or what
+        /// <paramref name="noteOf"/> gives for it in full (RefreshNotes shows it again).</summary>
         protected FrameworkElement ComboRow(SymbolRegular icon, string title, string? hint, IReadOnlyList<Choice> choices,
             Func<string> get, Action<string> set, Panel? into = null, double width = 240, Action? changed = null,
-            Func<Choice, bool>? enabled = null)
+            Func<Choice, bool>? enabled = null, Func<Choice, string?>? noteOf = null, string? line = null, string? defaultValue = null)
         {
+            // The default's name for the hover text, and whether the option names already mark it.
+            void Describe(SettingRow r)
+            {
+                r.ChoicesSayDefault = choices.Any(c => L.Source(c.Label).Contains("default", StringComparison.OrdinalIgnoreCase));
+                if (defaultValue != null) r.SetDefault(choices.FirstOrDefault(c => c.Value == defaultValue)?.Label);
+            }
             TextBlock note = null!;
             void ShowNote(int index)
             {
+                if (noteOf != null)
+                {
+                    SetHint(note, index >= 0 ? noteOf(choices[index]) : null);
+                    return;
+                }
                 var full = index >= 0 ? choices[index].Note : null;
-                var brief = full == null ? null : Brief(full, 110);
+                var brief = full == null ? null : Brief(full);
                 SetHint(note, brief);
                 note.ToolTip = brief == full ? null : full;
             }
@@ -605,16 +765,21 @@ namespace BloodborneLauncher.Views
             }
 
             var options = string.Join(" · ", choices.Select(c => c.Label));
-            var shortLabels = choices.Sum(c => Segmented.Short(c.Label).Length);
-            if (!SettingRow.Classic && choices.Count is >= 2 and <= 6 && shortLabels <= 72)
+            var shortLabels = choices.Select(c => Segmented.Short(c.Label)).ToList();
+            // Buttons only when their short labels tell the options apart (V-Sync's "On (latest
+            // frame)" and "On (every frame)" are both "On").
+            if (!SettingRow.Classic && choices.Count is >= 2 and <= 6 && shortLabels.Sum(l => l.Length) <= 72 &&
+                shortLabels.Distinct().Count() == choices.Count)
             {
                 var segmented = new Segmented(choices, enabled);
-                var row = Add(Card(icon, title, hint, segmented, out note, wide: true), into);
+                var row = Add(Card(icon, title, hint, segmented, out note, wide: true, line: line), into);
                 row.Choices = options;
+                Describe(row);
                 segmented.Select(Choices.IndexOf(choices, get()), notify: false);
                 ShowNote(segmented.SelectedIndex);
                 segmented.Changed += Picked;
                 row.Tag = note;
+                if (noteOf != null) _noteRefreshes.Add(() => ShowNote(segmented.SelectedIndex));
                 return segmented;
             }
 
@@ -622,25 +787,90 @@ namespace BloodborneLauncher.Views
             foreach (var choice in choices)
                 box.Items.Add(new ComboBoxItem { Content = choice.Label, Tag = choice.Value });
             ComboSearch.Attach(box);
-            var card = Add(Card(icon, title, hint, box, out note), into);
+            var card = Add(Card(icon, title, hint, box, out note, line: line), into);
             card.Choices = options;
+            Describe(card);
             box.SelectedIndex = Choices.IndexOf(choices, get());
             ShowNote(box.SelectedIndex);
-            box.SelectionChanged += (_, _) => { if (box.SelectedIndex >= 0) Picked(box.SelectedIndex); };
+            // An index past the choices is ShowInstead's label, not a choice.
+            box.SelectionChanged += (_, _) => { if (box.SelectedIndex >= 0 && box.SelectedIndex < choices.Count) Picked(box.SelectedIndex); };
             card.Tag = note;
+            if (noteOf != null) _noteRefreshes.Add(() => ShowNote(box.SelectedIndex));
             return box;
         }
 
+        /// <summary>The rows whose note depends on more than their own choice (ComboRow's noteOf).</summary>
+        private readonly List<Action> _noteRefreshes = new();
+
+        /// <summary>Shows those notes again, after what they depend on changed.</summary>
+        protected void RefreshNotes() => _noteRefreshes.ForEach(refresh => refresh());
+
+        /// <summary>Picks a ComboRow's option from code, as a click does (the setting saved, its note shown).</summary>
+        protected static void Pick(FrameworkElement control, int index)
+        {
+            if (control is Segmented segmented) segmented.Select(index, notify: true);
+            else if (control is ComboBox box) box.SelectedIndex = index;
+        }
+
+        /// <summary>Shows a ComboRow with <paramref name="text"/> in its choice's place, nothing saved, while
+        /// another setting decides (0.4.4 beta 27d, the tester: "Upscaler (DLSS)" for the anti-aliasing an
+        /// upscaler does itself, was an empty box); null takes it away again (Pick then shows the choice).</summary>
+        protected static void ShowInstead(FrameworkElement control, string? text)
+        {
+            if (control is Segmented segmented) segmented.ShowInstead(text);
+            else if (control is ComboBox box)
+            {
+                var label = box.Items.OfType<ComboBoxItem>().FirstOrDefault(item => Equals(item.Tag, InsteadTag));
+                if (text == null)
+                {
+                    if (label != null) box.Items.Remove(label);
+                    return;
+                }
+                if (label == null) box.Items.Add(label = new ComboBoxItem { Tag = InsteadTag });
+                label.Content = text;
+                box.SelectedItem = label;
+            }
+        }
+
+        private const string InsteadTag = "ShowInstead";
+
         protected FrameworkElement SettingCombo(SymbolRegular icon, string title, string? hint, IReadOnlyList<Choice> choices,
-            string key, Panel? into = null, Action? changed = null) =>
-            ComboRow(icon, title, hint, choices, () => S.Str(key), v => S.Set(key, v), into, changed: changed);
+            string key, Panel? into = null, Action? changed = null, Func<Choice, string?>? noteOf = null, string? line = null) =>
+            ComboRow(icon, title, hint, choices, () => S.Str(key), v => S.Set(key, v), into, changed: changed, noteOf: noteOf,
+                line: line, defaultValue: LauncherDefault(key));
 
         protected FrameworkElement IniCombo(SymbolRegular icon, string title, string? hint, IReadOnlyList<Choice> choices,
-            string key, Panel? into = null, Action? changed = null, Func<Choice, bool>? enabled = null) =>
-            ComboRow(icon, title, hint, choices, () => Ini.Get(key), v => Ini.Set(key, v), into, changed: changed, enabled: enabled);
+            string key, Panel? into = null, Action? changed = null, Func<Choice, bool>? enabled = null, string? line = null) =>
+            ComboRow(icon, title, hint, choices, () => Ini.Get(key), v => Ini.Set(key, v), into, changed: changed, enabled: enabled,
+                line: line, defaultValue: IniDefault(key));
+
+        /// <summary>A launcher setting's default as stored ("true", "en"), null when it has none.</summary>
+        protected static string? LauncherDefault(string key) => LauncherSettings.DefaultOf(key) switch
+        {
+            null => null,
+            System.Text.Json.Nodes.JsonValue v when v.TryGetValue<bool>(out var b) => b ? "true" : "false",
+            var node => node.ToString(),
+        };
+
+        /// <summary>A config.ini setting's default as stored ("1", "auto"), null when it has none.</summary>
+        protected static string? IniDefault(string key)
+        {
+            foreach (var (name, value) in IniFile.Defaults)
+                if (name == key) return value;
+            return null;
+        }
+
+        /// <summary>A launcher switch's default (null when it has none).</summary>
+        protected static bool? LauncherOn(string key) => LauncherDefault(key) is { } d ? d == "true" : null;
+
+        /// <summary>A config.ini switch's default (null when it has none).</summary>
+        protected static bool? IniOn(string key) => IniDefault(key) is { } d ? d == "1" : null;
+
+        /// <summary>"On" or "Off" for a switch's default.</summary>
+        protected static string? OnOff(bool? on) => on == null ? null : L.T(on.Value ? "On" : "Off");
 
         protected ToggleSwitch ToggleRow(SymbolRegular icon, string title, string? hint, Func<bool> get, Action<bool> set,
-            Panel? into = null, Action? changed = null)
+            Panel? into = null, Action? changed = null, string? line = null, bool? defaultOn = null)
         {
             var toggle = new ToggleSwitch { IsChecked = get(), VerticalAlignment = VerticalAlignment.Center };
             toggle.Click += (_, _) =>
@@ -649,21 +879,24 @@ namespace BloodborneLauncher.Views
                 Ws.SaveSoon();
                 changed?.Invoke();
             };
-            Add(Card(icon, title, hint, toggle, out _), into);
+            Add(Card(icon, title, hint, toggle, out _, line: line), into).SetDefault(OnOff(defaultOn));
             return toggle;
         }
 
-        protected ToggleSwitch SettingToggle(SymbolRegular icon, string title, string? hint, string key, Panel? into = null, Action? changed = null) =>
-            ToggleRow(icon, title, hint, () => S.Bool(key), v => S.Set(key, v), into, changed);
+        protected ToggleSwitch SettingToggle(SymbolRegular icon, string title, string? hint, string key, Panel? into = null, Action? changed = null,
+            string? line = null) =>
+            ToggleRow(icon, title, hint, () => S.Bool(key), v => S.Set(key, v), into, changed, line, LauncherOn(key));
 
-        protected ToggleSwitch IniToggle(SymbolRegular icon, string title, string? hint, string key, Panel? into = null, Action? changed = null) =>
-            ToggleRow(icon, title, hint, () => Ini.Flag(key), v => Ini.Set(key, v ? "1" : "0"), into, changed);
+        protected ToggleSwitch IniToggle(SymbolRegular icon, string title, string? hint, string key, Panel? into = null, Action? changed = null,
+            string? line = null) =>
+            ToggleRow(icon, title, hint, () => Ini.Flag(key), v => Ini.Set(key, v ? "1" : "0"), into, changed, line, IniOn(key));
 
         /// <summary>A slider with a small number box beside it: type a value and press Enter (or click
         /// away) to set it exactly. The value is kept in the slider's range and on its steps; text that
         /// is not a number puts the current value back.</summary>
         protected Slider SliderRow(SymbolRegular icon, string title, string? hint, double min, double max, double step,
-            Func<double> get, Action<double> set, string format = "0.00", Panel? into = null, double valueWidth = 44)
+            Func<double> get, Action<double> set, string format = "0.00", Panel? into = null, double valueWidth = 44,
+            string? line = null, double? defaultValue = null)
         {
             var slider = new Slider
             {
@@ -737,13 +970,14 @@ namespace BloodborneLauncher.Views
                 set(slider.Value);
                 Ws.SaveSoon();
             };
-            Add(Card(icon, title, hint, Row(slider, value), out _), into);
+            Add(Card(icon, title, hint, Row(slider, value), out _, line: line), into)
+                .SetDefault(defaultValue?.ToString(format, culture));
             return slider;
         }
 
         /// <summary>A text field row; saves as you type.</summary>
         protected TextBox TextRow(SymbolRegular icon, string title, string? hint, string placeholder,
-            Func<string> get, Action<string> set, Panel? into = null, double width = 300)
+            Func<string> get, Action<string> set, Panel? into = null, double width = 300, string? line = null)
         {
             var box = new TextBox
             {
@@ -758,8 +992,100 @@ namespace BloodborneLauncher.Views
                 set(box.Text);
                 Ws.SaveSoon();
             };
-            Add(Card(icon, title, hint, box, out _), into);
+            Add(Card(icon, title, hint, box, out _, line: line), into);
             return box;
+        }
+
+        /// <summary>
+        /// A switch whose settings fold under it (0.4.4 beta 26b, the tester's idea): turning it on opens
+        /// them, turning it off closes them, and the arrow beside it opens or closes them any time. While
+        /// it is off they are greyed: they don't apply. Put the settings into the panel this returns, then
+        /// add the panel to the page (into, or the page itself). For HDR, the FPS counter, camera tuning
+        /// and picture tuning.
+        /// </summary>
+        protected FoldRows FoldToggle(SymbolRegular icon, string title, string? hint, Func<bool> get, Action<bool> set,
+            out ToggleSwitch toggle, out SettingRow row, Panel? into = null, Action? changed = null, string? line = null, bool? defaultOn = null)
+        {
+            var rows = new FoldRows();
+            var arrow = new Button
+            {
+                Appearance = ControlAppearance.Transparent,
+                Padding = new Thickness(6),
+                Margin = new Thickness(0, 0, 6, 0),
+                VerticalAlignment = VerticalAlignment.Center,
+                ToolTip = L.T("Show or hide its settings"),
+            };
+            var on = new ToggleSwitch { IsChecked = get(), VerticalAlignment = VerticalAlignment.Center };
+            void Show(bool open)
+            {
+                rows.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+                arrow.Icon = Icon(open ? SymbolRegular.ChevronUp16 : SymbolRegular.ChevronDown16);
+            }
+            rows.Open = () => Show(true);
+            arrow.Click += (_, _) => Show(rows.Visibility != Visibility.Visible);
+            on.Click += (_, _) =>
+            {
+                var value = on.IsChecked == true;
+                set(value);
+                Ws.SaveSoon();
+                rows.IsEnabled = value;
+                Show(value);
+                changed?.Invoke();
+            };
+            row = Add(Card(icon, title, hint, Row(arrow, on), out _, line: line), into);
+            row.SetDefault(OnOff(defaultOn));
+            rows.IsEnabled = get();
+            Show(get());
+            toggle = on;
+            return rows;
+        }
+
+        /// <summary>
+        /// One engine switch's row (Core/EngineSwitches.cs): a toggle, a slider, a choice or a text field
+        /// bound to its env: setting, on whichever page it belongs. Returns what puts it back to the
+        /// engine's default (the Engine page's Reset all).
+        /// </summary>
+        protected Action SwitchRow(EngineSwitch item, SymbolRegular icon, Panel? into = null, Action? changed = null)
+        {
+            var info = EngineSwitches.Describe(item);
+            switch (item.Kind)
+            {
+                case SwitchKind.Toggle:
+                {
+                    var toggle = ToggleRow(icon, item.Title, info, () => EngineSwitches.Get(S, item) == item.On,
+                        v => EngineSwitches.Set(S, item, v ? item.On : item.Off), into, changed, item.Line);
+                    return () => toggle.IsChecked = item.Default == item.On;
+                }
+                case SwitchKind.Number:
+                {
+                    var format = item.Unit.Length > 0 ? $"{item.Format}' {item.Unit}'" : item.Format;
+                    var slider = SliderRow(icon, item.Title, info, item.Min, item.Max, item.Step,
+                        () => EngineSwitches.NumberOf(S, item),
+                        v =>
+                        {
+                            EngineSwitches.Set(S, item, EngineSwitches.Format(item, v));
+                            changed?.Invoke();
+                        },
+                        format, into, valueWidth: item.Unit.Length > 0 ? 86 : 52, line: item.Line);
+                    return () => slider.Value = EngineSwitches.DefaultNumber(item);
+                }
+                case SwitchKind.Text:
+                {
+                    var box = TextRow(icon, item.Title, info, item.Placeholder, () => EngineSwitches.Get(S, item),
+                        v =>
+                        {
+                            EngineSwitches.Set(S, item, v);
+                            changed?.Invoke();
+                        }, into, line: item.Line);
+                    return () => box.Text = "";
+                }
+                default:
+                {
+                    var control = ComboRow(icon, item.Title, info, item.Options, () => EngineSwitches.Get(S, item),
+                        v => EngineSwitches.Set(S, item, v), into, changed: changed, line: item.Line);
+                    return () => Pick(control, Choices.IndexOf(item.Options, item.Default));
+                }
+            }
         }
 
         protected static string Fmt(double value) => value.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);

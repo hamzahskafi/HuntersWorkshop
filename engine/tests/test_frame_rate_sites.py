@@ -43,12 +43,12 @@ class FrameRateSitesTests(unittest.TestCase):
     def test_counts_and_targets_follow_the_rate(self):
         by_at = {c['at']: c for c in self.entries['counts']}
         for fps, frames, micros, digits in ((60, 20, 16500, b'16666'), (90, 30, 11000, b'11111'),
-                                            (120, 40, 8250, b'08333'), (144, 48, 6875, b'06944')):
+                                            (120, 40, 8250, b'08333'), (144, 48, 6875, b'06944'),
+                                            (240, 80, 4125, b'04166')):
             with self.subTest(fps=fps):
                 self.assertEqual(frame_rate_check.count_bytes(by_at[0x192c405], fps), frames.to_bytes(4, 'little'))
                 self.assertEqual(frame_rate_check.count_bytes(by_at[0x25629f1], fps), micros.to_bytes(4, 'little'))
                 self.assertEqual(frame_rate_check.count_bytes(by_at[0x4b33c51], fps), digits)
-        self.assertEqual(frame_rate_check.count_bytes(by_at[0x4b33c51], 240), b'04166')  # uncapped's most
         wrong = copy.deepcopy(self.entries)
         wrong['counts'][0]['game'] += 1  # 60's is no longer what the list holds
         self.assertTrue(any(f.startswith('count') for f in frame_rate_check.check(wrong, self.listed)))

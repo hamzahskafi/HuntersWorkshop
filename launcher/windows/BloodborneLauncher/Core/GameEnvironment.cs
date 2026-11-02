@@ -3,7 +3,7 @@
 namespace BloodborneLauncher.Core
 {
     /// <summary>
-    /// The environment run_windows.py gets from the launcher. Most settings travel in config.ini
+    /// The environment the start (bb-start; run.sh on Linux) gets from the launcher. Most settings travel in config.ini
     /// (graphics, controls, online); these are the ones the engine takes from the environment.
     /// </summary>
     public static class GameEnvironment
@@ -97,9 +97,11 @@ namespace BloodborneLauncher.Core
         public static string PatchesDir(LauncherSettings s) =>
             s.Str("patches_dir") is { Length: > 0 } dir ? Paths.Expand(dir) : Path.Combine(Paths.DataDir, "patches");
 
-        /// <summary>30, 60 and 90 are the engine's fixed presets; 120 and uncapped use the uncapped
-        /// patch (scripts\run_windows.py turns them into BB_FPS=uncap with a limit).</summary>
-        public static string Fps(LauncherSettings s) => s.Str("fps_mode") is "30" or "90" or "120" or "144" or "uncap" ? s.Str("fps_mode") : "60";
+        /// <summary>The frame rate (Display › Frame rate): 30, 60, 90, 120, 144 and 240 are fixed rates,
+        /// each with the console's vblank at its rate (the start program sets 120, 144 and 240's,
+        /// start/main.cpp ConfigureFrameRate, and runs 240 at 144 without the frame-rate
+        /// corrections); uncap has no limit.</summary>
+        public static string Fps(LauncherSettings s) => s.Str("fps_mode") is "30" or "90" or "120" or "144" or "240" or "uncap" ? s.Str("fps_mode") : "60";
 
         /// <summary>This launch's answer about a region-changing patch while online ("keep" or
         /// "skip"; scripts/patches.py leaves it out unless "keep"), or null when none is on.</summary>
@@ -115,7 +117,7 @@ namespace BloodborneLauncher.Core
             var fps = Fps(s);
             var env = new Dictionary<string, string>(StringComparer.Ordinal)
             {
-                // The package's engine is already built: run_windows.py must not try MSYS2.
+                // The package's engine is already built: the start must not build it (run.sh on Linux).
                 ["BB_PREBUILT"] = "1",
                 ["BB_DATA_DIR"] = Paths.DataDir,
                 ["BB_CONFIG"] = Paths.IniPath,
@@ -141,17 +143,28 @@ namespace BloodborneLauncher.Core
             // Settings › Performance: empty is the engine's own choice (left unset).
             if (s.Str("draw_pipe") is "0" or "1") env["BB_DRAW_PIPE"] = s.Str("draw_pipe");
             if (s.Str("readbacks") is "0" or "2") env["BB_READBACKS"] = s.Str("readbacks");
-            if (s.Bool("frame_stats")) env["BB_FRAME_STATS"] = "1";
-            // The log level (standard is the engine's own, left unset), hitch reports and controller details.
+            // The log level (standard is the engine's own, left unset).
             if (s.Str("log_level") is "detailed" or "debug") env["BB_LOG_LEVEL"] = s.Str("log_level");
-            if (int.TryParse(s.Str("hitch_report_ms"), out var hitch) && hitch > 0) env["BB_HITCH_REPORT_MS"] = hitch.ToString();
-            if (s.Bool("pad_log")) env["BB_PAD_LOG"] = "1";
-            if (s.Bool("fsr_profile")) env["BB_FSR4_PROFILE"] = "1";
-            if (s.Bool("audio_stats")) env["BB_AUDIO_STATS"] = "1";
-            if (s.Bool("load_profile")) env["BB_SAMPLE_THREADS"] = "load";
-            if (s.Bool("fsr4_balanced")) env["BB_FSR4_MODEL"] = "balanced";
+            // The Log page's Diagnostics as one list (0.4.4 beta 28: the engine's start programs expand
+            // BB_DIAG, bb-start's ExpandDiagnostics and run.sh; a switch set on its own wins).
+            var diag = new List<string>();
+            if (s.Bool("frame_stats")) diag.Add("frame");
+            if (int.TryParse(s.Str("hitch_report_ms"), out var hitch) && hitch > 0) diag.Add($"hitch={hitch}");
+            if (s.Bool("gpu_profile")) diag.Add("gpu");
+            if (s.Bool("section_stats")) diag.Add("sections");
+            if (s.Bool("load_profile")) diag.Add("load");
+            if (s.Bool("audio_stats")) diag.Add("audio");
+            if (s.Bool("pad_log")) diag.Add("pad");
+            if (s.Bool("heap_checks")) diag.Add("heap");
+            if (s.Bool("shader_capture"))
+            {
+                diag.Add("shaders");
+                env["BB_SHADER_CAPTURE_DIR"] = Path.Combine(Path.GetDirectoryName(GameRunner.SessionLog)!, "shaders");
+            }
+            if (diag.Count > 0) env["BB_DIAG"] = string.Join(",", diag);
             // Experimental engine features: on by default, each can be turned off.
-            env["BB_PRECISE_PACING"] = s.Bool("exp_frame_pacing") ? "1" : "0";
+            // 0.4.4 beta 28: what is on by default in the engine is passed only when off.
+            if (!s.Bool("exp_frame_pacing")) env["BB_PRECISE_PACING"] = "0";
             // Off by default, and passed either way: an engine that has it on unless told 0 gets 0.
             env["BB_VBLANK_PACING"] = s.Bool("exp_vblank_lock") ? "1" : "0";
             env["BB_INDIRECT_CLAMP"] = s.Bool("exp_particle_cap") ? "1" : "0";
@@ -163,83 +176,36 @@ namespace BloodborneLauncher.Core
                 env[key] = value;
 
             // Off: the engine's earlier behaviour; on: its default (left unset).
-            if (!s.Bool("exp_vram_budget")) { env["BB_GC_PRESSURE_PERCENT"] = "0"; env["BB_GC_PRESSURE_SECONDS"] = "0"; }
+            // Switches that stand for several (0.4.4 beta 28: the engine's start programs expand them,
+            // bb-start's ExpandSwitchGroups and run.sh).
+            if (!s.Bool("exp_vram_budget")) env["BB_VRAM_BUDGET"] = "0";
             if (!s.Bool("exp_thread_priority")) env["BB_GPU_THREAD_PRIORITY"] = "0";
             if (!s.Bool("exp_sleep_spin")) env["BB_SLEEP_SPIN_US"] = "600";
             if (!s.Bool("exp_async_pipelines")) env["BB_ASYNC_PIPELINES"] = "0";
-            if (!s.Bool("exp_occlusion")) env["BB_OCCLUSION"] = "0";
+            if (s.Bool("exp_occlusion")) env["BB_OCCLUSION"] = "1";
             if (s.Bool("exp_sharp_ui")) env["BB_SHARP_UI"] = "1";
-            if (!s.Bool("exp_fast_draws"))
-            {
-                env["BB_SUBMIT_END_TASKS"] = "0";
-                env["BB_MEMO_REVALIDATE"] = "0";
-                env["BB_SAMPLER_MEMO"] = "0";
-                env["BB_DRAIN_SLEEP"] = "0";
-                env["BB_FAULT_SKIP_TEXTURES"] = "0";
-            }
+            if (!s.Bool("exp_fast_draws")) env["BB_FAST_DRAWS"] = "0";
             // Sound threads first (CPUs with many slower cores): off unless chosen.
-            if (!s.Bool("audio_priority") || s.Bool("safe_mode_next")) env["BB_AUDIO_THREAD_PRIORITY"] = "0";
+            if (s.Bool("audio_priority")) env["BB_AUDIO_THREAD_PRIORITY"] = "1";
             // Sound output: DirectSound writes further ahead than WASAPI, so a late sound thread
             // doesn't leave a gap (SDL reads its driver and buffer size from the environment).
             var output = s.Bool("safe_mode_next") ? "" : s.Str("sound_output");
             if (output.StartsWith("directsound")) env["SDL_AUDIO_DRIVER"] = "directsound";
             if (output == "directsound_large") env["SDL_AUDIO_DEVICE_SAMPLE_FRAMES"] = "2048";
-            if (s.Bool("exp_fast_loading")) env["BB_FAST_LOADING"] = "1";
+            if (!s.Bool("exp_fast_loading")) env["BB_FAST_LOADING"] = "0";
             if (!s.Bool("exp_frame_fixes")) env["BB_FRAME_FIXES"] = "0";
-            if (s.Bool("exp_frame_timer")) env["BB_FRAME_TIMER"] = "1";
-            if (s.Bool("exp_hot_pages")) env["BB_HOT_PAGES"] = "2";
-            // The PC memory model (the GPU reads the game's memory in place; the engine checks the
-            // GPU first and keeps copying where it cannot) and the game's draw calls handed over
-            // directly: on since 0.9.37 beta 4.
-            if (s.Bool("exp_guest_in_place")) env["BB_GUEST_IN_PLACE"] = "1";
-            if (s.Bool("exp_native_calls")) env["BB_NATIVE_CALLS"] = "1";
+            if (!s.Bool("exp_hot_pages")) env["BB_HOT_PAGES"] = "0";
+            // The game's per-frame GPU memory read in place (on unless 0; safe mode sets 0 below).
+            if (!s.Bool("exp_gx_in_place")) env["BB_GX_IN_PLACE"] = "0";
+            if (!s.Bool("exp_native_calls")) env["BB_NATIVE_CALLS"] = "0";
             if (s.Bool("exp_sfx_workaround")) env["BB_SFX_WORKAROUND"] = "1";
             if (s.Bool("borderless_fullscreen")) env["BB_EXCLUSIVE_FULLSCREEN"] = "0";
-            if (!s.Bool("exp_compile_skip"))
-            {
-                env["BB_SKIP_UNCOMPILED"] = "0";
-                env["BB_LATE_PIPELINE_BIND"] = "0";
-                env["BB_PIPELINE_TAKE"] = "0";
-            }
-            if (s.Bool("section_stats")) env["BB_SECTIONS"] = "1";
+            if (!s.Bool("exp_compile_skip")) env["BB_COMPILE_SKIP"] = "0";
             if (s.Str("overlay_keys") is "insert" or "off") env["BB_OVERLAY_KEYS"] = s.Str("overlay_keys");
             if (s.Bool("legacy_shaders")) env["BB_NATIVE_SHADERS"] = "0";
-            if (s.Bool("shader_capture"))
-            {
-                env["BB_SHADER_CAPTURE"] = "1";
-                env["BB_SHADER_CAPTURE_DIR"] = Path.Combine(Path.GetDirectoryName(GameRunner.SessionLog)!, "shaders");
-            }
-            if (s.Bool("safe_mode_next"))
-            {
-                // Safe mode (after a crash, one run): every experimental engine option and the mods off.
-                env.Remove("BB_FAST_LOADING");
-                env["BB_FRAME_FIXES"] = "0";
-                env.Remove("BB_FRAME_TIMER");
-                env.Remove("BB_HOT_PAGES");
-                env.Remove("BB_GUEST_IN_PLACE");
-                env.Remove("BB_NATIVE_CALLS");
-                env["BB_PRECISE_PACING"] = "0";
-                env["BB_VBLANK_PACING"] = "0";
-                // A crash guard: on, whatever the setting, in the run after a crash.
-                env["BB_INDIRECT_CLAMP"] = "1";
-                env["BB_IMAGE_WRITEBACK_GC"] = "0";
-                env["BB_GC_PRESSURE_PERCENT"] = "0";
-                env["BB_GC_PRESSURE_SECONDS"] = "0";
-                env["BB_GPU_THREAD_PRIORITY"] = "0";
-                env["BB_NATIVE_SHADERS"] = "0";
-                env["BB_SLEEP_SPIN_US"] = "600";
-                env["BB_ASYNC_PIPELINES"] = "0";
-                env["BB_OCCLUSION"] = "0";
-                env["BB_SUBMIT_END_TASKS"] = "0";
-                env["BB_MEMO_REVALIDATE"] = "0";
-                env["BB_SAMPLER_MEMO"] = "0";
-                env["BB_DRAIN_SLEEP"] = "0";
-                env["BB_FAULT_SKIP_TEXTURES"] = "0";
-                env["BB_SKIP_UNCOMPILED"] = "0";
-                env["BB_LATE_PIPELINE_BIND"] = "0";
-                env["BB_PIPELINE_TAKE"] = "0";
-                env["BB_MODS_ENABLED"] = "0";
-            }
+            // Safe mode (after a crash, one run): every experimental engine option and the mods off, a crash
+            // guard on (the engine's start programs set them, whatever the rows above say).
+            if (s.Bool("safe_mode_next")) env["BB_SAFE_MODE"] = "1";
             // The Hunter's Dream account (scripts/online.py uses it in that pool only).
             if (s.HuntersDreamToken is { Length: > 0 } token && s.Str("hd_name") is { Length: > 0 } name)
             {
@@ -261,6 +227,25 @@ namespace BloodborneLauncher.Core
             WindowsMonitors.ApplyEnvironment(s.Str("display_device"), WindowsMonitors.All(), env);
             return env;
         }
+
+        /// <summary>
+        /// The variable each Engine page setting passes (Build above), so Changed switches can say when
+        /// Extra variables sets it too (0.4.4 beta 28: its value then wins, at the setting's default or not).
+        /// Keep in step with Build.
+        /// </summary>
+        public static readonly IReadOnlyDictionary<string, string> FeatureVariables = new Dictionary<string, string>
+        {
+            ["legacy_shaders"] = "BB_NATIVE_SHADERS", ["exp_vram_cleanup"] = "BB_IMAGE_WRITEBACK_GC",
+            ["exp_frame_pacing"] = "BB_PRECISE_PACING", ["exp_vblank_lock"] = "BB_VBLANK_PACING",
+            ["exp_particle_cap"] = "BB_INDIRECT_CLAMP", ["exp_vram_budget"] = "BB_VRAM_BUDGET",
+            ["exp_thread_priority"] = "BB_GPU_THREAD_PRIORITY", ["exp_sleep_spin"] = "BB_SLEEP_SPIN_US",
+            ["exp_async_pipelines"] = "BB_ASYNC_PIPELINES", ["exp_occlusion"] = "BB_OCCLUSION",
+            ["exp_fast_draws"] = "BB_FAST_DRAWS", ["exp_compile_skip"] = "BB_COMPILE_SKIP",
+            ["exp_fast_loading"] = "BB_FAST_LOADING", ["exp_frame_fixes"] = "BB_FRAME_FIXES",
+            ["exp_hot_pages"] = "BB_HOT_PAGES", ["exp_gx_in_place"] = "BB_GX_IN_PLACE",
+            ["exp_native_calls"] = "BB_NATIVE_CALLS", ["exp_sfx_workaround"] = "BB_SFX_WORKAROUND",
+            ["draw_pipe"] = "BB_DRAW_PIPE", ["readbacks"] = "BB_READBACKS", ["audio_priority"] = "BB_AUDIO_THREAD_PRIORITY",
+        };
 
         /// <summary>Settings › Diagnostics › Extra variables: NAME=value pairs separated by spaces.</summary>
         public static IEnumerable<(string Name, string Value)> ExtraVariables(LauncherSettings s)

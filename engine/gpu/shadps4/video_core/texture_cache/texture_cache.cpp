@@ -20,6 +20,7 @@
 #include "video_core/buffer_cache/buffer_cache.h"
 #include "video_core/page_manager.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
+#include "video_core/renderer_vulkan/vk_gpu_savings.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_runtime.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
@@ -308,32 +309,6 @@ void TextureCache::DownloadImageMemory(ImageId image_id, bool sync) {
                               image.info.resources.layers * (image.info.num_bits / 8);
     ASSERT(download_size <= image.info.guest_size);
     image.mip_hashes_current = false; // its data lands in guest memory
-    vk::BufferImageCopy image_copy = {
-        .bufferOffset = 0,
-        .bufferRowLength = image.info.pitch,
-        .bufferImageHeight = image.info.size.height,
-        .imageSubresource =
-            {
-                .aspectMask = image.info.props.is_depth ? vk::ImageAspectFlagBits::eDepth
-                                                        : vk::ImageAspectFlagBits::eColor,
-                .mipLevel = 0,
-                .baseArrayLayer = 0,
-                .layerCount = image.info.resources.layers,
-            },
-        .imageOffset = {0, 0, 0},
-        .imageExtent = {image.info.size.width, image.info.size.height, image.info.size.depth},
-    };
-    // bbport BB_GUEST_IN_PLACE: the GPU copies the image into the game's memory itself, in stream
-    // order: before the fences that follow, no wait here and no CPU copy afterwards.
-    if (GuestInPlace() && image.info.guest_address != 0) {
-        const auto [arena, offset] =
-            buffer_cache.ObtainBuffer(image.info.guest_address, download_size, true);
-        if (buffer_cache.IsInPlace(image.info.guest_address, download_size)) {
-            image_copy.bufferOffset = offset;
-            runtime.DownloadImage(&image, arena, std::span{&image_copy, 1});
-            return;
-        }
-    }
     const auto download =
         runtime.GetStagingPool().Request(download_size, MemoryType::HostCached, 16, !sync);
     const vk::BufferImageCopy image_download = {
@@ -359,12 +334,6 @@ void TextureCache::DownloadImageMemory(ImageId image_id, bool sync) {
                            BbFreeCheck::ImageDownload);
         Core::Memory::Instance()->TryWriteBacking(std::bit_cast<u8*>(image.info.guest_address),
                                                   download.mapped, download_size);
-        if (!WriteTracking()) {
-            // bbport: the caches' own thread (stage A drained, or the draw recording thread):
-            // a readback the range needs runs here. Sent to the GPU command thread, it waited
-            // for that thread, or for this one, which never came back to run it.
-            buffer_cache.InvalidateMemory(image.info.guest_address, download_size, true);
-        }
     } else {
         scheduler.DeferPriorityOperation(
             [this, device_addr = image.info.guest_address, download, download_size] {
@@ -373,9 +342,6 @@ void TextureCache::DownloadImageMemory(ImageId image_id, bool sync) {
                                    BbFreeCheck::ImageDownload);
                 Core::Memory::Instance()->TryWriteBacking(std::bit_cast<u8*>(device_addr),
                                                           download.mapped, download_size);
-                if (!WriteTracking()) {
-                    buffer_cache.InvalidateMemory(device_addr, download_size);
-                }
                 runtime.GetStagingPool().FreeDeferred(download);
             });
     }
@@ -480,7 +446,7 @@ bool TextureCache::StoreTiledImage(ImageId image_id) {
                             std::min(mip.height, std::max(info.size.height >> level, 1u)), 1},
         });
     }
-    scheduler.EndRendering();
+    scheduler.EndRendering(Vulkan::GpuSavings::PassBreak::TextureCache);
     tile_manager.TileImage(image, copies, host.buffer, host.offset, /*extent_only=*/true);
     runtime.FlushBarriers();
     // Waited for here: the image still watches its pages until the store has landed (a store
@@ -490,10 +456,6 @@ bool TextureCache::StoreTiledImage(ImageId image_id) {
     BbFreeCheck::Check(address, size, host.mapped, BbFreeCheck::ImageDownload);
     const bool stored = memory->TryWriteBacking(std::bit_cast<u8*>(address), host.mapped, size);
     image.mip_hashes_current = false;
-    // Guest memory changed under the copies made of it (also by a partial store).
-    if (!WriteTracking()) {
-        buffer_cache.InvalidateMemory(address, size, true);
-    }
     // The other images over the range read guest memory again at their next use.
     for (const ImageId other_id : others) {
         Image& other = slot_images[other_id];
@@ -554,14 +516,10 @@ void TextureCache::DumpImagesAt(VAddr address, const char* dir) {
 /// bbport: a hash of guest memory for the refresh checks. From 1 MiB on, 256 KiB chunks are
 /// hashed on the copy threads and then their hashes: a 1080p R32F image the game refreshes every
 /// frame (its own compute copy of the depth buffer) cost ~1 ms of hashing on the draw recording
-/// thread. Only compared with hashes made here. BB_PARALLEL_IMAGE_HASH=0: one XXH3 as before.
+/// thread. Only compared with hashes made here.
 static u64 GuestMemoryHash(const void* data, u64 size) {
-    static const bool parallel = [] {
-        const char* env = std::getenv("BB_PARALLEL_IMAGE_HASH");
-        return !(env && env[0] == '0');
-    }();
     constexpr u64 Chunk = 256 * 1024;
-    if (!parallel || size < 4 * Chunk || !BbCopy::Enabled()) {
+    if (size < 4 * Chunk || !BbCopy::Enabled()) {
         return XXH3_64bits(data, size);
     }
     const auto* bytes = static_cast<const u8*>(data);
@@ -572,15 +530,6 @@ static u64 GuestMemoryHash(const void* data, u64 size) {
         hashes[i] = XXH3_64bits(bytes + offset, std::min(Chunk, size - offset));
     });
     return XXH3_64bits(hashes.data(), count * sizeof(u64));
-}
-
-/// bbport: whether a GPU-dirty refresh may keep the mip hashes (RefreshImage).
-static bool KeepMipHashes() {
-    static const bool keep = [] {
-        const char* env = std::getenv("BB_KEEP_MIP_HASHES");
-        return !(env && env[0] == '0');
-    }();
-    return keep;
 }
 
 /// bbport: the guest memory a MaybeCpuDirty check compares, the same at marking and at
@@ -795,6 +744,11 @@ ImageId TextureCache::ResolveDepthOverlap(const ImageInfo& requested_info, Bindi
         RefreshImage(source_image);
         // When creating a depth buffer through overlap resolution don't clear it on first use.
         new_image.info.meta_info.htile_clear_mask = 0;
+        // 0.4.4 beta 18: the conversions between kinds, in the frame statistics.
+        if (source_image.info.props.is_depth != new_image.info.props.is_depth) {
+            const u32 kind = source_image.info.props.is_depth ? 1 : 0;
+            Vulkan::GpuSavings::Count(Vulkan::GpuSavings::Get().overlap_conversions[kind]);
+        }
         runtime.CopyColorAndDepth(&source_image, &new_image);
 
         // Keep bound attachments valid until the renderer notices the replacement.
@@ -1165,8 +1119,7 @@ ImageId TextureCache::FindImageLayer(VAddr address, size_t size, u32& layer) {
     return found;
 }
 
-ImageView& TextureCache::FindTexture(ImageId image_id, const ImageDesc& desc, ViewMemo* memo,
-                                     bool refresh) {
+ImageView& TextureCache::FindTexture(ImageId image_id, const ImageDesc& desc, ViewMemo* memo) {
     Image& image = slot_images[image_id];
     if (desc.type == BindingType::Storage) {
         image.flags |= ImageFlagBits::GpuModified;
@@ -1177,9 +1130,7 @@ ImageView& TextureCache::FindTexture(ImageId image_id, const ImageDesc& desc, Vi
             downloads_queued.store(true, std::memory_order_release);
         }
     }
-    if (refresh) {
-        UpdateImage(image_id);
-    }
+    UpdateImage(image_id);
     if (memo && !BbToggle::Disabled(BbToggle::TextureViewMemo)) {
         if (memo->image_id == image_id && memo->backing == image.backing && memo->view_id) {
             return slot_image_views[memo->view_id];
@@ -1274,6 +1225,7 @@ void TextureCache::RefreshImage(Image& image) {
         return;
     }
     BbStats::Timer timer{BbStats::t_refresh};
+    BbStats::image_checks.fetch_add(1, std::memory_order_relaxed);
 
     RENDERER_TRACE;
     TRACE_HINT(fmt::format("{:x}:{:x}", image.info.guest_address, image.info.guest_size));
@@ -1298,10 +1250,10 @@ void TextureCache::RefreshImage(Image& image) {
     // hashes record is unchanged unless something wrote it since they were taken (which clears
     // mip_hashes_current): they are kept instead of hashing it again. The game's compute copy of
     // the depth buffer into a 1080p R32F image made that ~1 ms of every frame on the draw
-    // recording thread. BB_KEEP_MIP_HASHES=0: hashed every time.
+    // recording thread.
     constexpr u32 CpuDirtyBits = u32(ImageFlagBits::MaybeCpuDirty) | u32(ImageFlagBits::CpuDirty);
     const bool keep_hashes = is_gpu_dirty && image.mip_hashes_current &&
-                             (entry_flags & CpuDirtyBits) == 0 && KeepMipHashes();
+                             (entry_flags & CpuDirtyBits) == 0;
 
     BbStats::image_upload_bytes.fetch_add(image.info.guest_size, std::memory_order_relaxed);
     boost::container::small_vector<vk::BufferImageCopy, 14> image_copies;
@@ -1362,7 +1314,7 @@ void TextureCache::RefreshImage(Image& image) {
                           : keep_hashes ? "uploaded from the buffer cache, hashes kept"
                                         : "uploaded from the buffer cache");
 
-    scheduler.EndRendering();
+    scheduler.EndRendering(Vulkan::GpuSavings::PassBreak::TextureCache);
 
     std::optional<BbStats::Timer> part_timer{std::in_place, BbStats::t_refresh_obtain};
     BbSections::Scope obtain_scope{BbSections::RefreshObtain};

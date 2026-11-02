@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <atomic>
+#include <cstdio>
 #include "shader_recompiler/backend/spirv/emit_spirv_instructions.h"
 #include "shader_recompiler/backend/spirv/spirv_emit_context.h"
 
@@ -39,6 +41,17 @@ Id EmitReadLane(EmitContext& ctx, Id value, Id lane) {
 }
 
 Id EmitWriteLane(EmitContext& ctx, Id value, Id write_value, u32 lane) {
+    // 0.4.4 beta 20: a v_writelane the elimination pass could not remove (ReadLaneElimination)
+    // reads as 0 here; said once per shader, 16 at most, to know whether any game shader has
+    // one (the engine map's shader-8).
+    static std::atomic<u32> said{0};
+    static thread_local u64 last_hash = 0;
+    if (last_hash != ctx.info.pgm_hash && said.fetch_add(1, std::memory_order_relaxed) < 16) {
+        last_hash = ctx.info.pgm_hash;
+        std::printf("Recompiler: shader %016llx keeps a v_writelane to lane %u: its result reads "
+                    "as 0\n",
+                    static_cast<unsigned long long>(ctx.info.pgm_hash), lane);
+    }
     return ctx.u32_zero_value;
 }
 

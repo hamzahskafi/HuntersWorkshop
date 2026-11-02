@@ -8,10 +8,12 @@
 #include <filesystem>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #ifdef _WIN32
 #include <windows.h>
+#include <winver.h>
 #else
 #include <dlfcn.h>
 #endif
@@ -20,7 +22,6 @@
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_optiscaler.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
-#include "video_core/renderer_vulkan/vk_streamline.h"
 #include "bbport_settings.h"
 
 namespace Vulkan {
@@ -128,7 +129,7 @@ void SetP(NgxParameter* p, const char* name, void* v) {
     Slot<void (*)(NgxParameter*, const char*, void*)>(p, SetVoid)(p, name, v);
 }
 /// bbport: NVSDK_NGX_DLSS_Hint_Render_Preset (0 the DLL's default, 1 A ... 11 K): dlss_preset in
-/// config.ini, BB_DLSS_PRESET overrides it ("k" when neither); live from the menu.
+/// config.ini ("k" when it has none); live from the menu.
 unsigned DlssPreset(int quality);
 /// The same preset for every quality mode: the feature is created again when the mode changes.
 void SetPreset(NgxParameter* p, unsigned preset) {
@@ -193,7 +194,7 @@ unsigned DlssPreset(int quality) {
     return unsigned(std::clamp(preset, BbSettings::DlssPresetDefault, BbSettings::DlssPresetMax));
 }
 
-ResourceVk Resource(const Fsr4Upscaler::Image& image, vk::ImageAspectFlags aspect, bool rw) {
+ResourceVk Resource(const UpscaleInput::Image& image, vk::ImageAspectFlags aspect, bool rw) {
     ResourceVk r{};
     r.resource.image_view_info = {
         .image_view = static_cast<VkImageView>(image.view),
@@ -206,6 +207,62 @@ ResourceVk Resource(const Fsr4Upscaler::Image& image, vk::ImageAspectFlags aspec
     r.type = 0;
     r.read_write = rw;
     return r;
+}
+
+/// 0.4.4 beta 27c: the version of the DLSS file NGX loads from these folders ("310.9.16"), for the menu,
+/// the FPS counter and the log: Windows' file version of nvngx_dlss.dll (version.dll's functions, loaded
+/// here: no link change), the Linux library's name (libnvidia-ngx-dlss.so.310.4.0). Empty if not found.
+std::string DlssFileVersion(const std::vector<std::wstring>& paths) {
+#ifdef _WIN32
+    using SizeFn = DWORD(WINAPI*)(LPCWSTR, LPDWORD);
+    using InfoFn = BOOL(WINAPI*)(LPCWSTR, DWORD, DWORD, LPVOID);
+    using QueryFn = BOOL(WINAPI*)(LPCVOID, LPCWSTR, LPVOID*, PUINT);
+    static const HMODULE version_dll = LoadLibraryW(L"version.dll");
+    if (!version_dll) {
+        return {};
+    }
+    const auto size_fn = reinterpret_cast<SizeFn>(GetProcAddress(version_dll, "GetFileVersionInfoSizeW"));
+    const auto info_fn = reinterpret_cast<InfoFn>(GetProcAddress(version_dll, "GetFileVersionInfoW"));
+    const auto query_fn = reinterpret_cast<QueryFn>(GetProcAddress(version_dll, "VerQueryValueW"));
+    if (!size_fn || !info_fn || !query_fn) {
+        return {};
+    }
+    for (const auto& dir : paths) {
+        const std::wstring file = (std::filesystem::path(dir) / L"nvngx_dlss.dll").wstring();
+        DWORD handle = 0;
+        const DWORD size = size_fn(file.c_str(), &handle);
+        if (size == 0) {
+            continue;
+        }
+        std::vector<unsigned char> data(size);
+        VS_FIXEDFILEINFO* fixed = nullptr;
+        UINT length = 0;
+        if (!info_fn(file.c_str(), 0, size, data.data()) ||
+            !query_fn(data.data(), L"\\", reinterpret_cast<LPVOID*>(&fixed), &length) || !fixed) {
+            continue;
+        }
+        char text[48];
+        std::snprintf(text, sizeof(text), "%u.%u.%u", unsigned(HIWORD(fixed->dwFileVersionMS)),
+                      unsigned(LOWORD(fixed->dwFileVersionMS)), unsigned(HIWORD(fixed->dwFileVersionLS)));
+        std::string version = text;
+        if (const unsigned revision = LOWORD(fixed->dwFileVersionLS)) {
+            version += "." + std::to_string(revision);
+        }
+        return version;
+    }
+#else
+    constexpr std::string_view prefix = "libnvidia-ngx-dlss.so.";
+    for (const auto& dir : paths) {
+        std::error_code ec;
+        for (const auto& entry : std::filesystem::directory_iterator(std::filesystem::path(dir), ec)) {
+            const std::string name = entry.path().filename().string();
+            if (name.size() > prefix.size() && name.compare(0, prefix.size(), prefix) == 0) {
+                return name.substr(prefix.size());
+            }
+        }
+    }
+#endif
+    return {};
 }
 
 } // namespace
@@ -241,14 +298,13 @@ struct DlssUpscaler::Impl {
         int quality;
         bool hdr;
         unsigned preset; ///< the one asked for (a refused one stays the key: not retried each frame)
-        bool auto_exposure; ///< bbport: dlss_auto_exposure (HDR inputs have it regardless)
         bool operator==(const Key&) const = default;
     } key{};
 
     /// OptiScaler's NGX calls may run vkDeviceWaitIdle (a feature released or its backend
     /// changed), which needs every queue externally synchronized: they go out under the lock
-    /// our submissions and presents take (BB_OPTISCALER_NGX_LOCK).
-    const bool ngx_lock = OptiScaler::Part("BB_OPTISCALER_NGX_LOCK");
+    /// our submissions and presents take (OptiScaler's compatibility mode).
+    const bool ngx_lock = OptiScaler::Compat();
     std::unique_lock<std::mutex> QueueLock() {
         return ngx_lock ? std::unique_lock{Scheduler::submit_mutex} : std::unique_lock<std::mutex>{};
     }
@@ -426,7 +482,13 @@ struct DlssUpscaler::Impl {
             return;
         }
         available = true;
-        std::printf("DLSS: Super Resolution available (NGX core loaded)\n");
+        // 0.4.4 beta 27c: the DLSS file's version, for the menu and the FPS counter.
+        static const std::string version = DlssFileVersion(paths);
+        if (!version.empty()) {
+            BbSettings::Get().dlss_version.store(version.c_str(), std::memory_order_relaxed);
+        }
+        std::printf("DLSS: Super Resolution available (NGX core loaded; DLSS %s)\n",
+                    version.empty() ? "version unknown" : version.c_str());
     }
 
     static std::string fmt_hex(const char* what, unsigned value) {
@@ -435,7 +497,7 @@ struct DlssUpscaler::Impl {
         return text;
     }
 
-    bool Record(const Fsr4Upscaler::Frame& f) {
+    bool Record(const UpscaleInput::Frame& f) {
         if (!available) {
             return false;
         }
@@ -444,8 +506,7 @@ struct DlssUpscaler::Impl {
         const int quality = native ? int(Dlaa) : Quality(f.preset);
         const Key wanted{f.render_width, f.render_height, f.output.width, f.output.height,
                          quality, IsFloatFormat(f.color.format),
-                         DlssPreset(quality),
-                         BbSettings::Get().dlss_auto_exposure.load(std::memory_order_relaxed)};
+                         DlssPreset(quality)};
         if (!feature || !(wanted == key)) {
             if (feature) {
                 // bbport: the earlier submissions may still use the feature's resources; the open
@@ -466,17 +527,18 @@ struct DlssUpscaler::Impl {
             SetUI(params, "OutHeight", wanted.out_height);
             SetI(params, "PerfQualityValue", wanted.quality);
             // Motion vectors at render resolution, without jitter; standard depth.
+            // The HDR scene (a 1920x1080 output) with DLSS's own exposure: the game gives none, and
+            // NVIDIA's guide asks for one with HDR input. The game's tonemapped frame needs none
+            // (0.4.4 beta 27d: dlss_auto_exposure, a menu switch for it there too, went).
             int flags = FlagMvLowRes;
             if (wanted.hdr) {
                 flags |= FlagIsHdr | FlagAutoExposure;
-            } else if (wanted.auto_exposure) {
-                flags |= FlagAutoExposure; // bbport: the menu's DLSS auto exposure, LDR input too
             }
             SetI(params, "DLSS.Feature.Create.Flags", flags);
             SetI(params, "DLSS.Enable.Output.Subrects", 0);
             // bbport: the model is chosen, not left to the DLL's default per mode: preset K (the
             // transformer model) keeps thin moving objects - a weapon on the back, railings -
-            // steadier than the CNN presets. dlss_preset / BB_DLSS_PRESET: a letter (e: the last CNN
+            // steadier than the CNN presets. dlss_preset: a letter (e: the last CNN
             // model) or "default". A preset the DLL refuses is retried with its default.
             const unsigned preset = wanted.preset;
             SetPreset(params, preset);
@@ -514,15 +576,10 @@ struct DlssUpscaler::Impl {
         SetP(params, "Depth", &depth);
         SetP(params, "MotionVectors", &motion);
         SetP(params, "Output", &output);
-        // bbport: the reactive mask (menu) as DLSS's bias towards the current colour: 1 trusts this
-        // frame alone where blended effects changed it. Null clears the previous frame's.
-        ResourceVk bias{};
-        if (f.reactive.view) {
-            bias = Resource(f.reactive, vk::ImageAspectFlagBits::eColor, false);
-        }
-        SetP(params, "DLSS.Input.Bias.Current.Color.Mask", f.reactive.view ? &bias : nullptr);
-        SetUI(params, "DLSS.Input.Bias.Current.Color.Subrect.Base.X", 0);
-        SetUI(params, "DLSS.Input.Bias.Current.Color.Subrect.Base.Y", 0);
+        // 0.4.4 beta 25b: no bias-current-colour mask. NVIDIA's guide: it "should not be used"
+        // (310.4.0), a binary mask for problem assets once the integration is done (§3.15); HW
+        // gave it the reactive mask (graded). Set null each frame: the parameters outlive frames.
+        SetP(params, "DLSS.Input.Bias.Current.Color.Mask", nullptr);
         SetF(params, "Jitter.Offset.X", f.jitter[0]);
         SetF(params, "Jitter.Offset.Y", f.jitter[1]);
         SetF(params, "Sharpness", 0.0f);
@@ -559,11 +616,7 @@ struct DlssUpscaler::Impl {
         if (capabilities) {
             destroy_parameters(capabilities);
         }
-        // bbport: with Streamline loaded its DLSS Frame Generation shares NGX on this device and
-        // shuts it down itself (slShutdown, after this).
-        if (!Streamline::Loaded()) {
-            shutdown(VkDevice(instance.GetDevice()));
-        }
+        shutdown(VkDevice(instance.GetDevice()));
     }
 };
 
@@ -578,7 +631,7 @@ bool DlssUpscaler::Available() const noexcept {
     return impl->available;
 }
 
-bool DlssUpscaler::Record(const Fsr4Upscaler::Frame& frame) {
+bool DlssUpscaler::Record(const UpscaleInput::Frame& frame) {
     return impl->Record(frame);
 }
 

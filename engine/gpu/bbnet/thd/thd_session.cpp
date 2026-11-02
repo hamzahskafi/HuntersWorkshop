@@ -268,10 +268,6 @@ bool NpPost(const std::string& path, const Json& body, Json& out, std::string& e
     return ParseReply("POST " + path, Perform(Cfg().np_base, path, &text, timeout_ms), out, error);
 }
 
-bool NpGet(const std::string& path, Json& out, std::string& error, int timeout_ms) {
-    return ParseReply("GET " + path, Perform(Cfg().np_base, path, nullptr, timeout_ms), out, error);
-}
-
 void AddGameHeaders(std::vector<std::pair<std::string, std::string>>& headers) {
     // The game's own traffic carries the token too, so the server's game sessions map to the
     // account, and the ruleset, so its messages and bloodstains stay among the same rules.
@@ -656,9 +652,9 @@ bool ServerJoinRoom(std::uint64_t room_id, Json& reply, std::string& error) {
 }
 
 bool ServerLeaveRoom(const std::string& session_id, int member_id, Json& reply,
-                     std::string& error) {
+                     std::string& error, int timeout_ms) {
     Json body = {{"SessionId", session_id}, {"MemberId", member_id}};
-    return NpPost("/mp/matching2/leave_room", body, reply, error);
+    return NpPost("/mp/matching2/leave_room", body, reply, error, timeout_ms);
 }
 
 int ServerHeartbeat(const std::string& session_id, int member_id) {

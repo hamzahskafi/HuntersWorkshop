@@ -2,7 +2,13 @@ from paths import ROOT
 from pathlib import Path
 import tempfile
 import unittest
-from run_windows import gpu_cache_dir, gpu_cache_id, reset_stale_gpu_cache
+import gpu_cache
+
+NO_LAB = Path('/nonexistent/bb-shader-lab')
+
+
+def reset_stale_gpu_cache(cache, identity):
+    return gpu_cache.reset_stale(cache, identity, NO_LAB)
 
 
 class GpuCacheTests(unittest.TestCase):
@@ -30,20 +36,7 @@ class GpuCacheTests(unittest.TestCase):
             self.assertFalse(reset_stale_gpu_cache(cache, 'engine-1'))
             self.assertEqual((cache / 'engine.txt').read_text().strip(), 'engine-1')
 
-    def test_the_cache_follows_the_shader_compiler_not_the_engine(self):
-        with tempfile.TemporaryDirectory() as directory:
-            out = Path(directory)
-            self.assertEqual(gpu_cache_id(out, 'engine-1'), 'engine-1')
-            (out / 'gpu-cache.id').write_text('0123456789abcdef\n', encoding='utf-8')
-            self.assertEqual(gpu_cache_id(out, 'engine-1'), gpu_cache_id(out, 'engine-2'))
-            self.assertEqual(gpu_cache_id(out, 'engine-2'), 'gpu 0123456789abcdef')
-
-    def test_the_cache_is_beside_the_engine_unless_moved(self):
-        self.assertEqual(gpu_cache_dir({'BB_GPU_USER_DIR': 'X:/gpu'}), Path('X:/gpu/cache'))
-        self.assertEqual(gpu_cache_dir({}).parent.name, 'user')
-
     def test_one_catalog_per_game_of_the_gpu_vendor(self):
-        import gpu_cache
         from unittest.mock import patch
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

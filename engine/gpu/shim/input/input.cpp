@@ -48,8 +48,6 @@ PadState host_pad_state() {std::lock_guard lock(state_lock);return snapshot;}
 bool host_options_open() {return BbOverlay::MenuOpen();}
 bool ingame_menu_open() {return false;} // bbhost's separate host menu is not installed here.
 bool host_text_entry_open() {return text_open.load();}
-bool debug_menu_open() {return false;}
-bool debug_menu_active() {return false;} // No dedicated native debug-menu controller in this port.
 bool host_mouse_relative() {return relative.load();}
 bool host_mouse_stage_position(float& x,float& y) {
     std::lock_guard lock(state_lock);
@@ -89,7 +87,7 @@ bool Install(uint8_t* base,size_t size) {
         }
         std::fclose(f);
     }
-    BbInputConfig::append_bindings=[](BbInputConfig::Items& items) {for(int a=0;a<kBindDebugMenu;a++)items.emplace_back(std::string("bind.")+host_binding_info(a).key,host_binding_ini_value(a));};
+    BbInputConfig::append_bindings=[](BbInputConfig::Items& items) {for(int a=0;a<kBindCount;a++)items.emplace_back(std::string("bind.")+host_binding_info(a).key,host_binding_ini_value(a));};
     saved_serial=host_bindings_serial();
     mouse_camera_install(&image);menu_pointer_install(&image);
     active=true;

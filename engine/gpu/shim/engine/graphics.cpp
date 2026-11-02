@@ -34,7 +34,6 @@ constexpr std::uint64_t kYebisRecord = 0x25d4860;
 // push rbp; mov rbp, rsp; push r15..r12; push rbx; sub rsp, 0x28; mov r13, r9
 const std::uint8_t kYebisRecordPrologue[] = {0x55, 0x48, 0x89, 0xe5, 0x41, 0x57, 0x41, 0x56, 0x41, 0x55,
                                              0x41, 0x54, 0x53, 0x48, 0x83, 0xec, 0x28, 0x4d, 0x89, 0xcd};
-constexpr std::uint64_t kPostBlock = 0x59406e0;
 constexpr std::size_t kSaturation = 0xc8, kVignettePower = 0xd0, kGlareLuminance = 0xdc;
 // bbport: the rest of the tone map's colour correction. sub_269e990 copies the blended tone map
 // (a stack block in the area GPARAM's group order: ToneMapExposure, Gamma, ToneType,
@@ -107,12 +106,17 @@ void MotionBlur(std::uint64_t r) {
     }
 }
 // SSAO and AA are effects with their own settings (Picture tuning doesn't gate them): written
-// every view, so switching Picture tuning off leaves nothing forced behind.
+// every view, so switching Picture tuning off leaves nothing forced behind. 0.4.4 beta 28: the game's
+// AA only without an upscaler, as at start (patches.cpp NoUpscaler, BbSettings::GameAaApplies). The
+// flag followed the Anti-aliasing choice alone, so with "the game's own" kept for Upscaler None its
+// pass ran under DLSS and AMD FSR too (the tester: 119 FPS at the lamps against 122 without it).
 GUEST_ABI std::int64_t RenderView(std::uint64_t,const std::uint64_t* saved) {
     const auto r=saved[0];std::uint64_t caps=0;
     if (!r || !Read(r+kCapabilities,&caps)) return 0;
-    const std::uint8_t ssao=BbSettings::Get().effects[3].load() && (caps&kSsaoCapability);
-    const std::uint8_t aa=BbSettings::Get().effects[4].load() && (caps&kAaCapability);
+    const auto& s=BbSettings::Get();
+    const std::uint8_t ssao=s.effects[3].load() && (caps&kSsaoCapability);
+    const std::uint8_t aa=BbSettings::GameAaApplies(s.effects[BbSettings::EffectGameAa].load(), s.upscaler.load()) &&
+                          (caps&kAaCapability);
     Write(r+kSsaoFlag,ssao);Write(r+kAaFlag,aa);
     if (caps&kMotionBlurCapability) MotionBlur(r);
     return 0;

@@ -66,6 +66,13 @@ public:
     /// A proxy of the image holds writes its native image has not seen yet (NativeAccess would
     /// resolve them).
     [[nodiscard]] bool NativeStale(const VideoCore::Image& image) const;
+    /// bbport 0.7 (deadinside28): a whole-image copy from `src` to `dst` (the copy shader over
+    /// render targets, Rasterizer::IsComputeImageCopy) while `src`'s proxy holds its current
+    /// content: the proxies are copied (`dst` gets one) and `dst`'s native image is left to
+    /// resolve on a native access, instead of resolving `src` first. Colour into the same format,
+    /// depth into depth (its depth aspect, as Runtime::CopyImage) and depth into R32F (through a
+    /// buffer). False: not done, the native images are to be copied.
+    bool CopyProxy(VideoCore::ImageId src, VideoCore::ImageId dst);
     void ResolveAll();
     bool debug = false; ///< BB_SCENE_DEBUG frame: print resolves and fills
 private:
@@ -77,6 +84,9 @@ private:
         std::vector<std::pair<VideoCore::ImageViewInfo, vk::UniqueImageView>> views;
         vk::ImageLayout layout = vk::ImageLayout::eUndefined;
         SceneResolution::Coherence state;
+        /// 0.4.4 beta 14: a depth image's copy went into it (CopyProxy into R32F): resolved with
+        /// nearest filtering, as the native copy of the resolved depth.
+        bool depth_values = false;
     };
     static constexpr u64 Key(u64 uid, u32 level) {
         return uid << 4 | level;

@@ -77,15 +77,6 @@
 namespace fs = std::filesystem;
 using namespace Shader;
 
-// The pipeline serialization the cache recompile uses links in more of the GPU library than the
-// shared test stubs (tests/test_gpu_runtime_stubs.cpp) cover; the lab never reaches these.
-extern "C" {
-void runtime_blocked_report(const char*) {}
-[[noreturn]] void runtime_thread_exit(void*) { std::abort(); }
-int runtime_pad_type(void) { return 0; }
-int runtime_pad_button(uint32_t, int) { return 0; }
-}
-
 namespace {
 
 bool g_native = false;
@@ -400,7 +391,6 @@ bool ApplyLabProfile(Profile& profile) {
         {"needs_manual_interpolation", &profile.needs_manual_interpolation},
         {"uniform_constant_buffers", &profile.uniform_constant_buffers},
         {"uniform_dword_layout", &profile.uniform_dword_layout},
-        {"uniform_exact_base", &profile.uniform_exact_base},
         {"flatbuf_storage", &profile.flatbuf_storage},
         {"early_fragment_tests", &profile.early_fragment_tests},
         {"supports_fragment_shader_barycentric", &profile.supports_fragment_shader_barycentric},
@@ -441,7 +431,6 @@ int RunOne(const fs::path& file, const fs::path& profile_file) {
     profile.uniform_constant_buffers = g_native;
     // bbport: the engine's default native layout (dwords, offsets in the push data).
     profile.uniform_dword_layout = g_native;
-    profile.uniform_exact_base = false;
     if (!ApplyLabProfile(profile)) {
         return 2;
     }
@@ -1348,8 +1337,9 @@ int CheckCache(const fs::path& dir) {
                     spec2.info = &info2;
                     if (meta_version != 8) { // ShaderMetaVersion
                         why = "shader record version " + std::to_string(meta_version);
-                    } else if (binary_version != 7 && // ShaderBinaryVersion, MotionShaderBinaryVersion
-                               binary_version != 8) {
+                    } else if (binary_version != 7 && // ShaderBinaryVersion,
+                               binary_version != 8 && // MotionShaderBinaryVersion,
+                               binary_version != 9) { // GdsShaderBinaryVersion (0.4.4 beta 19)
                         why = "shader binary version " + std::to_string(binary_version);
                     } else if (!spec2.Deserialize(again)) {
                         why = "specialization unreadable";
@@ -1362,9 +1352,15 @@ int CheckCache(const fs::path& dir) {
                                HashCombine(info2.pgm_hash, perm_idx) != hash) {
                         why = "hash mismatch";
                     } else {
+                        bool gds = false; // per subgroup: compute shaders only
+                        for (const auto& buffer : info2.buffers) {
+                            gds = gds || (buffer.buffer_type == BufferType::GdsBuffer &&
+                                          info2.hw_stage == HwStage::Compute);
+                        }
                         why = "binary version " + std::to_string(binary_version) + " for motion " +
                               std::to_string(info2.hw_stage == HwStage::Vertex &&
-                                             spec2.runtime_info.hw.vs.motion_vectors);
+                                             spec2.runtime_info.hw.vs.motion_vectors) +
+                              ", GDS " + std::to_string(gds);
                     }
                     break;
                 }
@@ -2038,7 +2034,6 @@ Profile CaptureProfile(const fs::path& file) {
     }
     profile.uniform_constant_buffers = g_native;
     profile.uniform_dword_layout = g_native;
-    profile.uniform_exact_base = false;
     return profile;
 }
 

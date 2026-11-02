@@ -2,8 +2,9 @@
 
 Every change is checked against the hardware players actually use before it ships. A change that
 works on the development PC (RTX 5060, Intel CPU, Windows 11) has proven nothing about an AMD card,
-a GTX 10, a laptop iGPU or a 4-thread CPU. 0.9.37 beta 6 shipped a cache fix tested on that one PC:
-every RX 9070 XT player crashed at the start (below, "What went wrong").
+a GTX 10, a laptop iGPU or a 4-thread CPU. 0.9.37 beta 6 (Lantern Engine, which this project
+started from; versions 0.9.x below are Lantern's) shipped a cache fix tested on that one PC: every
+RX 9070 XT player crashed at the start (below, "What went wrong").
 
 ## Who plays
 
@@ -12,8 +13,8 @@ to 22). Re-count before each release (`tools/hardware_census.sh <folder of logs>
 
 | GPU family | Seen in logs | Driver | Notes |
 |---|---|---|---|
-| NVIDIA RTX 40 / 50 | 4060 (most common), 4060 Ti, 4070, 4070 Ti Super, 4080 Super, 4090, 5060, 5070 Ti, 5090 | 581 to 621 | DLSS, Reflex, frame generation (40/50) |
-| NVIDIA RTX 20 / 30 | 2060, 2070, 2080 Super, 3050, 3060 (+ laptop), 3070, 3080 | 552 to 617 | DLSS; no DLSS frame generation |
+| NVIDIA RTX 40 / 50 | 4060 (most common), 4060 Ti, 4070, 4070 Ti Super, 4080 Super, 4090, 5060, 5070 Ti, 5090 | 581 to 621 | DLSS |
+| NVIDIA RTX 20 / 30 | 2060, 2070, 2080 Super, 3050, 3060 (+ laptop), 3070, 3080 | 552 to 617 | DLSS |
 | NVIDIA GTX 16 | 1660 Ti, 1660 Super | 617 | Turing without RT/tensor cores: no DLSS |
 | NVIDIA GTX 10 and older | 1050 Ti, 1070 Ti | 576, 582 | Pascal: the 580 driver branch is its last; fewer Vulkan extensions |
 | AMD RDNA 1 to 4 | RX 5600 XT, 6600, 7700 XT, 7900 GRE, 9070 XT | 2.0.353 to 2.0.416 | FSR 4 on RDNA 4 |
@@ -108,8 +109,6 @@ Required by the engine (it stops without them; every family above has them): Vul
   validation, `play` compiles in play from an empty cache.
 - `bb-shader-lab --check-cache <cache folder>`: what the warm-up would build, and why the rest is
   left out, without a GPU.
-- `tools/chunk_buffer_probe.cpp`: the PC memory model's guest memory chunk calls on Windows (host
-  import, the chunk route, the arena's binding) alone, for the validation layer on any driver.
 
 ## Validation baseline
 
@@ -164,12 +163,14 @@ call stack (`shim/common/assert.cpp`), which found this.
 - **AMD**: no Mailbox present mode on some setups ("falling back to Fifo").
 - **AMD legacy driver (Polaris, Vega, old APUs)**: Vulkan 1.3.260, no dynamic vertex input: the
   vertex input is baked into every pipeline (GetVertexInputs).
-- **NVIDIA, the PC memory model**: the arena lists no memory type a host import may use, and the
-  engine binds imports anyway, outside the Vulkan spec ("Guest memory: ... outside the Vulkan spec").
-  Treat it as unproven on every driver: the arena is not made for external memory either
-  (`VUID-VkSparseMemoryBind-memory-02731`), and on lavapipe the GPU reads other bytes through such a
-  binding than the CPU wrote (`tools/chunk_buffer_probe.cpp`). `BB_CHUNK_BUFFERS=1` moves bindings in
-  one chunk off it (EMULATION_REMOVAL_PLAN.md, step 6 item 2).
+- **NVIDIA, the GX region in place** (`BB_GX_IN_PLACE`, on by default on Windows since 0.4.4): the
+  arena lists no memory type a host import may use. The region goes through a buffer of its own,
+  within the Vulkan spec; only when the arena is needed over the region (a binding across its edge,
+  or a shader's page fault there) are the arena's blocks bound to its import, logged "(outside the
+  Vulkan spec on this GPU)" where the arena does not take imports (the arena is not made for
+  external memory either: `VUID-VkSparseMemoryBind-memory-02731`). `BB_GX_OWN_BUFFER=0` binds the
+  whole region in the arena, as 0.4.4 betas 5 to 8 did. (The PC memory model, which bound all of
+  the game's memory that way, was removed in 0.4.4 beta 28.)
 - **NVIDIA Pascal (GTX 10)**: the 580 branch is the last driver; features in later drivers never
   reach these cards.
 

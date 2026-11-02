@@ -4,6 +4,7 @@
 #pragma once
 
 #include <optional>
+#include <vector>
 #include "common/types.h"
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/renderer_vulkan/vk_barrier_tracker.h"
@@ -26,7 +27,7 @@ class Scheduler;
 class Runtime {
 public:
     explicit Runtime(const Instance& instance, Scheduler& scheduler);
-    ~Runtime() = default;
+    ~Runtime();
 
     Scheduler& GetScheduler() {
         return scheduler;
@@ -49,10 +50,6 @@ public:
     void FillBuffer(const VideoCore::Buffer* dst, u64 offset, u64 size, u32 value);
 
     void InlineData(VideoCore::Buffer* dst, u64 offset, u32 value);
-    /// bbport BB_GUEST_IN_PLACE: copies from the game's memory itself (a guest memory chunk's
-    /// buffer, host memory the CPU writes) into `dst`: uploads without a CPU copy.
-    void CopyFromGuestChunk(vk::Buffer src, const VideoCore::Buffer* dst,
-                            std::span<const vk::BufferCopy> copies);
     /// bbport: `data` written into `dst` by the GPU in stream order (vkCmdUpdateBuffer pieces).
     void UpdateBuffer(const VideoCore::Buffer* dst, u64 offset, std::span<const u8> data);
 
@@ -79,11 +76,40 @@ public:
                        std::span<const vk::BufferImageCopy> download_copies);
 
     void CopyImage(VideoCore::Image* src, VideoCore::Image* dst);
+    /// Through `buffer` at `offset`; 0.4.4 beta 19: a null buffer takes a staging range of the
+    /// size the copy needs.
     void CopyImageWithBuffer(VideoCore::Image* src, VideoCore::Image* dst,
                              const VideoCore::Buffer* buffer, u64 offset);
     void CopyMip(VideoCore::Image* src, VideoCore::Image* dst, u32 mip, u32 slice);
 
     void CopyColorAndDepth(VideoCore::Image* src, VideoCore::Image* dst);
+
+    /// 0.4.4 beta 17: a single-sample 32-bit float depth image's depth into a 32-bit colour image
+    /// of its size (R32F, or R32_UINT as the float's bits), by a compute shader reading it where
+    /// it lies, as the game's own passes sample it (DepthStencilReadOnlyOptimal): no transfer
+    /// layout, which can cost a decompression of the whole depth image, and no round trip through
+    /// a buffer. Bit-exact; stencil is not copied (as by the copies before). Beta 19: also 16-bit
+    /// depth into R16 unorm or R16_UINT, and every level and layer both images have. False when
+    /// it does not apply (nothing done): the caller copies as before.
+    /// BB_DEPTH_COPY_SHADER=0 turns it off (CopyColorAndDepth as before 0.4.4 beta 17), with
+    /// CopyColorToDepth; the colour to multisampled depth draw keeps its limit of 4 samples, and
+    /// the buffer copy its own-sized staging range (beta 19).
+    bool CopyDepthToColor(VideoCore::Image* src, VideoCore::Image* dst);
+    /// 0.4.4 beta 19: the other way, a single-sample colour image (R32F, R32_UINT holding a
+    /// float's bits, R16 unorm, R16_UINT holding 16-bit depth's bits) into a depth image of its
+    /// size, by a full-screen draw into the depth image as an attachment, for every level and
+    /// layer both have: no transfer write into the depth image, no buffer. Its stencil is left as
+    /// it is (as by the copies before). False when it does not apply.
+    bool CopyColorToDepth(VideoCore::Image* src, VideoCore::Image* dst);
+    /// What CopyDepthToColor's shader writes.
+    enum class DepthCopyOutput : u32 { R32Float, R32Bits, R16Unorm, R16Bits };
+    /// Its dispatch, for images the texture cache does not hold (SceneTargets' proxies): `depth`
+    /// a depth-aspect view in `depth_layout`, `color` a storage view in General of the format
+    /// `output` names, `width` x `height`. The caller transitions both and keeps the views alive
+    /// until the GPU is done.
+    void RecordDepthToColor(vk::ImageView depth, vk::ImageLayout depth_layout, vk::ImageView color,
+                            DepthCopyOutput output, u32 width, u32 height);
+    [[nodiscard]] static bool DepthCopyShaderOn();
 
     void CopyDepthStencil(VideoCore::Image* src, VideoCore::Image* dst,
                           const VideoCore::SubresourceRange& sub_range);
@@ -102,36 +128,24 @@ public:
     bool IsBufferAccessed(const VideoCore::Buffer* handle, u64 offset, u64 size,
                           bool check_read_access = false);
 
-    /// bbport (BB_IMAGE_TILE_MEMO): notes GPU writes (AccessBuffer with a write access) over the
-    /// range from now on; the token asks BufferUnwritten. A few ranges at a time, oldest dropped.
+    /// bbport (texel buffer fills, BufferCache::tile_memos): notes GPU writes (AccessBuffer with a
+    /// write access) over the range from now on; the token asks BufferUnwritten. A few ranges at
+    /// a time, oldest dropped.
     u64 WatchBufferWrites(const VideoCore::Buffer* handle, u64 offset, u64 size);
     /// Nothing recorded since WatchBufferWrites wrote the range (false once the watch was dropped).
     [[nodiscard]] bool BufferUnwritten(u64 token) const;
 
-    /// bbport BB_CHUNK_BUFFERS: the range is the game's memory that other commands reach through
-    /// a guest memory chunk's own buffer. Accesses are tracked per buffer, so the two do not see
-    /// each other: until the access through this one is recorded and a barrier follows it, every
+    /// bbport BB_GX_IN_PLACE: the range is the game's memory that other commands reach through
+    /// another buffer (the arena over the GX region, bound to its import as the region's own
+    /// buffer is: GxArenaBound). Accesses are tracked per buffer, so the two do not see each other:
+    /// until the access through this one is recorded and a barrier follows it, every
     /// IsBufferAccessed answers yes (a barrier before it and one after), and the image fill
     /// watches count as written.
     void NoteAliasedAccess(const VideoCore::Buffer* handle, u64 offset, u64 size);
 
     void FlushBarriers();
 
-    /// bbport: runs before this thread changes image state (layouts, pending image
-    /// barriers): the rasterizer joins its texture binding helper there (BindHelper).
-    void SetImageAccessHook(void (*hook)(void*), void* context) {
-        image_access_hook = hook;
-        image_access_context = context;
-    }
-    void BeforeImageAccess() {
-        if (image_access_hook) {
-            image_access_hook(image_access_context);
-        }
-    }
-
 private:
-    void (*image_access_hook)(void*) = nullptr;
-    void* image_access_context = nullptr;
     const Instance& instance;
     Scheduler& scheduler;
     std::unique_ptr<VideoCore::BlitHelper> blit_helper;
@@ -163,6 +177,31 @@ private:
         u32 flushes = 0;       ///< barriers before it was seen (a binding never accessed ends it)
     };
     std::optional<AliasedAccess> aliased;
+    // 0.4.4 beta 17: CopyDepthToColor's pipelines (made on first use) and views (the last few
+    // subresources', as TemporalUpscaler::CachedView).
+    void CreateDepthCopyPipelines();
+    vk::ImageView DepthCopyView(const VideoCore::Image& image, vk::Format format,
+                                vk::ImageAspectFlags aspect, u32 level = 0, u32 layer = 0);
+    vk::UniqueDescriptorSetLayout depth_copy_set_layout;
+    vk::UniquePipelineLayout depth_copy_layout;
+    std::array<vk::UniquePipeline, 4> depth_copy_pipelines; ///< by DepthCopyOutput
+    bool depth_copy_r16 = false; ///< R16 storage images (shaderStorageImageExtendedFormats)
+    struct DepthCopyViewEntry {
+        vk::Image image{};
+        u64 uid = 0;
+        vk::Format format{};
+        vk::ImageAspectFlags aspect{};
+        u32 level = 0, layer = 0;
+        vk::ImageView view{};
+        u64 last_use = 0;
+    };
+    std::array<DepthCopyViewEntry, 8> depth_copy_views{};
+    u64 depth_copy_uses = 0;
+    // 0.4.4 beta 19: CopyColorToDepth's pipelines by depth format and what the colour holds.
+    vk::Pipeline ColorToDepthPipeline(vk::Format depth_format, u32 variant);
+    vk::UniqueDescriptorSetLayout color_copy_set_layout;
+    vk::UniquePipelineLayout color_copy_layout;
+    std::vector<std::pair<std::pair<vk::Format, u32>, vk::UniquePipeline>> color_copy_pipelines;
 };
 
 } // namespace Vulkan

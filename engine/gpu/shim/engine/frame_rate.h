@@ -28,7 +28,7 @@ private:
     double carry = 0;
 };
 
-/// Loader start, after the patches and the executable's verification: at 60, 90, 120, 144 FPS or uncapped
+/// Loader start, after the patches and the executable's verification: at 60, 90, 120, 144, 240 FPS or uncapped
 /// (BB_FPS; uncapped's limit BB_FPS_LIMIT) with the 60 FPS++ list in place, checks and applies the sites,
 /// sets the frame pacer's target and the values for the rate, and points the per-frame loads at slots past
 /// the end of the game's data segment, in its last page (`size`: the whole image, the linked modules after
@@ -36,13 +36,13 @@ private:
 /// (a comma list: clips, physics, grass, targeting, jump, sprint, slope, online, hitbox, timers, menus,
 /// durations, playtime, pace, sound, cloth, steps, lens, timer, camera, clothstep; without pace the game stays at
 /// 60).
-/// BB_FRAME_TIMER=1: the frame timer (Step) and the camera's eases with it.
+/// The frame timer (Step) and the camera's eases with it, unless "timer" is skipped.
 bool Install(std::uint8_t* image, std::size_t size);
 /// Each frame on the game's main thread, at the start of its frame pacer: the slots from the frame's
 /// time (the 60 FPS++ cave's, 0x575a908), not with the frame timer; and the Bloodletter's L2 self-hit
 /// once its param table is loaded.
 void Tick();
-/// The frame timer (BB_FRAME_TIMER=1): each frame from the cave, right after the frame pacer (`pacer`)
+/// The frame timer (on unless "timer" is skipped): each frame from the cave, right after the frame pacer (`pacer`)
 /// returns, before the frame's tasks: the step, the task step's and 0x575a908's, and the slots from it.
 void Step(std::uint64_t pacer);
 } // namespace BbEngine::FrameRate

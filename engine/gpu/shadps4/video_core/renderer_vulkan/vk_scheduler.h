@@ -27,6 +27,7 @@
 #include "video_core/amdgpu/regs_color.h"
 #include "video_core/amdgpu/regs_primitive.h"
 #include "video_core/renderer_vulkan/vk_breadcrumbs.h"
+#include "video_core/renderer_vulkan/vk_gpu_savings.h"
 #include "video_core/renderer_vulkan/vk_resource_pool.h"
 #include "video_core/renderer_vulkan/vk_semaphore.h"
 
@@ -778,6 +779,11 @@ public:
 
     /// Ends current rendering scope.
     void EndRendering();
+    /// 0.4.4 beta 19: the same, naming why (the frame statistics' render passes begun again with
+    /// the same targets, by what ended them). A plain EndRendering counts as other. Beta 20:
+    /// `detail`, for a barrier, what it waits for (BarrierWait bits 0 to 5) and the layouts it
+    /// moves images to (BarrierLayout bits 8 to 14), counted if the pass is begun again.
+    void EndRendering(GpuSavings::PassBreak why, u32 detail = 0);
 
     /// Sets a function to be called on every scheduler submission.
     void SetSubmitCallback(SubmitFunc&& on_submit) {
@@ -800,6 +806,7 @@ public:
     /// KickRecording() or submission.
     [[gnu::noinline]] vk::CommandBuffer CommandBuffer() {
         ProducerScope producer{*this, "CommandBuffer"};
+        recorded_since_submit.store(true, std::memory_order_relaxed);
         if (!workers.empty() && !direct_mode) {
             EnterDirectMode();
             direct_recordings.fetch_add(1, std::memory_order_relaxed);
@@ -852,6 +859,7 @@ public:
     template <typename Func>
     void Record(Func&& func) {
         ProducerScope producer{*this, "Record"};
+        recorded_since_submit.store(true, std::memory_order_relaxed);
         if (workers.empty() || direct_mode) {
             func(current_cmdbuf);
             return;
@@ -915,6 +923,7 @@ public:
     /// chunk: data and command must share a chunk, which is recycled once executed.
     void ReserveRecordData(size_t bytes) {
         ProducerScope producer{*this, "ReserveRecordData"};
+        recorded_since_submit.store(true, std::memory_order_relaxed); // for the command after it
         if (!IsRecordingDeferred()) {
             return;
         }
@@ -1017,7 +1026,7 @@ public:
     /// `site`: the caller (BbStats::WaitSite).
     void WaitDeferredSignals(u32 site = BbStats::WaitOther);
 
-    /// bbport BB_FENCE_ORDER=ordered (or experiment bit 8; default all: WaitDeferredSignals): a
+    /// bbport BB_FENCE_ORDER=ordered (the default; =all: WaitDeferredSignals): a
     /// CPU write of the command processor (WriteData, DMA) into [address, address + size),
     /// reading [src, src + src_size), waits only for the deferred signals the hardware would
     /// have written before it: those issued before the last point the command processor waited
@@ -1035,16 +1044,27 @@ public:
                              std::memory_order_relaxed);
     }
 
-    /// BB_FENCE_ORDER=ordered or experiment bit 8: WaitDeferredSignalsFor waits only for what it
-    /// must. FenceOrderPossible: it may be switched on while the game runs (BB_TOGGLE_FILE), so the
-    /// barriers are recorded all along.
+    /// BB_FENCE_ORDER=ordered (the default): WaitDeferredSignalsFor waits only for what it must,
+    /// and the barriers it needs are recorded (Rasterizer::NoteFenceBarrier).
     [[nodiscard]] static bool FenceOrderScoped();
-    [[nodiscard]] static bool FenceOrderPossible();
 
     /// Whether a render pass with exactly this state is open.
     [[nodiscard]] bool IsRenderingWith(const RenderState& state) const {
         return is_rendering && render_state == state;
     }
+
+    /// Whether a render pass is open.
+    [[nodiscard]] bool IsRendering() const {
+        return is_rendering;
+    }
+
+    /// 0.4.4 beta 20 (the audit): a render pass open, or closed by a recording cut with nothing
+    /// ending it since (frame statistics: what a dispatch interrupts).
+    [[nodiscard]] bool PassOpen() const {
+        return is_rendering || (resume_rendering && !ended_after_cut);
+    }
+
+
 
     /// Whether BeginRendering(state) would start a new render pass.
     [[nodiscard]] bool WillBeginRendering(const RenderState& state) const {
@@ -1060,6 +1080,14 @@ public:
     /// Returns the current command buffer tick.
     [[nodiscard]] u64 CurrentTick() const noexcept {
         return work_semaphore.CurrentTick();
+    }
+
+    /// bbport: whether anything was recorded for the GPU since the last submission (Record,
+    /// RecordOrdered, CommandBuffer; RecordCrumb goes through Record). With nothing recorded, the
+    /// last submission holds all the work before this point: a signal registered now belongs to
+    /// it, and a flush would submit nothing (Rasterizer::SignalTick, Rasterizer::Flush).
+    [[nodiscard]] bool RecordedSinceSubmit() const noexcept {
+        return recorded_since_submit.load(std::memory_order_relaxed);
     }
 
     /// Returns true when a tick has been triggered by the GPU.
@@ -1177,6 +1205,7 @@ private:
     template <typename Func>
     void RecordOrdered(Func&& func) {
         ProducerScope producer{*this, "RecordOrdered"};
+        recorded_since_submit.store(true, std::memory_order_relaxed);
         if (OrderedInline()) {
             func();
             return;
@@ -1239,6 +1268,11 @@ private:
     std::jthread priority_pending_ops_thread;
     RenderState render_state;
     bool is_rendering = false;
+    GpuSavings::PassBreak pass_break = GpuSavings::PassBreak::Other; ///< what ended the last pass
+    u32 pass_break_detail = 0;                                         ///< and its detail bits
+    /// 0.4.4 beta 20 (the audit): an ender came after a cut closed the pass (pass_break names
+    /// the first): the pass begun again is counted as split by it, not as resumed.
+    bool ended_after_cut = false;
     // bbport: threaded recording. Commands go into chunks of the current segment; segments are
     // recorded in parallel, each into its own command buffer, and a submission runs their
     // command buffers in order. Guest memory copies and fence signals go into ordered chunks,
@@ -1253,6 +1287,11 @@ private:
     std::vector<SubmissionBatch*> free_batches; ///< guarded by recorder_mutex
     bool async_submit = false; ///< BB_ASYNC_SUBMIT (default on)
     std::atomic<u64> submitted_tick{0}; ///< the last tick handed to the queue (WaitSubmitted)
+    /// RecordedSinceSubmit: set by every recording call, cleared once a submission is made.
+    std::atomic<bool> recorded_since_submit{false};
+    /// The submission's own self-check: commands in the batch with the flag still clear (a
+    /// recording path that does not set it), reported once.
+    void CheckRecordedFlag();
     u32 current_segment = 0;
     std::atomic<u32> active_worker{0}; ///< the worker of current_segment (it spins for work)
     size_t segment_bytes = 0;          ///< closures of the current segment handed over or retired

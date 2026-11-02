@@ -15,6 +15,7 @@
 #include "bbport_settings.h"
 #include "shader_recompiler/native/tone_curve.h"
 #include "shader_recompiler/resource.h"
+#include "video_core/renderer_vulkan/vk_gpu_savings.h"
 #include "video_core/renderer_vulkan/pipeline_compile_queue.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
@@ -250,6 +251,8 @@ void Pipeline::BindResources(DescriptorWrites& set_writes, const Shader::PushDat
     }
 
     // Descriptor set updates are device calls: they stay on this thread.
+    // 0.4.4 beta 20: counted (frame statistics): pipelines over the push-descriptor limit.
+    GpuSavings::Count(GpuSavings::Get().descriptor_set_binds);
     const auto desc_set = desc_heap.Commit(*desc_layout);
     for (auto& set_write : set_writes) {
         set_write.dstSet = desc_set;

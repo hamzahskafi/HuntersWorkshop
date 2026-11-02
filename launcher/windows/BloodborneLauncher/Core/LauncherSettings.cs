@@ -11,7 +11,6 @@ namespace BloodborneLauncher.Core
     public sealed class LauncherSettings
     {
         public const string OnlineCommunity = "https://thehuntersdream.com";
-        public const string ShadnetServer = "srv.shadps4.net:31313";
 
         private JsonObject _data = new();
 
@@ -27,7 +26,6 @@ namespace BloodborneLauncher.Core
             ["mods_enabled"] = true,
             ["patches_dir"] = "",
             ["language"] = "1",
-            ["fullscreen"] = false,
             ["display_device"] = "",
             ["present_mode"] = "Mailbox",
             ["fps_mode"] = "60",
@@ -41,10 +39,8 @@ namespace BloodborneLauncher.Core
             ["hitch_report_ms"] = "0",
             ["pad_log"] = false,
             ["gpu_profile"] = false,
-            ["vk_validation"] = false,
             ["extra_env"] = "",
             ["dlc_enabled"] = true,
-            ["online_password"] = "",
             // This launcher.
             ["port_dir"] = "",
             ["launch_method"] = "windows",
@@ -71,7 +67,6 @@ namespace BloodborneLauncher.Core
             ["app_icon_image"] = "", // custom: the picture chosen (AppIcon.CustomFile holds it as an icon)
             ["ui_window_buttons"] = "windows", // windows | mac
             ["ui_window_buttons_side"] = "usual", // usual (mac left, windows right) | left | right
-            ["fsr4_balanced"] = false,
             ["exp_vram_cleanup"] = true,
             // 0.9.37 beta 4: the dev setup, measured faster (PerfDefaults below switches older files once).
             ["exp_frame_pacing"] = true,
@@ -82,11 +77,9 @@ namespace BloodborneLauncher.Core
             ["exp_async_pipelines"] = true,
             ["exp_fast_loading"] = true, // does nothing at 30 or 60 FPS (loading.cpp)
             ["exp_frame_fixes"] = true, // the frame-rate corrections at 60 FPS and above (frame_rate.cpp)
-            ["exp_frame_timer"] = false, // one frame time for the game and every correction (frame_rate.cpp Step)
             ["exp_hot_pages"] = true,
-            // 0.4.0 beta 4: off. Its memory moves (sparse rebinds) stall the GPU now and then in play
-            // on NVIDIA; the CPU it saves is spare at 60 FPS (engine/docs/gpu-memory.md).
-            ["exp_guest_in_place"] = false,
+            // 0.4.4: the game's per-frame GPU memory (its GX region) read in place (BB_GX_IN_PLACE).
+            ["exp_gx_in_place"] = true,
             ["exp_native_calls"] = true,
             ["exp_sfx_workaround"] = false,
             ["borderless_fullscreen"] = false,
@@ -101,12 +94,10 @@ namespace BloodborneLauncher.Core
             ["audio_priority"] = false,
             ["sound_output"] = "",
             ["load_profile"] = false,
-            ["occlusion_default_on"] = true,
-            ["vram_budget_default_on"] = true,
             ["section_stats"] = false,
             ["shader_capture"] = false,
+            ["heap_checks"] = false, // 0.4.4 beta 28: BB_DIAG=heap
             ["overlay_keys"] = "both",
-            ["dlss_preset"] = "k",
             ["legacy_shaders"] = false, // beta 9.8 made legacy the default; beta 4 the native one again (PerfDefaults)
             ["trophy_notifications"] = true,
             ["trophy_sound"] = true,
@@ -129,10 +120,9 @@ namespace BloodborneLauncher.Core
                         _data[key] = value?.DeepClone();
                     // Beta builds: textures kept up to 80% of the card (the 40% default evicted and
                     // reloaded hundreds a second on 6-8 GB cards); switched on once for older files.
-                    // The marker is only ever written by a beta: "vram_budget_default_on" is in
-                    // Defaults(), so a stable launcher saved it beside its own default (off) and a
-                    // player moving from stable to a beta kept the 40% marks (RTX 4060 at 3.4-4.3
-                    // GB of 2486 MiB: evictions, re-uploads and tiled write-backs every frame).
+                    // The marker is only ever written by a beta, so a player moving from a stable build
+                    // to a beta gets it too (RTX 4060 at 3.4-4.3 GB of 2486 MiB with the 40% marks:
+                    // evictions, re-uploads and tiled write-backs every frame).
                     if (Updater.CurrentBeta > 0 && !saved.ContainsKey("vram_budget_beta_on"))
                         _data["exp_vram_budget"] = true;
                     // 0.9.37 beta 8: beta builds write the frame statistics into the log, switched
@@ -140,26 +130,13 @@ namespace BloodborneLauncher.Core
                     // them (the game's GPU range allocator nearly empty); most reports came without.
                     if (Updater.CurrentBeta > 0 && !saved.ContainsKey("frame_stats_beta_on"))
                         _data["frame_stats"] = true;
-                    // Beta 9.9: occlusion culling off once (9.8 switched it on for everyone; floors
-                    // and objects appeared late or flickered). On again only by choice.
-                    if (!saved.ContainsKey("occlusion_off_99"))
-                        _data["exp_occlusion"] = false;
-                    // Beta 9.8: the legacy shader compiler is the default again (the native one
-                    // held 45-55 FPS where the legacy one held 60, Forbidden Woods, RTX 3090);
-                    // switched on once, the native one stays a choice.
-                    if (!saved.ContainsKey("legacy_shaders_default_98"))
-                        _data["legacy_shaders"] = true;
-                    // 0.9.37 beta 4: the engine options the dev build ran with, once, over older
-                    // files (beta 3 players ran with half of the engine's own speedups switched off:
-                    // render threads at normal priority, long sleep spins, no precise pacing, every
-                    // memory page watched, 1/3 of the CPU and GPU used on an i7-10700F).
-                    if (!saved.ContainsKey(PerfDefaultsMarker))
-                        foreach (var (key, value) in PerfDefaults)
-                            _data[key] = value;
-                    // 0.4.0 beta 4: the PC memory model off once (beta 4 of 0.9.37 had switched it on
-                    // for everyone); on again only by choice.
-                    if (!saved.ContainsKey(GuestInPlaceOffMarker))
-                        _data["exp_guest_in_place"] = false;
+                    // 0.4.4 beta 28: the unified frame time is part of Frame rate corrections (it works only
+                    // with them, and every log since 0.3.0 ran with both): its own switch and marker go.
+                    _data.Remove("exp_frame_timer");
+                    _data.Remove("frame_timer_on_044");
+                    // 0.4.4 beta 28: a DLSS model of the launcher's own that nothing read (the DLSS model
+                    // row writes config.ini's dlss_preset).
+                    _data.Remove("dlss_preset");
                     // 0.4.0: a stable launcher over a beta's file (any beta writes frame_stats_beta_on)
                     // switches off once what betas turn on for testing: the frame statistics and the
                     // sharp UI. On again only by choice.
@@ -168,13 +145,6 @@ namespace BloodborneLauncher.Core
                     {
                         _data["frame_stats"] = false;
                         _data["exp_sharp_ui"] = false;
-                    }
-                    // Older launchers kept the shadNet password in plain text: encrypted now, and
-                    // the file rewritten without it.
-                    if (Str("online_password") is { Length: > 0 } plain && !Secret.IsProtected(plain))
-                    {
-                        OnlinePassword = plain;
-                        Save();
                     }
                 }
             }
@@ -188,38 +158,16 @@ namespace BloodborneLauncher.Core
                 _data["vram_budget_beta_on"] = true;
                 _data["frame_stats_beta_on"] = true;
             }
-            _data["legacy_shaders_default_98"] = true;
-            _data["occlusion_off_99"] = true;
-            _data[PerfDefaultsMarker] = true;
-            _data[GuestInPlaceOffMarker] = true;
             if (Updater.CurrentBeta == 0) _data[BetaTestingOffMarker] = true;
         }
 
-        private const string PerfDefaultsMarker = "perf_defaults_b4";
-        private const string GuestInPlaceOffMarker = "guest_in_place_off_040";
         private const string BetaTestingOffMarker = "beta_testing_off_040";
-
-        /// <summary>0.9.37 beta 4's defaults that older settings files are switched to once.</summary>
-        private static readonly (string Key, bool Value)[] PerfDefaults =
-        {
-            ("exp_frame_pacing", true), ("exp_thread_priority", true), ("exp_sleep_spin", true),
-            ("exp_fast_loading", true), ("exp_hot_pages", true), ("exp_native_calls", true),
-            ("legacy_shaders", false),
-        };
 
         public void Save()
         {
             Directory.CreateDirectory(Paths.ConfigDir);
             File.WriteAllText(Paths.ConfigFile,
                 _data.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
-        }
-
-        /// <summary>The shadNet password, kept encrypted for this Windows user (Core/Secret.cs).</summary>
-        public string OnlinePassword
-        {
-            get => Secret.Unprotect(Str("online_password"));
-            // Should Windows refuse to encrypt it, it stays as typed rather than being lost.
-            set => Set("online_password", Secret.Protect(value) is { Length: > 0 } encrypted ? encrypted : value);
         }
 
         /// <summary>The Hunter's Dream account token (its device link), encrypted like the password.</summary>
@@ -273,26 +221,10 @@ namespace BloodborneLauncher.Core
             return 0;
         }
 
-        /// <summary>A string-to-string object (e.g. key_bindings), empty when absent.</summary>
-        public Dictionary<string, string> Map(string key)
-        {
-            var map = new Dictionary<string, string>(StringComparer.Ordinal);
-            if (_data[key] is JsonObject obj)
-                foreach (var (k, v) in obj)
-                    if (v is JsonValue value && value.TryGetValue<string>(out var s))
-                        map[k] = s;
-            return map;
-        }
-
-        public void SetMap(string key, IReadOnlyDictionary<string, string> map)
-        {
-            var obj = new JsonObject();
-            foreach (var (k, v) in map.OrderBy(p => p.Key, StringComparer.Ordinal))
-                obj[k] = v;
-            _data[key] = obj;
-        }
-
         public void Set(string key, string value) => _data[key] = value;
+
+        /// <summary>A setting's default, as Load seeds it (the Engine page's Reset all); null when it has none.</summary>
+        public static JsonNode? DefaultOf(string key) => Defaults().TryGetValue(key, out var value) ? value?.DeepClone() : null;
 
         /// <summary>Forgets a setting: it reads as absent ("" / false / 0) again.</summary>
         public void Remove(string key) => _data.Remove(key);

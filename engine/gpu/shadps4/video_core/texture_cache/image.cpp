@@ -165,6 +165,7 @@ void UniqueImage::Create(const vk::ImageCreateInfo& image_ci) {
     image = vk::Image{unsafe_image};
     size_bytes = alloc_info.size;
     BbStats::vk_image_bytes.fetch_add(size_bytes, std::memory_order_relaxed);
+    BbStats::image_allocs.fetch_add(1, std::memory_order_relaxed);
 }
 
 Image::Image(const Vulkan::Instance& instance, Vulkan::Runtime& runtime_,

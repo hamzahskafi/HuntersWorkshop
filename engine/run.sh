@@ -11,8 +11,8 @@ if [[ ${1:-} == --software ]]; then
     if [[ -z ${VK_DRIVER_FILES:-} ]]; then echo 'Lavapipe not found; set VK_DRIVER_FILES.' >&2; exit 1; fi
     export VK_LOADER_LAYERS_DISABLE='~implicit~'
 fi
-# BB_PREBUILT=1 (packaged builds, the AppImage): out/bb-probe and its GPU library are installed
-# next to this script; nothing is built and no nix-shell is needed.
+# BB_PREBUILT=1 (packaged builds): out/bb-probe and its GPU library are installed next to this
+# script; nothing is built.
 # BB_DATA_DIR: writable directory for the generated files (out/), saves (user/) and config.ini;
 # by default this directory. BB_OUT_DIR: the generated files elsewhere (the Linux package keeps
 # them in engine/out beside its programs, as on Windows; packaging/linux/bb-start).
@@ -20,13 +20,79 @@ data=${BB_DATA_DIR:-.}
 out=${BB_OUT_DIR:-$data/out}
 mkdir -p "$out"
 export BB_CONFIG=${BB_CONFIG:-$data/config.ini}
-# FSR 4.1.1 assets (tools/fsr4cap/build_assets.sh): next to run.sh or in the data directory.
-if [[ -z ${BB_FSR411_DIR:-} && ! -d fsr4_411 && -d $data/fsr4_411 ]]; then
-    export BB_FSR411_DIR=$data/fsr4_411
-fi
-if [[ -z ${BB_PREBUILT:-} && -z ${BB_IN_NIX_SHELL:-} ]] && ! { command -v pkg-config >/dev/null && pkg-config --exists vulkan sdl3; } && command -v nix-shell >/dev/null; then
-    args=''; if (( $# )); then args=$(printf '%q ' "$@"); fi
-    exec env BB_IN_NIX_SHELL=1 nix-shell shell.nix --run "bash run.sh $args"
+# 0.4.4 beta 28: switches that stand for several (start/main.cpp ExpandSwitchGroups holds the same table;
+# tests/test_switch_groups.py checks they agree). Safe mode (BB_SAFE_MODE=1) sets its values whatever
+# was set; the others turn off their parts, except a part set on its own.
+# switch-groups-begin
+switch_groups=(
+    "BB_SAFE_MODE=1 force BB_FAST_LOADING=0 BB_FRAME_FIXES=0 BB_HOT_PAGES=0 BB_GX_IN_PLACE=0 BB_NATIVE_CALLS=0 BB_PRECISE_PACING=0 BB_VBLANK_PACING=0 BB_INDIRECT_CLAMP=1 BB_IMAGE_WRITEBACK_GC=0 BB_GPU_THREAD_PRIORITY=0 BB_AUDIO_THREAD_PRIORITY=0 BB_NATIVE_SHADERS=0 BB_SLEEP_SPIN_US=600 BB_ASYNC_PIPELINES=0 BB_OCCLUSION=0 BB_MODS_ENABLED=0 BB_FAST_DRAWS=0 BB_COMPILE_SKIP=0 BB_VRAM_BUDGET=0"
+    "BB_FAST_DRAWS=0 keep BB_SUBMIT_END_TASKS=0 BB_MEMO_REVALIDATE=0 BB_SAMPLER_MEMO=0 BB_DRAIN_SLEEP=0 BB_FAULT_SKIP_TEXTURES=0"
+    "BB_COMPILE_SKIP=0 keep BB_SKIP_UNCOMPILED=0 BB_LATE_PIPELINE_BIND=0 BB_PIPELINE_TAKE=0"
+    "BB_VRAM_BUDGET=0 keep BB_GC_PRESSURE_PERCENT=0 BB_GC_PRESSURE_SECONDS=0"
+    "BB_SYNC=legacy keep BB_HONEST_LABELS=0 BB_GX_IN_PLACE=0 BB_PIPE_SIGNALS=0 BB_SUBMIT_LOCK=gpu BB_WORK_RETIRED=0 BB_ZPASS_IN_ORDER=0 BB_FENCE_ORDER=all BB_DMA_WAITS=all BB_HOST_COPY_WAITS=all BB_PRODUCER_CHECK=1"
+)
+# switch-groups-end
+for group in "${switch_groups[@]}"; do
+    read -r trigger mode sets <<< "$group"
+    name=${trigger%%=*}
+    [[ ${!name:-} == "${trigger#*=}" ]] || continue
+    read -ra assignments <<< "$sets"
+    for assignment in "${assignments[@]}"; do
+        part=${assignment%%=*}
+        if [[ $mode == force || -z ${!part+set} ]]; then export "$assignment"; fi
+    done
+    echo "Engine: $trigger sets ${#assignments[@]} switches"
+done
+# The diagnostics as one list, BB_DIAG=part,part,... (the launcher's Log page): each part stands for
+# engine switches, set unless set on their own. "hitch=N" takes the hitch report's threshold in ms
+# (40 without one), "threads=a+b" the thread samplers' names. Each entry: the part, its value when
+# none is given (- for none), what it sets (an empty value takes the part's value). The same table
+# is in start/main.cpp (kDiagParts); tests/test_switch_groups.py checks they agree.
+# diag-parts-begin
+diag_parts=(
+    "frame - BB_FRAME_STATS=1"
+    "hitch 40 BB_HITCH_REPORT_MS="
+    "gpu - BB_GPU_PROFILE=1"
+    "sections - BB_SECTIONS=1"
+    "load - BB_SAMPLE_THREADS=load"
+    "audio - BB_AUDIO_STATS=1"
+    "pad - BB_PAD_LOG=1"
+    "heap - BB_WRITE_LOG=1 BB_FREE_CHECK=1 BB_HEAP_SITES=1"
+    "shaders - BB_SHADER_CAPTURE=1"
+    "timeline - BB_TIMELINE=1"
+    "waits - BB_WAIT_TRACE=1"
+    "threads - BB_SAMPLE_THREADS="
+)
+# diag-parts-end
+if [[ -n ${BB_DIAG:-} ]]; then
+    IFS=, read -ra diag_items <<< "$BB_DIAG"
+    diag_named=
+    for item in "${diag_items[@]}"; do
+        item=${item//[[:space:]]/}
+        [[ -n $item ]] || continue
+        diag_name=${item%%=*}
+        diag_name=${diag_name,,}
+        diag_value=
+        [[ $item == *=* ]] && diag_value=${item#*=}
+        diag_value=${diag_value//+/,}
+        diag_found=
+        for entry in "${diag_parts[@]}"; do
+            read -r part fallback sets <<< "$entry"
+            [[ $part == "$diag_name" ]] || continue
+            diag_found=1
+            [[ -n $diag_value || $fallback == - ]] || diag_value=$fallback
+            read -ra assignments <<< "$sets"
+            for assignment in "${assignments[@]}"; do
+                variable=${assignment%%=*}
+                value=${assignment#*=}
+                [[ -n $value ]] || value=$diag_value
+                if [[ -n $value && -z ${!variable+set} ]]; then export "$variable=$value"; fi
+            done
+        done
+        if [[ -z $diag_found ]]; then echo "Diagnostics: no part \"$diag_name\" in BB_DIAG"; continue; fi
+        diag_named+=${diag_named:+, }$diag_name${diag_value:+=$diag_value}
+    done
+    [[ -z $diag_named ]] || echo "Diagnostics: $diag_named (BB_DIAG)"
 fi
 # BB_SAVE_LOG=1 (launcher: "Save the log and statistics to a file"): this run's output and its
 # per-frame statistics also go to $data/logs/<time>.log, .frames.csv and .readbacks.csv.
@@ -38,22 +104,17 @@ if [[ ${BB_SAVE_LOG:-} == 1 ]]; then
     export BB_READBACK_LOG=${BB_READBACK_LOG:-$logs/$stamp.readbacks.csv}
     echo "Log: $logs/$stamp.log"
     exec 3>"$logs/$stamp.log"
-    # Bash builtins only (the AppImage's PATH has no tee).
+    # Bash builtins only (a minimal PATH may have no tee).
     exec > >(while IFS= read -r line || [[ -n $line ]]; do printf '%s\n' "$line"; printf '%s\n' "$line" >&3; done) 2>&1
 fi
 if [[ -z ${PYTHON:-} ]]; then
     PYTHON=$(command -v python3 || true)
-    if [[ -z $PYTHON ]]; then
-        for candidate in /nix/store/*-python3-*/bin/python3; do
-            if [[ -x $candidate ]]; then PYTHON=$candidate; break; fi
-        done
-    fi
 fi
 if [[ -z ${PYTHON:-} ]]; then echo 'Install Python 3 or set PYTHON.' >&2; exit 1; fi
 # BB_GAME_DIR: the game's folder (eboot.bin, sce_module, ...); default next to this directory.
 game=${BB_GAME_DIR:-../CUSA03173}
 if [[ ! -f $game/eboot.bin ]]; then echo "No eboot.bin in $game (set BB_GAME_DIR)." >&2; exit 1; fi
-# Configure the selected online backend on Linux, as run_windows.py does on Windows.
+# Configure the selected online backend on Linux, as bb-start does on Windows.
 # The launcher already supplies the signed-in account in the environment. Capture changes
 # privately: credentials must never be printed into the game log or evaluated as shell code.
 online_env=$("$PYTHON" scripts/online_env.py --config "$BB_CONFIG" --data "$data")
@@ -90,7 +151,7 @@ if [[ ${BB_AUTO_RENDER_RES:-} == 1 ]]; then
     unset BB_RENDER_RES BB_OUTPUT_RES BB_AUTO_RENDER_RES
 fi
 # BB_RENDER_RES=WxH explicitly sets the game's render resolution (a patch at start).
-# Frame rate: BB_FPS=uncap (default; vblank 480 Hz, frames shown at once), 60/90/120/144 or 30
+# Frame rate: BB_FPS=uncap (default; vblank 480 Hz, frames shown at once), 60/90/120/144/240 or 30
 # (unpatched). Above 30 the 60 FPS++ patch, the engine setting the pace and the values for the rate
 # (frame_rate.cpp; BB_FRAME_FIXES=0: the older FPS++ patches above 60). BB_PATCHES adds patch names ("a;b").
 # Fixes for the game's own bugs (gpu/shim/engine/game_fixes.cpp; the recording's compression level in
@@ -103,6 +164,12 @@ fi
 # controller details (ids, connection, rumble, disconnects, the first vibration request, round gate).
 # BB_HITCH_REPORT_MS=N: a frame over N ms gets every thread's wait and stack (about twice the frame time).
 fps=${BB_FPS:-uncap}
+# 0.4.4 beta 22: 240 is a fixed rate on the frame-rate corrections; without them (BB_FRAME_FIXES=0) the
+# patch file's lists stop at 144.
+if [[ $fps == 240 && ${BB_FRAME_FIXES:-1} == 0* ]]; then
+    echo '240 FPS needs the frame-rate corrections (BB_FRAME_FIXES=0): running at 144 FPS' >&2
+    fps=144
+fi
 # The engine reads it too (fast loading above 60, frame generation's limit with uncapped).
 export BB_FPS=$fps
 # config.ini output_res other than 1080p (720p for the Steam Deck, 1440p, 2160p): the whole game
@@ -111,26 +178,23 @@ export BB_FPS=$fps
 # Live resolution changes keep the guest at 1920x1080 and scale host targets at run time instead
 # (output and presets change in the menu without a restart, but post-processing stays at 1080p
 # and scene targets are copied back: much slower on the Steam Deck and older GPUs). Chosen by
-# BB_LIVE_RES=0/1, else config.ini live_resolution=0/1/auto (auto: the GPU check, strong
-# discrete GPUs get them); off when unset. 1080p output and TAA always use the live path.
+# config.ini live_resolution=0/1; off when unset (recommended). "auto" (a GPU
+# check) is no longer offered from 0.4.4 beta 25c and reads as off. 1080p output and TAA always use
+# the live path.
 if [[ -z ${BB_RENDER_RES:-} ]]; then
     read -r scaled_render scaled_output < <("$PYTHON" scripts/patches.py --print-scaled --settings "$BB_CONFIG") || true
 fi
 live=0
 if [[ -n ${scaled_output:-} ]]; then
-    live=${BB_LIVE_RES:-}
-    # Bash builtins only: the AppImage's PATH has no sed/grep (a missing one ended run.sh silently).
-    if [[ -z $live && -f $BB_CONFIG ]]; then
+    # Bash builtins only: a minimal PATH may have no sed/grep (a missing one ended run.sh silently).
+    if [[ -f $BB_CONFIG ]]; then
         while IFS= read -r line || [[ -n $line ]]; do
             [[ $line =~ ^live_resolution=([01]|auto)$ ]] && live=${BASH_REMATCH[1]}
         done < "$BB_CONFIG"
     fi
     if [[ $live == auto ]]; then
-        if [[ -n ${BB_PROBE:-} ]]; then caps=$(dirname -- "$BB_PROBE")/bb-gpu-capabilities
-        elif [[ -n ${BB_PREBUILT:-} ]]; then caps=bin/bb-gpu-capabilities
-        else caps=out/bb-gpu-capabilities; fi
-        live=$("$caps" --live-resolution 2> >(while IFS= read -r line; do
-            [[ $line == *MANGOHUD* ]] || printf '%s\n' "$line"; done >&2)) || live=0
+        echo "Settings: live_resolution=auto is no longer offered; off (recommended)"
+        live=0
     fi
     [[ $live == 1 ]] || live=0
 fi
@@ -152,45 +216,15 @@ if [[ -n ${BB_PREBUILT:-} && -n ${BB_GPU_USER_DIR:-} ]]; then
 fi
 # Background upload of the game's GPU memory into VRAM ahead of use (BufferCache::Preupload):
 # 1 = only memory already in VRAM that the game rewrote (no new VRAM), 2 = all of it (~3 GB more
-# VRAM), 0 = off. BB_GUEST_GPU_MEMORY=1 puts guest direct memory in GPU-visible dma-buf chunks
-# (BB_GUEST_IN_PLACE below implies it: it commits all allocated memory up front and rules out BB_UFFD).
+# VRAM), 0 = off.
 export BB_PREUPLOAD=${BB_PREUPLOAD:-1}
-# Memory model and translation. BB_PC_MODEL=1 (the launcher's "New memory and translation model",
-# experimental, off by default) selects how a PC release would work: the GPU uses the game's
-# memory where it is (GPU-visible system memory) and keeps the data it reads often in VRAM, the
-# command processor's work is translated rather than emulated (BB_GUEST_IN_PLACE=1 and what
-# depends on it). AMD GPUs only for now: on others the GPU library keeps it off
-# (BB_PC_MODEL_ANY_GPU=1: try it anyway; NVIDIA, whose dma-buf maps at offset 0 only, gets one
-# chunk per direct memory allocation). 0 (default): the model of 0.3 (VRAM copies of the game's
-# memory, write tracking), with the fixes made since. BB_GUEST_IN_PLACE set by hand overrides it.
-# BB_AS_0_3=1 (the launcher's developer switch "Synchronisation as in 0.3"): what changed since the
-# 0.3 release is reverted for comparisons: the 0.3 memory model, WRITE_DATA/DMA waiting for every
-# host copy, the scheduler's concurrent recording check.
-if [[ ${BB_AS_0_3:-0} == 1 ]]; then
-    export BB_GUEST_IN_PLACE=0 BB_HOST_COPY_WAITS=all BB_PRODUCER_CHECK=1
+# MangoHud (MANGOHUD=1) must be drawn once: the Steam Deck's performance overlay (mangoapp, game
+# mode) plus the in-game layer showed doubled, offset text.
+if [[ ${MANGOHUD:-0} == 1 ]] && pgrep -x mangoapp > /dev/null 2>&1; then
+    echo "MangoHud: Steam's performance overlay is on; the in-game MangoHud stays off"
+    unset MANGOHUD
+    export DISABLE_MANGOHUD=1
 fi
-export BB_GUEST_IN_PLACE=${BB_GUEST_IN_PLACE:-${BB_PC_MODEL:-0}}
-# MangoHud (launcher switch: MANGOHUD=1) must be drawn once. Two overlays on top of each other
-# showed doubled, offset text: the Steam Deck's performance overlay (mangoapp, game mode) plus the
-# in-game layer, or the AppImage's bundled layer plus a system MangoHud (the layer names differ,
-# so the Vulkan loader loads both).
-if [[ ${MANGOHUD:-0} == 1 ]]; then
-    if pgrep -x mangoapp > /dev/null 2>&1; then
-        echo "MangoHud: Steam's performance overlay is on; the in-game MangoHud stays off"
-        unset MANGOHUD
-        export DISABLE_MANGOHUD=1
-    elif grep -qs '"VK_LAYER_MANGOHUD' /usr/share/vulkan/implicit_layer.d/*.json \
-            /etc/vulkan/implicit_layer.d/*.json \
-            "${XDG_DATA_HOME:-$HOME/.local/share}"/vulkan/implicit_layer.d/*.json; then
-        # The system's own MangoHud (and its config) is used; the bundled one is skipped.
-        export VK_LOADER_LAYERS_DISABLE=${VK_LOADER_LAYERS_DISABLE:+$VK_LOADER_LAYERS_DISABLE,}VK_LAYER_MANGOHUD_overlay_64_x86_64
-    fi
-fi
-# Write tracking with userfaultfd write-protection instead of mprotect (no address-space write lock:
-# a streaming burst re-protected thousands of pages, ~10-20 ms); falls back to mprotect when the
-# kernel lacks it. Off by default for now: the Steam Deck crashed 4 times in 9 minutes with it
-# (2026-10-04, PM4 type 0 = zeroed command buffers, heap corruption); 1 turns it on.
-export BB_UFFD=${BB_UFFD:-0}
 # The command buffers of each submission are copied when the game submits them and decoded from
 # the copy: while an area loads the game reused that memory before the GPU thread got to it
 # ("Unimplemented PM4 type 0" a few seconds after loading a save). 0 decodes guest memory.
@@ -199,11 +233,9 @@ export BB_COPY_GPU_BUFFERS=${BB_COPY_GPU_BUFFERS:-1}
 # up to BB_GPU_WRITE_TWINS_MAX bytes per page) does not wait for the GPU (BufferCache twins).
 export BB_GPU_WRITE_TWINS=${BB_GPU_WRITE_TWINS:-1} BB_GPU_WRITE_TWINS_MAX=${BB_GPU_WRITE_TWINS_MAX:-65536}
 if [[ -z ${BB_VBLANK_HZ:-} ]]; then
-    case $fps in uncap) export BB_VBLANK_HZ=480 ;; 90) export BB_VBLANK_HZ=90 ;; *) export BB_VBLANK_HZ=60 ;; esac
-fi
-# FSR 4: faster post passes next to the downloaded ones (incremental; tools/fsr4_optimize.sh).
-if [[ -z ${BB_PREBUILT:-} && -d fsr4_shaders ]] && command -v spirv-cross >/dev/null; then
-    bash tools/fsr4_optimize.sh || echo 'FSR 4: optimized post passes not built' >&2
+    # 0.4.4 beta 22: 120, 144 and 240 at their own rate, as on Windows (60 before: their frame limit
+    # followed it, so they ran at 60).
+    case $fps in uncap) export BB_VBLANK_HZ=480 ;; 90|120|144|240) export BB_VBLANK_HZ=$fps ;; *) export BB_VBLANK_HZ=60 ;; esac
 fi
 if [[ -n ${BB_PREBUILT:-} ]]; then
     probe=${BB_PROBE:-bin/bb-probe}

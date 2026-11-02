@@ -48,6 +48,7 @@
 extern "C" {
 // runtime_memory.c
 int runtime_memory_is_mapped(uintptr_t address, uint64_t size);
+int runtime_memory_readable(uintptr_t address, uint64_t size);
 int runtime_memory_write_backing(uintptr_t address, const void* data, uint64_t size);
 void runtime_memory_read_backing(uintptr_t address, void* data, uint64_t size);
 uint64_t runtime_memory_clamp(uintptr_t address, uint64_t size);
@@ -62,7 +63,6 @@ uint64_t runtime_tsc_frequency(void);
 int32_t* runtime_errno(void);
 void runtime_memory_set_gpu_hooks(RuntimeGpuRange map, RuntimeGpuRange unmap, RuntimeGpuRange invalidate);
 void runtime_memory_set_note_write_hook(RuntimeGpuRange note);
-void runtime_memory_set_cpu_write_hook(RuntimeGpuRange hook);
 int runtime_memory_restore_access(void* context, uintptr_t address, int repeated);
 }
 namespace Shader { void RegisterSrtFaultHandler(); }
@@ -137,9 +137,12 @@ public:
 
 void MemoryManager::SetRasterizer(Vulkan::Rasterizer* rasterizer_) {
     rasterizer = rasterizer_;
-    // bbport: resource table plans (BB_NATIVE_TABLES) read only mapped guest memory.
+    // bbport: resource table plans (BB_NATIVE_TABLES) read only mapped guest memory; 0.4.4 beta
+    // 20: and readable under the game's own protection (a page it made unreadable faulted in the
+    // plan's memcpy, outside any handler: the engine map's shader-1).
     Shader::Native::TablePlan::guest_readable = [](u64 address, u64 bytes) {
-        return Memory::Instance()->ClampRangeSize(address, bytes) >= bytes;
+        return Memory::Instance()->ClampRangeSize(address, bytes) >= bytes &&
+               runtime_memory_readable(address, bytes) != 0;
     };
     // Existing guest mappings are replayed by the runtime when hooks are installed.
     runtime_memory_set_gpu_hooks(
@@ -152,14 +155,10 @@ void MemoryManager::SetRasterizer(Vulkan::Rasterizer* rasterizer_) {
         [](uintptr_t address, uint64_t size) {
             Memory::Instance()->GetRasterizer()->InvalidateMemory(address, size);
         });
-    // bbport: data written into GPU memory by a path the GPU side hears of (file reads, the game's
-    // resource loaders): invalidated, and an asset (it may keep a VRAM copy).
+    // bbport: data written into GPU memory by a path the GPU side hears of (file reads):
+    // invalidated.
     runtime_memory_set_note_write_hook([](uintptr_t address, uint64_t size) {
         Memory::Instance()->GetRasterizer()->NoteAssetWrite(address, size);
-    });
-    // bbport: the game's libc copies (memcpy, memset, memmove) over pages the caches watch.
-    runtime_memory_set_cpu_write_hook([](uintptr_t address, uint64_t size) {
-        Memory::Instance()->GetRasterizer()->OnCpuWrite(address, size);
     });
 }
 void MemoryManager::InvalidateMemory(VAddr address, u64 size) {
@@ -284,6 +283,10 @@ s32 PS4_SYSV_ABI sceKernelUsleep(u32 microseconds) {
 }
 } // namespace Libraries::Kernel
 
+// The online backend's leave at exit (bbnet_glue.cpp).
+extern "C" void bbnet_exit_begin(int timeout_ms);
+extern "C" void bbnet_exit_wait(void);
+
 namespace {
 // SDL video must be driven from one thread: the window lives on its own host thread.
 std::thread g_window_thread;
@@ -404,6 +407,11 @@ extern "C" int bbgpu_init(const BbGpuConfig* config) {
             std::printf("Exit: watchdog ended the process after %ld ms\n", watchdog_ms);
             TerminateNow(0);
         }).detach();
+        // Out of a co-op room before the process ends (Quit to Desktop closes the window too): The
+        // Hunter's Dream's server drops a member only when its heartbeat is 15 s old, so the other
+        // players saw the hunter leave late. Sent on its own thread, beside the cache save and the
+        // GPU drain below, and waited for with them, at most 2 s.
+        bbnet_exit_begin(2000);
         // Snapshot completed pipeline work and drain its asynchronous cache writes, on its own
         // thread: disk writes overlap the GPU drain below instead of preceding it.
         std::atomic<bool> cache_saved{false};
@@ -433,6 +441,7 @@ extern "C" int bbgpu_init(const BbGpuConfig* config) {
             cache_saved.wait(false, std::memory_order_acquire);
             saved = cache_saved.load(std::memory_order_acquire);
         }
+        bbnet_exit_wait();
         std::printf("Exit: clean shutdown in %lld ms\n",
                     static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(
                                                std::chrono::steady_clock::now() - exit_started)
@@ -583,20 +592,6 @@ int* PS4_SYSV_ABI __Error() {
     return runtime_errno();
 }
 } // namespace Libraries::Kernel
-
-// RenderDoc capture hooks: not used by the port.
-namespace VideoCore {
-void LoadRenderDoc() {}
-void StartCapture() {}
-void EndCapture() {}
-void TriggerCapture() {}
-void SetOutputDir(const std::filesystem::path&, const std::string&) {}
-bool IsRenderDocLoaded() { return false; }
-void RequestScreenshot(ScreenshotRequest) {}
-u32 ConsumeGameOnlyScreenshotRequests() { return 0; }
-u32 ConsumeWithOverlaysScreenshotRequests() { return 0; }
-ScreenshotRequests ConsumeScreenshotRequests() { return {}; }
-} // namespace VideoCore
 
 extern "C" int bbgpu_overlay_captures_input(void) {
     return BbOverlay::CapturesInput() ? 1 : 0;

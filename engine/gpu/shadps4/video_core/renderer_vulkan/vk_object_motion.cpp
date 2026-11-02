@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "video_core/renderer_vulkan/vk_object_motion.h"
+#include "video_core/renderer_vulkan/motion_copy_sources.h"
+#include "video_core/buffer_cache/gpu_write_stamps.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -81,7 +83,7 @@ ObjectMotion::ObjectMotion(const Instance& instance_, Scheduler& scheduler_)
     // animated draws. A setting or environment override can still disable the path.
     if (!BbSettings::Get().object_motion ||
         BbSettings::Get().upscaler == BbSettings::UpscalerOff) {
-        std::puts("Object motion: off (enable in menu or BB_OBJECT_MOTION=1)");
+        std::puts("Object motion: off (enable in menu or object_motion=1)");
         return;
     }
     const auto& features = instance.GetPhysicalDevice().getFeatures();
@@ -169,6 +171,20 @@ ObjectMotion::ObjectMotion(const Instance& instance_, Scheduler& scheduler_)
                 "frames)\n",
                 positions_per_frame,
                 (unsigned long long)((u64(1 + 2 * u64(positions_per_frame)) * 16) >> 20), hold);
+    // 0.4.4 beta 14: small skeletons the GPU wrote (Motion::GpuSmall).
+    if (Motion::GpuSmallMode() == Motion::GpuSmall::Version) {
+        std::printf("Object motion: small skeletons the GPU wrote compared with the last frame by "
+                    "their newest GPU write (BB_MOTION_GPU_SMALL=store: stored every frame)\n");
+    } else if (Motion::GpuSmallMode() == Motion::GpuSmall::Store) {
+        std::printf("Object motion: small skeletons the GPU wrote stored every frame "
+                    "(BB_MOTION_GPU_SMALL=store)\n");
+    } else if (Motion::GpuSmallMode() == Motion::GpuSmall::Source) {
+        std::printf("Object motion: small skeletons the GPU wrote compared with the last frame "
+                    "through the copy shader's source where it wrote them (BB_MOTION_GPU_SMALL=source)\n");
+    } else if (Motion::GpuSmallMode() == Motion::GpuSmall::Camera) {
+        std::printf("Object motion: small skeletons the GPU wrote get camera vectors only, for "
+                    "measuring (BB_MOTION_GPU_SMALL=camera)\n");
+    }
 }
 
 ObjectMotion::~ObjectMotion() {
@@ -186,8 +202,22 @@ ObjectMotion::~ObjectMotion() {
 }
 
 void ObjectMotion::OnFrameStart() {
+    // 0.4.4 beta 14: the copy shader's ranges are recorded while they are looked at
+    // (BB_MOTION_GPU_SMALL=source), this frame's and the last. 0.4.4 beta 21: no longer with frame
+    // statistics in the other modes: thousands of ranges a frame under a lock on the draw
+    // recording thread, and in the version mode the traced source gave draws without a palette
+    // the CPU holds an anchor players' runs never had (statistics runs now match them).
+    auto& copy_sources = Motion::CopySources::Get();
+    copy_sources.SetWanted(enabled && Motion::GpuSmallMode() == Motion::GpuSmall::Source);
+    copy_sources.NextFrame();
+    // 0.4.4 beta 16: GPU writes numbered for the version mode (and its statistics).
+    VideoCore::GpuWriteStamps::Get().SetWanted(
+        enabled && (BbStats::enabled || Motion::GpuSmallMode() == Motion::GpuSmall::Version));
     if (!enabled) {
         return;
+    }
+    if (BbStats::enabled) {
+        Motion::GpuSmallStats::Get().NextFrame();
     }
     if (BbStats::enabled && (frame % 600) == 0 && history.stats.draws) {
         const auto& s = history.stats;
@@ -221,6 +251,7 @@ void ObjectMotion::OnFrameStart() {
                     at ? by : "nothing",
                     double(std::max<u64>(s.peak_demand, history.Demand())) / (1 << 20),
                     double(positions_per_frame) / (1 << 20));
+        Motion::GpuSmallStats::Get().Report();
         index_ranges.stats = {};
         history.stats = {};
     }
@@ -239,7 +270,7 @@ void ObjectMotion::OnFrameStart() {
     for (auto& target : targets) {
         target.written = false;
     }
-    scheduler.EndRendering();
+    scheduler.EndRendering(Vulkan::GpuSavings::PassBreak::Motion);
     // Last frame's stores must be visible to this frame's loads. Also finish old reads
     // before the ping-pong half they reference is reused for writes.
     scheduler.Record([](vk::CommandBuffer cmd) {
@@ -254,7 +285,7 @@ void ObjectMotion::OnFrameStart() {
 }
 
 u32 ObjectMotion::PrepareDraw(const DrawInfo& draw, Motion::Anchor anchor, Motion::StoreReason reason) {
-    if (!enabled || BbToggle::Disabled(1u << 29) || params_used >= ParamsPerFrame) {
+    if (!enabled || params_used >= ParamsPerFrame) {
         return 0;
     }
     const auto allocation = history.Prepare(draw, anchor, reason);
@@ -314,7 +345,8 @@ ObjectMotion::Target& ObjectMotion::GetTarget(u32 width, u32 height) {
     slot->image = VideoCore::UniqueImage(device, instance.GetAllocator());
     slot->image.Create(vk::ImageCreateInfo{
         .imageType = vk::ImageType::e2D,
-        .format = vk::Format::eR32G32B32A32Sfloat,
+        // bbport 0.7, 0.4.4 beta 15: EmitFragmentMotion's packing, 8 bytes a pixel (was RGBA32F).
+        .format = vk::Format::eR32G32Uint,
         .extent = {width, height, 1},
         .mipLevels = 1,
         .arrayLayers = 1,
@@ -327,7 +359,7 @@ ObjectMotion::Target& ObjectMotion::GetTarget(u32 width, u32 height) {
     slot->view = Check(device.createImageViewUnique({
         .image = vk::Image(slot->image),
         .viewType = vk::ImageViewType::e2D,
-        .format = vk::Format::eR32G32B32A32Sfloat,
+        .format = vk::Format::eR32G32Uint,
         .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
     }));
     slot->width = width;
@@ -347,7 +379,7 @@ void ObjectMotion::Attach(RenderState& state, u32 width, u32 height) {
     attachment.image_layout = vk::ImageLayout::eColorAttachmentOptimal;
     if (!target.written || target.layout != vk::ImageLayout::eColorAttachmentOptimal) {
         // Clear once per frame; later reads must not erase the validity of this history.
-        scheduler.EndRendering();
+        scheduler.EndRendering(Vulkan::GpuSavings::PassBreak::Motion);
         const vk::ImageMemoryBarrier2 barrier{
             .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
             .srcAccessMask = vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite,

@@ -1,5 +1,7 @@
 #define _GNU_SOURCE
 #include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include "../src/runtime_pad.c"
 
@@ -77,24 +79,43 @@ static void test_round_gate(void) {
     assert(x==200 && y==60);
 }
 
+/* MinGW has no setenv, and no /tmp: the test's files go in %TEMP% there. */
+static void set_env(const char* name, const char* value) {
+#ifdef _WIN32
+    assert(_putenv_s(name, value) == 0);
+#else
+    assert(setenv(name, value, 1) == 0);
+#endif
+}
+
+static int temp_file(char* path, size_t size, const char* stem) {
+#ifdef _WIN32
+    const char* dir = getenv("TEMP") ? getenv("TEMP") : ".";
+#else
+    const char* dir = "/tmp";
+#endif
+    assert(snprintf(path, size, "%s/%s-XXXXXX", dir, stem) < (int)size);
+    return mkstemp(path);
+}
+
 int main(void) {
     test_key_move();
     test_round_gate();
-    char path[]="/tmp/bbport-pad-test-XXXXXX";
-    int fd=mkstemp(path);
+    char path[512];
+    int fd=temp_file(path,sizeof(path),"bbport-pad-test");
     assert(fd>=0);
     close(fd);
-    setenv("BB_PAD_FILE",path,1);
+    set_env("BB_PAD_FILE",path);
     /* config.ini controls: buttons moved, a trigger as a button and a button as a trigger. */
-    char config[]="/tmp/bbport-pad-config-XXXXXX";
-    int config_fd=mkstemp(config);
+    char config[512];
+    int config_fd=temp_file(config,sizeof(config),"bbport-pad-config");
     assert(config_fd>=0);
     const char controls[]="upscaler=fsr3\npad.cross=b\npad.circle=a\npad.r2=rightshoulder\n"
                           "pad.r1=righttrigger\nkey.cross=X, Space\npad.bogus=a\npad.menu_back=b\n";
     assert(write(config_fd,controls,sizeof(controls)-1)==(ssize_t)(sizeof(controls)-1));
     close(config_fd);
-    setenv("BB_CONFIG",config,1);
-    setenv("SDL_VIDEODRIVER","dummy",1);
+    set_env("BB_CONFIG",config);
+    set_env("SDL_VIDEODRIVER","dummy");
     /* Only the virtual test controller is a gamepad, whatever is plugged in. */
     SDL_SetHint(SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT,"0x1d50/0x6189");
     assert(SDL_Init(SDL_INIT_VIDEO|SDL_INIT_GAMEPAD));

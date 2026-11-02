@@ -98,11 +98,7 @@ public:
     u32 GetReadbackQueueFamilyIndex() const {
         return readback_family_index;
     }
-    /// bbport: memory can be exported as a dma-buf (guest memory, BbGuestMemory).
-    bool IsGuestMemoryExportSupported() const {
-        return guest_memory_export;
-    }
-    /// bbport: host memory can be imported (VK_EXT_external_memory_host; Windows PC memory model).
+    /// bbport: host memory can be imported (VK_EXT_external_memory_host; the GX region on Windows).
     bool IsGuestMemoryImportSupported() const {
         return guest_memory_import;
     }
@@ -315,52 +311,8 @@ public:
         return features.tessellationShader;
     }
 
-    /// Returns true when the shaderSubgroupClock feature of
-    /// bbport: the FSR 4 v07 INT8/DOT4 shaders can run (Float16, Int8, Int16, packed int8 dot
-    /// products, linear compute derivatives, extended storage image formats).
-    bool IsFsr4Int8Supported() const {
-        return vk12_features.shaderFloat16 && vk12_features.shaderInt8 && features.shaderInt16 &&
-               vk13_features.shaderIntegerDotProduct && compute_shader_derivatives &&
-               compute_shader_derivatives_features.computeDerivativeGroupLinear &&
-               features.shaderStorageImageExtendedFormats;
-    }
-
-    /// bbport: FSR 4.1.1 (INT8 model passes and VK_VALVE_shader_mixed_float_dot_product).
-    bool IsFsr411Supported() const {
-        return IsFsr4Int8Supported() && mixed_float_dot_product;
-    }
-
-    /// bbport: FSR 4.1.1 through the fsr4vk provider DLL (Windows): standard Vulkan features only,
-    /// requested at device creation when the DLL is installed (Fsr4Vk::FilesPresent).
-    bool IsFsr4VkSupported() const {
-        return fsr4vk;
-    }
-
-    /// bbport: FSR 4.1.1 can run, by the replay (IsFsr411Supported) or through fsr4vk.
-    bool IsFsr411Available() const {
-        return IsFsr4Int8Supported() && (mixed_float_dot_product || fsr4vk);
-    }
-
-    /// bbport: robustBufferAccess is on (fsr4vk sizes its descriptors by it).
-    bool IsRobustBufferAccessEnabled() const {
-        return features.robustBufferAccess;
-    }
-
     /// The Vulkan extensions required by NVIDIA NGX are enabled.
     bool IsDlssCapable() const { return dlss_extensions; }
-
-    /// bbport: FSR 4.1.1's FP8 matrix variant (RDNA4): FP8 cooperative matrices, the Vulkan
-    /// memory model, wave32 in full subgroups.
-    bool IsFsr411Fp8Supported() const {
-        return IsFsr411MatrixSupported() && shader_float8;
-    }
-
-    /// bbport: the same passes with FP16 matrices (the FP8 variant emulated, for testing).
-    bool IsFsr411MatrixSupported() const {
-        return IsFsr411Supported() && cooperative_matrix && vk12_features.vulkanMemoryModel &&
-               vk13_features.subgroupSizeControl && vk13_features.computeFullSubgroups &&
-               vk12_features.storageBuffer8BitAccess;
-    }
 
     /// VK_KHR_shader_clock is supported.
     bool IsShaderSubgroupClockSupported() const {
@@ -378,7 +330,7 @@ public:
         return hdr_metadata;
     }
 
-    /// bbport: VK_NV_low_latency2 is enabled for its boost hint (Swapchain), without Streamline.
+    /// bbport: VK_NV_low_latency2 is enabled for its boost hint (Swapchain).
     bool IsLowLatencyBoostEnabled() const {
         return low_latency_boost;
     }
@@ -456,16 +408,6 @@ public:
     /// Returns the subgroup size of the selected physical device.
     u32 SubgroupSize() const {
         return vk11_props.subgroupSize;
-    }
-
-    /// Returns the largest storage buffer descriptor range.
-    u32 MaxStorageBufferRange() const {
-        return properties.limits.maxStorageBufferRange;
-    }
-
-    /// Returns the largest dispatch width (workgroups in X).
-    u32 MaxComputeWorkGroupCountX() const {
-        return properties.limits.maxComputeWorkGroupCount[0];
     }
 
     /// Returns the maximum size of compute shared memory.
@@ -638,7 +580,6 @@ private:
     vk::Queue present_queue;
     vk::Queue graphics_queue;
     vk::Queue readback_queue;
-    bool guest_memory_export{};
     bool guest_memory_import{};
     u32 readback_family_index = NoFamily;
     std::vector<vk::PhysicalDevice> physical_devices;
@@ -675,13 +616,12 @@ private:
     bool image_view_min_lod{};
     bool shader_clock{};
     bool compute_shader_derivatives{};
-    bool mixed_float_dot_product{}; // bbport: VK_VALVE_shader_mixed_float_dot_product (FSR 4.1.1)
-    bool fsr4vk{};                  // bbport: the device features of the fsr4vk provider are enabled
+    bool amd_fsr{};                 // bbport: AMD's FSR DLLs are in the package: their features are enabled
     bool dlss_extensions{};         // bbport: VK_NVX_binary_import + VK_NVX_image_view_handle
     bool full_screen_exclusive{};   // bbport: VK_EXT_full_screen_exclusive (Windows)
     bool hdr_metadata{};            // bbport: VK_EXT_hdr_metadata
     bool low_latency_boost{};       // bbport: VK_NV_low_latency2 (+ VK_KHR_present_id), boost hint
-    bool cooperative_matrix{};      // bbport: VK_KHR_cooperative_matrix (FSR 4.1.1 FP8 variant)
+    bool cooperative_matrix{};      // bbport: VK_KHR_cooperative_matrix (AMD FSR 4's FP8 model)
     bool shader_float8{};           // bbport: VK_EXT_shader_float8 with FP8 matrices (RDNA4)
     bool supports_memory_budget{};
     bool supports_block_texel_view{};
@@ -692,5 +632,9 @@ private:
 /// bbport memory statistics: device-local VMA memory blocks and the allocations in them (the
 /// difference is free space VMA keeps).
 void VmaDeviceUsage(u64& block_bytes, u64& allocation_bytes);
+
+/// bbport memory statistics: the driver's count of this process's device-local memory and its budget
+/// (VK_EXT_memory_budget; both 0 without it).
+void VramUsage(u64& used_bytes, u64& budget_bytes);
 
 } // namespace Vulkan

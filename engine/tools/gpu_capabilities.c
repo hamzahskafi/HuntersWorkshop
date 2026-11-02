@@ -1,12 +1,20 @@
 /* Check whether native-size depth/stencil images can be blitted to reduced
  * renderer targets. The renderer needs both directions for live presets.
  * --gamepads: the connected gamepads, "GUID<tab>name" per line (the launcher's controller list,
- * BB_GAMEPAD). --read-input: one key or button for the launcher's controls (below). */
+ * BB_GAMEPAD). --read-input: one key or button for the launcher's controls (below).
+ * --fsr-versions: the AMD FSR versions AMD's FSR SDK offers on the game's GPU (below). */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <vulkan/vulkan.h>
 #include <SDL3/SDL.h>
+#ifdef _WIN32
+#include <wchar.h>
+#include <windows.h>
+#include "api/include/ffx_api.h"
+#include "api/include/vk/ffx_api_vk.h"
+#include "upscalers/include/ffx_upscale.h"
+#endif
 
 static VkDeviceSize largest_local_heap(VkPhysicalDevice device) {
     VkPhysicalDeviceMemoryProperties memory;
@@ -35,36 +43,6 @@ static int better_device(VkPhysicalDevice candidate, VkPhysicalDevice current) {
     const int old_cpu = old.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU;
     if (next_cpu != old_cpu) return !next_cpu;
     return largest_local_heap(candidate) > largest_local_heap(current);
-}
-
-/* --live-resolution: prints 1 when live resolution changes suit the GPU (run.sh, setting
- * live_resolution=auto), else 0. Live scaling keeps the game's post-processing at 1080p and
- * copies scene targets every frame: fine on a strong discrete GPU, 7-8 FPS on the Steam Deck
- * and a GTX 1060. Rule: discrete, at least 8 GB of device memory, and not an NVIDIA GPU older
- * than Turing (no fragment shader barycentrics; its depth/stencil copies take nine draws). */
-static int has_extension(VkPhysicalDevice device, const char *name) {
-    uint32_t count = 0;
-    if (vkEnumerateDeviceExtensionProperties(device, NULL, &count, NULL) != VK_SUCCESS) return 0;
-    VkExtensionProperties *list = calloc(count ? count : 1, sizeof(*list));
-    int found = 0;
-    if (list && vkEnumerateDeviceExtensionProperties(device, NULL, &count, list) == VK_SUCCESS)
-        for (uint32_t i = 0; i < count && !found; ++i) found = !strcmp(list[i].extensionName, name);
-    free(list);
-    return found;
-}
-
-static int live_resolution_suits(VkPhysicalDevice device) {
-    VkPhysicalDeviceProperties props;
-    vkGetPhysicalDeviceProperties(device, &props);
-    const int discrete = props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
-    const VkDeviceSize memory = largest_local_heap(device);
-    const int old_nvidia = props.vendorID == 0x10de &&
-                           !has_extension(device, "VK_KHR_fragment_shader_barycentric");
-    const int suits = discrete && memory >= (VkDeviceSize)7680 << 20 && !old_nvidia;
-    fprintf(stderr, "GPU: %s, %s, %llu MiB: live resolution changes %s\n", props.deviceName,
-            discrete ? "discrete" : "integrated or other", (unsigned long long)(memory >> 20),
-            suits ? "on" : "off (startup resolution patch)");
-    return suits;
 }
 
 static int list_gamepads(void) {
@@ -165,6 +143,89 @@ static int read_input(const char *kind) {
     return 0;
 }
 
+/* --fsr-versions (0.4.4 beta 27c, the launcher's Graphics page): the AMD FSR versions AMD's FSR SDK
+ * offers on the GPU the game uses, asked as the engine asks (vk_amd_fsr.cpp, a device of that GPU):
+ * "gpu<tab>name<tab>driver version" and then "version<tab>name" per version, as AMD names it (" *":
+ * provided by the driver). AMD's loader from BB_AMD_FSR_DIR, else the package's engine\amd-fsr (this
+ * program is in engine\out). AMD's DLLs are only loaded and asked, as AMD's API documents. Windows only:
+ * AMD's SDK has no Linux build. Exit 1 when it cannot tell. */
+static int fsr_versions(VkPhysicalDevice gpu) {
+#ifdef _WIN32
+    wchar_t dir[MAX_PATH] = L"", path[MAX_PATH * 2];
+    const wchar_t *env = _wgetenv(L"BB_AMD_FSR_DIR");
+    if (env && env[0]) {
+        wcsncpy(dir, env, MAX_PATH - 1);
+    } else {
+        GetModuleFileNameW(NULL, dir, MAX_PATH);
+        wchar_t *slash = wcsrchr(dir, L'\\');
+        if (slash) *slash = 0;
+        swprintf(path, MAX_PATH * 2, L"%ls\\amd-fsr\\amd_fidelityfx_loader_vk.dll", dir);
+        wcsncat(dir, GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES ? L"\\amd-fsr" : L"\\..\\amd-fsr",
+                MAX_PATH - wcslen(dir) - 1);
+    }
+    swprintf(path, MAX_PATH * 2, L"%ls\\amd_fidelityfx_loader_vk.dll", dir);
+    HMODULE loader = LoadLibraryExW(path, NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
+    if (!loader) {
+        fprintf(stderr, "AMD FSR: cannot load AMD's loader (error %lu)\n", GetLastError());
+        return 1;
+    }
+    PfnFfxQuery query = (PfnFfxQuery)(void (*)(void))GetProcAddress(loader, "ffxQuery");
+    if (!query) {
+        fputs("AMD FSR: not AMD's FSR loader (no ffxQuery)\n", stderr);
+        return 1;
+    }
+    const float priority = 1.0f;
+    const VkDeviceQueueCreateInfo queue = {
+        .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+        .queueFamilyIndex = 0,
+        .queueCount = 1,
+        .pQueuePriorities = &priority,
+    };
+    const VkDeviceCreateInfo info = {
+        .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+        .queueCreateInfoCount = 1,
+        .pQueueCreateInfos = &queue,
+    };
+    VkDevice device = VK_NULL_HANDLE;
+    if (vkCreateDevice(gpu, &info, NULL, &device) != VK_SUCCESS) {
+        fputs("AMD FSR: cannot create a Vulkan device\n", stderr);
+        return 1;
+    }
+    VkDeviceContext context = {device, gpu, vkGetDeviceProcAddr};
+    struct ffxQueryDescGetVersions versions;
+    memset(&versions, 0, sizeof(versions));
+    versions.header.type = FFX_API_QUERY_DESC_TYPE_GET_VERSIONS;
+    versions.createDescType = FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE;
+    versions.device = &context;
+    uint64_t count = 0;
+    versions.outputCount = &count;
+    int result = 1;
+    if (query(NULL, &versions.header) == FFX_API_RETURN_OK && count) {
+        uint64_t *ids = calloc((size_t)count, sizeof(*ids));
+        const char **names = calloc((size_t)count, sizeof(*names));
+        versions.versionIds = ids;
+        versions.versionNames = names;
+        if (ids && names && query(NULL, &versions.header) == FFX_API_RETURN_OK) {
+            VkPhysicalDeviceProperties props;
+            vkGetPhysicalDeviceProperties(gpu, &props);
+            printf("gpu\t%s\t%u\n", props.deviceName, props.driverVersion);
+            for (uint64_t i = 0; i < count; ++i) printf("version\t%s\n", names[i] ? names[i] : "?");
+            result = 0;
+        }
+        free(ids);
+        free(names);
+    } else {
+        fputs("AMD FSR: AMD's FSR SDK offers no upscaler for this GPU\n", stderr);
+    }
+    vkDestroyDevice(device, NULL);
+    return result; /* AMD's loader stays loaded until the process ends, as in the engine */
+#else
+    (void)gpu;
+    fputs("AMD FSR: Windows only (AMD's FSR SDK has no Linux build)\n", stderr);
+    return 1;
+#endif
+}
+
 int main(int argc, char **argv) {
     if (argc > 1 && !strcmp(argv[1], "--read-input")) {
         return read_input(argc > 2 ? argv[2] : "any");
@@ -172,7 +233,7 @@ int main(int argc, char **argv) {
     if (argc > 1 && !strcmp(argv[1], "--gamepads")) {
         return list_gamepads();
     }
-    const int live_mode = argc > 1 && !strcmp(argv[1], "--live-resolution");
+    const int fsr_mode = argc > 1 && !strcmp(argv[1], "--fsr-versions");
     const VkApplicationInfo app = {
         .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
         .pApplicationName = "bbport scene scaling probe",
@@ -216,11 +277,11 @@ int main(int argc, char **argv) {
         for (uint32_t i = 1; i < count; ++i)
             if (better_device(devices[i], selected)) selected = devices[i];
     }
-    if (live_mode) {
-        printf("%d\n", live_resolution_suits(selected));
+    if (fsr_mode) {
+        const int result = fsr_versions(selected);
         free(devices);
         vkDestroyInstance(instance, NULL);
-        return 0;
+        return result;
     }
     VkPhysicalDeviceProperties props;
     vkGetPhysicalDeviceProperties(selected, &props);

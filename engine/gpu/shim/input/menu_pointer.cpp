@@ -142,7 +142,6 @@ bool g_log = false;
 // from the pointer's.
 bool g_passive = false;
 
-std::atomic<std::uint64_t> g_tick{0};
 std::atomic<std::int64_t> g_focus_ms{0};
 // The last time a list with focus offered a choice (offers_choice): what decides whether the keys
 // that move the character navigate a menu in the world (menu_pointer_navigating).
@@ -598,7 +597,6 @@ void pointer_step(std::uint8_t* c, const std::uint8_t* input) {
     }
     // A list with focus is a menu the player is in, pointer or not - this is
     // what hands the mouse back from the camera.
-    g_tick.fetch_add(1, std::memory_order_relaxed);
     const std::int64_t focused_ms = now_ms();
     g_focus_ms.store(focused_ms, std::memory_order_relaxed);
     if (offers_choice(c)) {
@@ -864,10 +862,6 @@ std::uint32_t menu_region_confirm_button() {
 }
 
 std::uint32_t menu_confirm_button() {
-    // The developers' debug menu decides with Circle in every region.
-    if (debug_menu_open()) {
-        return 0x2000u;
-    }
     return menu_region_confirm_button();
 }
 
@@ -882,7 +876,6 @@ std::uint32_t menu_pointer_take_press() { return g_press.exchange(0); }
 
 void menu_pointer_hold_row(bool hold) { g_hold_row.store(hold, std::memory_order_relaxed); }
 
-std::uint64_t menu_pointer_tick() { return g_tick.load(std::memory_order_relaxed); }
 
 // bbport: the title screen and the menus before the world loads (input.cpp menu_move: there the
 // keys always navigate, as there is no character to move).

@@ -1,5 +1,40 @@
 # Parallel GPU command processing — design notes
 
+**Status (2026-10-31, 0.4.4 beta 21).** These notes and measurements are from 2026-09-30 and
+2026-10-01 (Linux, RX 7800 XT, mostly Hunter's Nightmare), from the native port this engine
+inherits (that session's report: [history/SESSION_2026-09-30.md](archive/SESSION_2026-09-30.md));
+every figure below is from then. The design they arrive at is today's: stage A
+(`shadPS4:GpuCommandProcessor`) decodes and selects pipelines with draw preparation ahead of it
+(`bb:DrawScan`, `bb:DrawPrepN`), stage B (`bb:DrawRec`) records each draw from the draw pipe, helped
+by the lookahead thread `bb:DrawAhead` (`parallel-stageb.md`), then the recording threads
+(`bb:VkRecorder`) and the copy threads (`bb:CopyN`); the constant ring, the render state and
+texture set memos and the copy shader HLE are as described. `engine-map.md` (1.2, 1.3) describes
+the threads and a frame as they are now. What changed since:
+
+- **Fences.** The game's end-of-pipe labels are written by `bb:GpuSignals` once the GPU has
+  finished the work before them ("honest labels", `Rasterizer::HonestLabels`), whenever the GPU
+  reads game memory in place. The signalling at recording time described under "Two-stage draw
+  pipeline" is what runs only with game memory tracked (`BB_GX_IN_PLACE=0`, safe mode, Linux) or
+  `BB_HONEST_LABELS=0` (for testing).
+- **Frame data read in place.** "Engine short paths" below dropped it because fences were
+  signalled at recording time. With honest labels it came back: since 0.4.4 beta 5 the game's GX
+  region (288 MiB of per-frame data) is imported and read in place by default on Windows
+  (`BB_GX_IN_PLACE`; through a buffer of its own since beta 9). The PC memory model
+  (`BB_GUEST_IN_PLACE`, all of the game's memory in place), off by default since 0.4.0 beta 4,
+  was removed in 0.4.4 beta 28.
+- **Thread counts** follow the threads available to the process (`BbThreads::Available()`): the
+  draw pipe (`BB_DRAW_PIPE`) and the lookahead are on from 8; draw preparation workers are a
+  quarter of them below 16 (at least 1) and 3/8 from 16 (6 to 8; `BB_PREP_WORKERS`); recording
+  threads are 1, 2 from 8 and 3 from 12 (`BB_VK_RECORD_THREADS`).
+- **"What would scale"**, item 1 (the two-stage pipeline) was built; splitting stage B itself was
+  planned and not built (`parallel-stageb.md`, section 7).
+- **Still opt-in:** the texture binding helper (`BB_TEXTURE_HELPER=1`), userfaultfd (`BB_UFFD=1`,
+  Linux), "hot pages" by the first rule (`BB_HOT_PAGES=1`). The stricter rule, `BB_HOT_PAGES=2`
+  (`region_manager.h`), is the launcher's default since Lantern 0.9.37 beta 4.
+- **Toggle bits** 1 << 20 to 1 << 23 named below were renumbered when the mask grew to 64 bits:
+  record prefetch, FindView memo, texture helper and early draw inputs are now 1 << 32 to 1 << 35
+  (`bbport_toggles.h`).
+
 Goal: remove the single-core bottleneck of the emulated GPU command processor
 (`shadPS4:GpuCommandProcessor`, ~100% of one core while the rest of the CPU idles).
 
@@ -70,7 +105,8 @@ The GPU command thread is back at ~100%: it is the limit again.
 
 Rejected: "hot pages" (never re-protect pages written repeatedly, upload them on every
 binding) — the set grew to ~14k pages, re-uploads dropped the frame rate to 33 FPS and a GPU
-ring timeout followed. Left opt-in behind BB_HOT_PAGES=1.
+ring timeout followed. Left opt-in behind BB_HOT_PAGES=1 (a stricter rule, `BB_HOT_PAGES=2`, is
+the launcher's default now; see Status).
 
 Texture description cache 2-way/4096, same-target fast path, LRU touch skip, no per-texture
 meta lookup: other outdoor view, 93.9 FPS; with the texture memos off (mask 1056) 65.6 FPS.
@@ -92,7 +128,7 @@ Findings, in the order they were fixed:
    staging pool freed blocks after 3 s idle, between streaming bursts. It now keeps 512 MiB
    (`BB_STAGING_KEEP_MB`), frees the rest after 30 s and populates 128 MiB at startup.
 3. Write faults: a 256 KiB unprotect window (`BB_FAULT_WINDOW`) halves them again.
-   `BB_UFFD=1` tracks writes with userfaultfd write-protection instead of mprotect (no
+   `BB_UFFD=1` (Linux) tracks writes with userfaultfd write-protection instead of mprotect (no
    address-space write lock, no mapping splits); read protection for readbacks still uses
    mprotect. It removes the mprotect time but did not change the stalls measurably; opt-in.
 4. File reads into write-protected guest pages failed with EFAULT (kernel copies do not reach
@@ -132,14 +168,17 @@ off below 12 hardware threads (Steam Deck: no workers). Now:
 - One scanner (`bb:DrawScan`) replays the register writes in order and stores, per buffer,
   its starting checksum and a delta of the 32-word register blocks it wrote
   (`AmdGpu::RegDirty/RegDelta`, recorded by `ApplyGraphicsRegisterPacket`).
-- Workers (`bb:DrawPrepN`, half the hardware threads in the affinity mask, 1..8) claim the
-  nearest scanned buffer ahead of the GPU thread, reach its starting state by applying the
-  deltas since their last buffer (or from the queue's tail state), and prepare its draws.
+- Workers (`bb:DrawPrepN`, half the hardware threads in the affinity mask, 1..8; fewer today,
+  see Status) claim the nearest scanned buffer ahead of the GPU thread, reach its starting state
+  by applying the deltas since their last buffer (or from the queue's tail state), and prepare
+  its draws.
   More workers now mean more buffers prepared in parallel, not more duplicated replay.
-- All helpers are SCHED_IDLE (`bbport_threads.h`): they only take idle cores. If the scanner
+- All helpers are SCHED_IDLE (`bbport_threads.h`; Windows: idle priority): they only take idle
+  cores. If the scanner
   starves (busy CPU), the GPU thread rebases it from its own register state once the lag
   passes 64 buffers instead of queueing without bound (`scanner rebases` in the stats).
-- Copy threads use the same affinity count (critical path, normal priority).
+- Copy threads use the same affinity count (critical path, normal priority; on Windows today
+  raised above the game's threads with 16 or more threads available, `BbThreads::MakeCritical`).
 
 A/B in one run (toggle 8192, standing still, `BB_FPS_LIMIT=0`, FSR 4), ~98% of direct draws
 prepared, no rebases:
@@ -195,6 +234,8 @@ reduced-resolution proxies — all on shared mutable state.
   the GPU still executes the current one, and EOP fences are signalled at record time.
   **Reading this memory in place (VK_EXT_external_memory_host) is therefore unsafe** unless
   fences wait for real GPU completion, which costs the guest (it waits on them). Dropped.
+  (Superseded since 0.4.4 beta 5 and 7: fences are written once the GPU is done, and the game's GX
+  region is read in place by default on Windows; see Status.)
 - Per second in the hot window: ~370k small constant copies (~179 MB, ~480 B each) and ~3.6k
   arena bindings covering ~13.8 GB (≈3.8 MB per binding) of which only ~516 MB are re-uploaded.
   Copying bound ranges instead of tracking pages would multiply the traffic by ~27 (why the
@@ -233,7 +274,10 @@ State after this work, standing still, `BB_FPS_LIMIT=0`, FSR 4: 82–85 FPS; GPU
 `build.sh` builds `libbbgpu` with LTO (`-flto=auto`, also for sirit and FSR-Vulkan linked
 into it) and, when `pgo/` holds a profile, with `-fprofile-use` (`-fprofile-partial-training
 -fprofile-correction`; functions changed since the profile compile without it). No `-march`:
-the same build runs on the Steam Deck.
+the same build runs on the Steam Deck. (Today LTO is CMake's interprocedural optimization,
+`BB_LTO`, default on, in `gpu/CMakeLists.txt`; clang builds, as on Windows with CLANG64, write
+`.profraw` files that `build.sh` merges into `pgo/default.profdata`; `BB_MARCH` optionally sets
+`-march`, empty by default.)
 
 Collecting a profile: `BB_PGO=generate bash run.sh` builds an instrumented library
 (`-fprofile-generate -fprofile-update=atomic`) that writes `pgo/` every 30 s (`bb:pgo` thread:
@@ -352,7 +396,9 @@ state.
   `WaitRegMem` on a fence value handed to stage B counts as met (`Liverpool::pending_fences`):
   stage B runs everything in stream order anyway. Unmet waits drain stage B, then yield.
 - The EOP fence is signalled by the Vulkan recording thread after the guest memory copies queued
-  before it (`Scheduler::SignalAfterHostCopies`), so stage B does not wait for them.
+  before it (`Scheduler::SignalAfterHostCopies`), so stage B does not wait for them. (Today only
+  with game memory tracked; read in place, `bb:GpuSignals` writes it once the GPU is done. See
+  Status.)
 - A submission's prepared draws stay alive until stage B has passed them
   (`RetireSubmission`) instead of a drain at its end.
 - Faults: stage B handles its own inline, like the GPU thread (`IsGpuSideThread`); the GPU
@@ -361,7 +407,8 @@ state.
 - `DmaData` to 0x3022C (skipped by the handler; ~70k/s) does not drain.
 - `BB_PIPE_VERIFY=N`: every Nth packet also carries the full register file and stage B reports
   words where its copy differs (none seen in game, menus included).
-- `BB_DRAW_PIPE=0/1` overrides the default (on with 8+ hardware threads). The toggle mask is 64
+- `BB_DRAW_PIPE=0/1` overrides the default (on with 8+ hardware threads; today 8 or more threads
+  available to the process, and the launcher can set it). The toggle mask is 64
   bits now (bits 20-29 are raw debug toggles of the motion vectors and the upscaler, which the
   first measurements below also flipped): 1 << 37 whole pipeline, 1 << 38 fences on stage B,
   1 << 39 WaitRegMem on pending fences, 1 << 40 dispatches, 1 << 41 fences signalled by the
@@ -545,6 +592,9 @@ G-buffer target; two 960x540 targets): 8 dispatches, and each needs the image do
 the buffer, the proxy resolved and the destination image uploaded again. Recognizing copies
 whose source is an image and turning them into image copies (or a proxy-sized copy) would remove
 most of that. Skipping the dispatches blacks out the scene, so the copies are needed.
+Hunter's Workshop 0.4.4 beta 13 extends that detector (`IsComputeImageCopy`) to the copies it
+missed, after bbport 0.7 (`docs/community-fixes-plan.md`); beta 14 copies the proxies themselves
+with a reduced scene size (`SceneTargets::CopyProxy`, also bbport 0.7).
 
 ### Fixed: guest heap corruption with the draw pipeline (2026-10-01)
 

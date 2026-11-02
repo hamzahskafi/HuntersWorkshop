@@ -41,6 +41,11 @@ it. Now (`Rasterizer::DrawRecord`, `HandleIfReady`):
 An already compiled pipeline costs what it did: `HandleIfReady` is the load and branch
 `Handle()` was. The draw command gained a branch on the recording thread (bind or not).
 
+In the launcher (Experimental engine features, all on by default; safe mode turns them off):
+"Background shader compiling" is `BB_ASYNC_PIPELINES`; "No shader freezes" is
+`BB_SKIP_UNCOMPILED`, `BB_LATE_PIPELINE_BIND` and `BB_PIPELINE_TAKE` together; "Faster draw
+thread" includes `BB_DRAIN_SLEEP` and `BB_FAULT_SKIP_TEXTURES` (below).
+
 ## Why not VK_EXT_graphics_pipeline_library
 
 DXVK links pipelines from libraries compiled when the game creates its shaders, long before the
@@ -236,11 +241,11 @@ marked applied to a cache the engine starts again. Intel has no catalog yet.
 - **Export the catalog again after every change of `ShaderMetaVersion`, `CaptureVersion` or the
   GPU part of `Shader::Profile`**: the seed line's `records of another engine` shows a stale one.
 - **The warm-up waits for every cached pipeline.** Since 2026-10-22 the driver builds them on
-  `BB_WARMUP_THREADS` threads (default the hardware threads less one, at most 8; 601 pipelines
-  with the driver cache cold: 13.9 s on one thread, 3.1 s on 8; `native_shader_compiler.md`,
-  "Compile speed and output quality"); their state is still rebuilt on the main thread. Letting
-  the game start at once (draws of a pipeline not ready yet behave as in play) would hide the
-  rest.
+  `BB_WARMUP_THREADS` threads (default the threads available to the process less one, at most
+  8; 601 pipelines with the driver cache cold: 13.9 s on one thread, 3.1 s on 8;
+  `native_shader_compiler.md`, "Compile speed and output quality"); their state is still rebuilt
+  on the main thread. Letting the game start at once (draws of a pipeline not ready yet behave as
+  in play) would hide the rest.
 - **A profile change still empties the cache.** Keeping the states and keys and seeding them like
   a catalog would refill it at the next start.
 - The catalog is seeded only into `<serial>`, not `<serial>-scene-curve` (BB_HDR_SCENE_CURVE=1):
@@ -273,6 +278,9 @@ model (`BB_GUEST_IN_PLACE=1`), native draw calls (`BB_NATIVE_CALLS=1`), hot page
 and the native shader compiler. Beta 4's launcher makes that set the default
 (`LauncherSettings.PerfDefaults`, switched once over older files by `perf_defaults_b4`; every one
 stays a toggle in Graphics › Experimental engine features, and safe mode turns them off).
+The PC memory model left that set again in Hunter's Workshop 0.4.0 beta 4 (off by default, then
+removed in 0.4.4 beta 28: `gpu-memory.md`); the game's GX region is read in place by default
+instead (`BB_GX_IN_PLACE`). The rest of the set are still the defaults.
 The catalog seeds a legacy-compiler cache as fully as a native one (510 pipelines each).
 OptiScaler's compatibility mode sends every submission from one thread while its frame generation
 is on: players capped by it should try without OptiScaler's frame generation.

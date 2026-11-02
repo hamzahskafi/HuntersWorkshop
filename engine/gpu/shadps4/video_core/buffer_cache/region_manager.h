@@ -164,9 +164,7 @@ public:
             bits.UnsetRange(start_page, end_page);
             if constexpr (type == Type::CPU) {
                 KeepHotPagesModified(start_page, end_page);
-                // bbport: the caller copies these pages next (ForEachUploadRange): their write
-                // protection may wait for that copy (BB_DEFER_PROTECT).
-                UpdateProtection<true, false, true>();
+                UpdateProtection<true, false>();
             } else if (EmulatorSettings.GetReadbacksMode() != GpuReadbacksMode::Disabled) {
                 UpdateProtection<false, true>();
             }
@@ -234,10 +232,8 @@ private:
      * @param new_bits     New state of the word
      *
      * @tparam track True when the tracker should start tracking the new pages
-     * @tparam defer bbport: the pages are copied next; the tracker may defer their write
-     * protection to that copy (PageManager::DeferPageWatchersForRegion)
      */
-    template <bool track, bool is_read, bool defer = false>
+    template <bool track, bool is_read>
     void UpdateProtection() {
         RENDERER_TRACE;
         RegionBits mask = is_read ? (~gpu ^ readable) : (cpu ^ writeable);
@@ -249,47 +245,39 @@ private:
         } else {
             writeable = cpu;
         }
-        if constexpr (defer && track && !is_read) {
-            if (tracker->DeferringProtects()) {
-                tracker->DeferPageWatchersForRegion(cpu_addr, mask);
-                return;
-            }
-        }
         tracker->UpdatePageWatchersForRegion<track, is_read>(cpu_addr, mask);
     }
 
     // bbport: pages the guest writes again and again (per-frame constants, skinning output)
     // cost a protection fault in the writing thread plus an mprotect with TLB shootdowns on
-    // every upload. After HotFaults faults a page stays writable and counts as always CPU
-    // modified, so it is uploaded on every use instead. The set is rebuilt every HotPeriod.
-    // Opt-in (BB_HOT_PAGES=1): in Hunter's Nightmare the set grew to ~14k pages (56 MB), each
-    // re-uploaded on every binding, which cost far more than the faults (33 FPS) and preceded
-    // a GPU ring timeout.
+    // every upload. A hot page stays writable and counts as always CPU modified, so it is
+    // uploaded on every use instead. The set is rebuilt every HotPeriod.
     //
-    // BB_HOT_PAGES=2, measured: a page becomes hot only when the guest wrote it before nearly every
-    // use - at least HotMinFaults faults in a HotWindow, and no more than HotUsesPerFault uses per
-    // fault. Re-uploading it on each use then copies what the faults made it copy anyway, without
-    // the fault and the re-protect; a page written once and read many times stays protected.
+    // A page becomes hot only when the guest wrote it before nearly every use - at least
+    // HotMinFaults faults in a HotWindow, and no more than HotUsesPerFault uses per fault.
+    // Re-uploading it on each use then copies what the faults made it copy anyway, without the
+    // fault and the re-protect; a page written once and read many times stays protected.
     // HotUsesPerFault was 2 until 0.9.37 beta 2: per-frame constants read by several draws never
     // qualified (14-62 hot pages at 2800 write faults/s), and each fault cost stage B a re-protect
-    // (0.35 us per packet, ~7% of it); the uploads run on the copy threads. At
-    // most HotMaxPages pages are hot at once (8 MiB), so a scene full of them cannot grow the set
-    // as the =1 rule did.
-    static int HotMode() {
-        static const int mode = [] {
+    // (0.35 us per packet, ~7% of it); the uploads run on the copy threads. At most HotMaxPages
+    // pages are hot at once (8 MiB), so a scene full of them cannot grow the set without bound
+    // (the earlier rule, hot after two faults, grew it to ~14k pages in Hunter's Nightmare and
+    // cost 33 FPS; removed in 0.4.4 beta 28). On by default since 0.4.4 beta 28 (the launcher's
+    // since Lantern 0.9.37 beta 4); BB_HOT_PAGES=0: off.
+    static bool HotPagesEnabled() {
+        static const bool on = [] {
             const char* env = std::getenv("BB_HOT_PAGES");
-            return env && (env[0] == '1' || env[0] == '2') ? env[0] - '0' : 0;
+            return !env || env[0] != '0';
         }();
-        return BbToggle::Disabled(BbToggle::HotPages) ? 0 : mode;
+        return on && !BbToggle::Disabled(BbToggle::HotPages);
     }
-    static bool HotPagesEnabled() { return HotMode() != 0; }
     static constexpr u8 HotMinFaults = 16;
     static constexpr u32 HotUsesPerFault = 8;
     static constexpr auto HotWindow = std::chrono::seconds(2);
     static constexpr s64 HotMaxPages = 2048;
 
     void CountUses(size_t start_page, size_t end_page) {
-        if (HotMode() != 2) {
+        if (!HotPagesEnabled()) {
             return;
         }
         for (size_t page = start_page; page < end_page; ++page) {
@@ -300,7 +288,6 @@ private:
     }
     // A short period re-protects thousands of pages at once and each faults again before it is
     // hot, a fault storm (a 2 s period gave ~20k faults/s and frame spikes).
-    static constexpr u8 HotFaults = 2;
     static constexpr auto HotPeriod = std::chrono::seconds(20);
 
     void CountWriteFaults(size_t start_page, size_t end_page) {
@@ -313,41 +300,26 @@ private:
             if (!hot_enabled) {
                 continue;
             }
-            if (HotMode() == 2) {
-                const auto now = std::chrono::steady_clock::now();
-                if (now - window_start > HotWindow) {
-                    write_faults.fill(0);
-                    uses.fill(0);
-                    window_start = now;
-                }
-                if (write_faults[page] != 0xff) {
-                    ++write_faults[page];
-                }
-                if (write_faults[page] < HotMinFaults || hot.Get(page) ||
-                    uses[page] > HotUsesPerFault * write_faults[page] ||
-                    BbStats::hot_pages.load(std::memory_order_relaxed) >= HotMaxPages) {
-                    continue;
-                }
-                if (num_hot == 0) {
-                    hot_since = now;
-                }
-                hot.Set(page);
-                ++num_hot;
-                BbStats::hot_pages.fetch_add(1, std::memory_order_relaxed);
-                continue;
+            const auto now = std::chrono::steady_clock::now();
+            if (now - window_start > HotWindow) {
+                write_faults.fill(0);
+                uses.fill(0);
+                window_start = now;
             }
-            if (write_faults[page] < HotFaults) {
+            if (write_faults[page] != 0xff) {
                 ++write_faults[page];
+            }
+            if (write_faults[page] < HotMinFaults || hot.Get(page) ||
+                uses[page] > HotUsesPerFault * write_faults[page] ||
+                BbStats::hot_pages.load(std::memory_order_relaxed) >= HotMaxPages) {
                 continue;
             }
-            if (!hot.Get(page)) {
-                if (num_hot == 0) {
-                    hot_since = std::chrono::steady_clock::now();
-                }
-                hot.Set(page);
-                ++num_hot;
-                BbStats::hot_pages.fetch_add(1, std::memory_order_relaxed);
+            if (num_hot == 0) {
+                hot_since = now;
             }
+            hot.Set(page);
+            ++num_hot;
+            BbStats::hot_pages.fetch_add(1, std::memory_order_relaxed);
         }
     }
 

@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using BloodborneLauncher.Build;
 
 namespace BloodborneLauncher.Core
@@ -6,8 +6,8 @@ namespace BloodborneLauncher.Core
     /// <summary>
     /// Where things live. The package folder (PortDir) holds the launcher, Bloodborne.exe and the
     /// player's files - config.ini, mods.json, patches.json, user, mods, logs (its data folder,
-    /// BB_DATA_DIR) - and the engine in engine\: out\bb-probe.exe, scripts\run_windows.py and a
-    /// bundled Python. Older packages had the engine at the top (EngineDirOf handles both).
+    /// BB_DATA_DIR) - and the engine in engine\: out\bb-start.exe, which starts out\bb-probe.exe.
+    /// Older packages had the engine at the top (EngineDirOf handles both).
     /// Launcher settings are per-user, in %APPDATA%\Hunters Workshop\settings.json.
     /// </summary>
     public static class Paths
@@ -59,14 +59,13 @@ namespace BloodborneLauncher.Core
             name + ".exe";
 #endif
 
-        /// <summary>A package's engine folder: its engine\, or the package itself (older layout).</summary>
+        /// <summary>A package's engine folder: its engine\, or the folder itself when it is the engine.</summary>
         public static string EngineDirOf(string dir) =>
-            File.Exists(Path.Combine(dir, "engine", "out", Program("bb-probe"))) ||
-            File.Exists(Path.Combine(dir, "engine", "scripts", "run_windows.py"))
+            File.Exists(Path.Combine(dir, "engine", "out", Program("bb-probe")))
                 ? Path.Combine(dir, "engine")
                 : dir;
 
-        /// <summary>The engine in use: out\bb-probe.exe, scripts, patches, shaders and Python.</summary>
+        /// <summary>The engine in use: out\bb-probe.exe and bb-start.exe, patches, data and AMD's FSR files.</summary>
         public static string EngineDir => EngineDirOf(PortDir);
 
         /// <summary>The engine and its DLLs.</summary>
@@ -96,27 +95,35 @@ namespace BloodborneLauncher.Core
             }
         }
 
-        /// <summary>The DLSS runtime's version: the DLL's file version, or the end of the .so's name.</summary>
-        public static string DlssVersion(string runtime) => OperatingSystem.IsWindows()
-            ? System.Diagnostics.FileVersionInfo.GetVersionInfo(runtime).FileVersion ?? ""
-            : Path.GetFileName(runtime)["libnvidia-ngx-dlss.so.".Length..];
+        /// <summary>0.4.4 beta 27: AMD's FSR SDK runtime in the engine's amd-fsr folder
+        /// (tools/fetch_amd_fsr.sh): its loader and upscaler DLLs. Windows only.</summary>
+        public static bool AmdFsrPresent => OperatingSystem.IsWindows() &&
+            File.Exists(Path.Combine(EngineDir, "amd-fsr", "amd_fidelityfx_loader_vk.dll")) &&
+            File.Exists(Path.Combine(EngineDir, "amd-fsr", "amd_fidelityfx_upscaler_vk.dll"));
 
-        /// <summary>The Bloodborne PC engine: out\bb-probe.exe and what starts it (out\bb-start.exe, or
-        /// scripts\run_windows.py before 0.9.32), in the folder or its engine\.</summary>
+        /// <summary>The DLSS runtime's version ("310.9.16"): the DLL's file version from its numbers (its
+        /// version text has commas: "310,9,16,0"), or the end of the .so's name.</summary>
+        public static string DlssVersion(string runtime)
+        {
+            if (!OperatingSystem.IsWindows()) return Path.GetFileName(runtime)["libnvidia-ngx-dlss.so.".Length..];
+            var info = System.Diagnostics.FileVersionInfo.GetVersionInfo(runtime);
+            if (info.FileMajorPart == 0 && info.FileMinorPart == 0) return info.FileVersion ?? "";
+            var version = $"{info.FileMajorPart}.{info.FileMinorPart}.{info.FileBuildPart}";
+            return info.FilePrivatePart != 0 ? $"{version}.{info.FilePrivatePart}" : version;
+        }
+
+        /// <summary>The Bloodborne PC engine: out\bb-probe.exe and out\bb-start.exe, which starts it, in the
+        /// folder or its engine\.</summary>
         public static bool IsPortDir(string? dir)
         {
             if (string.IsNullOrWhiteSpace(dir)) return false;
             var engine = EngineDirOf(dir);
             return File.Exists(Path.Combine(engine, "out", Program("bb-probe"))) &&
-                   (File.Exists(Path.Combine(engine, "out", Program("bb-start"))) ||
-                    File.Exists(Path.Combine(engine, "scripts", "run_windows.py")));
+                   File.Exists(Path.Combine(engine, "out", Program("bb-start")));
         }
 
-        /// <summary>The native start (0.9.32 and later): the boot image, mods, patches, then the game.</summary>
+        /// <summary>The native start: the boot image, mods, patches, then the game.</summary>
         public static string Start => Path.Combine(EngineDir, "out", Program("bb-start"));
-
-        /// <summary>The Python an older engine started with (scripts\run_windows.py).</summary>
-        public static string Python => Path.Combine(EngineDir, "tools", "python", "python.exe");
 
         /// <summary>The port next to the game folder (its usual layout: &lt;port&gt;\CUSA03173).</summary>
         public static string? PortBesideGame(string gameDir)

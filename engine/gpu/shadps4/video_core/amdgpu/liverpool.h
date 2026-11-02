@@ -85,6 +85,11 @@ struct Liverpool {
         u64 position;
     };
     std::deque<PendingFence> pending_fences;
+    /// 0.4.4 beta 20: waits on label+4 no longer answered from a 4-byte fence's "high half"
+    /// (PendingFenceValue; the frame statistics, with the fence submissions line).
+    static inline std::atomic<u64> fence_high_half_refused{0};
+    /// 0.4.4 beta 20: WRITE_DATA packets on the compute queues (stored by the CPU at decode).
+    static inline std::atomic<u64> compute_write_data{0};
     void NotePendingFences(const auto& event);
     bool PendingFenceValue(VAddr address, u32& value);
     void NotePendingWrite(const struct PM4CmdWriteData& write_data, u32 num_bytes);
@@ -114,8 +119,6 @@ public:
         if (frame != 0) {
             frame_ends.emplace_back(submissions_total, frame);
         }
-        mapped_queues[GfxQueueId].ccb_buffer_offset = 0;
-        mapped_queues[GfxQueueId].dcb_buffer_offset = 0;
         submit_done = true;
         submit_cv.notify_one();
     }
@@ -123,6 +126,21 @@ public:
     void WaitGpuIdle() noexcept {
         std::unique_lock lk{submit_mutex};
         submit_cv.wait(lk, [this] { return num_submits == 0; });
+    }
+
+    /// bbport BB_HONEST_LABELS: the GPU has got to the last of its submissions while work waits
+    /// for it (Rasterizer::Announce): wakes this thread from its idle wait to hand that over.
+    void WakeForGpu() noexcept {
+        {
+            std::scoped_lock lk{submit_mutex};
+            gpu_wants_work.store(true, std::memory_order_relaxed);
+        }
+        submit_cv.notify_all();
+    }
+
+    /// bbport: this thread is waiting for the game's next submission, everything before decoded.
+    bool DecoderIdle() const noexcept {
+        return decoder_idle.load(std::memory_order_acquire);
     }
 
     /// bbport: also the draw recording thread and the fences it deferred are done (see
@@ -165,14 +183,6 @@ public:
             ++num_commands;
             submit_cv.notify_one();
         }
-    }
-
-    void ReserveCopyBufferSpace() {
-        GpuQueue& gfx_queue = mapped_queues[GfxQueueId];
-        std::scoped_lock lk(gfx_queue.m_access);
-        constexpr size_t GfxReservedSize = 2_MB >> 2;
-        gfx_queue.ccb_buffer.reserve(GfxReservedSize);
-        gfx_queue.dcb_buffer.reserve(GfxReservedSize);
     }
 
     inline ComputeProgram& GetCsRegs() {
@@ -233,8 +243,6 @@ private:
         Handle handle;
     };
 
-    using CmdBuffer = std::pair<std::span<const u32>, std::span<const u32>>;
-    CmdBuffer CopyCmdBuffers(std::span<const u32> dcb, std::span<const u32> ccb);
     /// bbport: a submission's command buffers copied when the guest submits them
     /// (BB_COPY_GPU_BUFFERS): the guest reused their memory before the GPU thread decoded
     /// them ("PM4 type 0" from zeros or the next frame's commands, while an area loads).
@@ -259,10 +267,6 @@ private:
 
     struct GpuQueue {
         std::mutex m_access{};
-        std::atomic<u32> dcb_buffer_offset;
-        std::atomic<u32> ccb_buffer_offset;
-        std::vector<u32> dcb_buffer;
-        std::vector<u32> ccb_buffer;
         std::queue<Task::Handle> submits{};
         ComputeProgram cs_state{};
     };
@@ -306,6 +310,21 @@ private:
     /// Frames whose graphics submissions are all decoded are reported finished once the GPU has
     /// executed the work recorded so far (GPU command thread).
     void SignalDecodedFrames();
+    /// The newest frame whose graphics submissions are all decoded, taken off frame_ends (0:
+    /// none): reported finished by the caller (the frame end's task, or SignalDecodedFrames).
+    u64 TakeDecodedFrame();
+    /// BB_PIPE_SIGNALS, GPU command thread. The game usually ends a frame (sceGnmSubmitDone) right
+    /// after its last submission, before this thread has decoded it. Its frame end is then done
+    /// at its boundary, as that submission's decoding ends: the frame's cache work, its
+    /// retirement and one submission in one task (FrameEndTask), instead of the retirement alone
+    /// there and the frame end once this thread runs out of work (the profile's two submissions
+    /// back to back, 0.4.4 beta 9 to 11). False, and as before, when the game has not ended the
+    /// frame yet or has ended a later one too.
+    bool EndFrameAtBoundary();
+    /// Whether the submission whose decoding is ending is the last of a frame the game has
+    /// already ended (EndFrameAtBoundary follows it): its own end check (SubmitForSignals) is left
+    /// out, as the frame end submits right after it.
+    bool EndsSignalledFrame();
     /// BB_HONEST_LABELS: GPU idle once the GPU has finished the work up to `generation` and nothing
     /// was submitted since (the interrupt, work_retired).
     void SignalGpuIdle(u64 generation);
@@ -319,6 +338,9 @@ private:
     std::atomic<bool> submit_done{};
     std::mutex submit_mutex;
     std::condition_variable_any submit_cv;
+    /// bbport BB_HONEST_LABELS: set by WakeForGpu (under submit_mutex), taken by the idle wait.
+    std::atomic<bool> gpu_wants_work{false};
+    std::atomic<bool> decoder_idle{false};
     std::queue<Common::UniqueFunction<void>> command_queue{};
     std::thread::id gpu_id;
 #if defined(__linux__) || defined(_WIN32)

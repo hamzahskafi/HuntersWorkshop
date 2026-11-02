@@ -17,6 +17,7 @@
 #include "bbport_threads.h"
 #include "core/emulator_settings.h"
 #include "shader_recompiler/frontend/fetch_shader.h"
+#include "shader_recompiler/gds_append.h"
 #include "shader_recompiler/info.h"
 #include "video_core/cache_storage.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
@@ -27,9 +28,30 @@ namespace Serialization {
 /* You should increment versions below once corresponding serialization scheme is changed. */
 static constexpr u32 ShaderBinaryVersion = 7u; // bbport: interpolated integer fix (Pascal)
 static constexpr u32 MotionShaderBinaryVersion = 8u; // runtime address descriptor, set 1
+static constexpr u32 GdsShaderBinaryVersion = 9u; // 0.4.4 beta 19: GDS append per subgroup
+// The three binary versions are separate: a change to all shaders' code moves all three (to
+// numbers none of them had).
 static constexpr u32 ShaderMetaVersion = 8u; // bbport: HwFragmentRuntimeInfo::depth_first
 static constexpr u32 PipelineKeyVersion = 7u; // pointer-free pipeline state + generated fragment,
                                                // decided by the draw's own registers without a pixel shader
+
+/// The binary version a shader's record carries. 0.4.4 beta 19: shaders that use the GDS buffer
+/// carry their own while GDS appends are translated per subgroup (gds_append.h), so only they
+/// are compiled again, and BB_GDS_APPEND=lane takes their earlier binaries back; others as
+/// before (vertex shaders with motion vectors: their own since 0.4.4 beta 15). 0.4.4 beta 20:
+/// compute shaders only (the others' appends are per lane again, as their earlier binaries).
+static u32 BinaryVersionFor(const Shader::Info& info, const Shader::StageSpecialization& spec) {
+    if (Shader::GdsAppendPerSubgroup(info.hw_stage)) {
+        for (const auto& buffer : info.buffers) {
+            if (buffer.buffer_type == Shader::BufferType::GdsBuffer) {
+                return GdsShaderBinaryVersion;
+            }
+        }
+    }
+    const bool vertex_motion = info.hw_stage == Shader::HwStage::Vertex &&
+                               spec.runtime_info.hw.vs.motion_vectors;
+    return vertex_motion ? MotionShaderBinaryVersion : ShaderBinaryVersion;
+}
 } // namespace Serialization
 
 namespace Vulkan {
@@ -91,10 +113,7 @@ std::vector<u8> SerializeShaderMeta(const Shader::Info& info, const Shader::Stag
     Serialization::Writer meta{ar};
 
     meta.Write(Serialization::ShaderMetaVersion);
-    const bool vertex_motion = info.hw_stage == Shader::HwStage::Vertex &&
-                               spec.runtime_info.hw.vs.motion_vectors;
-    meta.Write(vertex_motion ? Serialization::MotionShaderBinaryVersion
-                             : Serialization::ShaderBinaryVersion);
+    meta.Write(Serialization::BinaryVersionFor(info, spec));
     meta.Write(perm_hash);
     meta.Write(perm_idx);
     spec.Serialize(ar);
@@ -129,10 +148,7 @@ void RegisterShaderMeta(const Shader::Info& info,
     Serialization::Writer meta{ar};
 
     meta.Write(Serialization::ShaderMetaVersion);
-    const bool vertex_motion = info.hw_stage == Shader::HwStage::Vertex &&
-                               spec.runtime_info.hw.vs.motion_vectors;
-    meta.Write(vertex_motion ? Serialization::MotionShaderBinaryVersion
-                             : Serialization::ShaderBinaryVersion);
+    meta.Write(Serialization::BinaryVersionFor(info, spec));
 
     meta.Write(perm_hash);
     meta.Write(perm_idx);
@@ -168,7 +184,8 @@ bool LoadShaderMeta(Serialization::Archive& ar, Shader::Info& info,
     u32 binary_version{};
     meta.Read(binary_version);
     if (binary_version != Serialization::ShaderBinaryVersion &&
-        binary_version != Serialization::MotionShaderBinaryVersion) {
+        binary_version != Serialization::MotionShaderBinaryVersion &&
+        binary_version != Serialization::GdsShaderBinaryVersion) {
         return false;
     }
 
@@ -186,10 +203,8 @@ bool LoadShaderMeta(Serialization::Archive& ar, Shader::Info& info,
 
     // Only old motion vertex binaries embed process-local addresses. Other v7 shaders remain
     // reusable; v8 motion binaries load the current addresses from a renderer-owned descriptor.
-    const bool vertex_motion = info.hw_stage == Shader::HwStage::Vertex &&
-                               spec.runtime_info.hw.vs.motion_vectors;
-    if (binary_version != (vertex_motion ? Serialization::MotionShaderBinaryVersion
-                                        : Serialization::ShaderBinaryVersion)) {
+    // v9: shaders that use the GDS buffer, with appends per subgroup (0.4.4 beta 19).
+    if (binary_version != Serialization::BinaryVersionFor(info, spec)) {
         return false;
     }
 
@@ -318,6 +333,10 @@ bool GraphicsPipeline::SerializationSupport::Deserialize(Serialization::Archive&
 
 bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar, u32 version) {
     sel.graphics_key.Deserialize(ar);
+    // 0.4.4 beta 15: keys saved before it carry the motion attachment as RGBA32F.
+    if (sel.graphics_key.motion_vectors) {
+        GraphicsPipelineKey::SetMotionTarget(sel.graphics_key);
+    }
     if (sel.graphics_key.motion_vectors &&
         !instance.GetPhysicalDevice().getFeatures().vertexPipelineStoresAndAtomics) {
         return false;
@@ -384,13 +403,22 @@ bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar, u32 version
         !sel.fetch_shader->attributes.empty() && sdata.vertex_attributes.empty()) {
         return false;
     }
-    // A fragment shader that reads the motion varyings needs a vertex shader that writes them
-    // (validation found keys pairing one with a vertex shader without them: undefined motion).
+    // Object motion is one choice per pipeline in play (PipelineCache's sel.motion): the key's
+    // motion attachment, the vertex shader's motion varyings and its address descriptor set, the
+    // fragment shader's motion output. A stage's hash is its program's with the permutation's
+    // index, which follows the order a run first compiled them in, so a record can find another
+    // run's permutation stored under its stage. A record whose stages and key disagree is left out
+    // and compiles again in play: a fragment shader reading motion varyings no vertex shader
+    // writes (undefined motion, found by validation), a vertex shader that reads the motion set
+    // with a key whose layout has none (invalid Vulkan, a crash on stricter drivers; found by
+    // Lantern 0.9.39 beta 26), or a motion attachment nothing writes.
     const auto& fs_runtime = sel.runtime_infos[u32(Shader::SwStage::Fragment)];
     const auto& vs_runtime = sel.runtime_infos[u32(Shader::SwStage::Vertex)];
-    if (sel.graphics_key.stage_hashes[u32(Shader::SwStage::Fragment)] && fs_runtime.hw.fs.motion_vectors &&
-        !(sel.graphics_key.stage_hashes[u32(Shader::SwStage::Vertex)] &&
-          vs_runtime.hw_stage == Shader::HwStage::Vertex && vs_runtime.hw.vs.motion_vectors)) {
+    const bool key_motion = sel.graphics_key.motion_vectors != 0;
+    const bool has_vs = sel.graphics_key.stage_hashes[u32(Shader::SwStage::Vertex)] != 0;
+    const bool has_fs = sel.graphics_key.stage_hashes[u32(Shader::SwStage::Fragment)] != 0;
+    const bool vs_motion = has_vs && vs_runtime.hw_stage == Shader::HwStage::Vertex && vs_runtime.hw.vs.motion_vectors;
+    if (vs_motion != key_motion || (has_fs && fs_runtime.hw.fs.motion_vectors != key_motion)) {
         return false;
     }
 
@@ -554,30 +582,27 @@ void PipelineCache::WarmUp() {
     // bbport: a GPU driver that crashes building one cached pipeline (an AMD driver did, at every
     // start) would end every start the same way. The pipelines being built are written to
     // warmup.running, one a line (the OS keeps the write when the process dies); the next start
-    // leaves those pipelines out and builds the others. BB_WARMUP_GUARD=0: not used.
+    // leaves those pipelines out and builds the others.
     std::unordered_set<std::string> crashed;
     std::filesystem::path guard_path;
     if (const auto folder = database.FolderPath(); !folder.empty()) {
-        const char* guard_env = std::getenv("BB_WARMUP_GUARD");
-        if (!(guard_env && guard_env[0] == '0')) {
-            guard_path = folder / "warmup.running";
-            if (std::ifstream last{guard_path}; last) {
-                for (std::string line; std::getline(last, line);) {
-                    while (!line.empty() && (line.back() == ' ' || line.back() == '\r')) {
-                        line.pop_back();
-                    }
-                    if (!line.empty()) {
-                        crashed.insert(line);
-                    }
+        guard_path = folder / "warmup.running";
+        if (std::ifstream last{guard_path}; last) {
+            for (std::string line; std::getline(last, line);) {
+                while (!line.empty() && (line.back() == ' ' || line.back() == '\r')) {
+                    line.pop_back();
+                }
+                if (!line.empty()) {
+                    crashed.insert(line);
                 }
             }
-            for (const auto& name : crashed) {
-                database.Remove(Storage::BlobType::PipelineKey, name);
-                std::printf("GPU cache: the GPU driver crashed building cached pipeline %s at the last "
-                            "start (or one built beside it); it is left out (it compiles again when a "
-                            "draw needs it)\n",
-                            name.c_str());
-            }
+        }
+        for (const auto& name : crashed) {
+            database.Remove(Storage::BlobType::PipelineKey, name);
+            std::printf("GPU cache: the GPU driver crashed building cached pipeline %s at the last "
+                        "start (or one built beside it); it is left out (it compiles again when a "
+                        "draw needs it)\n",
+                        name.c_str());
         }
     }
     // bbport: a driver that crashes in the warm-up may do so on many cached pipelines: on an

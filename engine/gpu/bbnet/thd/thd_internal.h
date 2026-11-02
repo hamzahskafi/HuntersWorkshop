@@ -56,7 +56,6 @@ long long IntOf(const Json& o, const char* key, long long dflt = 0);
 std::string NpBase();
 bool NpPost(const std::string& path, const Json& body, Json& out, std::string& error,
             int timeout_ms = 8000);
-bool NpGet(const std::string& path, Json& out, std::string& error, int timeout_ms = 8000);
 
 // ---- the dispatcher: one guest thread, so the callbacks run where the game expects them.
 enum class Prio { Context = 0, Request = 1, Signaling = 2, RoomEvent = 3 };
@@ -101,7 +100,8 @@ Peer PeersProvisional(const std::string& id, std::uint32_t addr, std::uint16_t p
 bool ServerContextStart(Json& reply, std::string& error);
 bool ServerCreateRoom(int max_members, const Json& extra, Json& reply, std::string& error);
 bool ServerJoinRoom(std::uint64_t room_id, Json& reply, std::string& error);
-bool ServerLeaveRoom(const std::string& session_id, int member_id, Json& reply, std::string& error);
+bool ServerLeaveRoom(const std::string& session_id, int member_id, Json& reply, std::string& error,
+                     int timeout_ms = 8000);
 int ServerHeartbeat(const std::string& session_id, int member_id); // 1 in the room, 0 not, -1 no answer
 bool ServerKickMember(const std::string& session_id, int member_id, int kicker_id,
                       const std::uint8_t* opt, std::size_t opt_len, std::string& error);

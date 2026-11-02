@@ -288,23 +288,10 @@ void CameraMotion::OnConstants(const float* data) {
     }
     std::memcpy(pass_camera.view.data(), data + 8, 12 * sizeof(float));
     std::memcpy(pass_camera.inv_view.data(), data + 180, 12 * sizeof(float));
-    // bbport: BB_CAMERA_INVERSE=own: the inverse of the view matrix itself instead of the one the
-    // game stores beside it (A/B; they agree to float precision). BB_CAMERA_LOG prints the gap.
-    static const bool own_inverse = [] {
-        const char* env = std::getenv("BB_CAMERA_INVERSE");
-        return env && std::strcmp(env, "own") == 0;
-    }();
-    const auto computed_inverse = InverseAffine(pass_camera.view);
-    float inverse_gap = 0.0f;
-    for (int i = 0; i < 12; ++i) {
-        inverse_gap = std::max(inverse_gap, std::abs(computed_inverse[i] - pass_camera.inv_view[i]));
-    }
-    const auto game_inverse = pass_camera.inv_view;
-    if (own_inverse != BbToggle::Disabled(BbToggle::CameraOwnInverse)) {
-        pass_camera.inv_view = computed_inverse;
-    }
     // bbport: BB_CAMERA_LOG=1 prints the camera position every 100 ms (scripted tests of how far
-    // the player moves in a given time at different frame rates).
+    // the player moves in a given time at different frame rates), with the inverse of the view
+    // matrix itself beside the game's stored one, which the camera vectors use (they agree to
+    // float precision).
     static const bool camera_log = std::getenv("BB_CAMERA_LOG") != nullptr;
     if (camera_log) {
         using Clock = std::chrono::steady_clock;
@@ -312,6 +299,12 @@ void CameraMotion::OnConstants(const float* data) {
         static auto next = start;
         if (const auto now = Clock::now(); now >= next) {
             next = now + std::chrono::milliseconds(100);
+            const auto& game_inverse = pass_camera.inv_view;
+            const auto computed_inverse = InverseAffine(pass_camera.view);
+            float inverse_gap = 0.0f;
+            for (int i = 0; i < 12; ++i) {
+                inverse_gap = std::max(inverse_gap, std::abs(computed_inverse[i] - game_inverse[i]));
+            }
             std::printf("Camera: %.3f s at %.3f %.3f %.3f (inverse of view: %.3f %.3f %.3f, largest "
                         "difference %.4f)\n",
                         std::chrono::duration<double>(now - start).count(), game_inverse[3],
@@ -326,8 +319,7 @@ void CameraMotion::OnConstants(const float* data) {
         const char* env = std::getenv("BB_CAMERA_Y");
         return !env ? 0.0f : std::strcmp(env, "up") == 0 ? -1.0f : std::strcmp(env, "down") == 0 ? 1.0f : 0.0f;
     }();
-    const float y_sign = (forced_y != 0.0f ? forced_y : gbuffer_y_sign) *
-                         (BbToggle::Disabled(BbToggle::CameraYFlip) ? -1.0f : 1.0f);
+    const float y_sign = forced_y != 0.0f ? forced_y : gbuffer_y_sign;
     pass_camera.proj = {data[52] * gbuffer_x_sign, data[57] * y_sign,
                     data[62], data[63]};
     {
@@ -449,12 +441,6 @@ void CameraMotion::OnDisplayPass(VideoCore::ImageId frame) {
 }
 
 bool CameraMotion::MirroredPasses() const noexcept {
-    // BB_REFLECTION_PASSES=0: every frame with several passes is a preview, as before.
-    static const bool on = [] {
-        const char* env = std::getenv("BB_REFLECTION_PASSES");
-        return !(env && env[0] == '0');
-    }();
-    if (!on) return false;
     const u32 n = std::min<u32>(frame_gbuffer_passes, u32(pass_positions.size()));
     const auto& first = pass_positions[0];
     for (u32 i = 1; i < n; ++i) {
@@ -501,7 +487,7 @@ void CameraMotion::Overlay(VideoCore::ImageId frame) {
         .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
     }));
 
-    scheduler.EndRendering();
+    scheduler.EndRendering(Vulkan::GpuSavings::PassBreak::Motion);
     runtime.Transit(&depth, vk::ImageLayout::eGeneral, vk::PipelineStageFlagBits2::eComputeShader,
                     vk::AccessFlagBits2::eShaderRead);
     runtime.Transit(&color, vk::ImageLayout::eGeneral, vk::PipelineStageFlagBits2::eComputeShader,

@@ -22,7 +22,6 @@
 #include "bbport_heap_sites.h"
 #include "bbport_wait_trace.h"
 #include "bbport_freeze.h"
-#include "bbport_settings.h"
 #include "video_core/renderer_vulkan/vk_frame_capture.h"
 #include "common/debug.h"
 #include "common/thread.h"
@@ -403,6 +402,24 @@ static void LogRam() {
                 mib(m.total_phys), mib(m.commit_left), mib(BbStats::vk_image_bytes.load()),
                 mib(BbStats::live_image_bytes.load()),
                 static_cast<unsigned long long>(BbStats::live_images.load()));
+#ifdef _WIN32
+    // bbport: VRAM, once a minute: the driver's count of the game's use against its budget (what an
+    // overlay shows), then the engine's part of it: VMA's blocks, images, the game's data in VRAM.
+    // (Linux: PrintMemory's Memory line.)
+    u64 vram_used = 0, vram_budget = 0, vma_blocks = 0, vma_used = 0;
+    Vulkan::VramUsage(vram_used, vram_budget);
+    Vulkan::VmaDeviceUsage(vma_blocks, vma_used);
+    if (vram_budget != 0) {
+        std::printf("VRAM: %llu of %llu MiB in use (the driver's count); Vulkan memory %llu MiB: VMA "
+                    "blocks %llu MiB (%llu MiB of them used), images %llu MiB, the game's data %llu MiB "
+                    "(%llu MiB of it unused)\n",
+                    mib(vram_used), mib(vram_budget),
+                    mib(BbStats::device_alloc_bytes.load() - BbStats::device_free_bytes.load()),
+                    mib(vma_blocks), mib(vma_used), mib(BbStats::vk_image_bytes.load()),
+                    mib(BbStats::residency_alloc_bytes.load()),
+                    mib(BbStats::residency_unused_bytes.load()));
+    }
+#endif
     // Where that RAM is: on the first report, then every five minutes. Listing every resident page
     // takes a while, so not on this (the presenting) thread.
     static int reports = 0;
@@ -490,10 +507,7 @@ static void LogLoad(double seconds, u64 flips, double worst_ms, u64 slow) {
 void VideoOutDriver::Flip(const Request& req) {
     BbFreeze::NoteFlip();
     // Update HDR status before presenting, then present the frame (bbport: on the swap thread).
-    // bbport: frame generation drops its generated frame while the next flip waits here.
-    presenter->NoteFlipQueued(1);
     RunPresenter([this, frame = req.frame, hdr = req.port->is_hdr] {
-        presenter->NoteFlipQueued(-1);
         presenter->SetHDR(hdr);
         presenter->Present(frame);
     });
@@ -617,23 +631,27 @@ void VideoOutDriver::Flip(const Request& req) {
                         (sys_us - last_sys) / 1e3, static_cast<unsigned long long>(invol - last_invol),
                         static_cast<unsigned long long>(vol - last_vol));
         }
+        // bbport: the parts of image create and refresh (texture loading), and how many images
+        // were given memory or had their guest data checked. Taken every frame: a long frame's
+        // figures are its own, not everything since the last.
+        static u64 last_parts[5], last_allocs, last_checks;
+        const u64 parts[5] = {BbStats::t_image_query.load(), BbStats::t_image_alloc.load(),
+                              BbStats::t_refresh_hash.load(), BbStats::t_refresh_obtain.load(),
+                              BbStats::t_refresh_detile.load()};
+        const u64 allocs = BbStats::image_allocs.load(), checks = BbStats::image_checks.load();
         if (frame_ms > 40.0 && last_gpu_ns != 0) {
             std::printf("       ms in: resident %.1f, protect %.1f, image create %.1f, "
                         "image refresh %.1f, staging %.1f, waiting for host copies %.1f\n",
                         (t_now[0] - last_t[0]) / 1e6, (t_now[1] - last_t[1]) / 1e6,
                         (t_now[2] - last_t[2]) / 1e6, (t_now[3] - last_t[3]) / 1e6,
                         (t_now[4] - last_t[4]) / 1e6, (t_now[5] - last_t[5]) / 1e6);
-            // bbport: the parts of image create and refresh (texture loading).
-            static u64 last_parts[5];
-            const u64 parts[5] = {BbStats::t_image_query.load(), BbStats::t_image_alloc.load(),
-                                  BbStats::t_refresh_hash.load(), BbStats::t_refresh_obtain.load(),
-                                  BbStats::t_refresh_detile.load()};
-            std::printf("       of which: format query %.1f, allocation %.1f; hashing %.1f, "
-                        "source data %.1f, detiling %.1f\n",
+            std::printf("       of which: format query %.1f, allocation %.1f (%llu images); "
+                        "hashing %.1f, source data %.1f, detiling %.1f (%llu images checked)\n",
                         (parts[0] - last_parts[0]) / 1e6, (parts[1] - last_parts[1]) / 1e6,
+                        static_cast<unsigned long long>(allocs - last_allocs),
                         (parts[2] - last_parts[2]) / 1e6, (parts[3] - last_parts[3]) / 1e6,
-                        (parts[4] - last_parts[4]) / 1e6);
-            std::copy(std::begin(parts), std::end(parts), std::begin(last_parts));
+                        (parts[4] - last_parts[4]) / 1e6,
+                        static_cast<unsigned long long>(checks - last_checks));
             std::printf("       GPU thread page faults %llu (process %llu), protection faults %llu; "
                         "protect calls %llu (%llu pages), of which write-revoking %llu (%llu pages)\n",
                         static_cast<unsigned long long>(minflt - last_minflt),
@@ -644,6 +662,9 @@ void VideoOutDriver::Flip(const Request& req) {
                         static_cast<unsigned long long>(rc - last_rc),
                         static_cast<unsigned long long>(rp - last_rp));
         }
+        std::copy(std::begin(parts), std::end(parts), std::begin(last_parts));
+        last_allocs = allocs;
+        last_checks = checks;
         last_pc = pc;
         last_pp = pp;
         last_rc = rc;
@@ -747,19 +768,29 @@ void VideoOutDriver::Flip(const Request& req) {
                                            ? double(gpu_us - window_gpu_us) / (all_draws - window_draws)
                                            : 0.0;
             const double draws_per_frame = frames ? double(all_draws - window_draws) / frames : 0.0;
+            // 0.4.4 beta 20: its work alone, without the idle spin counted in its CPU time (the
+            // engine map's clean-4): CPU time less the spin (not the sleep, which is no CPU
+            // time), per draw.
+            const u64 idle_ns = BbStats::gpu_idle_ns.exchange(0);
+            const u64 spin_ns = BbStats::gpu_spin_ns.exchange(0);
+            const double work_us_per_draw =
+                all_draws > window_draws
+                    ? std::max(0.0, double(gpu_us - window_gpu_us) - spin_ns / 1e3) /
+                          (all_draws - window_draws)
+                    : 0.0;
             window_draws = all_draws;
             window_gpu_us = gpu_us;
             std::printf("Frame stats: %.1f FPS, worst frame %.1f ms (vblank %u Hz); "
                         "%u shader/pipeline compiles, %.1f ms; %llu recorder syncs; "
                         "%.0f write faults/s, %lld hot pages; GPU thread %.2f us/draw, "
-                        "%.0f draws/frame, idle %.1f%%; blocked: recorder %.1f%%, host copies "
+                        "%.0f draws/frame, idle %.1f%%, work %.2f us/draw; blocked: recorder "
+                        "%.1f%%, host copies "
                         "%.1f%% (%.0f/frame, %.0f/frame not needed), copy threads %.1f%%, GPU ticks %.1f%%; "
                         "reduced-size draws %.0f/frame of %.0f in the scene\n",
                         frames / window, worst_ms, EmulatorSettings.GetVblankFrequency(), compiles,
                         compile_ns / 1e6, static_cast<unsigned long long>(direct),
                         faults / window, static_cast<long long>(BbStats::hot_pages.load()),
-                        us_per_draw, draws_per_frame,
-                        BbStats::gpu_idle_ns.exchange(0) / (window * 1e7),
+                        us_per_draw, draws_per_frame, idle_ns / (window * 1e7), work_us_per_draw,
                         BbStats::sync_recording_ns.exchange(0) / (window * 1e7),
                         BbStats::host_copies_wait_ns.exchange(0) / (window * 1e7),
                         frames ? double(BbStats::host_copy_waits.exchange(0)) / frames : 0.0,
@@ -770,7 +801,7 @@ void VideoOutDriver::Flip(const Request& req) {
                         frames ? double(BbStats::scene_draws.exchange(0)) / frames : 0.0);
             // bbport: where host copies and deferred fences were waited for (by call site, mostly
             // the draw recording thread's tasks), and the page protection changes of the draw
-            // recording thread and of the others (BB_DMA_WAITS, BB_FENCE_ORDER, BB_DEFER_PROTECT).
+            // recording thread and of the others (BB_DMA_WAITS, BB_FENCE_ORDER).
             {
                 const double f = frames ? double(frames) : 1.0;
                 const auto per_frame = [&](std::atomic<u64>& counter) {
@@ -812,18 +843,11 @@ void VideoOutDriver::Flip(const Request& req) {
                 }
                 const double other_calls = per_frame(BbStats::other_protect_calls);
                 const double other_ms = ms_per_frame(BbStats::other_protect_ns);
-                const double deferred_pages = per_frame(BbStats::deferred_protect_pages);
-                const double deferred_calls = per_frame(BbStats::deferred_protect_calls);
-                const double deferred_ms = ms_per_frame(BbStats::deferred_protect_ns);
                 std::printf("Stage B protects: %.1f/frame %.3f ms (uploads %.1f, textures %.1f, "
-                            "other %.1f); other threads %.1f/frame %.3f ms; deferred %.0f "
-                            "pages/frame, applied in %.1f calls/frame %.3f ms (bb:Protect or "
-                            "copies), copies that flushed %.1f/frame, cancelled %.0f pages/frame\n",
+                            "other %.1f); other threads %.1f/frame %.3f ms\n",
                             stage_b_calls, stage_b_ms, kind_calls[BbStats::ProtectUpload],
                             kind_calls[BbStats::ProtectTexture], kind_calls[BbStats::ProtectOther],
-                            other_calls, other_ms, deferred_pages, deferred_calls, deferred_ms,
-                            per_frame(BbStats::copy_flushes),
-                            per_frame(BbStats::deferred_cancelled_pages));
+                            other_calls, other_ms);
             }
             // bbport (docs/pipeline_compiles.md): what draws of pipelines still compiling did.
             {
@@ -856,8 +880,8 @@ void VideoOutDriver::Flip(const Request& req) {
             Vulkan::Breadcrumbs::PrintProgress();
             PrintMemory();
             if (const u64 in_place = BbStats::bound_in_place_bytes.exchange(0)) {
-                std::printf("Buffer bindings: %.1f MB/frame in place (%.1f GPU-written), %.1f MB/frame "
-                            "VRAM copies\n",
+                std::printf("Buffer bindings: %.1f MB/frame bound in place (%.1f GPU-written; the "
+                            "size bound, not what the GPU reads), %.1f MB/frame VRAM copies\n",
                             in_place / (frames * 1e6),
                             BbStats::bound_in_place_written_bytes.exchange(0) / (frames * 1e6),
                             BbStats::bound_vram_bytes.exchange(0) / (frames * 1e6));
@@ -902,9 +926,33 @@ void VideoOutDriver::Flip(const Request& req) {
                         (unsigned long long)BbStats::eop_decoded.load(),
                         (unsigned long long)BbStats::eop_written.load(),
                         (long long)(BbStats::eop_decoded.load() - BbStats::eop_written.load()));
-            if (const u64 early = BbStats::idle_flushes.exchange(0)) {
-                std::printf("Honest labels: %.1f submissions/frame sent early (GPU idle)\n",
-                            early / double(frames));
+            {
+                const u64 dry = BbStats::idle_flushes.exchange(0);
+                const u64 ahead = BbStats::ahead_flushes.exchange(0);
+                const u64 announced = BbStats::announced_flushes.exchange(0);
+                const u64 net = BbStats::net_flushes.exchange(0);
+                const u64 with_end = BbStats::retired_with_end.exchange(0);
+                const u64 alone = BbStats::retired_alone.exchange(0);
+                const u64 empty = BbStats::empty_flushes.exchange(0);
+                // 0.4.4 beta 20: waits on label+4 read from memory, not from a 4-byte fence's
+                // "high half" (0 before: the engine map's fence-1).
+                const u64 half = AmdGpu::Liverpool::fence_high_half_refused.exchange(0);
+                const u64 compute_writes = AmdGpu::Liverpool::compute_write_data.exchange(0);
+                if (dry || ahead || announced || net || empty || half || compute_writes) {
+                    std::printf("Fence submissions: %.1f/frame at the game's submission ends (GPU "
+                                "out of work %.1f, on its last %.1f), %.1f/frame when the GPU got "
+                                "to its last, %.1f/frame by the safety net (expected 0); frames "
+                                "retired with the frame end %.0f%%; empty ones not made "
+                                "%.1f/frame; waits on a 4-byte fence's next word read from memory "
+                                "%llu; compute-queue WRITE_DATA %llu\n",
+                                (dry + ahead) / double(frames), dry / double(frames),
+                                ahead / double(frames), announced / double(frames),
+                                net / double(frames),
+                                with_end + alone ? 100.0 * with_end / double(with_end + alone)
+                                                 : 0.0,
+                                empty / double(frames), static_cast<unsigned long long>(half),
+                                static_cast<unsigned long long>(compute_writes));
+                }
             }
             {
                 uint64_t sleeps = 0, sleep_ns = 0;
@@ -913,11 +961,6 @@ void VideoOutDriver::Flip(const Request& req) {
                     std::printf("Guest sleeps per frame: %.1f, %.2f ms\n", sleeps / double(frames),
                                 sleep_ns / (frames * 1e6));
                 }
-            }
-            if (const u64 copies = BbStats::shadow_copies.exchange(0)) {
-                std::printf("Shadow copies: %.0f/frame, %.1f MB/frame (in-place data the CPU writes, "
-                            "copied into VRAM for reading)\n",
-                            copies / double(frames), BbStats::shadow_bytes.exchange(0) / (frames * 1e6));
             }
             if (const u64 allocs = BbStats::gpu_range_allocs.exchange(0)) {
                 std::printf("Guest GPU memory: %.0f ranges/s handed out, %.2f MB/s\n", allocs / window,
@@ -1083,71 +1126,32 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
     // bbport: frame limit (see EmulatorSettings::GetFrameLimit). A request waits in the queue
     // until its slot; slots advance by one period (no drift) but never lag behind by more.
     u32 frame_limit = EmulatorSettings.GetFrameLimit();
-    // bbport: uncapped presets never present faster than the display refreshes. With Mailbox
-    // (the default) every frame past the refresh rate is rendered in full - scene, upscaler,
-    // post process - and then replaced in the mailbox before it is ever shown: GPU work and
-    // power for nothing (240 FPS on a 144 Hz screen threw away 40% of it). Fixed presets are
-    // left alone (their game speed follows the flip rate), and so is Immediate, chosen for
-    // tearing at the lowest latency. BB_CAP_TO_REFRESH=0 turns it off.
-    if (EmulatorSettings.IsUncappedVblank() && EmulatorSettings.GetPresentMode() != "Immediate") {
-        const char* env = std::getenv("BB_CAP_TO_REFRESH");
-        const u32 refresh = Frontend::DisplayRefreshHz();
-        if (!(env && env[0] == '0') && refresh >= 30 && (frame_limit == 0 || frame_limit > refresh)) {
-            std::printf("VideoOut: frame limit %u FPS lowered to the display's %u Hz "
-                        "(BB_CAP_TO_REFRESH=0 keeps it)\n", frame_limit, refresh);
-            frame_limit = refresh;
-        }
-    } else if (const u32 refresh = Frontend::DisplayRefreshHz();
-               refresh >= 30 && frame_limit > refresh + 1 &&
-               EmulatorSettings.GetPresentMode() == "Mailbox") {
-        std::printf("VideoOut: the %u FPS preset is faster than the display's %u Hz: about %u%% "
-                    "of the frames are rendered and never shown (a lower FPS preset saves that GPU "
-                    "work)\n", frame_limit, refresh, 100 - refresh * 100 / frame_limit);
+    // 0.4.4 beta 22: Uncapped is not held to the display's refresh rate any more (bbport's
+    // BB_CAP_TO_REFRESH did that with every present mode but Immediate, so Uncapped ran 60 on a
+    // 60 Hz screen): the launcher's V-Sync says how frames reach the screen, Off when Uncapped is
+    // chosen. What a rate above the display's costs, or where the display holds it, is logged.
+    const std::string present_mode = EmulatorSettings.GetPresentMode();
+    if (const u32 refresh = Frontend::DisplayRefreshHz();
+        refresh >= 30 && (frame_limit == 0 || frame_limit > refresh + 1)) {
+        if (present_mode == "Mailbox" && frame_limit)
+            std::printf("VideoOut: the %u FPS preset is faster than the display's %u Hz: about %u%% "
+                        "of the frames are rendered and never shown (a lower FPS preset saves that "
+                        "GPU work)\n", frame_limit, refresh, 100 - refresh * 100 / frame_limit);
+        else if (present_mode == "Mailbox")
+            std::printf("VideoOut: Uncapped with Mailbox: frames past the display's %u Hz are "
+                        "rendered and never shown\n", refresh);
+        else if (present_mode == "Fifo" || present_mode == "FifoRelaxed")
+            std::printf("VideoOut: %s waits for the display: the game runs at its %u Hz at most\n",
+                        present_mode.c_str(), refresh);
     }
     auto frame_period = frame_limit ? std::chrono::nanoseconds(1000000000 / frame_limit)
                                     : std::chrono::nanoseconds(0);
-    // bbport: frame generation's cap (BbSettings::frame_gen_cap, any present mode): the game at
-    // half the refresh rate, so its frame and the generated one fill every refresh (with Mailbox
-    // a faster game replaces generated frames before they are shown). Applied while generated
-    // frames are shown (BbSettings::frame_gen_active), back to the limit above otherwise.
-    const u32 base_limit = frame_limit;
-    // The frame limit caps the frames shown, generated ones included: the game runs at half of
-    // it (a 120 FPS limit is 60 + 60 generated, not 120 + 120). bbport: DLSS Frame Generation
-    // shows frame_gen_multiplier frames per game frame (up to 6): the limit and the cap divide by
-    // that. Only with the uncapped preset: the others (30, 60, 90, 120, 144) are fixed-timestep
-    // patches whose game speed follows the flip rate, and a halved limit ran the game in slow
-    // motion with twice the input lag (DLSS-G test, 60 FPS preset at 30).
-    static const bool variable_timestep = [] {
-        const char* fps = std::getenv("BB_FPS");
-        return fps && std::string_view{fps} == "uncap";
-    }();
-    const auto effective_limit = [&] {
-        const auto& s = BbSettings::Get();
-        if (!variable_timestep || !s.frame_gen_active.load(std::memory_order_relaxed)) {
-            return base_limit;
-        }
-        const u32 shown = u32(std::clamp(s.frame_gen_multiplier.load(std::memory_order_relaxed), 2,
-                                         BbSettings::FrameGenFramesMax + 1));
-        u32 limit = base_limit / shown;
-        const u32 refresh_share = Frontend::DisplayRefreshHz() / shown;
-        if (refresh_share >= 20 && s.frame_gen_cap.load(std::memory_order_relaxed)) {
-            limit = limit == 0 ? refresh_share : std::min(limit, refresh_share);
-        }
-        return limit == 0 ? base_limit : limit;
-    };
     auto next_flip = std::chrono::steady_clock::now();
     // A flip waits for its slot, a frame period after the one before: on time (within a quarter of a period)
     // the slots keep their cadence, so a sleep's overshoot never adds up. After a late flip they start again from
     // it (after bbport 0.7, deadinside28): a late frame is not followed by an early one (at 30 FPS 48 ms then
-    // 18 ms, a saw in the frame times). BB_PACE_CATCHUP=1: as before, the slots may lag one behind and catch up.
-    static const bool catch_up = [] {
-        const char* env = std::getenv("BB_PACE_CATCHUP");
-        return env && env[0] == '1';
-    }();
+    // 18 ms, a saw in the frame times).
     const auto next_slot = [&](std::chrono::steady_clock::time_point now) {
-        if (catch_up) {
-            return std::max(next_flip + frame_period, now - frame_period);
-        }
         return now - next_flip <= frame_period / 4 ? next_flip + frame_period : now + frame_period;
     };
     std::printf("VideoOut: vblank %u Hz, frame limit %u FPS, precise pacing %s\n",
@@ -1205,19 +1209,6 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
         const auto pace_of = [&] { return frame_limit ? frame_period : vblank_period; };
         PrecisePacing::Cadence ticks{vblank_period, Clock::now() + vblank_period};
         PrecisePacing::Cadence flips{pace_of()};
-        // The pace follows frame generation's cap (effective_limit) when it changes.
-        const auto update_pace = [&] {
-            const u32 limit = effective_limit();
-            if (limit == frame_limit) {
-                return;
-            }
-            std::printf("VideoOut: frame limit %u FPS%s\n", limit,
-                        limit != base_limit ? " (frame generation: half the frames shown)" : "");
-            frame_limit = limit;
-            frame_period = frame_limit ? std::chrono::nanoseconds(1000000000 / frame_limit)
-                                       : std::chrono::nanoseconds(0);
-            flips.SetPeriod(pace_of());
-        };
         // Flips are timed exactly (a spin of at most an eighth of the vblank period). Ticks only
         // spin without a frame limit: with one they just count time, and a spin before each of
         // 480 ticks a second took a core from the game's threads on 6-8 core CPUs.
@@ -1229,16 +1220,15 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
         // each slot sits just past a vblank, so every frame is shown for exactly N refreshes. A
         // cadence of its own drifts against the display's clock and its flips cross vblanks now
         // and then: a frame up a refresh longer, the next one shorter (judder at 60 FPS on 180 Hz).
-        // Not with Immediate (tearing, no vblank to wait for) or while frame generation paces the
-        // frames it adds; G-Sync and FreeSync refresh on the flips, and the watch reports nothing.
+        // Not with Immediate (tearing, no vblank to wait for); G-Sync and FreeSync refresh on the
+        // flips, and the watch reports nothing.
         const bool lock_allowed = PrecisePacing::VblankPacing() &&
                                   EmulatorSettings.GetPresentMode() != "Immediate";
         bool locked = false;
         int lock_reports = 0;
         const auto lock_to_vblank = [&] {
             std::optional<PrecisePacing::VblankTime> vblank;
-            if (lock_allowed && frame_limit &&
-                !BbSettings::Get().frame_gen_active.load(std::memory_order_relaxed)) {
+            if (lock_allowed && frame_limit) {
                 vblank = PrecisePacing::Vblank();
             }
             u32 refreshes = 0;
@@ -1287,7 +1277,6 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
         };
 
         while (!token.stop_requested()) {
-            update_pace();
             const Clock::time_point tick_deadline = ticks.Slot(); // the next tick
 
             if (DebugState.IsGuestThreadsPaused()) {
@@ -1339,14 +1328,6 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
     while (!token.stop_requested()) {
         timer.Start();
         const auto tick_deadline = std::chrono::steady_clock::now() + vblank_period;
-        // bbport: frame generation's cap with VSync (effective_limit).
-        if (immediate_flips) {
-            if (const u32 limit = effective_limit(); limit != frame_limit) {
-                frame_limit = limit;
-                frame_period = frame_limit ? std::chrono::nanoseconds(1000000000 / frame_limit)
-                                           : std::chrono::nanoseconds(0);
-            }
-        }
 
         if (DebugState.IsGuestThreadsPaused()) {
             DrawLastFrame();
@@ -1403,6 +1384,11 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
                 next_flip = next_slot(now);
                 Flip(request);
                 FRAME_END;
+            }
+            // bbport: on to the vblank once its tick has come: without a frame limit a queue
+            // that never ran empty kept this loop flipping and the vblank unsignaled.
+            if (std::chrono::steady_clock::now() >= tick_deadline) {
+                break;
             }
         }
         std::this_thread::sleep_until(tick_deadline);

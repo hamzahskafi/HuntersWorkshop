@@ -117,31 +117,13 @@ find_program(GLSLANG_COMPILER NAMES glslang glslangValidator REQUIRED)
 set(SIRIT_USE_SYSTEM_SPIRV_HEADERS OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/sirit EXCLUDE_FROM_ALL)
 
-# bbport: FSR 3.1 temporal upscaling / frame generation, native Vulkan (MIT, FireBurn/FSR-Vulkan).
-set(FFX_VK_PORTABLE_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(FFX_VK_PORTABLE_BUILD_PROBE OFF CACHE BOOL "" FORCE)
-add_subdirectory(third_party/fsr-vulkan EXCLUDE_FROM_ALL)
-if (WIN32)
-    # AMD's FidelityFX sources rely on MSVC's transitive includes (memset, floor, placement new,
-    # swprintf_s) on _WIN32.
-    foreach(ffx_target IN ITEMS ffx_vulkan_portable ffx_vulkan_fsr3_vk_backend_1_1_4
-            ffx_vulkan_fsr3_host_1_1_4 ffx_vulkan_fsr4_v07_vulkan ffx_vulkan_fsr4_v07_assets
-            ffx_vulkan_fsr3_vk_framegeneration_3_1_6 ffx_vulkan_fsr3_framegen_3_1_6_scaffold
-            ffx_vulkan_fsr3_sdk_core_3_1_5_scaffold)
-        if (TARGET ${ffx_target})
-            target_compile_options(${ffx_target} PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-include cstdio>"
-                "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-include cwchar>" "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-include cstring>"
-                "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-include cmath>" "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-include new>"
-                "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-include mutex>")
-        endif()
-    endforeach()
-endif()
-
 # Host shaders -> headers (same scheme as shadPS4's host_shaders/CMakeLists.txt).
 set(SHADER_SRC ${CMAKE_CURRENT_SOURCE_DIR}/shadps4/video_core/host_shaders)
 set(SHADER_INCLUDE ${CMAKE_CURRENT_BINARY_DIR}/include)
 set(SHADER_DIR ${SHADER_INCLUDE}/video_core/host_shaders)
 set(SHADER_HEADERS "")
+# The files the shaders include (0.4.4 beta 20: rcas_extra.glsl): a change rebuilds them all.
+file(GLOB SHADER_INCLUDES ${SHADER_SRC}/*.glsl ${SHADER_SRC}/fsr/*.h)
 function(add_host_shader FILENAME SHADER_NAME)
     set(OUT ${SHADER_DIR}/${SHADER_NAME}.h)
     string(TOUPPER ${SHADER_NAME} SYMBOL)
@@ -151,7 +133,7 @@ function(add_host_shader FILENAME SHADER_NAME)
         COMMAND ${CMAKE_COMMAND} -E make_directory ${SHADER_DIR}
         COMMAND ${GLSLANG_COMPILER} --target-env vulkan1.3 -o ${OUT} --vn ${SYMBOL} ${DEFINES} ${SHADER_SRC}/${FILENAME}
         COMMAND ${CMAKE_COMMAND} "-DHEADER_FILE=${OUT}" -P ${SHADER_SRC}/AddShaderHeaderInclude.cmake
-        DEPENDS ${SHADER_SRC}/${FILENAME} VERBATIM)
+        DEPENDS ${SHADER_SRC}/${FILENAME} ${SHADER_INCLUDES} VERBATIM)
     set(SHADER_HEADERS ${SHADER_HEADERS} ${OUT} PARENT_SCOPE)
 endfunction()
 add_host_shader(color_to_ms_depth.frag color_to_ms_depth_frag)
@@ -171,17 +153,19 @@ add_host_shader(hdr_native.comp hdr_native_gain_comp GAIN=1)
 add_host_shader(camera_motion.comp camera_motion_comp)
 add_host_shader(upscale_merge.comp upscale_merge_comp)
 add_host_shader(upscale_debug.comp upscale_debug_comp)
-add_host_shader(upscale_debug.comp upscale_debug_ldr_comp LDR_OUTPUT=1)
 add_host_shader(upscale_reactive.comp upscale_reactive_comp)
+add_host_shader(edge_clamp.comp edge_clamp_comp)
 add_host_shader(taa.comp taa_comp)
 add_host_shader(taa_sharpen.comp taa_sharpen_comp)
-add_host_shader(taa_sharpen.comp taa_sharpen_ldr_comp LDR_OUTPUT=1)
 add_host_shader(fsr4_color.comp fsr4_decode_comp)
 add_host_shader(fsr4_color.comp fsr4_encode_comp ENCODE=1)
-add_host_shader(fsr4_reactive.comp fsr4_reactive_comp)
-add_host_shader(frame_gen_compose.comp frame_gen_compose_comp)
-add_host_shader(frame_gen_depth.comp frame_gen_depth_comp)
-add_host_shader(dlss_ui_alpha.comp dlss_ui_alpha_comp)
+add_host_shader(depth_to_color.comp depth_to_color_comp)
+add_host_shader(depth_to_color.comp depth_to_color_uint_comp UINT_OUTPUT=1)
+add_host_shader(depth_to_color.comp depth_to_color_r16_comp R16_OUTPUT=1)
+add_host_shader(depth_to_color.comp depth_to_color_r16_uint_comp R16_UINT_OUTPUT=1)
+add_host_shader(color_to_depth.frag color_to_depth_frag)
+add_host_shader(color_to_depth.frag color_to_depth_bits_frag BITS32=1)
+add_host_shader(color_to_depth.frag color_to_depth_u16_frag U16=1)
 add_host_shader(buffer_multi_copy.comp buffer_multi_copy_comp)
 add_host_shader(indirect_clamp.comp indirect_clamp_comp)
 add_host_shader(depth_resample.frag depth_resample_frag)
@@ -196,7 +180,6 @@ add_custom_target(host_shaders DEPENDS ${SHADER_HEADERS})
 
 file(GLOB_RECURSE VIDEO_CORE CONFIGURE_DEPENDS shadps4/video_core/*.cpp)
 file(GLOB_RECURSE RECOMPILER CONFIGURE_DEPENDS shadps4/shader_recompiler/*.cpp)
-list(FILTER VIDEO_CORE EXCLUDE REGEX "renderdoc\\.cpp$")
 set(COMMON
     shadps4/common/decoder.cpp shadps4/common/error.cpp
     shadps4/common/io_file.cpp shadps4/common/native_clock.cpp shadps4/common/number_utils.cpp
@@ -207,12 +190,11 @@ file(GLOB AVPLAYER CONFIGURE_DEPENDS shadps4/core/libraries/avplayer/*.cpp)
 pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET libavformat libavcodec libavutil libswscale libswresample)
 file(GLOB SHIM_SOURCES CONFIGURE_DEPENDS shim/*.cpp shim/*/*.cpp)
 if (WIN32)
-    # These optional experiments use Linux dma-buf mappings and SIGTRAP hooks (the libGnm entry
-    # hooks, bbport_gnm_hooks.cpp, are inline patches and build on Windows too). Keep the
-    # section-backed Win32 memory and its vectored crash diagnostics; do not emulate dma-buf.
-    list(FILTER SHIM_SOURCES EXCLUDE REGEX "/bbport_(guest_memory|guest_hooks|free_check|heap_sites)\\.cpp$")
-    # The PC memory model has Windows files of its own (_win.cpp: host memory import, a vectored
-    # exception handler for the guest hooks).
+    # These optional experiments use Linux SIGTRAP hooks (the libGnm entry hooks,
+    # bbport_gnm_hooks.cpp, are inline patches and build on Windows too). Keep the section-backed
+    # Win32 memory and its vectored crash diagnostics. The guest memory import has a Windows file
+    # of its own (bbport_guest_memory_win.cpp: the GX region's host memory import).
+    list(FILTER SHIM_SOURCES EXCLUDE REGEX "/bbport_(guest_memory|free_check|heap_sites)\\.cpp$")
     set(BBGPU_LIBRARY_TYPE STATIC)
 else()
     list(FILTER SHIM_SOURCES EXCLUDE REGEX "_win\\.cpp$")
@@ -241,9 +223,7 @@ set_source_files_properties(shim/bbport_overlay.cpp PROPERTIES
 # Keyboard prompts' keycaps (shim/engine/keycap_art.cpp): Roboto Medium (Apache License 2.0).
 set_source_files_properties(shim/engine/keycap_art.cpp PROPERTIES
     OBJECT_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/misc/fonts/Roboto-Medium.ttf)
-target_include_directories(bbgpu PRIVATE shim shadps4 ${SHADER_INCLUDE} third_party/gcn/include third_party/half/include)
-# bbport: NVIDIA Streamline SDK headers (MIT), for DLSS Frame Generation (vk_streamline.cpp).
-target_include_directories(bbgpu PRIVATE third_party/streamline/include)
+target_include_directories(bbgpu PRIVATE shim shadps4 ${SHADER_INCLUDE} third_party/half/include)
 target_compile_definitions(bbgpu PRIVATE BOOST_ASIO_STANDALONE NDEBUG)
 target_compile_options(bbgpu PRIVATE -Wno-deprecated-declarations -Wno-missing-field-initializers)
 # The Linux shared library is loaded at process startup; Windows links it statically.
@@ -255,8 +235,9 @@ if(NOT WIN32)
     target_link_options(bbgpu PRIVATE
         -Wl,--exclude-libs,libavcodec.a:libavformat.a:libavutil.a:libswscale.a:libswresample.a)
 endif()
-target_link_libraries(bbgpu PRIVATE ffx-vulkan::portable ffx-vulkan::fsr4-v07-vulkan
-    ffx-vulkan::fsr3-vk-framegeneration-3.1.6) # bbport: frame generation (vk_frame_generation.cpp)
+# bbport 0.4.4 beta 27: AMD FSR through AMD's FSR SDK 2.4 (vk_amd_fsr.cpp): the AMD FSR API's headers
+# (MIT, third_party/amd-fsr-sdk); AMD's signed DLLs are loaded at run time, not linked.
+target_include_directories(bbgpu PRIVATE third_party/amd-fsr-sdk)
 target_link_libraries(bbgpu PUBLIC Vulkan::Headers fmt::fmt Boost::headers magic_enum::magic_enum
     tsl::robin_map GPUOpen::VulkanMemoryAllocator PkgConfig::XXHASH PkgConfig::SDL3 PkgConfig::FFMPEG miniz::miniz Zydis::Zydis sirit
     xbyak::xbyak)
@@ -284,7 +265,7 @@ target_compile_options(pipeline-cache-blob-test PRIVATE -UNDEBUG -Wall -Wextra -
 target_include_directories(pipeline-cache-blob-test PRIVATE ..)
 add_executable(image-overlap-test EXCLUDE_FROM_ALL ../tests/test_image_overlap.cpp ../tests/test_gpu_runtime_stubs.cpp)
 target_compile_options(image-overlap-test PRIVATE -UNDEBUG)
-target_include_directories(image-overlap-test PRIVATE shim shadps4 third_party/gcn/include)
+target_include_directories(image-overlap-test PRIVATE shim shadps4)
 target_link_libraries(image-overlap-test PRIVATE bbgpu)
 if (WIN32)
     target_link_libraries(image-overlap-test PRIVATE winmm ws2_32 psapi onecore)
@@ -298,6 +279,9 @@ target_link_libraries(pipeline-archive-test PRIVATE fmt::fmt)
 add_executable(motion-history-test EXCLUDE_FROM_ALL ../tests/test_motion_history.cpp)
 target_compile_options(motion-history-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(motion-history-test PRIVATE ..)
+add_executable(camera-cut-test EXCLUDE_FROM_ALL ../tests/test_camera_cut.cpp)
+target_compile_options(camera-cut-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(camera-cut-test PRIVATE ..)
 add_executable(occlusion-test EXCLUDE_FROM_ALL ../tests/test_occlusion.cpp)
 target_compile_options(occlusion-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(occlusion-test PRIVATE ..)
@@ -305,21 +289,21 @@ target_include_directories(occlusion-test PRIVATE ..)
 # with real threads (bbgpu: the platform and thread helpers).
 add_executable(pipeline-compile-test EXCLUDE_FROM_ALL ../tests/test_pipeline_compile.cpp ../tests/test_gpu_runtime_stubs.cpp)
 target_compile_options(pipeline-compile-test PRIVATE -UNDEBUG)
-target_include_directories(pipeline-compile-test PRIVATE shim shadps4 third_party/gcn/include)
+target_include_directories(pipeline-compile-test PRIVATE shim shadps4)
 target_link_libraries(pipeline-compile-test PRIVATE bbgpu)
 if (WIN32)
     target_link_libraries(pipeline-compile-test PRIVATE winmm ws2_32 psapi onecore)
 endif()
 # The shader lab (tests/shader_lab.cpp): shader captures compiled offline, without the game.
 add_executable(bb-shader-lab EXCLUDE_FROM_ALL ../tests/shader_lab.cpp ../tests/test_gpu_runtime_stubs.cpp)
-target_include_directories(bb-shader-lab PRIVATE shim shadps4 third_party/gcn/include)
+target_include_directories(bb-shader-lab PRIVATE shim shadps4)
 target_link_libraries(bb-shader-lab PRIVATE bbgpu miniz::miniz)
 if (WIN32)
     target_link_libraries(bb-shader-lab PRIVATE winmm ws2_32 psapi onecore)
 endif()
 add_executable(motion-shader-test EXCLUDE_FROM_ALL ../tests/test_motion_shaders.cpp ../tests/test_gpu_runtime_stubs.cpp)
 target_compile_options(motion-shader-test PRIVATE -UNDEBUG)
-target_include_directories(motion-shader-test PRIVATE shim shadps4 third_party/gcn/include)
+target_include_directories(motion-shader-test PRIVATE shim shadps4)
 target_link_libraries(motion-shader-test PRIVATE bbgpu)
 if (WIN32)
     target_link_libraries(motion-shader-test PRIVATE winmm ws2_32 psapi onecore)
@@ -333,25 +317,34 @@ target_compile_options(settings-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(settings-test PRIVATE .. shim)
 
 add_executable(scene-resolution-test EXCLUDE_FROM_ALL ../tests/test_scene_resolution.cpp ../tests/test_gpu_runtime_stubs.cpp)
-target_include_directories(scene-resolution-test PRIVATE shim shadps4 third_party/gcn/include)
+target_include_directories(scene-resolution-test PRIVATE shim shadps4)
 # The test's Vulkan-Hpp inline methods have a different set of platform extensions
 # from vk_platform.cpp. Keep them local and use an explicit dispatcher in the test.
 target_compile_options(scene-resolution-test PRIVATE -UNDEBUG -fPIC)
 set_source_files_properties(../tests/test_scene_resolution.cpp PROPERTIES
     COMPILE_OPTIONS "-fvisibility=hidden;-fvisibility-inlines-hidden")
 target_link_libraries(scene-resolution-test PRIVATE bbgpu)
+if (WIN32)
+    target_link_libraries(scene-resolution-test PRIVATE winmm ws2_32 psapi onecore)
+endif()
 add_executable(taa-shader-test EXCLUDE_FROM_ALL ../tests/test_taa_shader.cpp ../tests/test_gpu_runtime_stubs.cpp)
-target_include_directories(taa-shader-test PRIVATE shim shadps4 ${SHADER_INCLUDE} third_party/gcn/include)
+target_include_directories(taa-shader-test PRIVATE shim shadps4 ${SHADER_INCLUDE})
 target_compile_options(taa-shader-test PRIVATE -UNDEBUG -fPIC)
 set_source_files_properties(../tests/test_taa_shader.cpp PROPERTIES
     COMPILE_OPTIONS "-fvisibility=hidden;-fvisibility-inlines-hidden")
 target_link_libraries(taa-shader-test PRIVATE bbgpu)
+if (WIN32)
+    target_link_libraries(taa-shader-test PRIVATE winmm ws2_32 psapi onecore)
+endif()
 add_dependencies(taa-shader-test host_shaders)
 
 add_executable(camera-motion-test EXCLUDE_FROM_ALL ../tests/test_camera_motion.cpp ../tests/test_gpu_runtime_stubs.cpp)
-target_include_directories(camera-motion-test PRIVATE shim shadps4 ${SHADER_INCLUDE} third_party/gcn/include)
+target_include_directories(camera-motion-test PRIVATE shim shadps4 ${SHADER_INCLUDE})
 target_compile_options(camera-motion-test PRIVATE -UNDEBUG -fPIC)
 target_link_libraries(camera-motion-test PRIVATE bbgpu)
+if (WIN32)
+    target_link_libraries(camera-motion-test PRIVATE winmm ws2_32 psapi onecore)
+endif()
 add_dependencies(camera-motion-test host_shaders)
 
 # bbport: indirect_clamp.comp as Rasterizer::ClampDispatchArgs records it, then an indirect
@@ -375,25 +368,30 @@ target_compile_options(tone-curve-shader-test PRIVATE -UNDEBUG -Wall -Werror)
 target_link_libraries(tone-curve-shader-test PRIVATE Vulkan::Vulkan)
 add_dependencies(tone-curve-shader-test host_shaders)
 
-# bbport: FSR 4 benchmark outside the game (tools/fsr4_bench.cpp): ninja -C out/gpu fsr4-bench.
 add_executable(upscaler-support-test EXCLUDE_FROM_ALL ../tests/test_upscaler_support.cpp
     shim/bbport_settings.cpp shim/bbport_menu_i18n.cpp)
 target_include_directories(upscaler-support-test PRIVATE shim)
 target_compile_options(upscaler-support-test PRIVATE -UNDEBUG)
-
-add_executable(fsr4-bench EXCLUDE_FROM_ALL tools/fsr4_bench.cpp
-    shadps4/video_core/renderer_vulkan/fsr411/fsr411.cpp)
-target_include_directories(fsr4-bench PRIVATE shadps4/video_core/renderer_vulkan/fsr411)
-target_link_libraries(fsr4-bench PRIVATE ffx-vulkan::fsr4-v07-vulkan ffx-vulkan::fsr4-v07-assets Vulkan::Vulkan)
 
 add_executable(engine-hooks-test EXCLUDE_FROM_ALL ../tests/test_engine_hooks.cpp shim/engine/engine_hooks.cpp)
 target_compile_options(engine-hooks-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(engine-hooks-test PRIVATE ..)
 # The frame-rate corrections on a synthetic image built from their own table (no game files).
 add_executable(frame-rate-test EXCLUDE_FROM_ALL ../tests/test_frame_rate.cpp shim/engine/frame_rate.cpp
-    shim/engine/engine_hooks.cpp)
+    shim/engine/camera_rate.cpp shim/engine/engine_hooks.cpp)
 target_compile_options(frame-rate-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(frame-rate-test PRIVATE shim shim/engine)
+# The follow camera's weights every frame: its caves run natively on a synthetic image (no game files).
+add_executable(camera-rate-test EXCLUDE_FROM_ALL ../tests/test_camera_rate.cpp shim/engine/camera_rate.cpp
+    shim/engine/engine_hooks.cpp)
+target_compile_options(camera-rate-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(camera-rate-test PRIVATE shim shim/engine)
+# The follow camera's wall turn: the game's own code from out/eboot.elf (its path as the argument), with and without
+# the caves; skipped without the executable.
+add_executable(camera-wall-test EXCLUDE_FROM_ALL ../tests/test_camera_wall.cpp shim/engine/camera_rate.cpp
+    shim/engine/engine_hooks.cpp)
+target_compile_options(camera-wall-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(camera-wall-test PRIVATE shim shim/engine)
 # The work pools' lock and node cache against models of the game's lock and job list.
 add_executable(job-pool-test EXCLUDE_FROM_ALL ../tests/test_job_pool.cpp shim/engine/job_pool.cpp)
 target_compile_options(job-pool-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
@@ -404,6 +402,11 @@ target_link_libraries(job-pool-test PRIVATE Threads::Threads)
 add_executable(fmod-ring-test EXCLUDE_FROM_ALL ../tests/test_fmod_ring.cpp)
 target_compile_options(fmod-ring-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(fmod-ring-test PRIVATE ..)
+# The game's GX range allocator region, from the engine's hook on a stand-in for its init.
+add_executable(gx-ring-test EXCLUDE_FROM_ALL ../tests/test_gx_ring.cpp shim/bbport_gx_ring.cpp
+    shim/engine/gx_region.cpp shim/engine/engine_hooks.cpp)
+target_compile_options(gx-ring-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(gx-ring-test PRIVATE shim shim/engine)
 # The hit collector cap and the GX occlusion query guard against stand-ins for the game's functions.
 add_executable(crash-guards-test EXCLUDE_FROM_ALL ../tests/test_crash_guards.cpp shim/engine/crash_guards.cpp
     shim/engine/engine_hooks.cpp)

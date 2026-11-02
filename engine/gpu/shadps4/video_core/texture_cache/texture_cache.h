@@ -194,10 +194,8 @@ public:
     };
 
     /// Retrieves an image view with the properties of the specified image id.
-    /// `refresh` false: an image found out of date is used as is (the texture binding helper
-    /// checked it beforehand; only a guest write racing with the draw can make it so).
     [[nodiscard]] ImageView& FindTexture(ImageId image_id, const ImageDesc& desc,
-                                         ViewMemo* memo = nullptr, bool refresh = true);
+                                         ViewMemo* memo = nullptr);
 
     /// Retrieves the render target with specified properties
     [[nodiscard]] ImageView& FindRenderTarget(ImageId image_id, const ImageDesc& desc);
@@ -416,6 +414,14 @@ public:
         for (const ImageId image_id : images) {
             slot_images[image_id].flags &= ~ImageFlagBits::Picked;
         }
+    }
+
+    /// 0.4.4 beta 20 (the audit): ForEachImageInRegion under the cache's lock, from a thread the
+    /// guest's write faults run beside (they change image flags under it, Picked among them).
+    template <typename Func>
+    void ForEachImageInRegionLocked(VAddr cpu_addr, size_t size, Func&& func) {
+        std::scoped_lock lock{mutex};
+        ForEachImageInRegion(cpu_addr, size, std::forward<Func>(func));
     }
 
 private:

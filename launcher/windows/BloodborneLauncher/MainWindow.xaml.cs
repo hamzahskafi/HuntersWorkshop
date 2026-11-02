@@ -27,7 +27,25 @@ namespace BloodborneLauncher
             LogList.ItemsSource = _log;
             var ws = Workspace.Current;
             ws.Logged += OnLogged;
-            ws.Saved += () => SavedText.Text = L.F($"Saved {DateTime.Now:HH:mm:ss}");
+            // While the game runs, game settings changed here wait for its next start (Workspace.SaveNow).
+            ws.Saved += () => SavedText.Text = ws.IniHeld ? L.F($"Saved {DateTime.Now:HH:mm:ss} · game settings apply at its next start")
+                                                         : L.F($"Saved {DateTime.Now:HH:mm:ss}");
+            // config.ini read again (the game exited): the pages show what the in-game menus changed.
+            ws.IniReloaded += ReloadPages;
+            // Changed while the launcher was in the background (a game started another way, an edit by
+            // hand): read again when it comes back.
+            Activated += (_, _) =>
+            {
+                try
+                {
+                    if (!ws.Game.Running && System.IO.File.Exists(Paths.IniPath) &&
+                        System.IO.File.GetLastWriteTimeUtc(Paths.IniPath) != ws.Ini.FileTime)
+                        ws.ReloadIni();
+                }
+                catch (System.IO.IOException)
+                {
+                }
+            };
             ws.GameStateChanged += UpdatePlayButton;
             ws.GameCrashed += OnGameCrashed;
             ws.SignInRefused += OnSignInRefused;
@@ -115,11 +133,6 @@ namespace BloodborneLauncher
                     _ = Dispatcher.BeginInvoke(() => SetupGuide.Open(firstRun: true), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
                 else if (!ws.Settings.Bool("hardware_offered") && Prompt.SnapshotPath == null && Paths.IsPortDir(Paths.PortDir))
                     _ = Dispatcher.BeginInvoke(() => OfferBestSettings(firstRun: true), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
-                // Once, after updating from an older launcher (a new install starts on New): the
-                // newer engine or the one 0.9.33 ran, the player's choice. Nothing changes unasked.
-                else if (ws.Settings.Bool("hardware_offered") && !ws.Settings.Bool("engine_preset_asked") &&
-                         Prompt.SnapshotPath == null && Paths.IsPortDir(Paths.PortDir))
-                    _ = Dispatcher.BeginInvoke(AskEnginePreset, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
             };
             Closing += OnClosing;
         }
@@ -131,9 +144,9 @@ namespace BloodborneLauncher
         private bool _sidebarNav;
 
         /// <summary>Settings › Navigation (live): the Modern layout's tabs across the top, or the
-        /// sidebar with the pages in groups (GAME, EXTRAS, SYSTEM), in the tabs' look. Classic always
-        /// has the sidebar. The page shown stays, marked in the other one (More's sections are
-        /// entries of their own in the sidebar).</summary>
+        /// sidebar with the pages in groups (HUNT, VISUALS, WORKSHOP, ENGINE, and Settings at the
+        /// bottom), in the tabs' look. Classic always has the sidebar. The page shown stays, marked in
+        /// the other one (Visuals' and More's sections are entries of their own in the sidebar).</summary>
         public void ApplyNavigation()
         {
             var sidebar = SettingRow.Classic || Workspace.Current.Settings.Str("ui_navigation") == "sidebar";
@@ -149,8 +162,6 @@ namespace BloodborneLauncher
                 Sidebar.BorderThickness = new Thickness(1);
                 Sidebar.SetResourceReference(Border.BackgroundProperty, "PillTrackBrush");
                 Sidebar.SetResourceReference(Border.BorderBrushProperty, "GlassPaneStrokeBrush");
-                // Settings once, in the ENGINE group (Classic has it at the bottom too).
-                ClassicSettingsBottom.Visibility = Visibility.Collapsed;
                 var style = (Style)FindResource("GlassSidebarItem");
                 foreach (var item in SettingSearch.Descendants(Sidebar).OfType<System.Windows.Controls.RadioButton>())
                     item.Style = style;
@@ -158,11 +169,13 @@ namespace BloodborneLauncher
             if (!switching)
                 return;
             var shown = PageFrame.Content?.GetType();
-            if (shown == typeof(MorePage) && _pages.TryGetValue(typeof(MorePage), out var more))
-                shown = ((MorePage)more).ShownPage ?? typeof(PlayPage);
-            // More holds Mods, Cheats, Engine and Log pages of its own: the ones of the navigation
-            // left are dropped, so the other makes its own with the settings as they are now.
-            foreach (var type in new[] { typeof(MorePage), typeof(ModsPage), typeof(CheatsPage), typeof(EnginePage), typeof(OutputPage) })
+            if (shown != null && _pages.TryGetValue(shown, out var holder) && holder is SectionedPage sectioned)
+                shown = sectioned.ShownPage ?? typeof(PlayPage);
+            // Visuals and More hold pages of their own (Display to Interface; Mods, Cheats, Engine
+            // switches and Log): the ones of the navigation left are dropped, so the other makes its
+            // own with the settings as they are now.
+            foreach (var type in new[] { typeof(VisualsPage), typeof(MorePage) }
+                         .Concat(VisualsPage.Sections.Select(s => s.Page)).Concat(MorePage.Sections.Select(s => s.Page)))
                 _pages.Remove(type);
             _searchPagesReady = null; // made again for the search when its box is next focused
             var nav = sidebar ? (FrameworkElement)Sidebar : TabStrip;
@@ -176,9 +189,8 @@ namespace BloodborneLauncher
                 target.IsChecked = true;
                 return;
             }
-            // A page of More's (Mods, Cheats, Engine, Log) back on the tabs: More, at that section.
-            var key = shown == typeof(ModsPage) ? "mods" : shown == typeof(CheatsPage) ? "cheats"
-                : shown == typeof(EnginePage) ? "engine" : shown == typeof(OutputPage) ? "output" : null;
+            // A page of Visuals' or More's back on the tabs: that tab, at that section.
+            var key = VisualsPage.Sections.Concat(MorePage.Sections).FirstOrDefault(s => s.Page == shown).Key;
             if (key != null) Show(key);
             else (sidebar ? ClassicPlay : PlayItem).IsChecked = true;
         }
@@ -218,39 +230,20 @@ namespace BloodborneLauncher
         }
 
         /// <summary>Shows what would change to suit this PC, and applies it on Apply.</summary>
-        /// <summary>Graphics › Engine preset, asked once: New or Legacy (0.9.33). Closed without a
-        /// choice, it asks again at the next start.</summary>
-        private void AskEnginePreset()
-        {
-            var ws = Workspace.Current;
-            var choice = Prompt.Choose(L.T("New engine or the 0.9.33 one?"),
-                L.T("This update brings a newer engine: a faster draw thread, quicker shader compiling and more VRAM for textures. " +
-                    "Most players run faster with it. Legacy keeps the engine as 0.9.33 ran it.\n\n" +
-                    "You can change it any time under Graphics > Engine preset."),
-                L.T("Stay on Legacy"), L.T("Use New (recommended)"));
-            if (choice < 0) return;
-            EnginePreset.Apply(ws.Settings, choice == 1 ? EnginePreset.New : EnginePreset.Legacy);
-            ws.Settings.Set("engine_preset_asked", true);
-            ws.SaveSoon();
-            ws.Log(choice == 1 ? L.T("Engine preset: New") : L.T("Engine preset: Legacy (0.9.33)"), LogLevel.Good);
-        }
-
         public void OfferBestSettings(bool firstRun)
         {
             var ws = Workspace.Current;
             ws.Settings.Set("hardware_offered", true);
-            // A new install starts on the New engine preset: nothing to ask it later.
-            if (firstRun) ws.Settings.Set("engine_preset_asked", true);
             ws.SaveSoon();
             var hw = Hardware.Detect();
             var changes = hw.Recommend(ws.Settings, ws.Ini);
             if (changes.Count == 0)
             {
-                if (!firstRun) Prompt.Tell(L.T("Best settings for this PC"), L.F($"{hw.Summary}\n\nYour settings already suit this PC."));
+                if (!firstRun) Prompt.Tell(L.T("Suggested settings for this PC"), L.F($"{hw.Summary}\n\nYour settings already suit this PC."));
                 return;
             }
             var list = string.Join("\n", changes.Select(c => $"{c.Label}: {c.From} → {c.To}"));
-            if (!Prompt.Confirm(firstRun ? L.T("Settings for this PC") : L.T("Best settings for this PC"),
+            if (!Prompt.Confirm(firstRun ? L.T("Settings for this PC") : L.T("Suggested settings for this PC"),
                     L.F($"{hw.Summary}\n\n{list}\n\nYou can change any of them later."), L.T("Apply")))
                 return;
             foreach (var change in changes) change.Apply();
@@ -268,6 +261,9 @@ namespace BloodborneLauncher
             if (current == null) return;
             var page = _pages[current.GetType()] = (LauncherPage)Activator.CreateInstance(current.GetType())!;
             PageFrame.Navigate(page);
+            // Visuals or More: at the section that was shown.
+            if (current is SectionedPage shown && shown.ShownKey is { } key && page is SectionedPage again)
+                again.ShowSection(key);
             page.OnShown();
         }
 
@@ -508,7 +504,7 @@ namespace BloodborneLauncher
 
         private async void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
         {
-            Workspace.Current.SaveNow();
+            Workspace.Current.SaveNow(final: true); // config.ini too, the game running or not
             if (_closing || !Workspace.Current.Game.Running)
                 return;
 
@@ -564,7 +560,9 @@ namespace BloodborneLauncher
             item.Content as string ??
             (item.Content as Panel)?.Children.OfType<System.Windows.Controls.TextBlock>().FirstOrDefault()?.Text;
 
-        /// <summary>Shows a page: a tab ("online", "advanced": Settings), or one of More's ("output", "mods", "engine").</summary>
+        /// <summary>Shows a page by its key: a tab or sidebar entry ("online", "controls", "gameplay",
+        /// "advanced": Settings), or a section of Visuals' ("display", "graphics", "interface")
+        /// or More's ("mods", "cheats", "engine", "output"), which the sidebar lists as entries.</summary>
         public void Show(string page)
         {
             var item = _sidebarNav
@@ -577,6 +575,10 @@ namespace BloodborneLauncher
                     "cheats" when CheatsPage.Supported => ClassicCheats,
                     "engine" => ClassicEngine,
                     "controls" => ClassicControls,
+                    "gameplay" => ClassicGameplay,
+                    "display" => ClassicDisplay,
+                    "graphics" => ClassicGraphics,
+                    "interface" => ClassicInterface,
                     _ => ClassicPlay,
                 }
                 : page switch
@@ -585,14 +587,16 @@ namespace BloodborneLauncher
                     "advanced" => SettingsItem,
                     "output" or "mods" or "engine" => MoreItem,
                     "cheats" when CheatsPage.Supported => MoreItem,
+                    "display" or "graphics" or "interface" => VisualsItem,
                     "controls" => ControlsItem,
+                    "gameplay" => GameplayItem,
                     _ => PlayItem,
                 };
             if (item.IsChecked == true)
                 SidebarItem_Checked(item, new RoutedEventArgs());
             item.IsChecked = true;
-            if (item == MoreItem && _pages.TryGetValue(typeof(MorePage), out var more))
-                ((MorePage)more).ShowSection(page);
+            if (item.Tag is Type type && _pages.TryGetValue(type, out var holder) && holder is SectionedPage sectioned)
+                sectioned.ShowSection(page);
         }
 
         private void PageFrame_Navigated(object sender, System.Windows.Navigation.NavigationEventArgs e)
@@ -608,11 +612,11 @@ namespace BloodborneLauncher
 
         /// <summary>
         /// The pages this layout's tabs or sidebar lead to, in their order, each made if not shown yet
-        /// (once; they are kept as when visited). More stands for its sections, each a place of its own.
+        /// (once; they are kept as when visited). Visuals and More stand for their sections, each a place of its own.
         /// </summary>
         private IEnumerable<SettingSearch.Place> SearchPlaces()
         {
-            // Classic lists Settings twice (top and bottom of the sidebar): the later entry is kept.
+            // A page listed twice would be searched once: the later entry is kept.
             var items = new List<System.Windows.Controls.RadioButton>();
             foreach (var item in SettingSearch.Descendants(_sidebarNav ? Sidebar : TabStrip).OfType<System.Windows.Controls.RadioButton>())
             {
@@ -627,7 +631,7 @@ namespace BloodborneLauncher
                 // Only pages already made: MakeSearchPagesAsync makes the rest in the background and
                 // searches again once they are all there.
                 if (!_pages.TryGetValue((Type)item.Tag, out var made)) continue;
-                if (made is MorePage more)
+                if (made is SectionedPage more)
                 {
                     foreach (var (key, label, page) in more.MadeSectionPages())
                         yield return new SettingSearch.Place($"{name} › {label}", page, () => { Open(); more.ShowSection(key); });
@@ -701,7 +705,7 @@ namespace BloodborneLauncher
             foreach (var type in items)
             {
                 await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
-                if (PageOf(type) is MorePage more)
+                if (PageOf(type) is SectionedPage more)
                     foreach (var key in more.SectionKeys)
                     {
                         await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
@@ -901,7 +905,7 @@ namespace BloodborneLauncher
             var progress = new Progress<double>(p => TitleUpdateText.Text = L.F($"Downloading {p:P0}"));
             try
             {
-                ws.SaveNow();
+                ws.SaveNow(final: true);
                 var skipped = await Updater.InstallAsync(release, package, progress);
                 if (skipped.Count > 0)
                     Prompt.Tell(L.T("Updated, with files left out"),
@@ -967,14 +971,14 @@ namespace BloodborneLauncher
                 if (!Paths.IsPortDir(Paths.PortDir))
                 {
                     if (!Prompt.Confirm(L.T("Where is the engine?"),
-                            L.T("The launcher needs the engine (the folder with run.py and bin\\bb-probe.exe). ") +
+                            L.T("The launcher needs the engine (the folder with engine\\out\\bb-start.exe). ") +
                             L.T("It is normally the folder the launcher came in."), L.T("Choose folder")))
                         return;
-                    var dialog = new Microsoft.Win32.OpenFolderDialog { Title = L.T("Port folder (with Bloodborne.exe and run.py)") };
+                    var dialog = new Microsoft.Win32.OpenFolderDialog { Title = L.T("Hunter's Workshop folder") };
                     if (dialog.ShowDialog(this) != true) return;
                     if (!Paths.IsPortDir(dialog.FolderName))
                     {
-                        Prompt.Tell(L.T("Not the port folder"), L.T("That folder has no run.py with Bloodborne.exe or bin\\bb-probe.exe."));
+                        Prompt.Tell(L.T("Not the port folder"), L.T("That folder has no engine\\out\\bb-start.exe."));
                         return;
                     }
                     s.Set("port_dir", dialog.FolderName);

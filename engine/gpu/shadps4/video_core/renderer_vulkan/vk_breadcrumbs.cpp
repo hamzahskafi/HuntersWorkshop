@@ -48,6 +48,12 @@ struct Stream {
 std::array<Stream, MaxStreams> streams;
 std::atomic<u32> num_streams{0};
 bool enabled = false;
+/// 0.4.4 beta 21: BB_BREADCRUMBS=both: a marker before each command as well as after it. The one
+/// before says no more than the previous command's marker after (bottom of the pipe: all earlier
+/// work done), but for the work recorded between two commands (copies, clears, barriers): a hang
+/// there and one in the next command read alike without it. Beta 20 measured both at 0.10 ms of
+/// GPU time a frame at the lamp spot (about 3,600 markers).
+bool marker_before = false;
 std::once_flag init_once;
 vk::Buffer marker_buffer{};
 VmaAllocation marker_allocation{};
@@ -223,6 +229,7 @@ void Init(const Instance& instance) {
     if (env && env[0] == '0') {
         return;
     }
+    marker_before = env && std::strcmp(env, "both") == 0;
     if (!instance.IsBufferMarkerSupported()) {
         std::printf("GPU breadcrumbs: VK_AMD_buffer_marker unavailable, GPU hangs will not be "
                     "located\n");
@@ -254,6 +261,10 @@ void Init(const Instance& instance) {
     }
     args = markers + ArgsOffset / sizeof(u32);
     enabled = true;
+    if (marker_before) {
+        std::printf("GPU breadcrumbs: a marker before and after each command (BB_BREADCRUMBS=both; "
+                    "default: after only)\n");
+    }
 }
 
 /// Guest memory that may be gone by now: read only where the runtime has it mapped (its direct
@@ -412,7 +423,7 @@ u32 Note(u32 stream_index, const Crumb& crumb) {
 }
 
 void Mark(vk::CommandBuffer cmdbuf, u32 stream, u32 id, bool after) {
-    if (!enabled || stream >= MaxStreams) {
+    if (!enabled || stream >= MaxStreams || (!after && !marker_before)) {
         return;
     }
     cmdbuf.writeBufferMarkerAMD(vk::PipelineStageFlagBits::eBottomOfPipe, marker_buffer,
@@ -450,8 +461,9 @@ void ReportDeviceLost(const char* where) {
     if (enabled) {
         Report("at device lost", where);
     }
-    // The game's GPU range allocators (BB_FRAME_STATS, bbport_guest_hooks): Ebrietas' rock effect
-    // took one from ~165 MB free to under 1 MB right before its device losses.
+    // The game's GPU range allocators (BbStats::range_allocators, where a hook reports them):
+    // Ebrietas' rock effect took one from ~165 MB free to under 1 MB right before its device
+    // losses.
     for (std::size_t i = 0; i < BbStats::range_allocators.size(); ++i) {
         if (const u64 allocator = BbStats::range_allocators[i].load()) {
             std::printf("GPU range allocator %#llx at device lost: %llu live, %.1f MB free\n",
@@ -575,11 +587,25 @@ void Report(const char* title, const char* where) {
                 std::printf(", the GPU finished all\n");
                 continue;
             }
-            std::printf(", the GPU finished #%llu but did not start #%llu: stuck in the work "
-                        "recorded between them (copies, clears, barriers) or before it\n",
-                        (unsigned long long)id, (unsigned long long)(id + 1));
-            PrintEntry(stream, id, "finished");
-            PrintEntry(stream, id + 1, "next");
+            if (!marker_before) {
+                // Only markers after each command: the next one never finished, or the work
+                // recorded before it did not (copies, clears, barriers).
+                std::printf(", the GPU finished #%llu and not #%llu: stuck in it, or in the work "
+                            "recorded before it (copies, clears, barriers; BB_BREADCRUMBS=both "
+                            "tells them apart) (%llu noted after it)\n",
+                            (unsigned long long)id, (unsigned long long)(id + 1),
+                            (unsigned long long)(last - id - 1));
+                PrintEntry(stream, id, "finished");
+                PrintEntry(stream, id + 1, "STUCK");
+                std::fflush(stdout);
+                DumpPrograms(stream, id + 1);
+            } else {
+                std::printf(", the GPU finished #%llu but did not start #%llu: stuck in the work "
+                            "recorded between them (copies, clears, barriers) or before it\n",
+                            (unsigned long long)id, (unsigned long long)(id + 1));
+                PrintEntry(stream, id, "finished");
+                PrintEntry(stream, id + 1, "next");
+            }
         } else {
             std::printf(", the GPU started #%llu and did not finish it (%llu noted after it)\n",
                         (unsigned long long)id, (unsigned long long)(last - id));

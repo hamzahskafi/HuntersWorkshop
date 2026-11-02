@@ -1,5 +1,26 @@
 # Motion vectors: rework after the 2026-09-26 video
 
+The sections below are in the order the work was done; the earlier ones describe the state at
+their date. **As of 0.4.4 beta 21:**
+
+- Object motion follows the `object_motion` setting (default on; the launcher's "Object motion
+  vectors"; `BB_OBJECT_MOTION`). It is off with the upscaler off, or without
+  `vertexPipelineStoresAndAtomics`.
+- A G-buffer vertex shader gets the motion variant when one of its buffers has a 16-byte stride and
+  a size `Motion::ClassifyBuffer` calls a skeleton: 640 to 16384 bytes except 864 (the scene's), or
+  96 to 639 bytes in multiples of 48 (a small skeleton). `BB_OBJECT_MOTION_ALL=1`: every G-buffer
+  draw. `BB_MOTION_SELECT_LOG=1` prints each decision.
+- History: 4 Mi positions a frame, 8 Mi with a VRAM budget of 4 GiB or more (6 GB cards);
+  `BB_OBJECT_MOTION_VERTICES=<millions>`.
+- Small skeletons whose palette the CPU holds are gated by the palette's contents; those the GPU
+  wrote by their newest GPU write (`BB_MOTION_GPU_SMALL`: `version`, the default since beta 16;
+  `store`, `source`, `camera`). The copy shader's ranges are traced only with `source`.
+- The motion target is R32G32_UINT; positions are stored with relaxed atomic stores
+  (`BB_MOTION_STORE=exchange`: atomic exchanges).
+- Bit 29 of the first number in `BB_TOGGLE_FILE` turns off the per-draw history (stores and reads:
+  camera vectors only) while the game runs; the menu's "Show motion vectors (debug)" shows the
+  vectors.
+
 Source material: `video_2026-09-26_04-19-53.mp4`, FSR 3.1 Performance, 960×540 render → 1920×1080
 output, and `out/dev/t71.log`. This describes the working tree's changes at the time, not a
 confirmation of the quality in the game.
@@ -58,9 +79,12 @@ the selection still has to be checked visually.
 Build and CPU tests:
 
 ```bash
-cd native_probe
-nix-shell shell.nix --run 'bash build.sh && ninja -C out/gpu motion-history-test motion-shader-test && out/gpu/motion-history-test && out/gpu/motion-shader-test out/motion-shaders'
+cd engine
+bash build.sh && ninja -C out/gpu motion-history-test motion-shader-test && out/gpu/motion-history-test && out/gpu/motion-shader-test out/motion-shaders
 ```
+
+(The folder was `native_probe` then; the tests are `engine/tests/test_motion_history.cpp` and
+`test_motion_shaders.cpp`, built by `gpu/CMakeLists.txt`.)
 
 `test_motion_history.cpp` checks u16/u32 ranges, restart, a negative baseVertex, firstInstance,
 repeated draws, a topology change, a skipped frame, an exhausted budget, overflow and the number of
@@ -82,10 +106,10 @@ checked yet. Passing SPIR-V validation does not prove the picture is right.
 
 ## The next run in the game
 
-From `game_files`:
+From the repository root (`game_files` then; Linux):
 
 ```bash
-BB_FRAME_STATS=1 BB_TOGGLE_FILE=out/dev/motion-toggles bash native_probe/run.sh 2>&1 | tee native_probe/out/dev/motion-run.log
+BB_FRAME_STATS=1 BB_TOGGLE_FILE=out/dev/motion-toggles bash engine/run.sh 2>&1 | tee engine/out/dev/motion-run.log
 ```
 
 Bit 29 in the temporary toggle file turns off only the history writes. A fair performance
@@ -124,3 +148,47 @@ Changes:
 
 Measured in `out/motion-gated.log`: ~225 saved draws and ~600 "still" ones a frame, no overflow,
 58–80 FPS in game scenes. Whether the trail on the saw is gone still needs a visual check.
+
+## Small skeletons the GPU wrote (Hunter's Workshop 0.4.4 beta 14)
+
+Lantern 0.9.38's rule stores every small skeleton whose bone palette the GPU wrote, every frame:
+the palette's CPU copy is stale, so the gate cannot compare it with the last frame's. In the dense
+area facing its lamps that was 360 draws and 3.7 M vertices a frame (77 and 1.3 M facing the room),
+and object motion cost about 0.8 ms of GPU time there (`docs/community-fixes-plan.md`, beta 14).
+The game's copy shader writes many of its constants from its own memory: `motion_copy_sources.h`
+records where each of the copy shader's ranges came from, and a palette written by one of them is
+compared through its source, which the CPU holds (`BB_MOTION_GPU_SMALL=source`; `store`, the
+default until beta 16, keeps the old rule; `camera` stores none, for measuring). With frame
+statistics the motion report counts those draws, how many came from the copy shader, and how many
+of those were as in the last frame.
+
+## Cheaper for the same vectors (Hunter's Workshop 0.4.4 beta 15)
+
+- The vertex shaders store the clip positions with relaxed atomic stores instead of atomic
+  exchanges (`EmitVertexMotion`): no value is read back. `BB_MOTION_STORE=exchange` brings the
+  exchanges back to compare (a flag in the draw's parameters, no shader compiles again).
+- The motion target is R32G32_UINT, 8 bytes a pixel instead of 16, after bbport 0.7: the vector in
+  pixels as two halves, the depth at full precision with its sign bit set where a vector was written.
+  The compose pass unpacks it; its depth test is unchanged.
+- Left out: deriving the current position in the pixel shader from the pixel's coordinates (one
+  varying instead of two) would need every draw's viewport and jitter there to stay exact.
+- Next, once measured: previous positions from last frame's bone and model constants (a second pass
+  of the vertex shader's position) instead of stored vertices, which stay for vertices that change.
+
+## Small skeletons the GPU wrote, gated by their newest write (Hunter's Workshop 0.4.4 beta 16)
+
+Of beta 15's 360 small skeletons a frame whose palette the GPU wrote (facing the lamps of the dense
+area), 3 came from the copy shader this frame or the last: the rest were GPU-written earlier, and a
+page stays GPU-modified until the CPU writes it again. Every GPU write of tracked memory is now
+numbered per 4 KiB page where its pages become GPU-modified (`GpuWriteStamps`,
+`MemoryTracker::ForEachUploadRange`), and such a palette is gated by the number of its newest write
+as a palette the CPU holds is by its contents: not written since the last frame, it did not change
+and gets the camera vector; written since, it is stored and held as moved bones are.
+`BB_MOTION_GPU_SMALL=store` stores them every frame, as before.
+
+Since 0.4.4 beta 21 the copy shader's ranges are recorded and traced in the source mode only. Frame
+statistics used to turn the tracing on in every mode: thousands of ranges a frame recorded under a
+lock on the draw recording thread, and in the version mode a draw whose palettes the CPU could not
+read took its anchor from a traced source, which players' runs never had. The motion report prints
+the copy-shader counts in the source mode only.
+

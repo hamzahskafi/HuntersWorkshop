@@ -16,7 +16,7 @@ namespace BloodborneLauncher.Core
     {
         public const int Keep = 10;
         public const int InGameKeep = 5;
-        public static readonly TimeSpan InGameEvery = TimeSpan.FromMinutes(15);
+        public static readonly TimeSpan InGameEvery = TimeSpan.FromMinutes(10); // 0.4.4 beta 26b: was 15 (the tester's call)
         /// <summary>How long the saves must have been left alone before a copy while playing: the
         /// game writes its save files in place, and a copy taken mid-write would be torn.</summary>
         private static readonly TimeSpan InGameQuiet = TimeSpan.FromSeconds(45);

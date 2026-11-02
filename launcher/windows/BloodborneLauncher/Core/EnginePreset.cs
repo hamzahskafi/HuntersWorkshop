@@ -1,7 +1,8 @@
 namespace BloodborneLauncher.Core
 {
     /// <summary>
-    /// Graphics › Engine preset: the newer engine features on or off in one go. New is the default;
+    /// The Avalonia launcher's only (0.4.4 beta 28: the Windows launcher's Engine page dropped the preset;
+    /// this goes with the Linux work). Engine switches › Engine preset: the newer engine features on or off in one go. New is the default;
     /// Legacy runs the engine the way the 0.9.33 stable did (the features that were only on in
     /// betas off). The shader compiler and occlusion culling are switches of their own. Changing a single feature by hand shows Custom.
     /// </summary>

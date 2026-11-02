@@ -244,12 +244,17 @@ private:
     uint32_t generation = 1;
 };
 
-inline uint32_t JitterPhases(uint32_t render_width, uint32_t output_width) {
+// The jitter pattern's phases (its distinct sub-pixel offsets before it repeats): 8 x (output / render)^2,
+// the formula of AMD's FSR and NVIDIA's DLSS Programming Guide (§3.7.1.1), each output pixel covered by 8
+// samples. `min_phases`: DLSS asks for at least 16 (the guide's checklist, §2: "at least 16 jitter phases
+// (32 or more is preferred)"), which only moves DLAA (8) and render sizes above about 71% of the output.
+inline constexpr uint32_t kDlssMinJitterPhases = 16;
+inline uint32_t JitterPhases(uint32_t render_width, uint32_t output_width, uint32_t min_phases = 8) {
     if (!render_width || !output_width) {
-        return 8;
+        return min_phases;
     }
     const double ratio = double(output_width) / render_width;
-    return uint32_t(std::clamp(std::ceil(8.0 * ratio * ratio), 8.0, 256.0));
+    return uint32_t(std::clamp(std::ceil(8.0 * ratio * ratio), double(min_phases), 256.0));
 }
 
 // Instanced draws (the game's foliage: up to 64 bushes or flowers a draw) also carry a hash of their

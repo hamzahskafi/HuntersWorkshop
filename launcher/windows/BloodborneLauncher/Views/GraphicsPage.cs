@@ -1,4 +1,5 @@
-﻿using System.IO;
+﻿using System.Globalization;
+using System.Windows;
 using System.Windows.Controls;
 using BloodborneLauncher.Core;
 using Wpf.Ui.Controls;
@@ -6,237 +7,338 @@ using TextBlock = System.Windows.Controls.TextBlock;
 
 namespace BloodborneLauncher.Views
 {
-    /// <summary>Upscaling and the game's own effects (patches applied at start).</summary>
+    /// <summary>
+    /// What the game renders (0.4.4 beta 27b; 27c after the tester's review). Anti-aliasing first, then the
+    /// upscaler with what belongs to it under it: its quality (Auto by the output's height) and the render
+    /// resolution, a slider that shows what the quality renders at and that only Custom moves; the FSR
+    /// version from what AMD offers on this GPU (AmdFsrVersions); DLSS's model. Sharpening, the fine
+    /// settings under Advanced, then Detail and the game's effects. A row that only matters for another's
+    /// choice sits under it (Nest). One short line per row, the details and advice in its tooltip (27d:
+    /// SetTip). Frame generation is not offered (community-fixes-plan.md, Decisions).
+    /// </summary>
     public sealed class GraphicsPage : LauncherPage
     {
-        private readonly TextBlock _upscalerHint, _dlssHint, _frameGenHint;
-        private TextBlock? _motionBlurHint;
-        private readonly SettingRow _presetCard, _renderScaleCard, _sharpenCard, _sharpnessCard, _mipBiasCard;
-        private readonly SettingRow _frameGenFramesCard, _frameGenDynamicCard, _reflexCard, _frameGenCapCard;
+        /// <summary>Game effects (0.4.4 beta 28, the tester's call): what the game has and a switch leaves out,
+        /// in this order. Enhancements, what goes past the game or below it, are texture filtering, model
+        /// detail and screen-space reflections.</summary>
+        public static readonly string[] GameEffects =
+            { "effect_dof", "effect_motion_blur", "effect_chromatic_aberration", "effect_ssao", "effect_dynamic_shadows" };
 
-        public GraphicsPage() : base(L.T("Graphics"),
-            L.T("Stored in config.ini; the upscaler can also be changed in game (Insert or L3 + R3)."))
+        private readonly FrameworkElement _aa;
+        private readonly SettingRow _aaRow, _qualityRow, _scaleRow, _fsrRow, _dlssModel;
+        private readonly SettingRow _sharpenCard, _sharpnessCard, _mipBiasCard, _motionVectors;
+        private readonly TextBlock _aaHint, _upscalerHint, _scaleHint, _fsrHint, _dlssHint, _motionBlurHint;
+        private readonly ComboBox _quality = new() { Width = 240, VerticalAlignment = VerticalAlignment.Center };
+        private readonly ComboBox _fsr = new() { Width = 240, VerticalAlignment = VerticalAlignment.Center };
+        private readonly Slider _scale = new()
         {
-            Add(Card(SymbolRegular.Gauge24, L.T("Best settings for this PC"), Hardware.Detect().Summary,
-                SmallButton(L.T("Recommend…"), SymbolRegular.Sparkle24, (_, _) => MainWindow.Instance!.OfferBestSettings(firstRun: false)), out _));
+            Minimum = 33, Maximum = 100, SmallChange = 1, LargeChange = 5, TickFrequency = 1, IsSnapToTickEnabled = true,
+            Width = 200, VerticalAlignment = VerticalAlignment.Center,
+        };
+        private readonly TextBlock _scaleText = new() { MinWidth = 150, Margin = new Thickness(12, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+        private List<string> _fsrValues = new();
+        private bool _syncing;
 
-            Group(L.T("Upscaler"));
-            // FSR 4.1.1 runs through fsr4vk (in the package) or an fsr4_411 set built from the player's
-            // own AMD DLL: offered when either is there. Without both the setting becomes FSR 4, the
-            // model it would fall back to (#22).
-            var fsr411 = Fsr4VkFound() || Directory.Exists(Fsr411Dir());
-            if (!fsr411 && Ini.Get("upscaler") == "fsr411") Ini.Set("upscaler", "fsr4");
-            IniCombo(SymbolRegular.Sparkle24, L.T("Upscaler"), null,
-                fsr411 ? Choices.Upscalers : Choices.Upscalers.Where(c => c.Value != "fsr411").ToArray(), "upscaler", changed: UpdateUpscaler);
-            _upscalerHint = (TextBlock)((SettingRow)Body.Children[^1]).Tag;
+        public GraphicsPage()
+        {
+            // Sets the Display page's resolution and frame rate and this page's upscaler and quality.
+            // 0.4.4 beta 28: "Suggested" (was Best settings): a rule of thumb from the hardware, not a measured best.
+            Add(Card(SymbolRegular.Gauge24, L.T("Suggested settings for this PC"),
+                L.T("Output resolution, frame rate, upscaler and quality worked out from this PC's graphics card, processor and the game's monitor: " +
+                    "a starting point, not a measurement. Every change is listed before it applies") + "\n\n" + Hardware.Detect().Summary,
+                SmallButton(L.T("Suggest…"), SymbolRegular.Sparkle24, (_, _) => MainWindow.Instance!.OfferBestSettings(firstRun: false)), out _,
+                line: L.T("Resolution, frame rate and upscaler from this PC's hardware")));
 
-            IniCombo(SymbolRegular.ZoomIn24, L.T("Quality preset"), L.T("How far below the output resolution the game renders"),
-                Choices.Presets, "preset", changed: UpdateUpscaler);
-            _presetCard = (SettingRow)Body.Children[^1];
-            // The Custom preset's ratio (render_scale), the engine's PresetScale: 1.0 renders at the
-            // output (DLAA with DLSS), 3.0 is Ultra Performance.
-            SliderRow(SymbolRegular.SlideSize24, L.T("Render scale (Custom preset)"),
-                L.T("Output size divided by this is the render size: 1.00 renders at the output, 1.30 a little below, 3.00 like Ultra Performance. FSR 4 and DLSS use the nearest preset's model"),
-                1.0, 3.0, 0.05, () => ParseDouble(Ini.Get("render_scale", "1.30"), 1.3), v => Ini.Set("render_scale", Fmt(v)), format: "x0.00", valueWidth: 56);
-            _renderScaleCard = (SettingRow)Body.Children[^1];
+            Group(L.T("Upscaling and anti-aliasing"));
+            // 0.4.4 beta 27c: first (the tester's order). The anti-aliasing without an upscaler, the game's
+            // own pass among them: greyed with "Upscaler (DLSS)" in the box (27d) while an upscaler
+            // anti-aliases itself (the engine leaves the game's pass out then: patches.cpp NoUpscaler).
+            _aa = ComboRow(SymbolRegular.Color24, L.T("Anti-aliasing"), L.T("Smooths edges when no upscaler runs"),
+                Choices.AntiAliasing, AntiAliasingNow, v =>
+                {
+                    if (_syncing) return; // shown again from config.ini, not picked
+                    Ini.Set("upscaler", v == "taa" ? "taa" : "off");
+                    Ini.Set("effect_game_aa", v == "game" ? "1" : "0");
+                }, changed: () => { if (!_syncing) UpdateUpscaler(); });
+            _aaRow = LastRow;
+            _aaRow.SetTip(L.T("Off: the sharpest, with jagged edges. The game's own: its PS4 pass, after a restart. TAA: smooth edges, live."));
+            _aaHint = (TextBlock)_aaRow.Tag;
 
-            IniToggle(SymbolRegular.Eyedropper24, L.T("Sharpening (RCAS)"), L.T("Works with every option above, TAA included: turn it up if the picture looks soft"), "sharpen");
-            _sharpenCard = (SettingRow)Body.Children[^1];
-            SliderRow(SymbolRegular.SlideSize24, L.T("Sharpening strength"), L.T("Up to 1: the upscaler's own sharpening. Above 1: an extra pass"), 0, 2, 0.05,
-                () => ParseDouble(Ini.Get("sharpness"), 0.5), v => Ini.Set("sharpness", Fmt(v)));
-            _sharpnessCard = (SettingRow)Body.Children[^1];
-            SliderRow(SymbolRegular.Image24, L.T("Texture mip bias"),
-                L.T("Added to the texture detail the upscaler asks for: below 0 sharper textures (more shimmer), above 0 softer. 0 is the upscaler's own"),
-                -2, 1, 0.05, () => ParseDouble(Ini.Get("mip_bias", "0"), 0), v => Ini.Set("mip_bias", Fmt(v)), format: "+0.00;-0.00;0.00", valueWidth: 56);
-            _mipBiasCard = (SettingRow)Body.Children[^1];
-            IniToggle(SymbolRegular.ArrowMove24, L.T("Object motion vectors"), L.T("Less ghosting on characters; costs about 10% FPS"), "object_motion");
+            // The upscalers, or None, where Anti-aliasing above decides (upscaler=taa or off). One FSR,
+            // AMD's, through AMD's FSR SDK (engine\amd-fsr).
+            ComboRow(SymbolRegular.Sparkle24, L.T("Upscaler"), L.T("Renders below the output and fills it in"),
+                Choices.FrameUpscalers, () => Ini.Get("upscaler") is "fsr" or "dlss" ? Ini.Get("upscaler") : "none",
+                v => Ini.Set("upscaler", v != "none" ? v : Ini.Flag("effect_game_aa") ? "off" : "taa"), changed: UpdateUpscaler);
+            _upscalerHint = (TextBlock)LastRow.Tag;
+            LastRow.SetTip(L.T("DLSS needs an NVIDIA RTX card; AMD FSR runs on any GPU. Both anti-alias as they upscale."));
 
-            var dlssMore = Advanced(L.T("DLSS options"));
-            IniCombo(SymbolRegular.BrainCircuit24, L.T("DLSS model"),
-                L.T("Which NVIDIA model DLSS runs. Also in game (Insert or L3 + R3), where it changes at once"), Choices.DlssModels, "dlss_preset", dlssMore);
-            ToggleRow(SymbolRegular.BrightnessHigh24, L.T("DLSS auto exposure"),
-                L.T("DLSS works out each frame's exposure itself, for the game's finished frame too. Can calm ghosting in dark scenes"),
-                () => Ini.Get("dlss_auto_exposure", "0") == "1", v => Ini.Set("dlss_auto_exposure", v ? "1" : "0"), dlssMore);
-            ToggleRow(SymbolRegular.Image24, L.T("DLSS sharper textures"),
-                L.T("One more mip level of texture detail under DLSS, as NVIDIA's guide asks. Off: the render-to-output ratio only"),
-                () => Ini.Get("dlss_mip_bias", "1") != "0", v => Ini.Set("dlss_mip_bias", v ? "1" : "0"), dlssMore);
-            Add(Card(SymbolRegular.DeveloperBoard24, "DLSS", "", null, out _dlssHint), dlssMore);
+            // Its quality: plain names, Auto first with what it picks for the output (ShowQuality).
+            foreach (var _ in Choices.Presets) _quality.Items.Add(new ComboBoxItem());
+            ComboSearch.Attach(_quality);
+            _qualityRow = Add(Card(SymbolRegular.ZoomIn24, L.T("Upscaling quality"),
+                L.T("How far below the output the game renders: lower is faster and softer. Auto: Native AA up to 1200 lines, Quality up to 1600, Performance above"),
+                _quality, out _, line: L.T("How far below the output the game renders")));
+            _qualityRow.Choices = string.Join(" · ", Choices.Presets.Select(c => c.Label));
+            Nest();
+            _quality.SelectionChanged += (_, _) =>
+            {
+                if (_syncing || _quality.SelectedIndex < 0) return;
+                Ini.Set("preset", Choices.Presets[_quality.SelectedIndex].Value);
+                Ws.SaveSoon();
+                UpdateUpscaler();
+            };
 
-            Group(L.T("Frame generation"));
-            IniCombo(SymbolRegular.FastForward24, L.T("Frame generation"),
-                L.T("Extra frames between the game's own: smoother motion, a little more input lag. Needs an upscaler. Off by default"),
-                Choices.FrameGeneration, "frame_gen", changed: UpdateUpscaler);
-            _frameGenHint = (TextBlock)((SettingRow)Body.Children[^1]).Tag;
-            IniCombo(SymbolRegular.Layer24, L.T("DLSS generated frames"),
-                L.T("Frames shown per frame the game renders. More than 2x needs an RTX 50 GPU; the engine keeps to what the GPU allows"),
-                Choices.FrameGenFrames, "frame_gen_frames");
-            _frameGenFramesCard = (SettingRow)Body.Children[^1];
-            IniToggle(SymbolRegular.TopSpeed24, L.T("DLSS dynamic frame generation"),
-                L.T("RTX 50: the driver picks 2x, 3x or 4x moment by moment to reach your refresh rate, up to the generated frames above. Fewer generated frames when the game is fast: less lag, fewer artifacts. Also in game, with a target FPS"), "frame_gen_dynamic");
-            _frameGenDynamicCard = (SettingRow)Body.Children[^1];
-            IniCombo(SymbolRegular.Flash24, L.T("NVIDIA Reflex"),
-                L.T("Keeps the GPU's queue short for lower input lag. Always on while DLSS Frame Generation runs"),
-                Choices.Reflex, "reflex");
-            _reflexCard = (SettingRow)Body.Children[^1];
-            IniToggle(SymbolRegular.Timer24, L.T("Frame generation: even pacing (Uncapped)"),
-                L.T("With the Uncapped frame rate: the game at the refresh rate divided by the frames shown per game frame, so every generated frame reaches the screen. The fixed rates (30 to 144) are left as they are"), "frame_gen_cap");
-            _frameGenCapCard = (SettingRow)Body.Children[^1];
+            // Beside it, what the quality renders at: a slider (the share of the output per side) that only
+            // Custom moves, greyed otherwise (27d, the tester; one indent, as Quality's);
+            // render_scale keeps it as the engine's ratio (77% is 1.30).
+            _scaleText.SetResourceReference(TextBlock.FontFamilyProperty, "MonoFont");
+            _scaleRow = Add(Card(SymbolRegular.SlideSize24, L.T("Render resolution"),
+                L.T("The share of the output's width and height the game renders at. DLSS runs the nearest quality's model"),
+                Row(_scale, _scaleText), out _scaleHint));
+            Nest();
+            _scale.ValueChanged += (_, _) =>
+            {
+                if (_syncing || Ini.Get("preset", "auto") != "5") return;
+                Ini.Set("render_scale", Fmt(100.0 / _scale.Value));
+                Ws.SaveSoon();
+                ShowQuality();
+            };
 
-            // The engine's picture and camera controls (bbport_settings.cpp clamps the same ranges).
-            Group(L.T("Picture"));
-            var picture = new StackPanel();
-            IniToggle(SymbolRegular.Color24, L.T("Picture tuning"), L.T("Turns the settings below on, live. Also in the game's System menu (PC Graphics, PC Effects, PC Colour) and the Insert menu"), "graphics_controls");
-            IniToggle(SymbolRegular.CircleHalfFill24, L.T("Vignette"), null, "graphics_vignette", picture);
-            IniSlider(SymbolRegular.DarkTheme24, L.T("Ambient occlusion strength"), 0, 3, "graphics_ao_strength", picture);
-            IniSlider(SymbolRegular.WeatherSunny24, L.T("Shadow distance"), 0.5, 4, "graphics_shadow_scale", picture);
-            IniSlider(SymbolRegular.Lightbulb24, L.T("Bloom"), 0, 3, "graphics_bloom", picture);
-            IniSlider(SymbolRegular.Color24, L.T("Saturation"), 0, 3, "graphics_saturation", picture);
-            IniSlider(SymbolRegular.BrightnessHigh24, L.T("Brightness"), 0, 3, "graphics_brightness", picture);
-            IniSlider(SymbolRegular.DarkTheme24, L.T("Contrast"), 0.8, 1.2, "graphics_contrast", picture, step: 0.01);
-            IniSlider(SymbolRegular.Color24, L.T("Hue"), -180, 180, "graphics_hue", picture, step: 1, fallback: 0);
-            IniSlider(SymbolRegular.WeatherFog24, L.T("Fog"), 0, 3, "graphics_fog", picture);
-            Body.Children.Add(picture);
+            // AMD FSR's version: Automatic or any AMD offers on this GPU (asked in the background).
+            ComboSearch.Attach(_fsr);
+            _fsrRow = Add(Card(SymbolRegular.BrainCircuit24, L.T("FSR version"), L.T("The versions AMD offers on this GPU; Automatic runs the newest"),
+                _fsr, out _fsrHint));
+            Nest();
+            _fsrRow.SetTip(L.T("Newer is usually better. (driver) marks one AMD's graphics driver provides."));
+            _fsr.SelectionChanged += (_, _) =>
+            {
+                if (_syncing || _fsr.SelectedIndex < 0) return;
+                Ini.Set("fsr_version", _fsrValues[_fsr.SelectedIndex]);
+                Ws.SaveSoon();
+                ShowFsrVersions();
+            };
 
-            Group(L.T("Camera"));
-            IniToggle(SymbolRegular.Camera24, L.T("Camera tuning"), L.T("Turns the three settings below on"), "camera_controls");
-            IniSlider(SymbolRegular.ZoomOut24, L.T("Field of view"), 1, 1.5, "camera_fov_scale");
-            IniSlider(SymbolRegular.ArrowMaximize24, L.T("Distance"), 0.5, 1.5, "camera_distance_scale");
-            IniSlider(SymbolRegular.ArrowBidirectionalUpDown24, L.T("Height"), 0.5, 1.5, "camera_height_scale");
+            // DLSS's model, with DLSS only (Auto, the default: NVIDIA's pairing for each quality).
+            IniCombo(SymbolRegular.BrainCircuit24, L.T("DLSS model"), L.T("Which NVIDIA model DLSS runs; also in game (Insert or L3 + R3)"),
+                Choices.DlssModels, "dlss_preset", changed: UpdateUpscaler);
+            _dlssModel = Nest();
+            _dlssModel.SetTip(L.T("Auto: K from DLAA to Balanced, M at Performance, L at Ultra Performance."));
+            _dlssHint = (TextBlock)_dlssModel.Tag;
 
+            // Sharpening: its line says where it runs, for what runs (UpdateUpscaler; 27d, the tester).
+            IniToggle(SymbolRegular.Eyedropper24, L.T("Sharpening (RCAS)"), null, "sharpen", changed: UpdateUpscaler);
+            _sharpenCard = LastRow;
+            _sharpenCard.SetTip(L.T("AMD's RCAS. Brings back detail that upscaling softens."));
+            SliderRow(SymbolRegular.SlideSize24, L.T("Sharpening strength"), null, 0, 2, 0.05,
+                () => ParseDouble(Ini.Get("sharpness"), 0.2), v => Ini.Set("sharpness", Fmt(v)), defaultValue: 0.2);
+            _sharpnessCard = Nest();
+            _sharpnessCard.SetTip(L.T("0.20 is light. High values can halo edges and show grain."));
+
+            // The fine settings most players leave alone (27d: two; DLSS's sharper textures folded into the
+            // bias, auto exposure as NVIDIA and AMD advise, without a row).
+            var fine = Advanced();
+            IniToggle(SymbolRegular.ArrowMove24, L.T("Character motion vectors"), L.T("Less ghosting on characters; costs about 10% FPS"), "object_motion", fine);
+            _motionVectors = LastRow;
+            _motionVectors.SetTip(L.T("The game gives no motion for moving characters; this works it out. Off: faster, but moving enemies can trail. After a restart."));
+            SliderRow(SymbolRegular.Image24, L.T("Texture mip bias"), L.T("Below 0 sharper textures, above 0 softer"),
+                -2, 1, 0.05, () => ParseDouble(Ini.Get("mip_bias", "0"), 0), v => Ini.Set("mip_bias", Fmt(v)), format: "+0.00;-0.00;0.00", into: fine, valueWidth: 56, defaultValue: 0);
+            _mipBiasCard = LastRow;
+            _mipBiasCard.SetTip(L.T("0 is what NVIDIA and AMD advise with an upscaler. Below 0 can shimmer."));
+
+            // ==================== Game effects ====================
+            // 0.4.4 beta 28 (the tester's call; were Detail and Effects): grouped by where each setting
+            // comes from, as in the in-game overlay menu. First what the game has and a switch leaves out.
             Group(L.T("Game effects"));
-            Body.Children.Add(Text(L.T("Patches to the game, applied when it starts."), "Faint"));
-            IniCombo(SymbolRegular.Cube24, L.T("Model detail"), null, Choices.ModelLod, "model_lod");
-            IniCombo(SymbolRegular.Camera24, L.T("Follow camera"), L.T("Original keeps the game's camera distance, angle and follow speed at 60 FPS and above"), Choices.CameraTuning, "camera_tuning");
-            foreach (var effect in Choices.Effects)
+            Body.Children.Add(Text(L.T("The game's own effects. Off leaves one out; applied when the game starts"), "Faint"));
+            TextBlock? blurHint = null;
+            foreach (var effect in GameEffects.Select(key => Choices.Effects.Single(e => e.Key == key)))
             {
                 var motionBlur = effect.Key == "effect_motion_blur";
-                IniToggle(EffectIcon(effect.Key), effect.Title, effect.Hint, effect.Key, changed: motionBlur ? UpdateUpscaler : null);
-                if (motionBlur) _motionBlurHint = ((SettingRow)Body.Children[^1]).Hint;
+                IniToggle(SymbolRegular.Color24, effect.Title, effect.Hint, effect.Key, changed: motionBlur ? ShowMotionBlur : null, line: effect.Line);
+                if (!motionBlur) continue;
+                blurHint = LastRow.Hint;
+                // Beside the blur it is about, under it (was among the engine switches).
+                SwitchRow(EngineSwitches.All.Single(s => s.Env == "BB_UPSCALER_NO_BLUR"), SymbolRegular.Color24);
+                Nest();
             }
+            _motionBlurHint = blurHint!;
+
+            // ==================== Enhancements ====================
+            // What goes past the game, or below it for weaker GPUs.
+            Group(L.T("Enhancements"));
+            Body.Children.Add(Text(L.T("Model detail and texture filtering above or below the game's, and reflections it doesn't have. Applied when the game starts"), "Faint"));
+            SwitchRow(EngineSwitches.All.Single(s => s.Env == "BB_ANISO"), SymbolRegular.Image24);
+            IniCombo(SymbolRegular.Cube24, L.T("Model detail"), L.T("Highest costs GPU time; Lower and Lowest help weaker GPUs"), Choices.ModelLod, "model_lod",
+                line: L.T("How far away models keep their full detail"));
+            var reflections = Choices.Effects.Single(e => e.Key == "effect_ssr");
+            IniToggle(SymbolRegular.Color24, reflections.Title, reflections.Hint, reflections.Key, line: reflections.Line);
 
             Ws.PortChanged += UpdateUpscaler;
+            // AMD's list arrives on a worker thread: shown again here, and kept for the next start.
+            void Arrived() => Dispatcher.BeginInvoke(() =>
+            {
+                AmdFsrVersions.Remember();
+                ShowFsrVersions();
+            });
+            Loaded += (_, _) => AmdFsrVersions.Changed += Arrived;
+            Unloaded += (_, _) => AmdFsrVersions.Changed -= Arrived;
+            UpdateUpscaler();
         }
 
-        private void IniSlider(SymbolRegular icon, string title, double min, double max, string key, Panel? into = null,
-            double step = 0.05, double fallback = 1.0) =>
-            SliderRow(icon, title, null, min, max, step, () => ParseDouble(Ini.Get(key, Fmt(fallback)), fallback), v => Ini.Set(key, Fmt(v)), into: into);
-
-        /// <summary>An RTX 40 or 50 card (desktop or laptop): the GPUs NVIDIA's frame generation runs on.</summary>
-        private static bool DlssFrameGenGpu() =>
-            Hardware.Detect() is { Rtx: true } hardware &&
-            System.Text.RegularExpressions.Regex.IsMatch(hardware.Gpu, @"RTX\s*(PRO\s*)?[45]0\d\d", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-
-        /// <summary>NVIDIA Streamline's runtime beside the engine (tools/fetch_streamline.sh): DLSS Frame Generation.</summary>
-        private static bool StreamlineFound() =>
-            File.Exists(Path.Combine(Paths.BinariesDir, "sl.interposer.dll")) && File.Exists(Path.Combine(Paths.BinariesDir, "sl.dlss_g.dll"));
-
-        private static SymbolRegular EffectIcon(string key) => key switch
+        public override void OnShown()
         {
-            "skip_intro" => SymbolRegular.FastForward24,
-            "debug_camera" => SymbolRegular.Camera24,
-            "debug_menu" => SymbolRegular.Bug24,
-            _ => SymbolRegular.Color24,
+            AmdFsrVersions.Refresh(); // once a session, in the background
+            UpdateUpscaler(); // the output (Display) may have changed
+        }
+
+        /// <summary>The Anti-aliasing choice config.ini holds: TAA or Off from the upscaler, the game's own
+        /// from effect_game_aa. With an upscaler, what Upscaler None goes back to.</summary>
+        // The game's own pass unless effect_game_aa=0 (0.4.4 beta 28: on by default in the engine too).
+        private static string AntiAliasingNow() => Ini.Get("upscaler") switch
+        {
+            "taa" => "taa",
+            "off" => Ini.Get("effect_game_aa") != "0" ? "game" : "off",
+            _ => Ini.Get("effect_game_aa") != "0" ? "game" : "taa",
         };
 
-        public override void OnShown() => UpdateUpscaler();
+        private static double CustomScale() => Math.Clamp(ParseDouble(Ini.Get("render_scale", "1.30"), 1.3), 1.0, 3.0);
 
-        private static bool DlssFound() =>
-            Paths.DlssRuntime != null; // the engine has DLSS built in; NVIDIA's runtime sits beside it
+        /// <summary>The quality list (Auto with what it picks for the output chosen on Display; Native AA as
+        /// DLAA with DLSS) and the slider: the share and the size the game renders at, as the engine works
+        /// it out (Choices.RenderSize), movable with Custom only.</summary>
+        private void ShowQuality()
+        {
+            var (ow, oh) = Choices.OutputSize(Ini.Get("output_res", "1920x1080"));
+            var live = Ini.Get("live_resolution", "0") == "1";
+            var dlss = Ini.Get("upscaler") == "dlss";
+            var saved = Ini.Get("preset", "auto");
+            string Name(int preset) => preset == 0 && dlss ? "DLAA" : Choices.Presets[preset + 1].Label;
+            var preset = Choices.ResolvePreset(saved, oh);
+            var custom = preset == Choices.PresetCustom;
+            var scale = custom ? CustomScale() : Choices.PresetScales[preset];
+            var (w, h) = Choices.RenderSize(ow, oh, scale, live);
+            var percent = ow > 0 ? (int)Math.Round(100.0 * w / ow, MidpointRounding.AwayFromZero) : 100;
+            _syncing = true;
+            try
+            {
+                for (var i = 0; i < Choices.Presets.Length; i++)
+                    ((ComboBoxItem)_quality.Items[i]).Content = i == 0
+                        ? $"{Choices.Presets[0].Label} ({Name(Choices.AutoPreset(oh))})"
+                        : Name(i - 1);
+                // Selected again: the closed box shows the selected entry's text as it was when picked.
+                _quality.SelectedIndex = -1;
+                _quality.SelectedIndex = Math.Max(0, Choices.IndexOf(Choices.Presets, saved));
+                _scale.Minimum = Choices.RenderPercentMin(ow, oh, live);
+                _scale.Value = Math.Clamp(custom ? Math.Round(100 / scale) : percent, _scale.Minimum, 100);
+                _scaleText.Text = $"{percent}% — {w} × {h}";
+                // Greyed unless Custom (27d, the tester; it still shows what the quality renders at).
+                _scaleRow.IsEnabled = custom;
+                SetHint(_scaleHint, custom ? null : L.T("Choose Custom to set your own"));
+            }
+            finally { _syncing = false; }
+        }
+
+        /// <summary>FSR version: Automatic (with the newest AMD offers here) and each version AMD lists
+        /// (AmdFsrVersions); a saved one AMD does not offer here runs Automatic, and says so.</summary>
+        private void ShowFsrVersions()
+        {
+            var offered = AmdFsrVersions.Known;
+            var saved = Ini.Get("fsr_version", "auto");
+            var match = AmdFsrVersions.Match(offered, saved);
+            string Shown(string name) => "FSR " + AmdFsrVersions.Key(name) + (AmdFsrVersions.FromDriver(name) ? " " + L.T("(driver)") : "");
+            var newest = AmdFsrVersions.Newest(offered);
+            _syncing = true;
+            try
+            {
+                _fsr.Items.Clear();
+                _fsrValues = new List<string> { "auto" };
+                _fsr.Items.Add(new ComboBoxItem { Content = newest == null ? L.T("Automatic") : $"{L.T("Automatic")} ({Shown(newest)})" });
+                foreach (var name in offered)
+                {
+                    _fsr.Items.Add(new ComboBoxItem { Content = Shown(name) });
+                    _fsrValues.Add(AmdFsrVersions.Key(name));
+                }
+                _fsr.SelectedIndex = match + 1; // none: Automatic
+            }
+            finally { _syncing = false; }
+            _fsrRow.Choices = string.Join(" · ", _fsr.Items.Cast<ComboBoxItem>().Select(i => i.Content as string));
+            SetHint(_fsrHint, match < 0 && saved is not ("auto" or "") && offered.Count > 0
+                ? L.F($"FSR {saved} is not offered on this GPU: Automatic runs")
+                : null);
+        }
 
         private void UpdateUpscaler()
         {
             var value = Ini.Get("upscaler");
-            string? hint = value switch
+            var upscaling = value is "fsr" or "dlss";
+            var ngx = Paths.DlssRuntime;
+            // A note only for what needs action, or what runs (DLSS's version).
+            SetHint(_upscalerHint, value switch
             {
-                "fsr4" => Directory.Exists(Path.Combine(Paths.EngineDir, "fsr4_shaders"))
-                    ? L.T("Assets found. GPUs without the needed shader features fall back to FSR 3.1")
-                    : L.T("fsr4_shaders is missing from the port folder: the game falls back to FSR 3.1"),
-                "fsr411" when Fsr4VkFound() =>
-                    L.T("Through fsr4vk (included, experimental): runs on any GPU with the needed Vulkan features. Prefer FSR 4 if it looks wrong"),
-                "fsr411" => Fsr411Problem() is { } problem
-                    ? L.F($"{problem}: the game falls back to FSR 4")
-                    : L.T("Assets for the chosen resolution and preset found"),
-                "dlss" => DlssFound()
-                    ? L.T("Needs an NVIDIA GeForce RTX GPU; others fall back to FSR 3.1") +
-                      (Ini.Get("preset", "0") == "0" ? L.T(". With Native AA this is DLAA: DLSS as anti-aliasing at full resolution") : "")
-                    : L.T("DLSS files are missing: the game falls back to FSR 3.1"),
-                "taa" => L.T("Anti-aliasing at the output resolution, without an FSR model. Softer than DLAA or FSR Native AA: add sharpening below"),
-                _ => null,
-            };
-            SetHint(_upscalerHint, hint);
-            _presetCard.IsEnabled = value is not ("taa" or "off");
-            _renderScaleCard.Visibility = Ini.Get("preset", "0") == "5" ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
-            _renderScaleCard.IsEnabled = value is not ("taa" or "off");
-            _sharpenCard.IsEnabled = value != "off";
-            _sharpnessCard.IsEnabled = value != "off";
-            _mipBiasCard.IsEnabled = value != "off";
-
-            // Frame generation: DLSS's own rows only with DLSS chosen.
-            var frameGen = Ini.Get("frame_gen", "off");
-            _frameGenFramesCard.IsEnabled = frameGen == "dlss";
-            _frameGenDynamicCard.IsEnabled = frameGen == "dlss";
-            _reflexCard.IsEnabled = frameGen == "dlss";
-            _frameGenCapCard.IsEnabled = frameGen != "off";
-            SetHint(_frameGenHint, frameGen switch
-            {
-                "dlss" when !StreamlineFound() => L.T("NVIDIA Streamline (sl.interposer.dll, sl.dlss_g.dll) is missing from the engine folder: the game uses no frame generation"),
-                "dlss" when !DlssFrameGenGpu() => L.T("Needs an NVIDIA RTX 40 or 50 GPU with Hardware-accelerated GPU scheduling on; other GPUs: choose FSR 3.1"),
-                "dlss" => L.T("RTX 40: 2x; RTX 50: up to 6x. Loaded when the game starts; in game you can switch it off and on (Insert or L3 + R3)"),
-                "fsr3" => L.T("Any GPU. Not in menus, movies or with HDR output"),
+                "fsr" when !Paths.AmdFsrPresent => L.T("AMD's FSR files are missing from the engine folder (engine\\amd-fsr): the game runs TAA instead"),
+                "dlss" when ngx == null => L.T("DLSS files are missing: the game uses AMD FSR"),
+                "dlss" => "DLSS " + Paths.DlssVersion(ngx!),
                 _ => null,
             });
-            if (frameGen != "off" && value == "off")
-                SetHint(_frameGenHint, L.T("Frame generation needs an upscaler (or TAA): choose one above"));
-
-            // An upscaler takes the finished frame at outputs other than 1920x1080 and can smear the
-            // game's motion blur; More > Engine can leave the blur out there (BB_UPSCALER_NO_BLUR).
-            var (w, h) = Choices.OutputSize(Ini.Get("output_res", "1920x1080"));
-            if (_motionBlurHint != null)
-                SetHint(_motionBlurHint, value != "off" && (w, h) != (1920, 1080) && Ini.Flag("effect_motion_blur")
-                    ? L.T("With an upscaler at an output other than 1920x1080 the blur can smear. More > Engine > No motion blur smear with upscalers leaves it out there")
-                    : null);
-
-            var ngx = Paths.DlssRuntime;
-            SetHint(_dlssHint, ngx != null
-                ? L.F($"NVIDIA DLSS {Paths.DlssVersion(ngx)} is included ({Path.Combine("out", Path.GetFileName(ngx))}). Choose it as the upscaler above")
-                : L.F($"{Path.Combine("out", "nvngx_dlss.dll")} is missing from the engine folder"));
+            // The anti-aliasing an upscaler does itself: greyed, "Upscaler (DLSS)" in the box (27d, the tester),
+            // the choice kept for Upscaler None.
+            var upscalerName = value == "dlss" ? "DLSS" : "AMD FSR";
+            _syncing = true;
+            try
+            {
+                if (upscaling) ShowInstead(_aa, L.F($"Upscaler ({upscalerName})"));
+                else
+                {
+                    ShowInstead(_aa, null);
+                    Pick(_aa, Math.Max(0, Choices.IndexOf(Choices.AntiAliasing, AntiAliasingNow())));
+                }
+            }
+            finally { _syncing = false; }
+            _aaRow.IsEnabled = !upscaling;
+            if (upscaling) SetHint(_aaHint, null);
+            ShowQuality();
+            var upscalerRows = upscaling ? Visibility.Visible : Visibility.Collapsed;
+            _qualityRow.Visibility = upscalerRows;
+            _scaleRow.Visibility = upscalerRows;
+            // RCAS runs after an upscaler or TAA only; character motion vectors too (ObjectMotion). The mip
+            // bias applies with an upscaler (TemporalUpscaler::SceneMipBias: TAA renders at the output).
+            var temporal = value != "off";
+            _sharpenCard.IsEnabled = temporal;
+            _sharpnessCard.IsEnabled = temporal && Ini.Flag("sharpen"); // as in game
+            _mipBiasCard.IsEnabled = upscaling;
+            _motionVectors.IsEnabled = temporal;
+            // Where the sharpening runs, for what runs: FSR sharpens up to 1 itself and an RCAS pass adds
+            // the rest; DLSS has none of its own, so the pass does it all; TAA's runs after it.
+            _sharpenCard.SetInfo(value switch
+            {
+                "dlss" => L.T("After DLSS (it has none of its own)"),
+                "fsr" => L.T("FSR's own sharpening"),
+                "taa" => L.T("After TAA"),
+                _ => L.T("Needs an upscaler or TAA"),
+            });
+            _sharpnessCard.SetInfo(value == "fsr" ? L.T("Above 1 adds a second pass") : L.T("Higher is sharper"));
+            _fsrRow.Visibility = value == "fsr" ? Visibility.Visible : Visibility.Collapsed;
+            if (value == "fsr") ShowFsrVersions();
+            var dlss = value == "dlss" ? Visibility.Visible : Visibility.Collapsed;
+            _dlssModel.Visibility = dlss;
+            if (value == "dlss")
+            {
+                var (_, oh) = Choices.OutputSize(Ini.Get("output_res", "1920x1080"));
+                var model = Choices.DlssAutoModel(Choices.ResolvePreset(Ini.Get("preset", "auto"), oh), CustomScale());
+                SetHint(_dlssHint, Ini.Get("dlss_preset", "auto") == "auto" ? L.F($"Auto: model {model} at this quality") : null);
+            }
+            ShowMotionBlur();
         }
 
-        /// <summary>The fsr4vk provider the package ships (FSR 4.1.1 on any GPU, vk_fsr4vk.cpp).</summary>
-        private static bool Fsr4VkFound() =>
-            File.Exists(Path.Combine(Paths.EngineDir, "fsr4vk", "amd_fidelityfx_upscaler_vk.dll"));
-
-        private static string Fsr411Dir()
+        /// <summary>An upscaler takes the finished frame at outputs other than 1920x1080 and can smear the
+        /// game's motion blur; the switch under it leaves the blur out there (BB_UPSCALER_NO_BLUR).</summary>
+        private void ShowMotionBlur()
         {
-            var env = Environment.GetEnvironmentVariable("BB_FSR411_DIR");
-            if (!string.IsNullOrEmpty(env)) return env;
-            var local = Path.Combine(Paths.EngineDir, "fsr4_411");
-            return Directory.Exists(local) ? local : Path.Combine(Paths.DataDir, "fsr4_411");
-        }
-
-        /// <summary>The FSR 4.1.1 model files the chosen output and preset need (fsr4_411\).</summary>
-        private static string? Fsr411Problem()
-        {
+            if (_motionBlurHint == null) return; // the row is built after the first call
             var (w, h) = Choices.OutputSize(Ini.Get("output_res", "1920x1080"));
-            var model = (w > 1920 || h > 1080 ? "t2160" : "t1080") + (Ini.Get("preset", "4") == "4" ? "_m1" : "_m0");
-            var passes = new List<string> { "spd", "prepass", "pass0_post" };
-            for (var i = 1; i <= 12; i++)
-            {
-                passes.Add($"pass{i}");
-                passes.Add($"pass{i}_post");
-            }
-            passes.Add("postpass");
-            passes.Add("rcas");
-
-            var dir = Path.Combine(Fsr411Dir(), model);
-            foreach (var name in passes)
-            {
-                var file = new FileInfo(Path.Combine(dir, name + ".spv"));
-                if (!file.Exists || file.Length < 20 || file.Length % 4 != 0)
-                    return L.F($"Missing or damaged fsr4_411\\{model}\\{name}.spv");
-            }
-            var init = new FileInfo(Path.Combine(dir, "initializer.bin"));
-            return init.Exists && init.Length == 131072 ? null : L.F($"Missing or damaged fsr4_411\\{model}\\initializer.bin");
+            SetHint(_motionBlurHint, Ini.Get("upscaler") != "off" && (w, h) != (1920, 1080) && Ini.Flag("effect_motion_blur")
+                ? L.T("With an upscaler at an output other than 1920x1080 the blur can smear: No motion blur smear with upscalers, below, leaves it out there")
+                : null);
         }
     }
 }

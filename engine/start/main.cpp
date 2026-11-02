@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// bb-start.exe: starts Bloodborne PC natively (was scripts/run_windows.py and the scripts it ran).
+// bb-start.exe: starts Bloodborne PC natively on Windows (0.9.32 replaced the Python start with it).
 //
 //     bb-start.exe [--game-dir DIR] [bb-probe options...]
 //
@@ -202,18 +202,12 @@ void SeedGpuCache(const fs::path& cache, const fs::path& catalogs, const fs::pat
     }
 }
 
-void ResetStaleGpuCache(const fs::path& cache, const std::string& identity, const std::string& legacy,
-                        const fs::path& recompiler) {
+void ResetStaleGpuCache(const fs::path& cache, const std::string& identity, const fs::path& recompiler) {
+    if (identity.empty()) return;
     const fs::path stamp = cache / "engine.txt";
     std::error_code error;
     try {
-        const std::string stamped = Trim(ReadText(stamp));
-        if (identity.empty() || stamped == identity) return;
-        // Made by an earlier engine from these same sources (its identity hashed whole files).
-        if (!legacy.empty() && stamped == legacy) {
-            WriteText(stamp, identity + "\n");
-            return;
-        }
+        if (Trim(ReadText(stamp)) == identity) return;
     } catch (const Error&) {
     }
     if (fs::is_directory(cache, error) && RecompileGpuCache(cache, recompiler)) {
@@ -243,7 +237,13 @@ void ResetStaleGpuCache(const fs::path& cache, const std::string& identity, cons
 
 std::string ConfigureFrameRate() {
     std::string fps = Env("BB_FPS", "60");
-    if (fps == "120" || fps == "144") {
+    // 0.4.4 beta 22: 240 is a fixed rate like 120 and 144, on the frame-rate corrections (their values follow
+    // the rate); without them (BB_FRAME_FIXES=0, safe mode) the patch file's lists stop at 144.
+    if (fps == "240" && Env("BB_FRAME_FIXES", "1").substr(0, 1) == "0") {
+        Log("240 FPS needs the frame-rate corrections (off): running at 144 FPS");
+        fps = "144";
+    }
+    if (fps == "120" || fps == "144" || fps == "240") {
         SetEnv("BB_FPS", fps);
         SetEnv("BB_FPS_LIMIT", fps);
         SetEnv("BB_VBLANK_HZ", fps);
@@ -304,7 +304,116 @@ int RunProbe(const fs::path& probe, const std::vector<std::wstring>& arguments, 
     return int(code);
 }
 
+// 0.4.4 beta 28: switches that stand for several (the launcher passes one value; the engine's own
+// switches keep their names for tests). Safe mode (BB_SAFE_MODE=1, the run after a crash): every
+// experimental option and the mods off, a crash guard on; it sets its values whatever was set. Fast
+// draws, compile skipping and the VRAM budget off (BB_FAST_DRAWS=0, BB_COMPILE_SKIP=0, BB_VRAM_BUDGET=0)
+// turn off their parts, except a part set on its own; BB_SYNC=legacy puts back the synchronisation of
+// before the GPU work's fences were honest (every fallback the A/B tests kept, the GX region tracked). The same table is in run.sh (switch groups);
+// tests/test_switch_groups.py checks they agree.
+// switch-groups-begin
+struct SwitchGroup {
+    const char* name;
+    const char* when;
+    bool force;
+    std::vector<std::pair<const char*, const char*>> sets;
+};
+const SwitchGroup kSwitchGroups[] = {
+    {"BB_SAFE_MODE", "1", true,
+     {
+         {"BB_FAST_LOADING", "0"}, {"BB_FRAME_FIXES", "0"}, {"BB_HOT_PAGES", "0"}, {"BB_GX_IN_PLACE", "0"},
+         {"BB_NATIVE_CALLS", "0"}, {"BB_PRECISE_PACING", "0"}, {"BB_VBLANK_PACING", "0"},
+         {"BB_INDIRECT_CLAMP", "1"}, {"BB_IMAGE_WRITEBACK_GC", "0"}, {"BB_GPU_THREAD_PRIORITY", "0"},
+         {"BB_AUDIO_THREAD_PRIORITY", "0"}, {"BB_NATIVE_SHADERS", "0"}, {"BB_SLEEP_SPIN_US", "600"},
+         {"BB_ASYNC_PIPELINES", "0"}, {"BB_OCCLUSION", "0"}, {"BB_MODS_ENABLED", "0"},
+         {"BB_FAST_DRAWS", "0"}, {"BB_COMPILE_SKIP", "0"}, {"BB_VRAM_BUDGET", "0"}}},
+    {"BB_FAST_DRAWS", "0", false,
+     {
+         {"BB_SUBMIT_END_TASKS", "0"}, {"BB_MEMO_REVALIDATE", "0"}, {"BB_SAMPLER_MEMO", "0"},
+         {"BB_DRAIN_SLEEP", "0"}, {"BB_FAULT_SKIP_TEXTURES", "0"}}},
+    {"BB_COMPILE_SKIP", "0", false,
+     {
+         {"BB_SKIP_UNCOMPILED", "0"}, {"BB_LATE_PIPELINE_BIND", "0"}, {"BB_PIPELINE_TAKE", "0"}}},
+    {"BB_VRAM_BUDGET", "0", false,
+     {
+         {"BB_GC_PRESSURE_PERCENT", "0"}, {"BB_GC_PRESSURE_SECONDS", "0"}}},
+    {"BB_SYNC", "legacy", false,
+     {
+         {"BB_HONEST_LABELS", "0"}, {"BB_GX_IN_PLACE", "0"}, {"BB_PIPE_SIGNALS", "0"}, {"BB_SUBMIT_LOCK", "gpu"},
+         {"BB_WORK_RETIRED", "0"}, {"BB_ZPASS_IN_ORDER", "0"}, {"BB_FENCE_ORDER", "all"}, {"BB_DMA_WAITS", "all"},
+         {"BB_HOST_COPY_WAITS", "all"}, {"BB_PRODUCER_CHECK", "1"}}},
+};
+// switch-groups-end
+
+void ExpandSwitchGroups() {
+    for (const SwitchGroup& group : kSwitchGroups) {
+        if (Env(group.name, "") != group.when) continue;
+        for (const auto& [name, value] : group.sets) {
+            if (group.force || !Env(name)) SetEnv(name, value);
+        }
+        Log("Engine: %s=%s sets %u switches", group.name, group.when, unsigned(group.sets.size()));
+    }
+}
+
+// 0.4.4 beta 28: the diagnostics as one list, BB_DIAG=part,part,... (the launcher's Log page): each part
+// stands for engine switches, set unless set on their own. "hitch=N" takes the hitch report's
+// threshold in ms (40 without one), "threads=a+b" the thread samplers' names. The same table is in run.sh
+// (diag parts); tests/test_switch_groups.py checks they agree.
+// diag-parts-begin
+struct DiagPart {
+    const char* name;
+    const char* fallback; // the part's value when BB_DIAG names it without one ("" for none)
+    std::vector<std::pair<const char*, const char*>> sets; // a value of "" takes the part's value
+};
+const DiagPart kDiagParts[] = {
+    {"frame", "", {{"BB_FRAME_STATS", "1"}}},
+    {"hitch", "40", {{"BB_HITCH_REPORT_MS", ""}}},
+    {"gpu", "", {{"BB_GPU_PROFILE", "1"}}},
+    {"sections", "", {{"BB_SECTIONS", "1"}}},
+    {"load", "", {{"BB_SAMPLE_THREADS", "load"}}},
+    {"audio", "", {{"BB_AUDIO_STATS", "1"}}},
+    {"pad", "", {{"BB_PAD_LOG", "1"}}},
+    {"heap", "", {{"BB_WRITE_LOG", "1"}, {"BB_FREE_CHECK", "1"}, {"BB_HEAP_SITES", "1"}}},
+    {"shaders", "", {{"BB_SHADER_CAPTURE", "1"}}},
+    {"timeline", "", {{"BB_TIMELINE", "1"}}},
+    {"waits", "", {{"BB_WAIT_TRACE", "1"}}},
+    {"threads", "", {{"BB_SAMPLE_THREADS", ""}}},
+};
+// diag-parts-end
+
+void ExpandDiagnostics() {
+    const std::string list = Env("BB_DIAG", "");
+    std::string named;
+    size_t at = 0;
+    while (at <= list.size() && !list.empty()) {
+        const size_t comma = std::min(list.find(',', at), list.size());
+        const std::string item = Trim(list.substr(at, comma - at));
+        at = comma + 1;
+        if (item.empty()) continue;
+        const size_t eq = item.find('=');
+        const std::string name = Lower(item.substr(0, eq));
+        std::string value = eq == std::string::npos ? "" : item.substr(eq + 1);
+        std::replace(value.begin(), value.end(), '+', ',');
+        const DiagPart* part = nullptr;
+        for (const DiagPart& p : kDiagParts)
+            if (name == p.name) part = &p;
+        if (!part) {
+            Log("Diagnostics: no part \"%s\" in BB_DIAG", name.c_str());
+            continue;
+        }
+        if (value.empty()) value = part->fallback;
+        for (const auto& [variable, fixed] : part->sets) {
+            const std::string set = *fixed ? std::string(fixed) : value;
+            if (!set.empty() && !Env(variable)) SetEnv(variable, set);
+        }
+        named += (named.empty() ? "" : ", ") + name + (value.empty() ? "" : "=" + value);
+    }
+    if (!named.empty()) Log("Diagnostics: %s (BB_DIAG)", named.c_str());
+}
+
 int Main(std::vector<std::wstring> arguments) {
+    ExpandSwitchGroups();
+    ExpandDiagnostics();
     const Folders folders = Locate();
     std::optional<std::string> game = Env("BB_GAME_DIR");
     if (arguments.size() > 1 && arguments[0] == L"--game-dir") {
@@ -325,15 +434,13 @@ int Main(std::vector<std::wstring> arguments) {
     try {
         const auto package = nlohmann::json::parse(ReadText(folders.package / "package.json"));
         const std::string engine = package.value("engine", "");
-        std::string identity = engine, legacy;
+        std::string identity = engine;
         try {
             const std::string id = Trim(ReadText(out / "gpu-cache.id"));
             if (!id.empty()) identity = "gpu " + id;
-            const std::string old = Trim(ReadText(out / "gpu-cache.legacy.id"));
-            if (!old.empty()) legacy = "gpu " + old;
         } catch (const Error&) {
         }
-        ResetStaleGpuCache(Path(Env("BB_GPU_USER_DIR", "")) / "cache", identity, legacy, out / "bb-shader-lab.exe");
+        ResetStaleGpuCache(Path(Env("BB_GPU_USER_DIR", "")) / "cache", identity, out / "bb-shader-lab.exe");
     } catch (const std::exception&) {
     }
     fs::create_directories(out);
@@ -363,10 +470,13 @@ int Main(std::vector<std::wstring> arguments) {
         return 1;
     }
     std::error_code error;
-    if (!Env("BB_FSR411_DIR") && !fs::is_directory(folders.engine / "fsr4_411", error) && fs::is_directory(data / "fsr4_411", error))
-        SetEnv("BB_FSR411_DIR", Utf8(data / "fsr4_411"));
-    if (!Env("BB_FSR4VK_DIR") && fs::is_regular_file(folders.engine / "fsr4vk" / "amd_fidelityfx_upscaler_vk.dll", error))
-        SetEnv("BB_FSR4VK_DIR", Utf8(folders.engine / "fsr4vk"));
+    // 0.4.4 beta 27: AMD's FSR SDK DLLs (tools/fetch_amd_fsr.sh) in the package's engine\amd-fsr; the
+    // engine looks for an amd-fsr folder beside itself (out\) without this (vk_amd_fsr.cpp).
+    const fs::path amd_fsr_dir = Env("BB_AMD_FSR_DIR") ? Path(Env("BB_AMD_FSR_DIR", "")) : folders.engine / "amd-fsr";
+    const bool amd_fsr_files = Env("BB_AMD_FSR", "") != "0" &&
+                               fs::is_regular_file(amd_fsr_dir / "amd_fidelityfx_loader_vk.dll", error) &&
+                               fs::is_regular_file(amd_fsr_dir / "amd_fidelityfx_upscaler_vk.dll", error);
+    if (!Env("BB_AMD_FSR_DIR") && amd_fsr_files) SetEnv("BB_AMD_FSR_DIR", Utf8(amd_fsr_dir));
     const fs::path remembered = out / "game_dir.txt";
     if ((!game || game->empty()) && fs::is_regular_file(remembered, error)) game = Trim(ReadText(remembered));
     const fs::path game_dir = game && !game->empty() ? Path(*game) : folders.package.parent_path() / "CUSA03173";
@@ -518,22 +628,26 @@ int Main(std::vector<std::wstring> arguments) {
     std::optional<std::pair<Size, Size>> scaled;
     if (Env("BB_RENDER_RES", "").empty() && !other_edition) {
         try {
-            scaled = ScaledSizes(ReadSettings(config));
+            // 0.4.4 beta 27: without AMD's FSR files the engine runs TAA instead of AMD FSR
+            // (BbSettings::ConfigureUpscalerSupport), which renders at the output size: no patch.
+            auto start_settings = ReadSettings(config);
+            const std::string upscaler = Setting(start_settings, "upscaler").value_or("off");
+            if (!amd_fsr_files && (upscaler == "fsr" || upscaler == "fsr3" || upscaler == "fsr4" || upscaler == "fsr411")) {
+                Log("Upscaler: AMD FSR's files are not in %s: TAA, at the output size", Utf8(amd_fsr_dir).c_str());
+                start_settings["upscaler"] = "taa";
+            }
+            scaled = ScaledSizes(start_settings);
         } catch (const Error&) {
         }
     }
     std::string live = "0";
     if (scaled) {
-        live = Env("BB_LIVE_RES", "");
-        if (live.empty()) live = SettingValue(config, "live_resolution").value_or("0");
+        live = SettingValue(config, "live_resolution").value_or("0");
         if (live.empty()) live = "0";
+        // 0.4.4 beta 25c: Off or On; "auto" (a GPU check) is no longer offered and reads as off.
         if (live == "auto") {
-            std::string answer;
-            try {
-                RunProgram(out / "bb-gpu-capabilities.exe", {L"--live-resolution"}, &answer);
-            } catch (const Error&) {
-            }
-            live = Trim(answer).empty() ? "0" : Trim(answer);
+            Log("Settings: live_resolution=auto is no longer offered; off (recommended)");
+            live = "0";
         }
         live = live == "1" ? "1" : "0";
     }

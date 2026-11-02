@@ -1,87 +1,96 @@
-# Temporal upscaling and frame generation — frame analysis and plan
+# Temporal upscaling — frame analysis and plan
 
-## Native TAA and missing FSR 4 assets (2026-10-01)
+## Today (0.4.4)
 
-`upscaler=taa` / `BB_UPSCALER=taa` is a separate native-resolution temporal AA
-mode, available live in the launcher and overlay. It uses the existing jitter and
-camera/object motion vectors, reprojection, depth rejection and 3×3 neighborhood
-clipping in one compute pass with two ping-pong RGBA16F histories. History stores
-depth in alpha; the scene's original alpha is preserved by the HDR merge. HUD is
-composed afterwards and never enters history. Output changes and AA/provider
-changes reset history. TAA uses Native AA dimensions while preserving the saved
-FSR preset, and does not allocate an FSR context or execute an FSR model/RCAS.
-It still adds GPU work compared with disabling temporal AA; native 4K raster cost
-also remains. The explicit `BB_RENDER_RES` compatibility path must be unset.
+The sections after this one are the record of the work from the first frame analysis (bbport,
+2026-10-01) on, dated; what runs now:
 
-FSR Native AA is not a fast pass-through: it renders at the output resolution and
-also executes the temporal reconstruction (including the model for FSR 4) and
-optional sharpening. It can therefore be slower than no AA at the same output.
-
-FSR 4.1.1 assets have separate 1080p/2160p tiers and standard/Ultra models:
-`t1080_m0`, `t1080_m1`, `t2160_m0`, `t2160_m1`. Outputs above 1080p need the 2160
-tier, irrespective of the preset. A missing `t2160_m0/spd.spv` means missing
-assets, not a GPU feature failure. These assets are not bundled: build the full
-set with `tools/fsr4cap/build_assets.sh` and put it in `BB_FSR411_DIR` or the
-packaged data directory's `fsr4_411`. Fatal asset failures now select FSR 3.1 in
-the live settings, so the menu shows the active provider, retains the error, and
-allows retrying FSR 4 after changing the output/installing assets.
-
-`taa-shader-test` checks real SPIR-V output for accumulation, clipping, depth
-disocclusion, invalid history and out-of-frame motion on Vulkan (Lavapipe works).
-`out/taa-appimage-build.log` records these checks, settings round trips and 64
-Python tests. `out/taa-live-validation.log` and `out/taa-appimage-validation.log`
-check TAA at 1080p/720p/1440p/4K, TAA ↔ FSR 3, and a missing 2160-tier FSR 4.1.1
-model in one gameplay process, including output captures and camera movement.
-`out/taa-launcher-validation.log` checks actual GTK controls and saved settings.
-TAA has not yet been tested on the tester's GTX 1060.
-
-## Startup patch is the default again for outputs other than 1080p (2026-10-02)
-
-The live path below made the Steam Deck and a GTX 1060 + 4-core Haswell drop to 7–8 FPS
-(release 0.1 AppImage: 40–50 FPS on the Deck). With guest allocations at 1920×1080 the game's
-post-processing stays at 1080p even for 720p output, guest compute passes resolve scene proxies
-back to 1080p every frame (RX 7800 XT, 720p FSR 3 Performance on 4 cores: 826 vs 576
-draws/frame, 185 vs 210 FPS), and on GPUs without shader stencil export every depth/stencil
-copy took nine draws.
-
-- `run.sh` again patches the game's render size for outputs other than 1080p (as in 0.1) and
-  marks it with `BB_AUTO_RENDER_RES=1`, so an in-game restart recomputes it. Preset and output
-  changes then need a restart (the menu offers it). `BB_LIVE_RES=1` selects the live path.
-  1080p output and TAA keep the live path.
-- Depth/stencil scene proxies need `VK_EXT_shader_stencil_export` again; without it these
-  targets stay native (as in 0.1). `BB_SCENE_STENCIL_BITS=1` still forces the portable
-  resampler for tests.
-
-## Live resolution changes (2026-10-01)
-
-The in-game output selector now resizes 720p/1080p/1440p/2160p host targets at a
-display-pass boundary. Presets use `output / scale`, including raster sizes above
-1080p (4K Quality: 2560×1440; Native AA: 3840×2160). Guest allocations stay at
-1920×1080; `run.sh` no longer inserts a resolution patch for normal output choices.
-The explicit `BB_RENDER_RES` compatibility override is retained.
-
-`SceneTargets` resolves and retires old proxies before changing size. FSR resources
-and history are rebuilt for the new input/output, with completion waits for both
-FSR 3 and FSR 4. The 1080p path keeps HDR reconstruction before game post;
-other outputs reconstruct tonemapped scene proxies at the first Scaleform pass,
-then draw HUD/menu geometry into the output-size target. The display buffer is
-resized too. Movie shader identification prevents a native-size fullscreen post
-pass from being mistaken for UI.
-
-Guest compute passes retain their native dispatch sizes and can resolve proxies
-back to 1080p. This change does not scale every post-processing pass; performance
-and intermediate detail can differ from the old startup-patched render sizes.
-
-Verification: `out/dev/live-resolution-summary.log` switches output, preset and FSR
-off/on in one PID. `BB_PRESENT_DUMP_TRIGGER` captures the completed host display
-buffer (including HUD) into `BB_DUMP_DIR`. Captures confirm actual 720p/1440p/2160p
-buffers. `scene-resolution-test` covers color/depth/stencil round trips through
-proxies both smaller and larger than the guest allocation. `BB_PRESET_FILE` accepts
-`preset [output-index [upscaler-index]]` for scripted menu-equivalent changes.
-
-Frame analyzer: `BB_CAPTURE_TRIGGER=<file> BB_CAPTURE_DIR=<dir>`; creating the file records
-the next frame (boundary: the pass writing a display buffer) — passes, targets, shaders,
-sampled textures, and the first 1 KiB of bound constants for small passes and first draws.
+- **Upscalers** (`upscaler` in `config.ini`, `BB_UPSCALER`; the launcher's Graphics page and the
+  in-game menu): `fsr` (AMD FSR through AMD's FSR SDK 2.4, `vk_amd_fsr.cpp`; from 0.4.4 beta 27),
+  `dlss` (DLSS Super Resolution, NVIDIA RTX), `taa` (below) and `off`. A `config.ini` without the key
+  gets `off` (the game's own anti-aliasing; from 0.4.4); the older `fsr3`, `fsr4` and `fsr411` read as `fsr`. `BB_UPSCALER=none` leaves the
+  whole path out. From 0.4.4 beta 27b the menus offer AMD FSR, DLSS or None as the upscaler and, for
+  None, Anti-aliasing: TAA (`taa`), the game's own (`off` with `effect_game_aa=1`) or Off (`off`).
+- **The game's own anti-aliasing** (`effect_game_aa`, a patch at start, off by default) applies only
+  with `upscaler=off` from 0.4.4 beta 27b: under AMD FSR, DLSS or TAA bb-start and `patches.py` apply
+  "Disable AA" whatever the key says (`NoUpscaler`; `BB_UPSCALER` decides when set). It ran after the
+  tonemap, on the frame an upscaler at other outputs takes, softening it.
+- **AMD FSR** (0.4.4 beta 27): AMD's signed `amd_fidelityfx_loader_vk.dll` and
+  `amd_fidelityfx_upscaler_vk.dll` in the package's `engine/amd-fsr` (`tools/fetch_amd_fsr.sh`, with
+  AMD's licence; `BB_AMD_FSR_DIR` overrides the folder, `BB_AMD_FSR=0` hides it), loaded at run time
+  and driven through the AMD FSR API (`third_party/amd-fsr-sdk`, MIT headers). AMD's SDK lists the
+  versions for the GPU (the log names them) and picks one: FSR 4.1.2 on RX 9000 (FP8), RX 7000, RX 6000
+  and Ryzen AI Max (INT8), Ryzen AI 300/400 and Z2 (lightweight INT8); FSR 3.1.6 elsewhere (NVIDIA,
+  Intel, older Radeon). `fsr_version` (0.4.4 beta 27c) is `auto` or the name of a version AMD lists
+  for the GPU (`3.1.6`, `2.3.4`, `4.1.2`; 27a's `3.1` the newest 3.1; `BbSettings::FsrVersionMatch`,
+  a shipped version before the driver's), asked for by AMD's version override; live, the context made
+  again; one AMD does not list runs AMD's choice, logged. The menus list what AMD offers: the engine's
+  probe (`FsrVersionsOffered`), the launcher's `bb-gpu-capabilities --fsr-versions` (AMD's same query
+  on a device of the game's GPU). The menu, the FPS counter and the log name the version that runs,
+  marked when AMD's driver provides it (`fsr_running_driver`); DLSS's file version too (`dlss_version`). The context is made on a worker thread (it builds the upscaler's shaders): the
+  scene renders at full size without the upscaler meanwhile. Inputs as before: standard depth (AMD
+  supports it), render-size motion vectors without jitter, dynamic resolution within the output size;
+  HDR at a 1920x1080 output, the game's frame decoded to linear light elsewhere. Windows only: AMD's
+  SDK has no Linux build. FireBurn's FSR 3.1 and FSR 4, the built-in FSR 4 model, FSR 4.1.1's replay and
+  fsr4vk were removed with it (AMD's licence forbids reverse engineering its DLLs, which the 4.1.1
+  replay was built from).
+- **Where:** at a 1920x1080 output on the HDR scene colour right before the post-processing
+  combine (compute shader `9a9cf8a9`), written back so that the game's own post-processing,
+  tonemap and UI run on it; at other outputs on the game's tonemapped frame before its UI, which
+  is then drawn at the output size. Inputs: the scene depth, camera motion vectors, object motion
+  vectors (`object_motion`, on by default) and sub-pixel jitter (`jitter`, on).
+- **Presets** (`preset`; the menus' Quality from 0.4.4 beta 27c): Auto (`auto`, the default from 27c:
+  `BbSettings::AutoPreset` by the output's height, Native AA up to 1200 lines, Quality up to 1600,
+  Performance above; bb-start's and `patches.py`'s start sizes resolve it the same), Native AA (DLAA
+  with DLSS), Quality x1.5, Balanced x1.7, Performance x2, Ultra Performance x3 and Custom
+  (`render_scale`, 1.0-3.0; the menus' Render resolution slider, in percent of the output per side,
+  only Custom moves). TAA always renders at the output. The menus show each one's scene size for the output
+  (`BbSettings::PresetRenderSize`, the launcher's `Choices.RenderSize`): live, `ForScale` of the
+  output (multiples of 4); patched at start, `ScaledSizes` (at least 640x360, never exactly 1920x1080:
+  1916x1076).
+- **Render size:** outputs other than 1920x1080 (TAA aside) get the game's render size patched at
+  the start (`live_resolution=0`, the default; a preset or output change then needs a restart), as
+  in "Startup patch is the default again" below; `live_resolution=1` takes the live path. Off is the
+  default and the recommended choice; `auto` (a GPU check) is no longer offered from 0.4.4 beta 25c
+  and reads as off.
+- **Fallbacks** (0.4.4 beta 27): before the first frame, `dlss` without an RTX GPU, the driver's NGX
+  or `nvngx_dlss` becomes AMD FSR, and AMD FSR without AMD's files (or on Linux, or with no version
+  for the GPU) TAA; bb-start (and `scripts/patches.py`) choose the start's render size for TAA then,
+  so TAA runs at the output size. A fatal failure in play falls back the same way (DLSS to AMD FSR,
+  AMD FSR to TAA); in a session started at a reduced render size TAA cannot run, and the picture is
+  not upscaled until the game starts again. The menu shows the upscaler in use and why.
+- **DLSS's model** (`dlss_preset`): Auto from 0.4.4 beta 27c (NVIDIA's pairing: K for DLAA, Quality and
+  Balanced, M for Performance, L for Ultra Performance), was K; J, K, L, M or the DLL's default.
+- **Sharpening:** `sharpen` (on) and `sharpness` (0-2, default 0.20). AMD FSR applies its own
+  RCAS up to 1 and an extra RCAS pass above it; DLSS, which has no sharpening of its own, gets the
+  whole range from that pass; TAA has its own pass (docs/MODS.md, "TAA sharpening"). The launcher's
+  and the menu's lines say which, for the upscaler chosen (0.4.4 beta 27d).
+- **Texture mip bias** (`mip_bias`, -2..+1, live): the scene's texture LOD bias while AMD FSR or DLSS
+  runs is log2(render / output) - 1, as both NVIDIA's DLSS guide and AMD's FSR docs ask
+  (`mipBias = log2(renderResolution/displayResolution) - 1.0`), plus `mip_bias`. From 0.4.4 beta 27d
+  for both (DLSS's -1 was the `dlss_mip_bias` switch, on by default; AMD FSR had the ratio alone). TAA
+  renders at the output: no bias.
+- **Exposure:** the game gives the upscalers no exposure value. AMD FSR runs with its auto exposure
+  (AMD recommends it unless there is a reason not to); DLSS with its own for the HDR scene (a
+  1920x1080 output), none for the game's tonemapped frame. 0.4.4 beta 27d: no settings for them
+  (`fsr4_auto_exposure`, on by default, and `dlss_auto_exposure`, off, are ignored if a file has them).
+- **Reactive mask** (`reactive`, off by default): AMD FSR's reactive mask (FSR 3.1 uses it; FSR 4
+  may; up to 0.4.4 beta 26 FSR 4 got it blended over its output, `fsr4_reactive.comp`, removed); TAA
+  and DLSS do not use it, and it is not made for them. FSR 3.1's tuning (`fsr3_*`) goes to AMD's FSR
+  3.1 through its key-value configuration. Up to 0.4.4 beta
+  25a DLSS was given it as its bias-current-colour mask, which NVIDIA's guide (310.4.0, §3.15) says
+  should not be used.
+- **History reset on a camera cut** (0.4.4 beta 25b, every upscaler): the first frame after the
+  camera turned more than the vertical field of view or moved more than 15 m starts the history again
+  (`camera_cut.h`; NVIDIA §3.13). Not less: the follow camera snaps up to 4 m in one frame towards the
+  hunter when a wall comes between them, which the motion vectors handle. Frames after a loading screen started again already (a frame
+  without the upscaler resets the next). The log names each cut (`Upscaler: camera cut ...`); with
+  frame statistics, the resets by cause and the largest turn and move of the other frames.
+  `BB_CAMERA_CUT_RESET=0`: logged and counted, the history kept.
+- **Jitter:** a Halton(2,3) pattern of 8 x (output / render)^2 phases (AMD's and NVIDIA's formula);
+  DLSS at least 16 (NVIDIA's checklist; from 0.4.4 beta 25b), so DLAA has 16 instead of 8.
+- **Frame generation (not offered since 0.4.4), DLSS's options and the mip bias:**
+  [archive/dlss_frame_generation.md](archive/dlss_frame_generation.md).
 
 ## Bloodborne's frame (1920x1080, Hunter's Dream / Nightmare)
 
@@ -115,197 +124,6 @@ Signature: `[0]=3000 (far) [1]=1/3000 [4]=1920 [5]=1080 [6]=1/1920 [7]=1/1080`.
 
 The previous frame's matrices are not there; the port keeps them itself.
 
-## Plan
-
-1. Find the scene constants every frame (signature), keep the previous view/projection.
-2. Camera motion vectors: compute pass from depth and current/previous matrices into an
-   RG16F target; debug view to check them. Object motion later (vertex shader replay with the
-   previous frame's constants through the recompiler).
-3. Jitter: sub-pixel offset of clip-space positions in the scene passes (recompiler).
-4. Upscaler at the scene color stage (before post and UI): FSR 3.1 first (open, native Vulkan,
-   also frame generation), then DLSS (native on Linux), XeSS/XeFG and OptiScaler through a
-   loader for their Windows DLLs.
-
-## Status
-
-- Camera motion vectors: verified by reprojecting the previous frame (`BB_DEBUG_MOTION=1`,
-  toggles 1<<22 reprojected frame, 1<<23 error map): static geometry matches.
-- FSR 3.1 (`BB_UPSCALER=fsr3`, FireBurn/FSR-Vulkan submodule): scene color before the
-  post-processing combine (compute shader 9a9cf8a9), 1:1, RGB written back (the game keeps data
-  in the alpha). Toggle 1<<24 switches it off at run time.
-- Jitter: viewport offset of scene geometry (drawn with the scene depth, not full-screen
-  quads), Halton(2,3) 8 phases; sign checked by sharpness (correct 255, flipped 208, off 271 —
-  1:1 jitter trades high-frequency aliasing for a slightly softer image). Toggle 1<<25 off.
-- Frame-to-frame difference while standing still: ~33% lower with FSR.
-- Missing: motion of animated objects (characters, cloth, foliage), reactive/transparency
-  masks for particles and fog, render-resolution scaling, frame generation.
-
-
-## 2026-10-01: FSR 4 did not work at 1440p/2160p output (flicker and shaking)
-
-Video `video_2026-10-01_03-58-59.mp4` (3840x2160 output, FSR 4 Performance): every object flickered
-and shook. The cause: in this mode the upscaler did not run at all while jitter stayed on, so the
-screen showed the stretched scene frame, each frame shifted to its own Halton phase.
-
-1. The UI pass was recognized by the exact size of the `BB_RENDER_RES` target (1916x1078), but the
-   game allocates targets with an aligned height (1916x1080; the scene constants say 1916x1080
-   too). `RunScaled` was never called (the log had no `UI: native composition`). Alignment of up to
-   8 pixels is now allowed (`RenderTarget`), and the scene size for FSR comes from the scene
-   constants (`CameraMotion::RenderSize`, `SceneSize`).
-2. After that FSR 4 failed with `external image registration failed (-1000069000)`: `RunScaled`
-   created new image views every frame, and FSR 4's registry holds eight. It now uses the same
-   `CachedView`s as the Native AA path.
-
-Checked with a dump (`BB_DUMP_TRIGGER=<file> BB_DUMP_DIR=<folder>`, `BB_DUMP_FRAMES`, 8 by default:
-FSR's input, motion vectors and output, raw): with the camera still, the PSNR of consecutive output
-frames is ~45 dB against ~28 dB for the jittered input; turning the camera and walking leave no
-trails. FPS in this mode is ~107 instead of ~220: before, FSR 4 simply did not run.
-
-Left: sprites (4 indices each) drawn into the scene colour with the scene depth (glows, small
-lights) are still not jittered (the rule "≤ 6 indices = a full-screen pass").
-
-## 2026-10-01: a faster FSR 4: the post pass (2.9 → 0.8 ms at 4K)
-
-Measurements: `BB_FSR4_PROFILE=1` (the time of each FSR 4 pass, a provider patch in the submodule,
-see `gpu/patches/fsr-vulkan`), the out-of-game benchmark `out/gpu/fsr4-bench` (`ninja -C out/gpu
-fsr4-bench`; `--stats`: registers and instructions from RADV). 4K Balanced (2260x1272 → 3840x2160),
-RX 7800 XT: all of FSR 4 takes 5.8 ms, of which **post 2.5–2.9 ms** (not the neural network: the
-last layers, a 2x2 pixel shuffle and blending with the history), the model's 12 passes 2.4 ms, pre
-0.55.
-
-The cause: each thread computes a 2x2 block of output pixels and writes them one by one into three
-images (the recurrent state, the history, the output), so each write instruction of a wave writes
-every other pixel. Removing any one of the three writes made the pass 1.3–4 times faster with the
-same code.
-
-The fix: `tools/fsr4_optimize.sh` decompiles post (spirv-cross), `tools/fsr4_post_lds.pl` gathers
-the workgroup's 16x16 block in shared memory and writes whole rows, glslang compiles it back into
-`fsr4_shaders/opt/`; `vk_fsr4.cpp` takes it from there (`BB_FSR4_OPT=0`: the original). Two
-subtleties found by comparing outputs:
-- spirv-cross translates the signed int8 unpack (`OpBitcast` to `i8vec4`) as `unpack8(uint)`
-  (unsigned): without a fix the result is entirely different (PSNR 17 dB);
-- values in shared memory must stay float: the compiler turns half from shared memory into a
-  16-bit write, which rounds differently in unorm8.
-
-`tools/fsr4_verify.sh` compares the original and the optimized post for all presets at 1080p,
-1440p and 4K output on pseudo-random inputs: 1440p and 4K are bit-identical; post at 4K 2.1–3.5 →
-0.81–0.87 ms, 1440p 1.2–1.5 → 0.36–0.38 ms, 1080p 0.37–0.69 → 0.20–0.22 ms. In the game (4K
-Balanced): FSR 4 5.8 → 4.0 ms, the GPU frame 13.1 → ~11.6 ms; beyond that the FPS is limited by the
-CPU (the GPU command thread waits for guest memory copies, "host copies" ~20%).
-
-Found along the way: **the original FSR 4 at the 1080 tier (1920x1080 output) is nondeterministic**:
-from run to run on identical inputs a stripe at the left edge (columns 0–132) changes, so there is a
-race or a read of uninitialized memory somewhere in the model or provider. At 1080p output this can
-show as flicker at the left edge of the frame. Not investigated.
-
-The reactive mask is no longer computed with FSR 4 (FSR 4 does not take it).
-
-### Also checked (same place, 4K Balanced)
-
-- **A/B in one process** (`ab.sh`, bit 24: FSR off, the UI copy without upscaling): 86.5 FPS with
-  FSR 4 against 87.7 without. After the post optimization the frame is limited by the CPU (the GPU
-  command thread, waiting for guest memory copies), not the GPU. Async compute for FSR (overlapping
-  it with the start of the next frame) would give no more than this ~1%: postponed until the CPU
-  side is faster; it would also need the UI and output commands of frame N reordered after frame
-  N+1's work.
-- **WMMA (`VK_KHR_cooperative_matrix`, supported by RADV on RDNA3)**: a prototype of the model's
-  pass 1 (a 16-channel residual block: 3x3 16→16, 1x1 16→32 ReLU, 1x1 32→16): 0.85 ms in the first
-  version, 0.49 ms with a word layout in shared memory, against 0.30 ms for the original dot4. The
-  arithmetic on WMMA would take ~0.1 ms, but with 16 channels the tile layout, epilogues through
-  shared memory and occupancy (6 waves per SIMD, limited by LDS) eat the gain. The ceiling is about
-  1 ms for all 12 passes with careful hand work on each; not started.
-- `RADV_PERFTEST=cswave32` (wave32 for compute): FSR 4 is slower, 4.2 → 5.4 ms.
-- The pre pass (0.54 ms) is not limited by its writes (0.50 ms without them).
-
-## 2026-10-01: FSR 4 flicker at the left edge at 1080p output: a race in the model's pass 11
-
-The 1080 tier's nondeterminism (see above) is a bug in the v07 model's shader, pass 11 (the
-decoder, 1/4 → 1/2 resolution). Each thread is one input pixel at 1/4 resolution and writes a 2x2
-block of the 1/2 resolution output. The dispatch rounds the width up to 64 threads, and threads past
-the input's width do not stop: at the 1080 tier (an input 480 wide) threads 480..511 write output
-pixels 960..1023, that is the first pixels of the next row (any tensor's row is 15360 bytes), and
-race with their real writers. At 4K output the width 960 divides by 64, so there is no error.
-
-`tools/fsr4_pass11_guard.pl` adds an early exit for threads past the edge (the size comes from the
-pass's own neighbour check); `tools/fsr4_optimize.sh` builds it into `fsr4_shaders/opt` for all
-presets together with post; `vk_fsr4.cpp` and the benchmark take any pass from `opt/`.
-`tools/fsr4_verify.sh`: 1440p/4K are bit-identical to the original (the guard does not trigger
-there); 1080p gives the same result from run to run, and differs from the original after the first
-frame only in the former stripe at the left edge.
-
-Found at the same time: spirv-cross translates every signed int8 unpack (`OpBitcast` to `v4char`)
-as the unsigned `unpack8(uint)`; pass 11 has nine different forms of it. The fix is shared by the
-scripts: `tools/Fsr4SpirvCrossFixes.pm` (every `unpack8` through a signed helper).
-
-## 2026-10-01: FSR 4.1.1, what is inside and how to run it on Vulkan (exploration)
-
-Source: `amd_fidelityfx_upscaler_dx12.dll` 4.1.1.2740 from OptiScaler (`FSR4_LATEST`).
-- The DLL has the provider `ffxProvider_FSR4_Int8` / `Fsr4Int8UpscalerModel` (version "FSR4-i8
-  4.1.1"). 1028 DXIL containers (25.7 MB): the model passes `fsr4_model_v07_fp8_no_scale_pass1..12`
-  (+ `_post`), 270 `prepass` variants, 144 `postpass`, `fsr_rcas_pass` and a fallback FSR 3.1/2.
-  Nothing is compressed.
-- Despite "fp8" in the name, the model passes are plain DXIL with `dot4AddPacked` (int8 dot4),
-  without AMD extensions (WMMA). The architecture is the same v07 (12 passes), but the weights and
-  biases are not built into the shader: they are read from `InitializerBuffer` (t18, a typed
-  buffer), the tensor sizes from the cbuffer `CsTensorSizes`, scratch is `u11`. Each pass has 9
-  variants: the grid is built in (tiers 1080 / 4K / 8K: 480x270, 960x540, 1920x1080 for pass 5) and,
-  apparently, the presets.
-- `amdxcffx64.dll` (loader 2.3.0.2913, which Proton loads) has the same FP8 FSR 4 passes and ML frame
-  generation (`mlfi_*`), no separate INT8 model. `FSR4_INT8` 4.0.2 is `v07_i8`, which the port
-  already uses.
-- dxil-spirv (HansKristian-Work/dxil-spirv, built from source) translates the passes into correct
-  SPIR-V: `dxil-spirv <pass> --enable-shader-i8-dot --ssbo-uav --use-reflection-names`.
-
-What a provider of our own for 4.1.1 lacks: which container is which (preset, tier, pass), the
-contents of `InitializerBuffer`, the values of `CsTensorSizes`, the prepass/postpass permutations,
-constants and dispatch sizes. The most reliable path is not to take apart the provider's x86 code
-but to record one frame: a small test program on the FFX API (DX12, MinGW) under Wine/Proton with
-vkd3d-proton, the "FSR4-i8" provider chosen explicitly through a version override, and a Vulkan
-layer that writes the pipelines (SPIR-V from dxil-spirv), buffer contents and dispatch sizes. Then
-replay it with our own provider in the same benchmark (`fsr4-bench`), checked against the recorded
-output.
-
-## 2026-10-01: FSR 4.1.1 in the port (upscaler=fsr411)
-
-AMD's 4.1.1 model (INT8) runs natively on Vulkan and matches the DLL bit for bit.
-
-**How it was obtained.** `tools/fsr4cap/fsr4cap.exe` (C, MinGW) calls the FidelityFX API 2.3 from
-`amd_fidelityfx_loader_dx12.dll` with an explicit version 4.1.1 and, by replacing D3D12 method
-tables, records everything the DLL does under vkd3d-proton: pipelines (DXIL), root signatures,
-descriptors, uploads, constants, dispatches. A frame is 29 dispatches: auto-exposure SPD, prepass,
-pass0_post, model passes 1..12 (each followed by `_post`, clearing the tensor's border), postpass,
-RCAS.
-- There are two models: m0 (Native..Performance) and m1 (Ultra Performance, ratio 3.0), with 128 KB
-  of weights (`InitializerBuffer`). Tiers: t1080 (output up to 1920x1080), t2160 (larger, including
-  2560x1080).
-- Tensors are computed from the output aligned to 8; the `CsTensorSizes` table (17 sizes), the group
-  counts and the constants (MLSR as in v07, but width/height not aligned and `inv_scale = 1 /
-  scale`; SPD; RCAS) are checked by `extract.py` on 20 recordings.
-- dxil-spirv translates the DXIL the same way vkd3d-proton does: `--mixed-float-dot-product`
-  (`VK_VALVE_shader_mixed_float_dot_product`, dot2 on half with accumulation in float); without it
-  the PSNR is 40 dB instead of an exact match. `--class-bindings` (a patch) lays out the SRV, UAV,
-  CBV and sampler registers at bindings +0/+32/+64/+96, and the runtime binds resources by name.
-- `fsr411/fsr411.cpp` is an independent Vulkan core (the game and `fsr4-bench --fsr411`).
-- `verify.sh`: the DLL and the replay on identical inputs, 8 frames: bit-identical for 1080p (both
-  models), 1440p, 2560x1080 and 4K (both models). 1600x900 differs only at the right edge, where the
-  DLL itself is nondeterministic (a race in its shaders when the tensor width is not a multiple of
-  64).
-
-**Speed-up.** The postpass was rewritten with workgroup memory at the level of SPIR-V assembly
-(`postpass_lds.py`; going through GLSL is inexact: `DenormPreserve` and the exact placement of
-`RelaxedPrecision` are lost, and something else changes the result too): 2.18 → 0.95 ms at 4K, bit
-for bit as the DLL. All of FSR 4.1.1: 1.09 ms at 1080p (1280x720), 4.2 ms at 4K Balanced. In the
-game (4K Balanced) the upscaler takes 4.12 ms against 4.32 ms for the accelerated v07.
-
-**Building the assets** (by the user, from their own DLLs; nothing from AMD is in the repository):
-
-    bash tools/fsr4cap/build_assets.sh <amd_fidelityfx_upscaler_dx12.dll 4.1.x> <amd_fidelityfx_loader_dx12.dll 2.3.x>
-
-Needs nix-shell (or MinGW, cmake, ninja, python3, SPIRV-Tools, umu-run), and network access for
-dxil-spirv, the FidelityFX SDK headers and Proton (GE-Proton). The DLLs come with OptiScaler, for
-example (`FSR4_LATEST/`), and with games that have FSR 3.1/4. A build from scratch gives the same
-files; `VERIFY=1` at the end compares with the DLL.
-
-**A correction to the A/B above ("the frame is limited by the CPU").** Those measurements ran while
-12 hung shadPS4 processes each took a core. On an idle system: "host copies" 1.6%, waiting for the
-GPU ~41%: the frame is limited by the GPU, so async compute for FSR makes sense again.
+The dated notes that were here (TAA's first version, the live and startup resolution paths of
+October 2026, the FSR 3.1, FSR 4 and FSR 4.1.1 work that beta 27 replaced with AMD's FSR SDK) are in
+[archive/upscaler-2026-10.md](archive/upscaler-2026-10.md).

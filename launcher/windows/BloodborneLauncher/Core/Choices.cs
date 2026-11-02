@@ -3,23 +3,50 @@
     /// <summary>A drop-down entry. Note is shown under the row while this entry is selected.</summary>
     public sealed record Choice(string Label, string Value, string? Note = null);
 
-    public sealed record Effect(string Key, string Title, bool Default, string? Hint = null);
+    public sealed record Effect(string Key, string Title, bool Default, string? Hint = null)
+    {
+        /// <summary>The line under its title (Classic); the hint is the hover text (0.4.4 beta 28's text pass).</summary>
+        public string? Line { get; init; }
+    }
 
     /// <summary>Every list the launcher offers, in English, with the values bbport expects.</summary>
     public static class Choices
     {
+        // 0.4.4 beta 28 (the tester): where Off or None is a choice it comes first, and the rest go from
+        // less to more.
+
+        /// <summary>0.4.4 beta 27: one FSR, AMD's (AMD's FSR SDK picks the version; the engine reads the
+        /// older "fsr3", "fsr4" and "fsr411" as it).</summary>
         public static readonly Choice[] Upscalers =
         {
-            new("FSR 4", "fsr4"),
-            new("FSR 4.1.1", "fsr411"),
-            new("FSR 3", "fsr3"),
-            new("DLSS (NVIDIA RTX)", "dlss"),
-            new(L.T("TAA (native anti-aliasing)"), "taa"),
             new(L.T("Off"), "off"),
+            new(L.T("TAA (native anti-aliasing)"), "taa"),
+            new("AMD FSR", "fsr"),
+            new("DLSS (NVIDIA RTX)", "dlss"),
         };
 
-        /// <summary>frame_gen in config.ini: generated frames between the game's own (the engine's
-        /// vk_frame_generation.h; DLSS through NVIDIA Streamline, vk_streamline.h). Off by default.</summary>
+        /// <summary>Graphics › Upscaler (0.4.4 beta 27b): None, where the game renders at the output and
+        /// Anti-aliasing (AntiAliasing) decides upscaler=taa or off, or one of the two upscalers.</summary>
+        public static readonly Choice[] FrameUpscalers =
+        {
+            new(L.T("None"), "none"),
+            new("AMD FSR", "fsr"),
+            new("DLSS (NVIDIA RTX)", "dlss"),
+        };
+
+        /// <summary>Graphics › Anti-aliasing (0.4.4 beta 27b), with Upscaler None: none (upscaler=off,
+        /// effect_game_aa=0), the game's own pass (upscaler=off, effect_game_aa=1; the default from beta 28) or
+        /// TAA (upscaler=taa), in that order (the tester's, beta 28). With an upscaler the upscaler
+        /// anti-aliases, and the engine leaves the game's own pass out.</summary>
+        public static readonly Choice[] AntiAliasing =
+        {
+            new(L.T("Off"), "off"),
+            new(L.T("The game's own"), "game", L.T("Applied when the game starts")),
+            new("TAA", "taa"),
+        };
+
+        /// <summary>frame_gen (Avalonia's Graphics page only): 0.4.4 beta 28 removed frame generation from the
+        /// engine, which ignores the key; this list goes with the Linux work.</summary>
         public static readonly Choice[] FrameGeneration =
         {
             new(L.T("Off"), "off"),
@@ -28,37 +55,70 @@
                 L.T("NVIDIA's frame generation with Reflex: 2x on RTX 40, up to 6x on RTX 50. Needs an upscaler and Hardware-accelerated GPU scheduling. Applied when the game starts")),
         };
 
-        /// <summary>frame_gen_frames: DLSS generated frames per real one (more than one: RTX 50).</summary>
-        public static readonly Choice[] FrameGenFrames =
+        /// <summary>Display › Window mode (0.4.4 beta 26): config.ini's fullscreen with the launcher's
+        /// borderless_fullscreen (BB_EXCLUSIVE_FULLSCREEN=0), the two switches they were.</summary>
+        public static readonly Choice[] WindowModes =
         {
-            new("2x", "1", L.T("One generated frame per real one (RTX 40 and 50)")),
-            new("3x", "2", L.T("RTX 50 only")),
-            new("4x", "3", L.T("RTX 50 only")),
-            new("5x", "4", L.T("RTX 50 only")),
-            new("6x", "5", L.T("RTX 50 only")),
+            new(L.T("Windowed"), "window"),
+            new(L.T("Borderless fullscreen"), "borderless", L.T("Trophy notifications and other windows show over the game")),
+            new(L.T("Fullscreen"), "fullscreen",
+                L.T("The driver may give the game the screen to itself (exclusive fullscreen): the lowest latency and G-SYNC's fullscreen-only mode, but trophy notifications and other windows don't show over it")),
         };
 
-        /// <summary>reflex: NVIDIA Reflex low latency while DLSS Frame Generation is loaded.</summary>
-        public static readonly Choice[] Reflex =
-        {
-            new(L.T("On"), "on", L.T("Lower input lag. Always on while DLSS Frame Generation runs")),
-            new(L.T("On + Boost"), "boost", L.T("Also keeps the GPU clocks up: a little lower lag, more power")),
-            new(L.T("Off"), "off", L.T("Only while DLSS Frame Generation is off")),
-        };
-
+        /// <summary>preset in config.ini, the upscaler's quality (0.4.4 beta 27c): Auto ("auto", the default:
+        /// AutoPreset by the output's height), then the engine's presets by number. Plain names; the
+        /// Graphics page shows what each renders at on its slider.</summary>
         public static readonly Choice[] Presets =
         {
-            new(L.T("Native AA (no upscaling; DLAA with DLSS)"), "0"),
-            new(L.T("Quality (x1.5)"), "1"),
-            new(L.T("Balanced (x1.7)"), "2"),
-            new(L.T("Performance (x2)"), "3"),
-            new(L.T("Ultra Performance (x3)"), "4"),
-            new(L.T("Custom (render scale below)"), "5"),
+            new(L.T("Auto"), "auto"),
+            new(L.T("Native AA"), "0"),
+            new(L.T("Quality"), "1"),
+            new(L.T("Balanced"), "2"),
+            new(L.T("Performance"), "3"),
+            new(L.T("Ultra Performance"), "4"),
+            new(L.T("Custom"), "5"),
         };
+
+        /// <summary>The preset value for Custom (render_scale).</summary>
+        public const int PresetCustom = 5;
+
+        /// <summary>Auto's choice for an output this many lines tall, as the engine's (BbSettings::AutoPreset):
+        /// Native AA up to 1200, Quality up to 1600, Performance above.</summary>
+        public static int AutoPreset(int height) => height <= 1200 ? 0 : height <= 1600 ? 1 : 3;
+
+        /// <summary>A preset value as the engine runs it for an output this tall: Auto resolved, the rest
+        /// by number (Native AA for anything else).</summary>
+        public static int ResolvePreset(string value, int height) =>
+            value is "" or "auto" ? AutoPreset(height)
+            : int.TryParse(value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var p) ? Math.Clamp(p, 0, PresetCustom)
+            : 0;
+
+        /// <summary>The lowest share of the output per side, in percent, the engine renders at there
+        /// (BbSettings::RenderPercentMin): a third, or what keeps 640 × 360 where the start is patched.</summary>
+        public static int RenderPercentMin(int outW, int outH, bool live)
+        {
+            var most = (outW, outH) == (1920, 1080) || live ? 3.0 : Math.Max(1.0, Math.Min(3.0, Math.Min(outW / 640.0, outH / 360.0)));
+            return (int)Math.Round(100 / most, MidpointRounding.AwayFromZero);
+        }
+
+        /// <summary>The model DLSS's Auto runs at a preset (NVIDIA's pairing, as the engine's DlssPresetAuto):
+        /// K for Native AA (DLAA), Quality and Balanced, M for Performance, L for Ultra Performance; Custom
+        /// by the nearest preset's ratio.</summary>
+        public static char DlssAutoModel(int preset, double customScale)
+        {
+            if (preset == PresetCustom)
+            {
+                var nearest = 0;
+                for (var p = 1; p < PresetScales.Length; p++)
+                    if (Math.Abs(PresetScales[p] - customScale) < Math.Abs(PresetScales[nearest] - customScale)) nearest = p;
+                preset = nearest;
+            }
+            return preset switch { 3 => 'M', 4 => 'L', _ => 'K' };
+        }
 
         public static readonly Choice[] OutputResolutions =
         {
-            new(L.T("1280 × 720 (Steam Deck)"), "1280x720"),
+            new("1280 × 720", "1280x720"),
             new("1600 × 900", "1600x900"),
             new("1920 × 1080", "1920x1080"),
             new("2560 × 1440", "2560x1440"),
@@ -73,6 +133,9 @@
             new("7680 × 2160 (32:9)", "7680x2160"),
             // Narrower than 16:9: the camera and UI made taller to fill it (Widescreen).
             new("1280 × 1024 (5:4)", "1280x1024"),
+            // 0.4.4 beta 26b: the Steam Deck's own screen (LCD and OLED), 16:10; 720p was labelled for it and
+            // letterboxed there. The engine takes it as a custom size (any even WxH).
+            new(L.T("1280 × 800 (Steam Deck)"), "1280x800"),
             new("1680 × 1050 (16:10)", "1680x1050"),
             new("1920 × 1200 (16:10)", "1920x1200"),
             new("2560 × 1600 (16:10)", "2560x1600"),
@@ -87,8 +150,32 @@
         /// <summary>A size the engine takes as a custom output: 640 × 360 to 16384 × 8640, even.</summary>
         public static bool ValidCustomSize(int w, int h) => w >= 640 && h >= 360 && w <= 16384 && h <= 8640;
 
+        /// <summary>Each preset's ratio, output / render (the engine's BbSettings::PresetScale); Custom's is render_scale.</summary>
+        public static readonly double[] PresetScales = { 1.0, 1.5, 1.7, 2.0, 3.0 };
+
+        /// <summary>
+        /// The scene size the engine renders for an output and a ratio (output / render), as the game's
+        /// menus show it (BbSettings::PresetRenderSize). At 1920 × 1080, or with Live resolution change
+        /// on, the live size (scene_resolution.h ForScale: the ratio 1 to 3, multiples of 4); at other
+        /// outputs the size patched at startup (patches.cpp ScaledSizes: never below 640 × 360, never
+        /// exactly 1920 × 1080).
+        /// </summary>
+        public static (int W, int H) RenderSize(int outW, int outH, double scale, bool live)
+        {
+            if ((outW, outH) == (1920, 1080) || live)
+            {
+                scale = Math.Clamp(scale, 1.0, 3.0);
+                return (Math.Max(1, (int)Math.Round(outW / scale / 4, MidpointRounding.AwayFromZero)) * 4,
+                        Math.Max(1, (int)Math.Round(outH / scale / 4, MidpointRounding.AwayFromZero)) * 4);
+            }
+            scale = Math.Max(1.0, Math.Min(scale, Math.Min(outW / 640.0, outH / 360.0)));
+            var w = Math.Max(4, (int)Math.Round(outW / scale / 4, MidpointRounding.ToEven) * 4);
+            var h = Math.Max(4, (int)Math.Round(outH / scale / 4, MidpointRounding.ToEven) * 4);
+            return (w, h) == (1920, 1080) ? (1916, 1076) : (w, h);
+        }
+
         /// <summary>The size an output_res value names; "auto" is the display's own (1920 × 1080
-        /// when it is unknown), as the engine reads it at start (scripts/run_windows.py).</summary>
+        /// when it is unknown), as the engine reads it at start (bb-start).</summary>
         public static (int W, int H) OutputSize(string value)
         {
             if (value == "auto")
@@ -104,21 +191,28 @@
                 : (1920, 1080);
         }
 
-        // Chromatic aberration, depth of field, motion blur and the game's own anti-aliasing start off:
-        // the picture is clearer without them, and the upscalers anti-alias (players' advice).
+        // Chromatic aberration and motion blur start off: the picture is clearer without them (players'
+        // advice). The game's own anti-aliasing is on (0.4.4 beta 28; the upscalers leave it out). Depth of
+        // field on and the intros skipped (0.4.4).
         public static readonly Effect[] Effects =
         {
-            new("effect_chromatic_aberration", L.T("Chromatic aberration"), false),
-            new("effect_dof", L.T("Depth of field"), false),
-            new("effect_motion_blur", L.T("Motion blur"), false),
-            new("effect_ssao", L.T("Ambient occlusion (SSAO)"), true),
-            new("effect_game_aa", L.T("Game's own anti-aliasing"), false),
-            new("effect_dynamic_shadows", L.T("Shadows from dynamic lights"), true),
-            new("effect_ssr", L.T("Screen-space reflections"), false, L.T("Not in the original game")),
-            new("skip_intro", L.T("Skip intro videos"), false),
+            new("effect_chromatic_aberration", L.T("Chromatic aberration"), false,
+                L.T("On in the original game; off here by default, for a clearer picture")) { Line = L.T("Colour fringes toward the screen's edges") },
+            new("effect_dof", L.T("Depth of field"), true) { Line = L.T("Blur on the parts of the picture out of focus") },
+            new("effect_motion_blur", L.T("Motion blur"), false,
+                L.T("On in the original game; off here by default, for a clearer picture. Costs GPU time")) { Line = L.T("Blur when the camera turns fast") },
+            new("effect_ssao", L.T("Ambient occlusion (SSAO)"), true) { Line = L.T("Soft shading in corners and creases") },
+            new("effect_game_aa", L.T("Game's own anti-aliasing"), true),
+            new("effect_dynamic_shadows", L.T("Shadows from dynamic lights"), true,
+                L.T("One of the heaviest effects: off gives a large FPS gain")) { Line = L.T("Shadows cast by lamps and other point lights; heavy") },
+            new("effect_ssr", L.T("Screen-space reflections"), false,
+                L.T("Not in the original game: Kyo's patch turns on reflections the game has only in its debug functions. Costs GPU time"))
+                { Line = L.T("Adds reflections on wet and shiny surfaces") },
+            new("skip_intro", L.T("Skip intro videos"), true),
             new("debug_camera", L.T("Free camera"), false, L.T("Toggle with Cross + L3 / Space + Z")),
             new("debug_menu", L.T("Debug menu"), false,
-                L.T("Left touchpad / Tab. Needs the adhoc folder from Nexus mod #253 (adhoc/font) in the game's dvdroot_ps4 or as a mod; without it the patch is not applied")),
+                L.T("Left touchpad / Tab. Needs the adhoc folder from Nexus mod #253 (adhoc/font) in the game's dvdroot_ps4 or as a mod; without it the patch is not applied"))
+                { Line = L.T("The game's developer menu (Left touchpad / Tab)") },
         };
 
         /// <summary>log_level (BB_LOG_LEVEL): how much the game writes into its log.</summary>
@@ -150,23 +244,31 @@
 
         public static readonly Choice[] ModelLod =
         {
+            new(L.T("Lowest (2)"), "2"),
+            new(L.T("Lower (1)"), "1"),
             new(L.T("As in the game"), "0"),
             new(L.T("Highest (-2)"), "-2"),
-            new(L.T("Lower (1)"), "1"),
-            new(L.T("Lowest (2)"), "2"),
         };
 
         public static readonly Choice[] FpsModes =
         {
-            new("60 FPS", "60"),
-            new("90 FPS", "90", L.T("Includes the sprint fix for high frame rates")),
-            new("120 FPS", "120", L.T("The 90 FPS patch made for 120")),
-            new("144 FPS", "144", L.T("The 90 FPS patch made for 144")),
-            new(L.T("Uncapped"), "uncap", L.T("The community uncapped patch, no limit. It can freeze at the end of a boss intro (Vicar Amelia's); 120 and 144 use another patch")),
+            // 0.4.4 beta 22: what each rate runs since 0.3.0 (Kyo's 60 FPS++ with the engine's values for
+            // the rate, start/patches.cpp; with Frame rate corrections off, the patch file's lists). In
+            // order, with 240 (on the corrections only: without them the start runs 144) and Uncapped
+            // last, no longer held to the display's refresh rate (the V-Sync below says how frames
+            // reach the screen; FrameRateSync).
             new(L.T("30 FPS (as on PS4)"), "30"),
+            new("60 FPS", "60", L.F($"With the engine's frame rate corrections for {60} FPS")),
+            new("90 FPS", "90", L.F($"With the engine's frame rate corrections for {90} FPS")),
+            new("120 FPS", "120", L.F($"With the engine's frame rate corrections for {120} FPS")),
+            new("144 FPS", "144", L.F($"With the engine's frame rate corrections for {144} FPS")),
+            new("240 FPS", "240", L.F($"With the engine's frame rate corrections for {240} FPS. Needs Frame rate corrections (Engine switches): without them the game runs at {144}")),
+            new(L.T("Uncapped"), "uncap", L.T("No limit: as fast as your PC can go, up to 480 FPS. Above 240 FPS the game is untested, and the old community uncapped patch froze in boss fights at such rates. For a high frame rate we recommend 240")),
         };
 
-        /// <summary>The DLSS model (BB_DLSS_PRESET): NVIDIA's render presets.</summary>
+        /// <summary>The DLSS model (config.ini's dlss_preset): NVIDIA's render presets. The CNN presets E and F are
+        /// deprecated by NVIDIA (DLSS 310.6.0) and not offered from 0.4.4 beta 25b; a saved one reads as
+        /// Auto (the engine's settings).</summary>
         public static readonly Choice[] DlssModels =
         {
             new(L.T("Auto (per quality)"), "auto", L.T("NVIDIA's DLSS 4.5 pairing: K for DLAA, Quality and Balanced, M for Performance, L for Ultra Performance")),
@@ -174,17 +276,15 @@
             new(L.T("Transformer 2 (preset M)"), "m", L.T("DLSS 4.5's model for Performance: sharper, a little heavier")),
             new(L.T("Transformer 2 (preset L)"), "l", L.T("DLSS 4.5's model for Ultra Performance")),
             new(L.T("Transformer (preset J)"), "j", L.T("Like K, slightly less ghosting and a little more flicker")),
-            new(L.T("CNN (preset E)"), "e", L.T("The older model: a little faster on RTX 20 and 30 cards, softer and more ghosting in motion")),
-            new(L.T("CNN (preset F)"), "f", L.T("The older model for Ultra Performance and DLAA")),
             new(L.T("The DLL's default"), "default", L.T("Whatever the included DLSS version picks for each quality mode")),
         };
 
         /// <summary>What opens the port's in-game settings menu (BB_OVERLAY_KEYS).</summary>
         public static readonly Choice[] OverlayKeys =
         {
-            new(L.T("Insert or L3 + R3"), "both", L.T("The keyboard's Insert key, or both sticks pressed on a controller")),
-            new(L.T("Insert only"), "insert", L.T("Pressing both sticks in a fight no longer opens it")),
             new(L.T("Off"), "off", L.T("The menu never opens; settings stay in the launcher and the game's PC menus")),
+            new(L.T("Insert only"), "insert", L.T("Pressing both sticks in a fight no longer opens it")),
+            new(L.T("Insert or L3 + R3"), "both", L.T("The keyboard's Insert key, or both sticks pressed on a controller")),
         };
 
         /// <summary>The port's in-game settings menu (Insert / L3+R3).</summary>
@@ -202,19 +302,22 @@
             new("Русский", "ru"),
         };
 
+        /// <summary>V-Sync (BB_PRESENT_MODE): how finished frames reach the screen. The values are
+        /// Vulkan's present modes, named in brackets at the end of each description (0.4.4 beta 22:
+        /// plain names; the values, and so settings files, are as before).</summary>
         public static readonly Choice[] PresentModes =
         {
-            new(L.T("Mailbox"), "Mailbox", L.T("Low latency without tearing")),
-            new(L.T("FIFO (VSync)"), "Fifo", L.T("Classic vertical sync")),
-            new(L.T("FIFO Relaxed"), "FifoRelaxed", L.T("VSync that tears instead of stuttering when a frame is late")),
-            new(L.T("Immediate"), "Immediate", L.T("Lowest latency; may tear")),
+            new(L.T("Off"), FrameRateSync.Off, L.T("Frames go out the moment they're ready: lowest latency, may tear (Immediate)")),
+            new(L.T("On (latest frame)"), FrameRateSync.Latest, L.T("No tearing, low latency: each refresh shows the newest finished frame. Default (Mailbox)")),
+            new(L.T("On (every frame)"), "Fifo", L.T("Classic V-Sync: every frame shown in order, no tearing, a little more latency. The game can't run faster than the screen (FIFO)")),
+            new(L.T("Adaptive"), "FifoRelaxed", L.T("Like On (every frame), but tears instead of stuttering when a frame is late (FIFO Relaxed)")),
         };
 
         public static readonly Choice[] DrawPipe =
         {
+            new(L.T("Off"), "0", L.T("More stable, but slower")),
             new(L.T("Auto"), "", L.T("On with 8 or more CPU threads")),
             new(L.T("On"), "1"),
-            new(L.T("Off"), "0", L.T("More stable, but slower")),
         };
 
         public static readonly Choice[] GameLanguages =
@@ -226,18 +329,6 @@
             new(L.T("Spanish"), "3"),
             new(L.T("German"), "4"),
             new(L.T("Italian"), "5"),
-        };
-
-        public static readonly Choice[] HdrPaperWhite =
-        {
-            new(L.T("100 nits"), "100"), new(L.T("150 nits"), "150"), new(L.T("200 nits (default)"), "200"),
-            new(L.T("250 nits"), "250"), new(L.T("300 nits"), "300"), new(L.T("400 nits"), "400"),
-        };
-
-        public static readonly Choice[] HdrPeak =
-        {
-            new(L.T("400 nits"), "400"), new(L.T("600 nits"), "600"), new(L.T("800 nits"), "800"), new(L.T("1000 nits (default)"), "1000"),
-            new(L.T("1500 nits"), "1500"), new(L.T("2000 nits"), "2000"), new(L.T("4000 nits"), "4000"),
         };
 
         /// <summary>button_prompts: the game's button icons as keys while the keyboard or mouse is in use, always, or never.</summary>
@@ -284,15 +375,15 @@
 
         public static readonly Choice[] LiveResolution =
         {
-            new(L.T("Auto (by GPU)"), "auto"),
-            new(L.T("Off (faster)"), "0"),
+            // 0.4.4 beta 25c: Off (recommended) or On; a saved "auto" shows as Off, as the engine reads it.
+            new(L.T("Off (recommended)"), "0"),
             new(L.T("On"), "1"),
         };
 
         public static readonly Choice[] Readbacks =
         {
-            new(L.T("Relaxed"), "", L.T("Default")),
             new(L.T("Off"), "0"),
+            new(L.T("Relaxed"), "", L.T("Default")),
             new(L.T("Precise"), "2"),
         };
 

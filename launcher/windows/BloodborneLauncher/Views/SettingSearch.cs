@@ -49,7 +49,7 @@ namespace BloodborneLauncher.Views
             if (at == 0) return new Hit(row, place, null, 100);
             if (at > 0) return new Hit(row, place, null, char.IsLetterOrDigit(title[at - 1]) ? 60 : 80);
 
-            var info = row.Info ?? "";
+            var info = row.Line == null ? row.Info ?? "" : row.Line + "\n" + row.Info;
             var hint = row.Hint.Visibility == Visibility.Visible ? row.Hint.Text : "";
             // The fixed text first (no string built per row and query); the live hint only when needed.
             if (!words.All(w => Has(title, w) || Has(info, w) || Has(hint, w) || Has(row.Choices, w) ||

@@ -5,13 +5,22 @@ using System.Windows.Controls;
 
 namespace BloodborneLauncher.Views
 {
-    /// <summary>Screen, frame rate and the language of the port's in-game menu.</summary>
+    /// <summary>
+    /// What the screen gets: the monitor, the window, the output resolution, the frame rate and V-Sync, HDR
+    /// and picture tuning (0.4.4 beta 26: the FPS counter, Sharp UI and the in-game menu's language and
+    /// shortcut went to Interface and the game's language to Play; 26b: HDR back here, Best settings to
+    /// Graphics; 27b: picture tuning from the Look page, which went, below HDR).
+    /// </summary>
     public sealed class DisplayPage : LauncherPage
     {
         private readonly ComboBox _monitor = new() { Width = 360, VerticalAlignment = VerticalAlignment.Center };
         private bool _refreshingMonitors;
 
-        public override void OnShown() => RefreshMonitors();
+        public override void OnShown()
+        {
+            RefreshMonitors();
+            ShowHdr(); // Use HDR may have been turned on or off in Windows meanwhile
+        }
 
         private void RefreshMonitors()
         {
@@ -65,7 +74,8 @@ namespace BloodborneLauncher.Views
                 Ws.SaveSoon();
             }
 
-            ComboRow(SymbolRegular.ResizeLarge24, L.T("Output resolution"), L.T("The upscaler renders below this and fills it in"),
+            ComboRow(SymbolRegular.ResizeLarge24, L.T("Output resolution"),
+                L.T("The resolution the game is shown at. An upscaler renders at it (Native AA) or below it, and fills in the rest"),
                 Choices.OutputResolutions,
                 () => { var v = Ini.Get("output_res", "1920x1080"); return Named(v) ? v : Choices.Custom; },
                 v =>
@@ -73,7 +83,7 @@ namespace BloodborneLauncher.Views
                     customRow.Visibility = v == Choices.Custom ? Visibility.Visible : Visibility.Collapsed;
                     if (v == Choices.Custom) ApplyCustom();
                     else Ini.Set("output_res", v);
-                });
+                }, line: L.T("The resolution the game is shown at"), defaultValue: "1920x1080");
 
             foreach (var box in new[] { widthBox, heightBox })
             {
@@ -83,123 +93,194 @@ namespace BloodborneLauncher.Views
             customRow = Add(Card(SymbolRegular.Ruler24, L.T("Custom resolution"),
                 L.T("Your own output size, any shape (5:4, 16:10, 32:9...): the camera and UI follow it with Widescreen on"),
                 Row(widthBox, new System.Windows.Controls.TextBlock { Text = "×", Margin = new Thickness(8, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center }, heightBox),
-                out customNote));
+                out customNote, line: L.T("Any width and height, in any shape")));
             customRow.Visibility = Named(Ini.Get("output_res", "1920x1080")) ? Visibility.Collapsed : Visibility.Visible;
         }
 
-        private void IniSlider(SymbolRegular icon, string title, double min, double max, string key, Panel? into = null,
-            double step = 0.05, double fallback = 1.0) =>
-            SliderRow(icon, title, null, min, max, step, () => ParseDouble(Ini.Get(key, Fmt(fallback)), fallback), v => Ini.Set(key, Fmt(v)), into: into);
+        /// <summary>The frame rate and V-Sync, side by side (0.4.4 beta 22: V-Sync was the presentation
+        /// mode under Screen › Advanced). Choosing Uncapped turns V-Sync Off and going back to a fixed
+        /// rate turns that Off back on (FrameRateSync); V-Sync's note says when the pair holds the game
+        /// to the display.</summary>
+        private void FrameRateRows()
+        {
+            Group(L.T("Frame rate"));
+            var rate = S.Str("fps_mode");
+            FrameworkElement sync = null!;
+            SettingCombo(SymbolRegular.Gauge24, L.T("Frame rate"), L.T("Every rate above 30 runs on the engine's frame rate corrections, built on Kyo's 60 FPS++ and other community findings. " +
+                    "With the corrections off (Engine switches › Frame rate corrections), the community FPS++ patches run instead, and 240 runs at 144. " +
+                    "Above the display's refresh rate, V-Sync On (latest frame) and Off draw frames the display never shows; " +
+                    "On (every frame) and Adaptive hold the game to the display's rate. 30 is the game as on the PS4"),
+                Choices.FpsModes, "fps_mode", changed: () =>
+                {
+                    var now = S.Str("fps_mode");
+                    var after = FrameRateSync.After(rate, now, S.Str("present_mode"));
+                    rate = now;
+                    if (after != null) Pick(sync, Choices.IndexOf(Choices.PresentModes, after));
+                    RefreshNotes();
+                }, noteOf: c => c.Note, line: L.T("30 is the PS4's; higher rates use the engine's corrections"));
+            sync = SettingCombo(SymbolRegular.Image24, L.T("V-Sync"), L.T("How finished frames reach the screen"),
+                Choices.PresentModes, "present_mode", noteOf: c => FrameRateSync.Note(S.Str("fps_mode"), c.Value, Hardware.Detect().RefreshHz) ?? c.Note);
+        }
 
-        public DisplayPage() : base(L.T("Display"), L.T("Resolution, window mode, frame rate and menu language. Applied when the game starts."))
+        public DisplayPage()
         {
             _monitor.SetResourceReference(StyleProperty, "DefaultComboBoxStyle");
             ComboSearch.Attach(_monitor);
             Group(L.T("Screen"));
             Add(Card(SymbolRegular.Desktop24, L.T("Monitor"),
                 L.T("The game opens here from the start, including fullscreen and HDR. If this monitor is disconnected, the Windows primary monitor is used. Applied on the next launch."),
-                _monitor, out _));
+                _monitor, out _, line: L.T("The monitor the game opens on")));
             RefreshMonitors();
             _monitor.SelectionChanged += (_, _) =>
             {
                 if (_refreshingMonitors || _monitor.SelectedItem is not ComboBoxItem item) return;
                 S.Set("display_device", item.Tag as string ?? "");
                 Ws.SaveSoon();
+                ShowHdr(); // HDR is the chosen display's
+                RefreshNotes(); // and so is the refresh rate V-Sync's note gives
             };
+            // One choice for what were two switches (Fullscreen, and Borderless fullscreen, which did
+            // nothing without it). The same two settings as before: config.ini's fullscreen and the
+            // launcher's borderless_fullscreen (BB_EXCLUSIVE_FULLSCREEN=0).
+            ComboRow(SymbolRegular.FullScreenMaximize24, L.T("Window mode"), L.T("How the game's window fills the screen"),
+                Choices.WindowModes,
+                () => !Ini.Flag("fullscreen") ? "window" : S.Bool("borderless_fullscreen") ? "borderless" : "fullscreen",
+                v =>
+                {
+                    Ini.Set("fullscreen", v == "window" ? "0" : "1");
+                    if (v != "window") S.Set("borderless_fullscreen", v == "borderless");
+                });
             OutputResolutionRows();
-            SettingToggle(SymbolRegular.TextFont24, L.T("Sharp UI"),
-                L.T("Menus, HUD and text drawn at the output resolution instead of 1080p stretched up: much sharper at 1440p and 4K. New: on by default in betas while it is tested. Applied on the next launch"),
-                "exp_sharp_ui");
-            IniToggle(SymbolRegular.FullScreenMaximize24, L.T("Fullscreen"), L.T("The game covers the whole screen"), "fullscreen");
-            SettingToggle(SymbolRegular.WindowNew24, L.T("Borderless fullscreen"),
-                L.T("Keeps fullscreen a borderless window, so trophy notifications and other windows show on top. Off: the driver may switch to exclusive fullscreen (lowest latency, G-SYNC fullscreen-only mode), which hides them"),
-                "borderless_fullscreen");
             ToggleRow(SymbolRegular.RatioOneToOne24, L.T("Widescreen"), L.T("Outputs that are not 16:9 (21:9, 32:9, 16:10, 5:4) with the right field of view and the UI kept in shape"),
-                () => Ini.Get("widescreen", "1") != "0", v => Ini.Set("widescreen", v ? "1" : "0"));
+                () => Ini.Get("widescreen", "1") != "0", v => Ini.Set("widescreen", v ? "1" : "0"), line: L.T("Right field of view and UI on screens that aren't 16:9"), defaultOn: true);
             var screenMore = Advanced();
             IniCombo(SymbolRegular.ArrowSync24, L.T("Live resolution change"),
-                L.T("Change the resolution in the game menu without restarting. Off is faster; turn on only if you switch resolutions in game"), Choices.LiveResolution, "live_resolution", into: screenMore);
-            SettingCombo(SymbolRegular.Image24, L.T("Presentation mode"), null, Choices.PresentModes, "present_mode", into: screenMore);
+                L.T("Lets the in-game overlay menu change the resolution without restarting. Off is faster; turn it on only if you switch resolutions in game"), Choices.LiveResolution, "live_resolution", into: screenMore, line: L.T("Change the resolution in game, without restarting"));
 
-            Group(L.T("Frame rate"));
-            SettingCombo(SymbolRegular.Gauge24, L.T("Frame rate"), L.T("30, 60, 90, 120 and 144 are the game's frame-rate patches for that rate; Uncapped uses the community uncapped patch"), Choices.FpsModes, "fps_mode");
+            FrameRateRows();
+            HdrRows();
+            PictureRows();
+        }
 
-            // bbport: the FPS counter (was on the Graphics page among the upscaler settings).
-            Group(L.T("FPS counter"));
-            IniToggle(SymbolRegular.DataUsage24, L.T("Show FPS"), L.T("Also in game: Insert or L3 + R3"), "show_fps");
-            IniToggle(SymbolRegular.Wrench24, L.T("Note while shaders build"),
-                L.T("\"Building shaders\" in a corner while the game builds shaders for a place it shows for the first time. Also in game: Insert or L3 + R3"),
-                "compile_note");
-            IniCombo(SymbolRegular.PositionToFront24, L.T("FPS counter position"), null, new Choice[]
-            {
-                new(L.T("Top right"), "0"), new(L.T("Top left"), "1"), new(L.T("Bottom right"), "2"), new(L.T("Bottom left"), "3"), new(L.T("Top centre"), "4"),
-            }, "fps_position");
-            IniSlider(SymbolRegular.TextFontSize24, L.T("FPS counter size"), 0.75, 2.0, "fps_scale");
-            IniCombo(SymbolRegular.Color24, L.T("FPS counter text colour"), L.T("Any colour in game: Insert or L3 + R3 › Other"), new Choice[]
-            {
-                new(L.T("White"), "#FFFFFF"), new(L.T("Yellow"), "#FFD54A"), new(L.T("Green"), "#7CFC8A"), new(L.T("Cyan"), "#6FE3FF"),
-                new(L.T("Red"), "#FF5A5A"), new(L.T("Orange"), "#FFA040"), new(L.T("Pink"), "#FF8AD8"), new(L.T("Black"), "#000000"),
-            }, "fps_text_color");
-            IniSlider(SymbolRegular.Eye24, L.T("FPS counter text opacity"), 0.1, 1.0, "fps_text_opacity", fallback: 1.0);
-            IniCombo(SymbolRegular.ColorBackground24, L.T("FPS counter background"), null, new Choice[]
-            {
-                new(L.T("Dark grey"), "#0F0F0F"), new(L.T("Black"), "#000000"), new(L.T("Dark red"), "#3A0A0A"), new(L.T("Dark blue"), "#0A1A3A"), new(L.T("White"), "#FFFFFF"),
-            }, "fps_bg_color");
-            IniSlider(SymbolRegular.Blur24, L.T("FPS counter background opacity"), 0.0, 1.0, "fps_bg_opacity", fallback: 0.5);
-            IniToggle(SymbolRegular.BorderAll24, L.T("FPS counter border"), null, "fps_border");
-            // What the counter shows (on unless turned off), folded under the switch.
-            var fpsParts = Advanced(L.T("What the FPS counter shows"));
-            foreach (var (icon, key, title) in new[]
-                     {
-                         (SymbolRegular.TopSpeed24, "show_fps_rate", L.T("Frame rate")),
-                         (SymbolRegular.Timer24, "show_fps_frame_time", L.T("Frame time")),
-                         (SymbolRegular.ResizeLarge24, "show_fps_upscaler", L.T("Upscaler")),
-                         (SymbolRegular.DeveloperBoard24, "show_fps_cpu", L.T("CPU usage")),
-                         (SymbolRegular.Gauge24, "show_fps_gpu", L.T("GPU usage")),
-                     })
-            {
-                // CPU and GPU use are off unless chosen (the engine's defaults, bbport_settings.h).
-                var fallback = key is "show_fps_cpu" or "show_fps_gpu" ? "0" : "1";
-                ToggleRow(icon, title, L.T("Shown in the FPS counter"), () => Ini.Get(key, fallback) == "1", v => Ini.Set(key, v ? "1" : "0"), fpsParts);
-                ((System.Windows.FrameworkElement)fpsParts.Children[^1]).Margin = new System.Windows.Thickness(24, 0, 0, 0);
-            }
+        private FoldRows _hdr = null!;
+        private readonly StackPanel _hdrNative = new();
+        private SettingRow _hdrRow = null!, _peakRow = null!;
+        private Wpf.Ui.Controls.ToggleSwitch _hdrSwitch = null!;
+        private static string HdrHint => L.T("The game's picture on an HDR screen, with brighter highlights. Applied when the game starts");
 
-
+        /// <summary>
+        /// HDR (0.4.4 beta 26b: back from the Picture page, beside the display it depends on, as in the
+        /// in-game menu's Display tab). A switch with its settings folded under it; the display the game
+        /// opens on (Monitor above) says whether it can: no HDR there greys the switch.
+        /// </summary>
+        private void HdrRows()
+        {
             Group("HDR");
-            var hdrHint = WindowsHdr.AnyOn()
-                ? L.T("The game's picture on an HDR screen, with brighter highlights. Applied when the game starts")
-                : WindowsHdr.AnySupported()
-                    ? L.T("Turn on Use HDR in Windows' display settings first (Settings › System › Display)")
-                    : L.T("This display shows no HDR");
-            IniToggle(SymbolRegular.Hdr24, L.T("HDR output"), hdrHint, "hdr");
+            _hdr = FoldToggle(SymbolRegular.Hdr24, L.T("HDR output"), HdrHint,
+                () => Ini.Flag("hdr"), v => Ini.Set("hdr", v ? "1" : "0"), out _hdrSwitch, out _hdrRow, changed: ShowHdr, line: L.T("The game in HDR, with brighter highlights"));
             ComboRow(SymbolRegular.Lightbulb24, L.T("HDR source"),
                 L.T("Native: highlights as bright as they are in the game's scene. Expanded: the SDR picture's bright parts made brighter"),
-                Choices.HdrMode, () => Ini.Get("hdr_mode", "native"), v => Ini.Set("hdr_mode", v));
+                Choices.HdrMode, () => Ini.Get("hdr_mode", "native"), v => Ini.Set("hdr_mode", v), _hdr, changed: ShowHdr, line: L.T("The scene's own highlights, or the SDR picture expanded"));
+            // The UI's brightness and colour apply to the Native source only (the in-game menu hides them
+            // otherwise): under it (0.4.4 beta 27b).
+            ComboRow(SymbolRegular.TextFont24, L.T("UI brightness"), L.T("Native source only: how bright the HUD, menus and subtitles are, against paper white"),
+                Choices.HdrUiBrightness, () => Ini.Get("hdr_ui_brightness", "1"), v => Ini.Set("hdr_ui_brightness", v), _hdrNative, line: L.T("How bright the HUD, menus and subtitles are"));
+            Nest();
+            ComboRow(SymbolRegular.Color24, L.T("UI colour"), L.T("Native source only: Vivid shows the HUD and menus with the colours a wide-gamut monitor gives SDR; Exact keeps sRGB's"),
+                Choices.HdrUiColor, () => Ini.Get("hdr_ui_color", "1"), v => Ini.Set("hdr_ui_color", v), _hdrNative, line: L.T("Vivid or exact (sRGB) colours for the HUD and menus"));
+            Nest();
+            _hdr.Children.Add(_hdrNative);
             SliderRow(SymbolRegular.BrightnessHigh24, L.T("Paper white"), L.T("How bright the game's white is, in nits. Range: 10–500"),
                 10, 500, 1, () => ParseDouble(Ini.Get("hdr_paper_white", "200"), 200),
                 v => Ini.Set("hdr_paper_white", v.ToString("0", System.Globalization.CultureInfo.InvariantCulture)),
-                format: L.T("0' nits'"), valueWidth: 82);
+                format: L.T("0' nits'"), into: _hdr, valueWidth: 82, defaultValue: 200);
             ToggleRow(SymbolRegular.Desktop24, L.T("Peak brightness from the display"),
                 L.T("The peak Windows reports for the display the game is on (the Windows HDR Calibration app's, once it has run). Off: the value below"),
-                () => Ini.Get("hdr_peak_auto", "1") != "0", v => Ini.Set("hdr_peak_auto", v ? "1" : "0"));
+                () => Ini.Get("hdr_peak_auto", "1") != "0", v => Ini.Set("hdr_peak_auto", v ? "1" : "0"), _hdr, ShowHdr, line: L.T("Takes the peak brightness Windows reports"), defaultOn: true);
             SliderRow(SymbolRegular.WeatherSunny24, L.T("Peak brightness"), L.T("Your display's peak brightness, in nits, when it is not taken from the display. Range: 10–4000"),
                 10, 4000, 10, () => ParseDouble(Ini.Get("hdr_peak", "1000"), 1000),
                 v => Ini.Set("hdr_peak", v.ToString("0", System.Globalization.CultureInfo.InvariantCulture)),
-                format: L.T("0' nits'"), valueWidth: 82);
+                format: L.T("0' nits'"), into: _hdr, valueWidth: 82, line: L.T("Your display's peak brightness, in nits"), defaultValue: 1000);
+            _peakRow = Nest();
             ComboRow(SymbolRegular.Sparkle24, L.T("Highlight boost"), L.T("Off keeps the game's own look; higher makes lamps, fire and the sky brighter"),
-                Choices.HdrBoost, () => Ini.Get("hdr_boost", "0.25"), v => Ini.Set("hdr_boost", v));
-            var hdrMore = Advanced();
-            ComboRow(SymbolRegular.TextFont24, L.T("UI brightness"), L.T("Native source only: how bright the HUD, menus and subtitles are, against paper white"),
-                Choices.HdrUiBrightness, () => Ini.Get("hdr_ui_brightness", "1"), v => Ini.Set("hdr_ui_brightness", v), hdrMore);
-            ComboRow(SymbolRegular.Color24, L.T("UI colour"), L.T("Native source only: Vivid shows the HUD and menus with the colours a wide-gamut monitor gives SDR; Exact keeps sRGB's"),
-                Choices.HdrUiColor, () => Ini.Get("hdr_ui_color", "1"), v => Ini.Set("hdr_ui_color", v), hdrMore);
+                Choices.HdrBoost, () => Ini.Get("hdr_boost", "0.25"), v => Ini.Set("hdr_boost", v), _hdr, line: L.T("How much brighter lamps, fire and the sky get"));
+            Body.Children.Add(_hdr);
+            ShowHdr();
+        }
 
-            Group(L.T("Language"));
-            ComboRow(SymbolRegular.LocalLanguage24, L.T("In-game menu language"), L.T("The port's settings menu (Insert or L3 + R3)"),
-                Choices.MenuLanguages, () => Ini.Get("menu_language", "en"), v => Ini.Set("menu_language", v));
-            SettingCombo(SymbolRegular.Translate24, L.T("Game language"), L.T("The game's own text and voices"), Choices.GameLanguages, "language");
-            SettingCombo(SymbolRegular.Keyboard24, L.T("In-game menu shortcut"),
-                L.T("What opens the port's settings menu while playing. Applied on the next launch"), Choices.OverlayKeys, "overlay_keys");
+        private readonly List<Action> _gameOwnPicture = new();
+        private FoldRows _picture = null!;
+
+        /// <summary>
+        /// Picture tuning (0.4.4 beta 27b: from the Look page, which went, below HDR as the tester asked):
+        /// the engine's picture controls (bbport_settings.cpp clamps the same ranges), in the in-game menu's
+        /// order, with its "Game's own picture" button, folded under a switch. Its values apply only while
+        /// it is on; off is the game's own picture with the values kept, as in the game's System menu
+        /// (Colour), which has the same switch.
+        /// </summary>
+        private void PictureRows()
+        {
+            Group(L.T("Picture"));
+            _picture = FoldToggle(SymbolRegular.Color24, L.T("Picture tuning"),
+                L.T("Applies the settings below, live; off shows the game's own picture and keeps your values. Also in the game's System menu (Graphics, Effects, Colour) and the in-game overlay menu"),
+                () => Ini.Flag("graphics_controls"), v => Ini.Set("graphics_controls", v ? "1" : "0"), out _, out _, line: L.T("Your own brightness, colour, fog and bloom, live"));
+            TuningSlider(SymbolRegular.BrightnessHigh24, L.T("Brightness"), 0, 3, "graphics_brightness");
+            TuningSlider(SymbolRegular.DarkTheme24, L.T("Contrast"), 0.8, 1.2, "graphics_contrast", step: 0.01);
+            TuningSlider(SymbolRegular.Color24, L.T("Saturation"), 0, 3, "graphics_saturation");
+            TuningSlider(SymbolRegular.Color24, L.T("Hue"), -180, 180, "graphics_hue", step: 1, fallback: 0, tip: L.T("0 is the game's own"));
+            TuningSlider(SymbolRegular.WeatherFog24, L.T("Fog"), 0, 3, "graphics_fog", line: L.T("How thick the fog is"));
+            TuningSlider(SymbolRegular.Lightbulb24, L.T("Bloom"), 0, 3, "graphics_bloom", line: L.T("How strong the glow around bright lights is"));
+            // On unless turned off: the engine's default (bbport_settings.h).
+            var vignette = ToggleRow(SymbolRegular.CircleHalfFill24, L.T("Vignette"), L.T("Off: the picture stays even to the edges"),
+                () => Ini.Get("graphics_vignette", "1") != "0", v => Ini.Set("graphics_vignette", v ? "1" : "0"), _picture,
+                line: L.T("Darkens the edges of the screen, as the game does"), defaultOn: true);
+            _gameOwnPicture.Add(() =>
+            {
+                vignette.IsChecked = true;
+                Ini.Set("graphics_vignette", "1");
+            });
+            TuningSlider(SymbolRegular.DarkTheme24, L.T("Ambient occlusion strength"), 0, 3, "graphics_ao_strength",
+                line: L.T("How dark the shading in corners is"), tip: L.T("Needs Ambient occlusion on (Graphics › Game effects). 1.00 is the game's own"));
+            TuningSlider(SymbolRegular.WeatherSunny24, L.T("Shadow distance"), 0.5, 4, "graphics_shadow_scale", line: L.T("How far away shadows are drawn"));
+            Add(Card(SymbolRegular.ArrowReset24, L.T("Game's own picture"), L.T("Puts the settings above back to the game's own values"),
+                SmallButton(L.T("Reset"), SymbolRegular.ArrowUndo24, (_, _) =>
+                {
+                    foreach (var reset in _gameOwnPicture) reset();
+                    Ws.SaveSoon();
+                }), out _), _picture);
+            Body.Children.Add(_picture);
+        }
+
+        /// <summary>A picture tuning slider; the "Game's own picture" button puts it back to <paramref name="fallback"/>.
+        /// Its hover text says which value is the game's own (<paramref name="tip"/>, "1.00 is the game's own" when null).</summary>
+        private void TuningSlider(SymbolRegular icon, string title, double min, double max, string key, double step = 0.05, double fallback = 1.0,
+            string? line = null, string? tip = null)
+        {
+            var slider = SliderRow(icon, title, null, min, max, step, () => ParseDouble(Ini.Get(key, Fmt(fallback)), fallback),
+                v => Ini.Set(key, Fmt(v)), into: _picture, line: line);
+            LastRow.SetTip(tip ?? L.T("1.00 is the game's own"));
+            _gameOwnPicture.Add(() =>
+            {
+                slider.Value = fallback; // saves through the slider
+                Ini.Set(key, Fmt(fallback));
+            });
+        }
+
+        /// <summary>What the game's display can do, and the rows that depend on choices made.</summary>
+        private void ShowHdr()
+        {
+            if (_hdrRow == null) return; // rows built after the monitor list
+            // The display the game opens on; when it cannot be told, any display decides, as before.
+            var display = WindowsHdr.ForMonitor(S.Str("display_device"));
+            var supported = display?.Supported ?? WindowsHdr.AnySupported();
+            var on = display?.On ?? WindowsHdr.AnyOn();
+            // Greyed only when that display is known to show no HDR; a saved On can still be turned off.
+            _hdrSwitch.IsEnabled = display == null || supported || Ini.Flag("hdr");
+            SetHint(_hdrRow.Hint, !supported ? L.T("This display shows no HDR")
+                : !on ? L.T("Turn on Use HDR in Windows' display settings first (Settings › System › Display)")
+                : HdrHint);
+            _peakRow.IsEnabled = Ini.Get("hdr_peak_auto", "1") == "0";
+            _hdrNative.Visibility = Ini.Get("hdr_mode", "native") == "native" ? Visibility.Visible : Visibility.Collapsed;
         }
     }
 }
