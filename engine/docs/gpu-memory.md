@@ -73,7 +73,7 @@ here one missed refresh at 60 Hz.
   keeping VRAM copies of everything and catching every CPU write (page protection, faults,
   re-uploads). Off by default in bbport and in DarkIzuku's fork.
 - **Lantern (Awaken):** Windows version from 0.9.16, on for everyone from 0.9.37 beta 4; beta 5
-  fixed an FPS sink with it (`docs/memory_model_fps_sink.md`). Hunter's Workshop inherited that
+  fixed an FPS sink with it (`docs/archive/memory_model_fps_sink.md`). Hunter's Workshop inherited that
   default.
 - **bbport 0.52 and later:** dropped sparse binding for it; its notes say "NVIDIA's sparse binding
   stalls the GPU for seconds". That replacement (the Vulkan layer's memory module, dma-buf memory)

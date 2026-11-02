@@ -390,7 +390,7 @@ From the audit of 27c (four read-only audits, re-checked) and the tester's calls
   keys), the never-run workflow under `engine/.github`, `.gitmodules`, `tools/release-assets.ps1`, the
   drifted Dockerfile, `tools/bridge_helper`, the duplicate hash list, unused third-party files (ImGui's
   examples and prebuilt libraries, SPIRV-Headers' extras, `gcn`, half's tests, LibAtrac9's C# port), docs
-  that describe removed features moved to `docs/history/` or corrected.
+  that describe removed features moved to `docs/archive/` or corrected.
 - **Removed:** the PC memory model (`BB_GUEST_IN_PLACE` and the switches under it, `bbport_guest_memory*`,
   its probe tools and doc); frame generation, Streamline and Reflex's code (`vk_streamline`,
   `vk_frame_generation`, its shaders and settings, the Streamline headers and fetcher; the
@@ -413,7 +413,7 @@ From the audit of 27c (four read-only audits, re-checked) and the tester's calls
 - **Still to ask:** the crash diagnostics for the fixed 0x263b8e7 heap corruption (`bbport_free_check`,
   `heap_sites`, `write_log`, `windows_experiments`; recommended: remove); OptiScaler (one key); the old
   shadNet online path and bbnet's NP modules the game never imports (checked first); the GPU-path tracers
-  that overlap; `docs/history/`.
+  that overlap; `docs/archive/`.
 
 ### Release candidate, then 0.4.4
 

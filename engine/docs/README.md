@@ -1,8 +1,8 @@
 # Engine documents
 
 What each document here is for. Checked against the code at 0.4.4 beta 22 (2026-10-31); a document
-written for an older version says so at its top. Finished plans and closed investigations are in
-[history/](history/README.md).
+written for an older version says so at its top. Finished plans, closed investigations and removed
+features are in [archive/](archive/README.md) (0.4.4 beta 28; was `history/`).
 
 ## For players and testers
 
@@ -11,7 +11,6 @@ written for an older version says so at its top. Finished plans and closed inves
 - [MODS.md](MODS.md): file mods, where they go and how the engine merges them.
 - [COMPATIBILITY.md](COMPATIBILITY.md): graphics cards and drivers, and what the engine does on each.
 - [hdr.md](hdr.md): HDR output and its settings.
-- [dlss_frame_generation.md](dlss_frame_generation.md): DLSS Frame Generation and the upscaler options.
 
 ## The project's log and map
 
@@ -32,8 +31,8 @@ written for an older version says so at its top. Finished plans and closed inves
 - [native_shader_compiler.md](native_shader_compiler.md): the shader translator's native paths
   (constant buffers, resource tables).
 - [motion_vectors.md](motion_vectors.md): motion vectors for the upscalers (camera and object motion).
-- [upscaler.md](upscaler.md): the upscalers (TAA, DLSS, FSR 3.1, FSR 4), where they run and their
-  inputs.
+- [upscaler.md](upscaler.md): the upscalers (TAA, DLSS, AMD FSR through AMD's FSR SDK), where they run
+  and their inputs.
 - [hdr-scene-path.md](hdr-scene-path.md): the plan for HDR from the scene (the next HDR mode).
 
 ## Frame rate
@@ -46,6 +45,3 @@ written for an older version says so at its top. Finished plans and closed inves
 
 - [gpu-memory.md](gpu-memory.md): why frames were late while memory was moved, and what 0.4.4 did
   about it (the GX region read in place, fences written when the GPU is done).
-- [memory_model_fps_sink.md](memory_model_fps_sink.md): the PC memory model's FPS loss over a
-  session. The model is Experimental, off by default since 0.4.0 beta 4, and to be removed before
-  0.4.4 ships.

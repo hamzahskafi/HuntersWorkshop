@@ -172,7 +172,7 @@ call stack (`shim/common/assert.cpp`), which found this.
   Treat it as unproven on every driver: the arena is not made for external memory either
   (`VUID-VkSparseMemoryBind-memory-02731`), and on lavapipe the GPU reads other bytes through such a
   binding than the CPU wrote (`tools/chunk_buffer_probe.cpp`). `BB_CHUNK_BUFFERS=1` moves bindings in
-  one chunk off it (history/EMULATION_REMOVAL_PLAN.md, step 6 item 2). The game's GX region, read in
+  one chunk off it (archive/EMULATION_REMOVAL_PLAN.md, step 6 item 2). The game's GX region, read in
   place by default on Windows (`BB_GX_IN_PLACE`, 0.4.4), goes through a buffer of its own, within
   the spec; only when the arena is needed over the region (a binding across its edge, or a
   shader's page fault there) are the arena's blocks bound to its import, logged "(outside the

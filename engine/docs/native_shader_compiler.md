@@ -6,7 +6,7 @@ is for Bloodborne's shaders only, which are a closed set: about 860 programs in 
 all compiled by the same PSSL compiler. The plan here replaces the inherited path piece by piece,
 each piece checked against it per captured shader in the shader lab before the game uses it. It
 grew out of item 5, "Shaders ahead of time", of the emulation removal plan
-([history/EMULATION_REMOVAL_PLAN.md](history/EMULATION_REMOVAL_PLAN.md), now historical).
+([history/EMULATION_REMOVAL_PLAN.md](archive/EMULATION_REMOVAL_PLAN.md), now historical).
 
 **Status at 0.4.4 beta 21.** Built: the table plan (steps 1 and 1b; the walker is still the default,
 `BB_NATIVE_TABLES=0`) and the compile speed and output changes of 2026-10-22 (all on by default).

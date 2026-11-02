@@ -50,7 +50,7 @@ Hunter's Workshop started from [Lantern Engine](https://github.com/Awakenchan/La
 | Linux online start and the bound on runaway particle work | [Lena Różalska](https://github.com/DecayingEagle) |
 | Online servers | [The Hunter's Dream](https://thehuntersdream.com) |
 | AMD FSR | [AMD FSR SDK](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK) 2.4: AMD's signed DLLs, used as AMD ships them, and its API headers (MIT) |
-| DLSS | NVIDIA DLSS SDK and Streamline |
+| DLSS | NVIDIA DLSS SDK (the driver's NGX core) |
 | Sound | [LibAtrac9](https://github.com/Thealexbarney/LibAtrac9) |
 | In-game menu | [Dear ImGui](https://github.com/ocornut/imgui) |
 | Controller mappings | [SDL_GameControllerDB](https://github.com/mdqinc/SDL_GameControllerDB) |
@@ -95,4 +95,3 @@ part stays with its authors; the third-party licenses are in [`engine/licenses`]
 |---|---|
 | [`engine/`](engine) | the engine: start program, runtime and renderer (see its [README](engine/README.md) for building) |
 | [`launcher/windows/`](launcher/windows) | the launcher |
-| [`tools/`](tools) | release tooling |

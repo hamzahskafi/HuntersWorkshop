@@ -2,7 +2,7 @@
 
 **Status (2026-10-31, 0.4.4 beta 21).** These notes and measurements are from 2026-09-30 and
 2026-10-01 (Linux, RX 7800 XT, mostly Hunter's Nightmare), from the native port this engine
-inherits (that session's report: [history/SESSION_2026-09-30.md](history/SESSION_2026-09-30.md));
+inherits (that session's report: [history/SESSION_2026-09-30.md](archive/SESSION_2026-09-30.md));
 every figure below is from then. The design they arrive at is today's: stage A
 (`shadPS4:GpuCommandProcessor`) decodes and selects pipelines with draw preparation ahead of it
 (`bb:DrawScan`, `bb:DrawPrepN`), stage B (`bb:DrawRec`) records each draw from the draw pipe, helped

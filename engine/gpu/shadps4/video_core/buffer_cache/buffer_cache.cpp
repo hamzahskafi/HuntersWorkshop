@@ -396,7 +396,7 @@ bool ChunkTextures() {
     }();
     return on;
 }
-/// bbport BB_CHUNK_BUFFERS=1 (step 6 item 2 of docs/history/EMULATION_REMOVAL_PLAN.md): a binding
+/// bbport BB_CHUNK_BUFFERS=1 (step 6 item 2 of docs/archive/EMULATION_REMOVAL_PLAN.md): a binding
 /// of the game's memory in place that lies in one guest memory chunk is given as that chunk's own
 /// buffer with an offset, not as the arena: the GPU then reaches it without the sparse binding of a
 /// host import, which the Vulkan spec does not allow (the arena's memory types are VRAM only).

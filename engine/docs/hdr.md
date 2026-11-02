@@ -124,7 +124,7 @@ the settings, not per frame.
 Frame generation runs with HDR output: FSR 3.1 interpolates the 8-bit frame before the encode, and
 the generated frame is encoded with the real frame's gain map; DLSS Frame Generation gets the
 frame and the frame without its UI encoded alike (`BB_DLSSG_HDR=0` turns it off with HDR;
-docs/dlss_frame_generation.md).
+docs/archive/dlss_frame_generation.md).
 
 ### Cost
 

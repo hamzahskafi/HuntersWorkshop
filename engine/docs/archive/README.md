@@ -1,13 +1,18 @@
-# History: documents kept for the record
+# Archive: documents kept for the record
+
+Nothing here describes the engine as it is. How it works now: [engine-map.md](../engine-map.md);
+every change and measurement since Hunter's Workshop began:
+[community-fixes-plan.md](../community-fixes-plan.md). Links inside these files may point at files
+one folder up (`../`). (Called `docs/history/` until 0.4.4 beta 28.)
+
+## From bbport
 
 These files are from bbport's development (deadinside28's native Linux port of Bloodborne, which
 DarkIzuku's fork, Lantern Engine and then Hunter's Workshop are built on). They came into this
 repository with the engine's source in Lantern 0.9.37 beta 7 (`c494fca`, 2026-10-22). Most are in
 Russian, and all describe bbport on Linux (an RX 7800 XT with RADV, unless they say otherwise), not
 Hunter's Workshop as it is. They are kept as written; links inside them may point at files beside
-them that are one folder up (`../`). How the engine works now: [engine-map.md](../engine-map.md);
-every change and measurement since Hunter's Workshop began:
-[community-fixes-plan.md](../community-fixes-plan.md).
+them that are one folder up (`../`).
 
 Oldest first:
 
@@ -26,8 +31,6 @@ Oldest first:
 - [FIXES_2026-09-27.md](FIXES_2026-09-27.md): the same day's analysis of three reported problems (the
   reactive mask, trails on weapons, settings that needed a restart), 2026-09-27; superseded by
   [motion_vectors.md](../motion_vectors.md) and [upscaler.md](../upscaler.md).
-- [FIXES_SUMMARY_2026-09-27.md](FIXES_SUMMARY_2026-09-27.md): a short summary of the same fixes with
-  what to test, 2026-09-27; as above.
 - [CURRENT_STATUS_2026-09-29.md](CURRENT_STATUS_2026-09-29.md): a snapshot of the port and its
   upscaler (what is in the code, what ran, what was checked on screen), 2026-09-29; superseded by
   later work, today [engine-map.md](../engine-map.md).
@@ -58,3 +61,23 @@ Oldest first:
 - [bbport-README.md](bbport-README.md) (English): bbport's README (deadinside28), undated, from after
   bbport 0.3 (its new memory model still an option for AMD GPUs only); Hunter's Workshop's own:
   [README.md](../../README.md).
+
+## From Lantern Engine and Hunter's Workshop
+
+- [linux-radv-investigation.md](linux-radv-investigation.md) (English): one Linux/RADV report
+  investigated in Lantern 0.9.37 beta 9 (online play's start on Linux, the indirect dispatch cap);
+  both fixes are in the engine.
+- [WINDOWS_0.4_INTEGRATION.md](WINDOWS_0.4_INTEGRATION.md) (English): merging bbport 0.4 into a
+  Windows build and the bbhost ports after it, before Hunter's Workshop began; moved 2026-10-31.
+- [online.md](online.md) (English): setting up a custom shadNet server in the launcher this project
+  started from; Hunter's Workshop plays online through a Hunter's Dream account.
+- [memory_model_fps_sink.md](memory_model_fps_sink.md) (English): the PC memory model's FPS sinking
+  over a session and its fix, 2026-10-22; the model was removed in 0.4.4 beta 28.
+- [dlss_frame_generation.md](dlss_frame_generation.md) (English): DLSS Frame Generation through
+  NVIDIA Streamline and the upscaler options, 2026-10-22; not offered from 0.4.4 beta 26, removed in
+  beta 28.
+- [upscaler-2026-10.md](upscaler-2026-10.md) (English): upscaler.md's dated notes of October 2026
+  (TAA's first version, the live and startup resolution paths, FireBurn's FSR 3.1, FSR 4 and FSR
+  4.1.1); moved in 0.4.4 beta 28.
+- [launcher-layout-proposal.md](launcher-layout-proposal.md) (English): the launcher's reorganisation
+  as proposed and built in 0.4.4 betas 26 to 27d.

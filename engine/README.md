@@ -18,7 +18,7 @@ and [shadPS4](https://github.com/shadps4-emu/shadPS4), and added:
 - **its own start and runtime**: `start/` (bb-start: the game's executable prepared once and reused,
   mods, patches checked against the game's code, the GPU cache kept across updates) and `src/` (the
   runtime, saves, files read in place, pads with menu and keyboard bindings);
-- **a direct path away from emulation** ([docs/history/EMULATION_REMOVAL_PLAN.md](docs/history/EMULATION_REMOVAL_PLAN.md)):
+- **a direct path away from emulation** ([docs/archive/EMULATION_REMOVAL_PLAN.md](docs/archive/EMULATION_REMOVAL_PLAN.md)):
   draw calls taken from the game's graphics library as records, the PC memory model (the game's
   memory used by the GPU in place, [docs/gpu-memory.md](docs/gpu-memory.md); in Hunter's Workshop
   an Experimental option, off by default since 0.4.0 beta 4 and to be removed before 0.4.4 ships),
@@ -113,7 +113,7 @@ FSR SDK runtime and Streamline.
 | `tests/` | tests and the shader lab |
 | `tools/` | developer tools |
 | `packaging/` | the Linux package (`packaging/linux`: Ubuntu setup, build, the start script) |
-| `docs/` | design notes; `docs/history` keeps notes that no longer describe the engine, many from the projects it started from |
+| `docs/` | design notes; `docs/archive` keeps notes that no longer describe the engine, many from the projects it started from |
 
 ## Credits and licenses
 

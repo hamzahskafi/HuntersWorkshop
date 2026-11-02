@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // The Vulkan calls the PC memory model makes for a guest memory chunk on Windows (BbGuestMemory,
-// step 6 item 2 of docs/history/EMULATION_REMOVAL_PLAN.md), alone, so the validation layer can
+// step 6 item 2 of docs/archive/EMULATION_REMOVAL_PLAN.md), alone, so the validation layer can
 // judge them on any driver, lavapipe in WSL included (the engine on Linux makes dma-buf chunks
 // instead):
 //   chunk        host memory imported (VK_EXT_external_memory_host) with the chunk's own buffer;
