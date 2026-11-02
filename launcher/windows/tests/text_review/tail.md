@@ -46,11 +46,6 @@ What the launcher does changes in these, not only what it says. Each comes with 
    (rows whose tooltip already says "On by default" carry a flag that leaves it out); a line's last full
    stop is dropped; a tooltip that would only repeat its line is left out. Check: V-Sync's hover shows
    "Default: On (latest frame)" alone; Reset trophy progress's line has no full stop.
-9. **Proposed, not yet decided: the two Intel effect fixes together.** The effect trail crash fix moves
-   from Experimental engine features to Game fixes, under the Intel effect crash fix, and greys while that
-   one is on; it is then left out of the start, as the Intel fix's tooltip already asks ("Turn off the
-   Effect trail crash fix with it"). Today both can be on at once. Check: with both on in the settings,
-   only the Intel fix is applied, and the start log says why.
 
 ## Outside review
 

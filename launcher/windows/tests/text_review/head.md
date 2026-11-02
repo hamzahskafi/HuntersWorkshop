@@ -62,6 +62,5 @@ draft keeps that voice and fixes what is wrong, cut or out of date, rather than 
 | Fixed-refresh frame lock greys while Precise frame pacing is off | It needs it; its own value is kept | Engine switches |
 | Share your settings shares everything except what belongs to this PC, to the player or to one session | The tester's call | Settings |
 | Suggested settings read the game's monitor; Changed switches lists what Extra variables override | Two bugs the outside review found | Graphics, Engine switches |
+| The two Intel effect fixes stay separate switches, as today | The tester's call | Engine switches |
 
-**Still open:** the effect trail crash fix moving under the Intel effect crash fix and greying while that one
-is on (Changes outside the texts, 9).
