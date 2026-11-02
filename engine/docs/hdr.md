@@ -121,10 +121,8 @@ HDR metadata (`VK_EXT_hdr_metadata`): max mastering luminance is the peak, MaxFA
 MaxCLL is the peak in native mode and expand's SDR white level in expand mode. It changes with
 the settings, not per frame.
 
-Frame generation runs with HDR output: FSR 3.1 interpolates the 8-bit frame before the encode, and
-the generated frame is encoded with the real frame's gain map; DLSS Frame Generation gets the
-frame and the frame without its UI encoded alike (`BB_DLSSG_HDR=0` turns it off with HDR;
-docs/archive/dlss_frame_generation.md).
+Frame generation is not offered (removed in 0.4.4); how it ran with HDR output is in
+docs/archive/dlss_frame_generation.md.
 
 ### Cost
 

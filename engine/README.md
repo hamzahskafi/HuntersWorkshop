@@ -21,7 +21,7 @@ and [shadPS4](https://github.com/shadps4-emu/shadPS4), and added:
 - **a direct path away from emulation** ([docs/archive/EMULATION_REMOVAL_PLAN.md](docs/archive/EMULATION_REMOVAL_PLAN.md)):
   draw calls taken from the game's graphics library as records, the game's per-frame GPU memory
   read in place ([docs/gpu-memory.md](docs/gpu-memory.md); Hunter's Workshop removed the wider PC
-  memory model in 0.4.4 beta 28), and a native compiler for the game's shaders
+  memory model in 0.4.4), and a native compiler for the game's shaders
   ([docs/native_shader_compiler.md](docs/native_shader_compiler.md));
 - **renderer performance work**: draw preparation on worker threads, cached render state, pipeline
   cache warm-up with a crash guard, occlusion culling and frame pacing;

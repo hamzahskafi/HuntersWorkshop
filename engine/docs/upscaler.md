@@ -1,4 +1,4 @@
-# Temporal upscaling and frame generation — frame analysis and plan
+# Temporal upscaling — frame analysis and plan
 
 ## Today (0.4.4)
 
@@ -8,7 +8,7 @@ The sections after this one are the record of the work from the first frame anal
 - **Upscalers** (`upscaler` in `config.ini`, `BB_UPSCALER`; the launcher's Graphics page and the
   in-game menu): `fsr` (AMD FSR through AMD's FSR SDK 2.4, `vk_amd_fsr.cpp`; from 0.4.4 beta 27),
   `dlss` (DLSS Super Resolution, NVIDIA RTX), `taa` (below) and `off`. A `config.ini` without the key
-  gets `fsr`; the older `fsr3`, `fsr4` and `fsr411` read as `fsr`. `BB_UPSCALER=none` leaves the
+  gets `off` (the game's own anti-aliasing; from 0.4.4); the older `fsr3`, `fsr4` and `fsr411` read as `fsr`. `BB_UPSCALER=none` leaves the
   whole path out. From 0.4.4 beta 27b the menus offer AMD FSR, DLSS or None as the upscaler and, for
   None, Anti-aliasing: TAA (`taa`), the game's own (`off` with `effect_game_aa=1`) or Off (`off`).
 - **The game's own anti-aliasing** (`effect_game_aa`, a patch at start, off by default) applies only
@@ -89,7 +89,7 @@ The sections after this one are the record of the work from the first frame anal
   `BB_CAMERA_CUT_RESET=0`: logged and counted, the history kept.
 - **Jitter:** a Halton(2,3) pattern of 8 x (output / render)^2 phases (AMD's and NVIDIA's formula);
   DLSS at least 16 (NVIDIA's checklist; from 0.4.4 beta 25b), so DLAA has 16 instead of 8.
-- **Frame generation, DLSS's options and the mip bias:**
+- **Frame generation (not offered since 0.4.4), DLSS's options and the mip bias:**
   [archive/dlss_frame_generation.md](archive/dlss_frame_generation.md).
 
 ## Bloodborne's frame (1920x1080, Hunter's Dream / Nightmare)

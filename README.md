@@ -8,6 +8,23 @@ Vulkan.
 > 1.09, dumped from your own PS4. This project is not affiliated with Sony Interactive Entertainment
 > or FromSoftware.
 
+## What it does
+
+- **Higher frame rates done properly:** 30 (as on PS4), 60, 90, 120, 144 or 240 FPS, or uncapped. Built
+  on Kyo's 60 FPS++, with the engine's own corrections so physics, cloth, animation and the follow
+  camera keep the game's speed at every rate.
+- **Upscaling and picture:** DLSS on NVIDIA RTX cards, AMD FSR through AMD's own FSR SDK (FSR 4.1 on
+  Radeon RX 6000 and newer, FSR 3.1 on other cards), TAA or the game's own anti-aliasing; HDR output,
+  widescreen, and picture tuning.
+- **A PC version of the game:** keyboard and mouse controls, the game's System menu with PC pages, and
+  an in-game settings menu (Insert, or L3 + R3 on a controller).
+- **Online and co-op** through [The Hunter's Dream](https://thehuntersdream.com).
+- **The rest of the workshop:** mods and the community's game patches, cheats, trophies, save backups,
+  and a launcher in 13 languages with a setup guide that checks your game files.
+
+What changed in the latest version: [release notes 0.4.4](engine/docs/release-notes-0.4.4.md)
+(earlier ones are beside it).
+
 ## Install
 
 1. Download `HuntersWorkshop-v<version>-win64.zip` from

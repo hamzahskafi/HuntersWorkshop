@@ -1,8 +1,8 @@
 # Engine documents
 
-What each document here is for. Checked against the code at 0.4.4 beta 22 (2026-10-31); a document
-written for an older version says so at its top. Finished plans, closed investigations and removed
-features are in [archive/](archive/README.md) (0.4.4 beta 28; was `history/`).
+What each document here is for. Checked against the code at 0.4.4 (2026-11-03); a document written
+for an older version says so at its top. Finished plans, closed investigations and removed
+features are in [archive/](archive/README.md) (was `history/`).
 
 ## For players and testers
 
@@ -15,10 +15,10 @@ features are in [archive/](archive/README.md) (0.4.4 beta 28; was `history/`).
 ## The project's log and map
 
 - [community-fixes-plan.md](community-fixes-plan.md): every change since Hunter's Workshop began, with
-  its measurements and credits (the main table, newest rows at the bottom), and the review of what
-  other Bloodborne PC projects fixed.
+  its measurements and credits (the main table, newest rows at the bottom), what is left after 0.4.4
+  (its "After 0.4.4" section), and the review of what other Bloodborne PC projects fixed.
 - [launcher-text-review.md](launcher-text-review.md): every launcher row's title, line and tooltip, with
-  the texts proposed for beta 28's text step.
+  the texts proposed for 0.4.4's text pass (applied).
 - [engine-map.md](engine-map.md): how the engine works (threads, a frame from the game's commands to
   the screen, where the GPU and CPU time goes) and the reviewed optimization ideas, with the status of
   each after 0.4.4 beta 21 at its top.

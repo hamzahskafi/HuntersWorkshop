@@ -5,7 +5,7 @@ to date 2026-10-31 (0.4.4 beta 21). This file records what was found, how to fix
 that has been done. Paths are relative to `engine/`; shadPS4's (`video_core/...`, `core/...`) to
 `engine/gpu/shadps4/`.
 
-## Status (2026-10-31, 0.4.4 beta 21)
+## Status (0.4.4)
 
 - **The PC memory model (`BB_GUEST_IN_PLACE`) was removed in 0.4.4 beta 28**, with its switches
   and the launcher option (`exp_guest_in_place`); it had been off by default since 0.4.0 beta 4.
@@ -29,7 +29,7 @@ that has been done. Paths are relative to `engine/`; shadPS4's (`video_core/...`
 - **Not done:** step 1's per-frame figures and light hitch report, step 3.3 (pinning at load, model
   only) and step 3.4 (the full-screen image). Cause 3 (image memory per image) is as it was.
 
-## Decision (2026-10-26)
+## Decision (2026-10-26; superseded: the PC memory model was removed in 0.4.4)
 
 - **The PC memory model (`BB_GUEST_IN_PLACE`) is off by default.** It's the main source of late
   frames in play on the measured PC (RTX 3070 Ti, i5-14600KF, 60 FPS). The CPU it saves, a few

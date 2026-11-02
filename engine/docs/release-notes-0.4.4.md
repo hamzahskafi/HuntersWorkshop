@@ -11,9 +11,9 @@ What changed since 0.4.3, for the release page. The engine work behind each line
   of its own (it works only with them, and every log since 0.3.0 ran with both). The follow camera
   stays Original and model detail As in the game. A settings file that had the unified frame time off
   gets it back with the corrections; everything else in it stays as it was.
-- **A new install starts without an upscaler, on the game's own anti-aliasing** (the tester's call;
-  the launcher used to start it on FSR 4 at Ultra Performance, then AMD FSR). With an upscaler chosen,
-  **Auto quality** goes by the output's height: Native AA up to 1200 lines (1080p),
+- **A new install starts without an upscaler, on the game's own anti-aliasing** (the launcher used
+  to start it on FSR 4 at Ultra Performance). With an upscaler chosen, **Auto quality** goes by the
+  output's height: Native AA up to 1200 lines (1080p),
   Quality up to 1600 (1440p), Performance above (4K renders 1920 × 1080), so by default the game never
   renders much more than native 1080p, and it follows the output when you change it. **DLSS's Auto
   model** is NVIDIA's pairing: K for DLAA, Quality and Balanced, M for Performance, L for Ultra
@@ -101,8 +101,8 @@ behind its tabs, Visuals holding Display to Interface; the Linux launchers are u
   The game's own). Under AMD FSR, DLSS or TAA it only softened the picture they work from; a
   settings file that has it on keeps it for when the upscaler is None. The game's System menu shows
   its Anti-Aliasing as Off then (it showed On with DLAA), and its help line says why. Its pass also
-  no longer runs under DLSS or AMD FSR when it is the choice kept for Upscaler None (119 FPS at the
-  lamps against 122 without it, in the tester's report).
+  no longer runs under DLSS or AMD FSR when it is the choice kept for Upscaler None (at the lamps,
+  119 FPS with it against 122 without).
 - **The launcher and the game no longer overwrite each other's settings.** The game reads its
   settings when it starts and writes its own when you change them in game, so a change made in the
   launcher while the game ran was lost. The launcher now keeps those changes until the game exits
@@ -127,7 +127,7 @@ behind its tabs, Visuals holding Display to Interface; the Linux launchers are u
   corrections are welcome). Every list has Off or None first. The game's System menu help lines fit
   the window (Output resolution's was cut off).
 - **Every language complete:** 199 older texts that showed in English in 12 of the 13 languages
-  (since 0.9.37 beta 5, only Simplified Chinese had them) are translated: the setup guide above all,
+  (only Simplified Chinese had them) are translated: the setup guide above all,
   and the DLSS model names, the log level and diagnostics rows, hitch reports, shader catalogs and the
   Engine page's older switches (machine-made, like the rest). German addresses the player as "Sie"
   throughout (11 texts used "du").
@@ -311,7 +311,6 @@ behind its tabs, Visuals holding Display to Interface; the Linux launchers are u
 - **The screen's last row and column keep the game's own alpha** with DLAA and TAA at native
   resolution: the fix for the shimmering line at the right and bottom edges (GitHub issue 43) copied
   the neighbouring pixels whole, alpha included; it now copies their colour only.
-
 - **The System menu opened from the title screen no longer has Quit to Desktop:** it repeated the
   title menu's own Quit Game. It stays in the System menu opened in game.
 
@@ -359,8 +358,8 @@ behind its tabs, Visuals holding Display to Interface; the Linux launchers are u
   dispatch. `BB_BREADCRUMBS=both` puts back the hang marker before each draw.
 - Experiments removed: `BB_ASYNC_FENCES`, `BB_FENCE_DELAY_TEST`, `BB_SUBMIT_LOCK=ahead`,
   `BB_SHADOWS` and `BB_HLE_COPY_MERGE` (measured slower, unused, or never safe to turn on).
-- **Beta 28, the cleanup:** the switches settled by measurement went, each keeping the path that was
-  the default (`BB_DEFER_PROTECT`, `BB_UFFD`, `BB_TEXTURE_HELPER`, `BB_UBO_EXACT`, `BB_CAMERA_FIX`,
+- **Switches settled by measurement went,** each keeping the path that was the default
+  (`BB_DEFER_PROTECT`, `BB_UFFD`, `BB_TEXTURE_HELPER`, `BB_UBO_EXACT`, `BB_CAMERA_FIX`,
   `BB_CAMERA_INVERSE`, TAA's experiment bits, and 16 Lantern 0.9.x "as before" switches among them),
   with the PC memory model (`BB_GUEST_IN_PLACE`). config.ini decides the settings: their environment
   aliases (`BB_HDR*`, `BB_DLSS_PRESET`, ...) went; `BB_UPSCALER` stays for A/B runs.
@@ -381,7 +380,9 @@ behind its tabs, Visuals holding Display to Interface; the Linux launchers are u
   stay. Building the engine no longer needs protobuf (with Abseil) or miniupnpc.
 - **A Lantern 0.9.x folder updated in place is no longer supported** (`run.bat`, the Python start and
   the 0.9.x settings migrations went): install the Hunter's Workshop package instead.
-
+- **Updating in place leaves files 0.4.4 no longer uses** (Streamline's DLLs, `nvngx_dlssg.dll`,
+  `NvLowLatencyVk.dll`, the `fsr4vk` and `fsr4_shaders` folders, `gpu-cache.legacy.id`, `run.bat`):
+  nothing loads them, and they can be deleted. Keep `nvngx_dlss.dll`: it is DLSS itself.
 - **The first start after updating rebuilds part of the GPU cache.** The motion vectors' shaders
   and a few compute shaders changed, so they compile again the first time something draws them:
   some pop-in on first visits, once each. Saved pipelines whose shaders disagree with their motion

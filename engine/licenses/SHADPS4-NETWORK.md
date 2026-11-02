@@ -12,7 +12,7 @@ license notice (`CPPHTTPLIB.txt`). The game's sceHttp and sceSsl imports call th
 ruleset headers.
 
 The rest of shadPS4's network code (its sceNet, NetCtl and NP libraries and the shadNet client) was
-removed in 0.4.4 beta 28, with the shadNet online path: online play is The Hunter's Dream's, and
+removed in 0.4.4, with the shadNet online path: online play is The Hunter's Dream's, and
 nothing called it any more. `bbnet_glue.cpp` registers what is left; `include/` holds the few
 declarations these files need from the rest of shadPS4. Online play is off unless `BB_ONLINE=1`,
 which only The Hunter's Dream's start sets.
