@@ -74,7 +74,7 @@ int main() {
                v.mouse_invert_y == fresh.mouse_invert_y.load() && v.mouse_auto_rotation == fresh.mouse_auto_rotation.load() &&
                v.mouse_sensitivity == fresh.mouse_sensitivity.load());
         assert(v.change_appearance == fresh.change_appearance.load() && v.rebirth == fresh.rebirth.load());
-        assert(v.fsr4_auto_exposure == fresh.fsr4_auto_exposure.load() && v.fsr4_invert_jitter == fresh.fsr4_invert_jitter.load());
+        assert(v.fsr4_invert_jitter == fresh.fsr4_invert_jitter.load());
         v.fullscreen = fresh.fullscreen.load();
         v.menu_x = fresh.menu_x.load();
         v.menu_y = fresh.menu_y.load();
@@ -332,13 +332,14 @@ int main() {
     BbSettings::Load();
     assert(s.live_resolution == 1);
     s.live_resolution = 0;
-    // The DLSS model and its mip bias (live in the menu), the OptiScaler switches (read at start).
+    // The DLSS model (live in the menu), the OptiScaler switches (read at start). dlss_mip_bias went in
+    // 0.4.4 beta 27d (NVIDIA's extra level always): read as nothing, left in the file as it was.
     {
         std::ofstream file(path);
         file << "dlss_preset=j\ndlss_mip_bias=0\noptiscaler_compat=0\noptiscaler_sync_submit=1\n";
     }
     BbSettings::Load();
-    assert(s.dlss_preset == 10 && !s.dlss_mip_bias && !s.optiscaler_compat &&
+    assert(s.dlss_preset == 10 && !s.optiscaler_compat &&
            s.optiscaler_sync_submit == BbSettings::OptiSubmitOn);
     assert(!s.startup_optiscaler.compat && s.startup_optiscaler.sync_submit == BbSettings::OptiSubmitOn);
     s.dlss_preset = BbSettings::DlssPresetDefault;
@@ -387,7 +388,7 @@ int main() {
     {
         std::ofstream file(path);
         file << "frame_gen=dlss\nframe_gen_frames=9\nreflex=boost\npreset=5\nrender_scale=1.3\n"
-                "mip_bias=-5\ndlss_auto_exposure=1\n";
+                "mip_bias=-5\n";
     }
     BbSettings::Load();
     // 0.4.4 beta 26: frame generation reads as off while it is not offered (FrameGenOffered).
@@ -395,7 +396,7 @@ int main() {
     const int fsr_fg = BbSettings::FrameGenOffered ? BbSettings::FrameGenFsr3 : BbSettings::FrameGenOff;
     assert(s.frame_gen == dlss_fg && s.startup_frame_gen == dlss_fg);
     assert(s.frame_gen_frames == BbSettings::FrameGenFramesMax && s.reflex == BbSettings::ReflexBoost);
-    assert(s.preset == BbSettings::PresetCustom && s.render_scale == 1.3f && s.dlss_auto_exposure);
+    assert(s.preset == BbSettings::PresetCustom && s.render_scale == 1.3f);
     assert(s.mip_bias == BbSettings::MipBiasMin);
     assert(BbSettings::PresetScale(BbSettings::PresetCustom) == 1.3f);
     assert(BbSettings::ModelPreset(BbSettings::PresetCustom) == BbSettings::Quality);
@@ -410,7 +411,6 @@ int main() {
         assert(text.find("reflex=boost\n") != std::string::npos);
         assert(text.find("render_scale=1.10\n") != std::string::npos);
         assert(text.find("mip_bias=-2.00\n") != std::string::npos);
-        assert(text.find("dlss_auto_exposure=1\n") != std::string::npos);
     }
     { std::ofstream file(path); file << "frame_gen=fsr3\nreflex=sometimes\nrender_scale=9\n"; }
     BbSettings::Load();

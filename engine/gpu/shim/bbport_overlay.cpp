@@ -918,21 +918,36 @@ void UpscalerSection() {
                          : s.upscaler == BbSettings::UpscalerTaa ? 0
                                                                  : (game_aa ? 1 : 0); // what None goes back to
         int picked = mode;
+        // 0.4.4 beta 27d (the tester): with an upscaler the box names it, greyed, as the launcher's; the
+        // choice is kept for Upscaler None.
+        char instead[64] = {};
+        if (upscaling) {
+            std::snprintf(instead, sizeof(instead), BbSettings::MenuText("Upscaler (%s)", "Апскейлер (%s)"),
+                          s.upscaler == BbSettings::UpscalerDlss ? "DLSS" : "AMD FSR");
+        }
         ImGui::BeginDisabled(upscaling);
-        if (ImGui::Combo(label, &picked, modes, int(std::size(modes))) && picked != mode) {
+        if (ImGui::BeginCombo(label, upscaling ? instead : modes[mode])) {
+            for (int i = 0; i < int(std::size(modes)); ++i) {
+                if (ImGui::Selectable(modes[i], i == mode)) {
+                    picked = i;
+                }
+            }
+            ImGui::EndCombo();
+        }
+        if (picked != mode) {
             Store(s.upscaler, picked == 0 ? int(BbSettings::UpscalerTaa) : int(BbSettings::UpscalerOff), true);
             Store(s.effects[BbSettings::EffectGameAa], picked == 1, true);
         }
         ImGui::EndDisabled();
-        Hint(upscaling ? BbSettings::MenuText("The upscaler anti-aliases: this applies with Upscaler None.",
-                                              "Апскейлер сглаживает сам: это действует при апскейлере «Нет».")
-                       : BbSettings::MenuText(
-                             "TAA: smooth edges at the output resolution, live (sharpening helps). The game's "
-                             "own: its anti-aliasing pass, as on the PS4, after a restart. Off: the sharpest "
-                             "picture, with jagged edges.",
-                             "TAA: гладкие края в разрешении вывода, сразу (поможет резкость). Собственное "
-                             "игры: её проход сглаживания, как на PS4, после перезапуска. Выкл: самая резкая "
-                             "картинка, с лесенками."));
+        if (!upscaling) {
+            Hint(BbSettings::MenuText(
+                "TAA: smooth edges at the output resolution, live (sharpening helps). The game's "
+                "own: its anti-aliasing pass, as on the PS4, after a restart. Off: the sharpest "
+                "picture, with jagged edges.",
+                "TAA: гладкие края в разрешении вывода, сразу (поможет резкость). Собственное "
+                "игры: её проход сглаживания, как на PS4, после перезапуска. Выкл: самая резкая "
+                "картинка, с лесенками."));
+        }
     }
     if (const char* label = Item("Upscaler", "Апскейлер")) {
         // 0.4.4 beta 27: one FSR, AMD's (AMD's FSR SDK picks the version); FSR 3.1 (FireBurn's), FSR 4
@@ -980,8 +995,8 @@ void UpscalerSection() {
                                BbSettings::MenuText(problem));
             if (!BbSettings::IsFrameUpscaler(s.upscaler))
                 ImGui::TextUnformatted(BbSettings::MenuText(
-                    "Anti-aliasing below runs instead. Select the upscaler again to retry.",
-                    "Вместо него работает сглаживание ниже. Выберите апскейлер снова, чтобы повторить."));
+                    "Anti-aliasing above runs instead. Select the upscaler again to retry.",
+                    "Вместо него работает сглаживание выше. Выберите апскейлер снова, чтобы повторить."));
             ImGui::PopTextWrapPos();
         }
     }
@@ -992,18 +1007,9 @@ void UpscalerSection() {
         QualityRows();
     }
     if (s.upscaler == BbSettings::UpscalerFsr || Searching()) {
+        // 0.4.4 beta 27d: its auto exposure as AMD advises (no checkbox), the jitter sign check in
+        // config.ini only (fsr4_invert_jitter): neither a player's choice.
         FsrVersionRow();
-        if (const char* label = Item("FSR: auto exposure", "FSR: авто-экспозиция")) {
-            Checkbox(label, s.fsr4_auto_exposure);
-        }
-        if (const char* label = Item("FSR: invert jitter sign", "FSR: обратный знак jitter")) {
-            Checkbox(label, s.fsr4_invert_jitter);
-            Hint(BbSettings::MenuText(
-                "For diagnosing ghosting: FSR normalizes color by exposure and uses it to decide when to "
-                "discard previous frames. Changes apply immediately, without a restart.",
-                "Проверка при гостинге: FSR нормирует цвет по экспозиции и по ней решает, когда отбросить "
-                "прошлые кадры. Меняются сразу, без перезапуска."));
-        }
     }
     if (s.upscaler == BbSettings::UpscalerDlss || Searching()) {
         DlssModelRow();
@@ -1153,20 +1159,39 @@ void UpscalerSection() {
         }
     }
     const bool temporal = s.upscaler != BbSettings::UpscalerOff; // an upscaler or TAA
-    // Sharpening after an upscaler or TAA, its strength under it.
+    // Sharpening after an upscaler or TAA, its strength under it. 0.4.4 beta 27d (the tester): their
+    // hints say where it runs for what runs, as the launcher's lines: FSR sharpens up to 1 itself and an
+    // RCAS pass adds the rest; DLSS has none of its own, so the pass does it all; TAA's runs after it.
+    const bool fsr = s.upscaler == BbSettings::UpscalerFsr;
+    const char* where = s.upscaler == BbSettings::UpscalerDlss
+                            ? BbSettings::MenuText("After DLSS (it has none of its own).", "После DLSS (своей у него нет).")
+                        : fsr ? BbSettings::MenuText("FSR's own sharpening.", "Собственная резкость FSR.")
+                        : s.upscaler == BbSettings::UpscalerTaa ? BbSettings::MenuText("After TAA.", "После TAA.")
+                                                                : BbSettings::MenuText("Needs an upscaler or TAA.",
+                                                                                       "Нужен апскейлер или TAA.");
     ImGui::BeginDisabled(!temporal);
     if (const char* label = Item("Sharpening (RCAS)")) {
         Checkbox(label, s.sharpen);
+        char hint[384];
+        std::snprintf(hint, sizeof(hint), "%s %s", where,
+                      BbSettings::MenuText("AMD's RCAS: brings back detail that upscaling softens.",
+                                           "RCAS от AMD: возвращает детали, которые смягчает апскейлинг."));
+        Hint(hint);
     }
     ImGui::Indent();
     if (const char* label = Item("Sharpness")) {
         ImGui::BeginDisabled(!s.sharpen);
         Slider(label, s.sharpness, 0.0f, 2.0f);
         ImGui::EndDisabled();
-        Hint(BbSettings::MenuText(
-            "Up to 1: the upscaler's own sharpening (RCAS). Above 1 another RCAS pass is added. "
-            "DLSS has no sharpening of its own: an RCAS pass does all of it. "
-            "Ctrl+click the slider to type an exact value."));
+        char hint[384];
+        std::snprintf(hint, sizeof(hint), "%s %s",
+                      fsr ? BbSettings::MenuText("Above 1 adds a second pass.", "Выше 1 добавляется второй проход.")
+                          : BbSettings::MenuText("Higher is sharper.", "Чем выше, тем резче."),
+                      BbSettings::MenuText("0.20 is light; high values can halo edges and show grain. Ctrl+click to "
+                                           "type a value.",
+                                           "0.20 — слегка; высокие значения дают ореолы по краям и зерно. Ctrl+щелчок — "
+                                           "ввести значение."));
+        Hint(hint);
     }
     ImGui::Unindent();
     ImGui::EndDisabled(); // no upscaler or TAA
@@ -1187,43 +1212,21 @@ void UpscalerSection() {
             "дополнительный проход. С апскейлером или TAA. Изменение применяется после "
             "перезапуска игры."));
     }
-    ImGui::BeginDisabled(!temporal);
+    // 0.4.4 beta 27d: with an upscaler only (TemporalUpscaler::SceneMipBias: TAA renders at the output).
+    // DLSS's sharper textures folded in (the extra level NVIDIA and AMD both advise, always); DLSS's auto
+    // exposure as NVIDIA advises, without a checkbox; sub-pixel jitter in config.ini only (jitter=0).
+    ImGui::BeginDisabled(!upscaling);
     if (const char* label = Item("Texture mip bias", "Mip bias текстур")) {
         Slider(label, s.mip_bias, BbSettings::MipBiasMin, BbSettings::MipBiasMax, "%+.2f");
         Hint(BbSettings::MenuText(
-            "Added to the texture detail the upscaler already asks for (the render-to-output ratio, "
-            "and DLSS's extra level): below 0 sharper textures (more shimmer), above 0 softer. 0: "
-            "the upscaler's own. Live.",
-            "Добавляется к детализации текстур, которую уже задаёт апскейлер (соотношение рендера и "
-            "вывода и лишний уровень DLSS): меньше 0 — чётче (больше мерцания), больше 0 — мягче. 0 — "
-            "как у апскейлера. Меняется сразу."));
+            "Added to the texture detail the upscaler asks for: the render-to-output ratio and one "
+            "level more, as NVIDIA and AMD advise. Below 0 sharper textures (more shimmer), above 0 "
+            "softer. Live.",
+            "Добавляется к детализации текстур, которую задаёт апскейлер: соотношение рендера и вывода "
+            "и ещё один уровень, как советуют NVIDIA и AMD. Меньше 0 — чётче (больше мерцания), больше "
+            "0 — мягче. Меняется сразу."));
     }
-    // 0.4.4 beta 27c: DLSS's two finer settings (were the DLSS section's), with DLSS only.
-    if (s.upscaler == BbSettings::UpscalerDlss || Searching()) {
-        if (const char* label = Item("DLSS: sharper textures (mip bias -1)", "DLSS: чётче текстуры (mip bias -1)")) {
-            Checkbox(label, s.dlss_mip_bias);
-            Hint(BbSettings::MenuText(
-                "Textures one mip level sharper than the render resolution alone gives, as NVIDIA's DLSS "
-                "guide asks. Off: only the render-to-output ratio. Live.",
-                "Текстуры на один mip-уровень чётче, чем даёт само разрешение рендера, как советует "
-                "руководство NVIDIA по DLSS. Выкл.: только соотношение рендера и вывода. Меняется сразу."));
-        }
-        if (const char* label = Item("DLSS: auto exposure", "DLSS: авто-экспозиция")) {
-            Checkbox(label, s.dlss_auto_exposure);
-            Hint(BbSettings::MenuText(
-                "DLSS works out the frame's exposure itself, for the game's tonemapped frame too (the HDR "
-                "scene at 1080p always has it). Can steady dark scenes that ghost. Live (a brief pause).",
-                "DLSS сам определяет экспозицию кадра, и для готового кадра игры (HDR-сцена при 1080p — "
-                "всегда). Может успокоить тёмные сцены с гостингом. Меняется сразу (короткая пауза)."));
-        }
-    }
-    if (const char* label = Item("Sub-pixel jitter")) {
-        Checkbox(label, s.jitter);
-        Hint(BbSettings::MenuText(
-            "Each frame the scene shifts by a fraction of a pixel, and the upscaler gathers more "
-            "detail from several frames. Without it you only get history-based anti-aliasing."));
-    }
-    ImGui::EndDisabled(); // no upscaler or TAA
+    ImGui::EndDisabled(); // no upscaler
 }
 
 

@@ -84,7 +84,13 @@ anyway. VISUALS is **Display, Graphics, Interface** (Look went):
   without an upscaler or TAA; the System menu opened from the title no longer has Quit to Desktop (the
   title's own Quit Game is there), kept in game.
 
-## As built (beta 27c)
+## As built (beta 27c, then 27d)
+
+27d (the tester's look at 27c): Anti-aliasing greyed with "Upscaler (DLSS)" in its box; disabled rows
+dim on every page; Render resolution greyed unless Custom, beside Quality; Sharpening's line says where
+it runs for what runs; tooltips with advice on the upscaling rows; Advanced is character motion vectors
+and texture mip bias (DLSS's sharper textures and auto exposure folded into the engine's rules). The
+27c layout below otherwise stands.
 
 The tester's look at 27b (2026-11-02), discussed in full before any code:
 

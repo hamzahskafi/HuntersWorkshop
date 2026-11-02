@@ -643,6 +643,11 @@ bool color_seeded=false;
 StartupToggle enhancements[]={{nullptr,124001},{nullptr,124002},{nullptr,124004}};
 bool enhancements_seeded=false;
 StartupToggle graphics_toggles[]={{nullptr,117001},{nullptr,117000}};
+// 0.4.4 beta 27d (the tester: On with DLAA): the game's own anti-aliasing shows what applies. An upscaler
+// or TAA anti-aliases itself and the game's pass is left out then (patches.cpp NoUpscaler), so the row
+// shows Off, does not move, and its help line (117009) says why; the choice is kept for Upscaler None.
+constexpr std::uint32_t kAaLockedId=117009;
+bool AaLocked() { return BbSettings::Get().upscaler!=BbSettings::UpscalerOff; }
 StartupToggle effect_toggles[]={{nullptr,117005},{nullptr,117002},{nullptr,117003},{nullptr,120001}};
 bool graphics_seeded=false,effects_seeded=false;
 std::int32_t output_resolution=BbSettings::OutputDefault,last_resolution=BbSettings::OutputDefault;
@@ -697,7 +702,11 @@ GUEST_ABI void GraphicsHandler(void* dialog,void* params) {
     host_log("pc-options: PCGraphics opened, dialog=%p params=%p",dialog,params);
     alignas(16) std::uint8_t scratch[0x100]{};
     hle_call_guest<std::int64_t>(guest_fn(kScratchInit),&scratch);
-    for (auto& t:graphics_toggles) { t.value=t.last=t.setting->load()?1:0;add_toggle_row(dialog,&t.value,t.id,DefaultOf(t.setting)); }
+    for (auto& t:graphics_toggles) {
+        const bool locked=t.setting==&BbSettings::Get().effects[BbSettings::EffectGameAa] && AaLocked();
+        t.value=t.last=!locked && t.setting->load()?1:0;
+        add_toggle_row(dialog,&t.value,locked?kAaLockedId:t.id,DefaultOf(t.setting));
+    }
     SeedSliders(graphics_sliders);
     for (auto& s:graphics_sliders) add_slider_row(dialog,&s.value,s.id,s.def);
     output_resolution=last_resolution=BbSettings::Get().output_res;
@@ -1031,6 +1040,11 @@ void Tick() {
     // Anti-aliasing, ambient occlusion, motion blur, depth of field and chromatic aberration are effects
     // of their own, which Picture Tuning does not gate: they no longer turn it on (0.4.4 beta 26b; the
     // tester saw it on after changing effects). Of the toggles only the vignette is a picture setting.
+    // The game's anti-aliasing while an upscaler or TAA runs: back to Off, nothing saved (AaLocked).
+    if (AaLocked()) {
+        for (auto& t:graphics_toggles)
+            if (t.setting==&BbSettings::Get().effects[BbSettings::EffectGameAa]) t.value=t.last;
+    }
     push_toggles(graphics_toggles,graphics_seeded);
     const std::uint8_t vignette=effect_toggles[3].last;
     push_toggles(effect_toggles,effects_seeded);

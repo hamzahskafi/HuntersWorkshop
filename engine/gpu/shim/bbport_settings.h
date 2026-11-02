@@ -252,8 +252,8 @@ struct Values {
     std::atomic<bool> hide_cursor{true};
     /// The settings menu's position (fraction of the screen), -1 until it is moved.
     std::atomic<float> menu_x{-1.0f}, menu_y{-1.0f};
-    // FSR 4 checks (menu): the provider's auto exposure, the jitter sign it is given.
-    std::atomic<bool> fsr4_auto_exposure{true};
+    // AMD FSR check (config.ini only since 0.4.4 beta 27d): the jitter sign it is given. Auto exposure
+    // follows NVIDIA's and AMD's guidance, no setting (27d: fsr4_auto_exposure, dlss_auto_exposure went).
     std::atomic<bool> fsr4_invert_jitter{false};
     std::atomic<int> active_render_width{1920}, active_render_height{1080};
     /// Set by the renderer: the game's motion blur is held off (engine/graphics.cpp), as a temporal
@@ -330,10 +330,6 @@ struct Values {
     /// DLSS's render preset (DlssPreset*); live: its feature is created again (vk_dlss.cpp). Set by
     /// DLSS: the preset its feature runs (0 the DLL's default, a refused one included), -1 before.
     std::atomic<int> dlss_preset{DlssPresetAuto}, dlss_applied_preset{-1};
-    /// dlss_mip_bias (BB_DLSS_MIP_BIAS): one more mip level of texture detail under DLSS; live.
-    std::atomic<bool> dlss_mip_bias{true};
-    /// dlss_auto_exposure: DLSS's own exposure for any input (HDR inputs always use it); live.
-    std::atomic<bool> dlss_auto_exposure{false};
     /// render_scale (BB_RENDER_SCALE): the Custom preset's output / render ratio; live as presets.
     std::atomic<float> render_scale{1.3f};
     /// mip_bias (BB_MIP_BIAS): texture LOD bias added while an upscaler runs (MipBiasMin..Max); live.

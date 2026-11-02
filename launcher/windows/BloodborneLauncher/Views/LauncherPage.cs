@@ -20,8 +20,15 @@ namespace BloodborneLauncher.Views
         public SymbolIcon Icon { get; }
         public TextBlock Hint { get; }
         public string Title { get; }
-        /// <summary>The description (the ⓘ tooltip, or the line under the title in Classic).</summary>
-        public string? Info { get; }
+        /// <summary>The description (the ⓘ tooltip, or the line under the title in Classic); SetInfo changes it
+        /// (0.4.4 beta 27d: a line that follows what runs, Sharpening's).</summary>
+        public string? Info { get; private set; }
+        /// <summary>Advice shown on hover only, after the description (0.4.4 beta 27d, the tester: the short
+        /// lines left nothing to advise with).</summary>
+        public string? Tip { get; private set; }
+        private readonly SymbolIcon? _mark;
+        private readonly TextBlock? _description;
+        private readonly StackPanel _text;
 
         /// <summary>A setting the settings search finds: set for rows a page puts in with LauncherPage.Add,
         /// not for list entries such as trophies, mods or connection test results.</summary>
@@ -61,29 +68,33 @@ namespace BloodborneLauncher.Views
             var name = new TextBlock { Text = title, FontSize = 13.5, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
             var titleLine = new StackPanel { Orientation = Orientation.Horizontal };
             titleLine.Children.Add(name);
-            if (!string.IsNullOrWhiteSpace(info) && !Classic)
+            if (!Classic)
             {
-                var mark = new SymbolIcon { Symbol = SymbolRegular.Info16, FontSize = 12, Margin = new Thickness(6, 1, 0, 0), VerticalAlignment = VerticalAlignment.Center, ToolTip = info, Cursor = Cursors.Help };
-                mark.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "TextFillColorTertiaryBrush");
-                ToolTipService.SetInitialShowDelay(mark, 150);
-                titleLine.Children.Add(mark);
+                _mark = new SymbolIcon { Symbol = SymbolRegular.Info16, FontSize = 12, Margin = new Thickness(6, 1, 0, 0), VerticalAlignment = VerticalAlignment.Center, Cursor = Cursors.Help };
+                _mark.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "TextFillColorTertiaryBrush");
+                ToolTipService.SetInitialShowDelay(_mark, 150);
+                ToolTipService.SetShowOnDisabled(_mark, true);
+                titleLine.Children.Add(_mark);
             }
 
             Hint = new TextBlock { FontSize = 11.5, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 0), Visibility = Visibility.Collapsed };
             Hint.SetResourceReference(TextBlock.ForegroundProperty, "TextFillColorTertiaryBrush");
 
-            var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+            var text = _text = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
             text.Children.Add(titleLine);
-            if (Classic && !string.IsNullOrWhiteSpace(info))
+            if (Classic)
             {
                 // Classic shows the description under the title instead of in a tooltip: its first
-                // sentence there, the whole text when the mouse is on it.
-                var brief = LauncherPage.Brief(info);
-                var description = new TextBlock { Text = brief, FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 1, 0, 0),
-                    ToolTip = brief == info ? null : info };
-                description.SetResourceReference(TextBlock.ForegroundProperty, "TextFillColorSecondaryBrush");
-                text.Children.Add(description);
+                // sentence there, the whole text and the advice when the mouse is on the row's text.
+                _description = new TextBlock { FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 1, 0, 0) };
+                _description.SetResourceReference(TextBlock.ForegroundProperty, "TextFillColorSecondaryBrush");
+                text.Children.Add(_description);
+                ToolTipService.SetShowOnDisabled(text, true); // a greyed row still says why
             }
+            ShowInfo();
+            // 0.4.4 beta 27d (the tester): a row another choice switches off looks it, on every page
+            // (WPF UI's controls grey, the title and description did not).
+            IsEnabledChanged += (_, e) => Opacity = (bool)e.NewValue ? 1.0 : 0.45;
 
             var grid = new Grid();
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -123,6 +134,40 @@ namespace BloodborneLauncher.Views
                 text.Children.Add(Hint);
 
             Child = grid;
+        }
+
+        /// <summary>A new description (Info), shown as the row shows it.</summary>
+        public void SetInfo(string? info)
+        {
+            Info = info;
+            ShowInfo();
+        }
+
+        /// <summary>Advice for the tooltip, after the description.</summary>
+        public void SetTip(string? tip)
+        {
+            Tip = tip;
+            ShowInfo();
+        }
+
+        private void ShowInfo()
+        {
+            var has = !string.IsNullOrWhiteSpace(Info);
+            var full = string.Join("\n\n", new[] { Info, Tip }.Where(t => !string.IsNullOrWhiteSpace(t)));
+            if (_mark != null)
+            {
+                _mark.ToolTip = full.Length > 0 ? full : null;
+                _mark.Visibility = full.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+            }
+            if (_description != null)
+            {
+                var brief = has ? LauncherPage.Brief(Info!) : "";
+                _description.Text = brief;
+                _description.Visibility = has ? Visibility.Visible : Visibility.Collapsed;
+                // The hover text adds what the line leaves out: the rest of the description, the advice.
+                var hover = brief == (Info ?? "") ? Tip : full;
+                _text.ToolTip = string.IsNullOrWhiteSpace(hover) ? null : hover;
+            }
         }
 
         /// <summary>A picture in the icon's place (a trophy's own), <paramref name="size"/> pixels
@@ -188,6 +233,8 @@ namespace BloodborneLauncher.Views
     {
         private readonly List<Border> _items = new();
         private readonly IReadOnlyList<Choice> _choices;
+        private readonly Grid _grid = new();
+        private Border? _instead;
         public int SelectedIndex { get; private set; } = -1;
         public event Action<int>? Changed;
 
@@ -198,7 +245,7 @@ namespace BloodborneLauncher.Views
             Padding = new Thickness(3);
             SetResourceReference(BackgroundProperty, "PillTrackBrush");
 
-            var grid = new Grid();
+            var grid = _grid;
             for (var i = 0; i < choices.Count; i++)
             {
                 grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -241,17 +288,21 @@ namespace BloodborneLauncher.Views
         public static string Short(string label) =>
             label.IndexOfAny(new[] { '(', '（' }) is > 0 and var i ? label[..i].TrimEnd() : label;
 
-        /// <summary>No option highlighted (0.4.4 beta 27c: a choice another setting decides for now).</summary>
-        public void Clear()
+        /// <summary>One label in the options' place while another setting decides (0.4.4 beta 27d: "Upscaler
+        /// (DLSS)" for the anti-aliasing an upscaler does itself); null puts the options back.</summary>
+        public void ShowInstead(string? text)
         {
-            SelectedIndex = -1;
-            foreach (var item in _items)
+            if (text == null)
             {
-                item.Background = Brushes.Transparent;
-                var label = (TextBlock)item.Child;
-                label.SetResourceReference(TextBlock.ForegroundProperty, "TextFillColorPrimaryBrush");
-                label.FontWeight = FontWeights.Normal;
+                Child = _grid;
+                return;
             }
+            _instead ??= new Border { CornerRadius = new CornerRadius(11), Padding = new Thickness(8, 5, 8, 5),
+                Child = new TextBlock { FontSize = 12.5, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center } };
+            _instead.SetResourceReference(BackgroundProperty, "SegmentSelectedBrush");
+            ((TextBlock)_instead.Child).Text = text;
+            ((TextBlock)_instead.Child).Foreground = Brushes.White;
+            Child = _instead;
         }
 
         public void Select(int index, bool notify)
@@ -689,7 +740,8 @@ namespace BloodborneLauncher.Views
             card.Choices = options;
             box.SelectedIndex = Choices.IndexOf(choices, get());
             ShowNote(box.SelectedIndex);
-            box.SelectionChanged += (_, _) => { if (box.SelectedIndex >= 0) Picked(box.SelectedIndex); };
+            // An index past the choices is ShowInstead's label, not a choice.
+            box.SelectionChanged += (_, _) => { if (box.SelectedIndex >= 0 && box.SelectedIndex < choices.Count) Picked(box.SelectedIndex); };
             card.Tag = note;
             if (noteOf != null) _noteRefreshes.Add(() => ShowNote(box.SelectedIndex));
             return box;
@@ -708,13 +760,27 @@ namespace BloodborneLauncher.Views
             else if (control is ComboBox box) box.SelectedIndex = index;
         }
 
-        /// <summary>Shows a ComboRow with no option chosen, without saving anything (0.4.4 beta 27c: the
-        /// anti-aliasing an upscaler does itself).</summary>
-        protected static void Unpick(FrameworkElement control)
+        /// <summary>Shows a ComboRow with <paramref name="text"/> in its choice's place, nothing saved, while
+        /// another setting decides (0.4.4 beta 27d, the tester: "Upscaler (DLSS)" for the anti-aliasing an
+        /// upscaler does itself, was an empty box); null takes it away again (Pick then shows the choice).</summary>
+        protected static void ShowInstead(FrameworkElement control, string? text)
         {
-            if (control is Segmented segmented) segmented.Clear();
-            else if (control is ComboBox box) box.SelectedIndex = -1;
+            if (control is Segmented segmented) segmented.ShowInstead(text);
+            else if (control is ComboBox box)
+            {
+                var label = box.Items.OfType<ComboBoxItem>().FirstOrDefault(item => Equals(item.Tag, InsteadTag));
+                if (text == null)
+                {
+                    if (label != null) box.Items.Remove(label);
+                    return;
+                }
+                if (label == null) box.Items.Add(label = new ComboBoxItem { Tag = InsteadTag });
+                label.Content = text;
+                box.SelectedItem = label;
+            }
         }
+
+        private const string InsteadTag = "ShowInstead";
 
         protected FrameworkElement SettingCombo(SymbolRegular icon, string title, string? hint, IReadOnlyList<Choice> choices,
             string key, Panel? into = null, Action? changed = null, Func<Choice, string?>? noteOf = null) =>

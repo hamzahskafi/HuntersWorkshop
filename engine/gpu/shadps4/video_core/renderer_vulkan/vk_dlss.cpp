@@ -299,7 +299,6 @@ struct DlssUpscaler::Impl {
         int quality;
         bool hdr;
         unsigned preset; ///< the one asked for (a refused one stays the key: not retried each frame)
-        bool auto_exposure; ///< bbport: dlss_auto_exposure (HDR inputs have it regardless)
         bool operator==(const Key&) const = default;
     } key{};
 
@@ -508,8 +507,7 @@ struct DlssUpscaler::Impl {
         const int quality = native ? int(Dlaa) : Quality(f.preset);
         const Key wanted{f.render_width, f.render_height, f.output.width, f.output.height,
                          quality, IsFloatFormat(f.color.format),
-                         DlssPreset(quality),
-                         BbSettings::Get().dlss_auto_exposure.load(std::memory_order_relaxed)};
+                         DlssPreset(quality)};
         if (!feature || !(wanted == key)) {
             if (feature) {
                 // bbport: the earlier submissions may still use the feature's resources; the open
@@ -530,11 +528,12 @@ struct DlssUpscaler::Impl {
             SetUI(params, "OutHeight", wanted.out_height);
             SetI(params, "PerfQualityValue", wanted.quality);
             // Motion vectors at render resolution, without jitter; standard depth.
+            // The HDR scene (a 1920x1080 output) with DLSS's own exposure: the game gives none, and
+            // NVIDIA's guide asks for one with HDR input. The game's tonemapped frame needs none
+            // (0.4.4 beta 27d: dlss_auto_exposure, a menu switch for it there too, went).
             int flags = FlagMvLowRes;
             if (wanted.hdr) {
                 flags |= FlagIsHdr | FlagAutoExposure;
-            } else if (wanted.auto_exposure) {
-                flags |= FlagAutoExposure; // bbport: the menu's DLSS auto exposure, LDR input too
             }
             SetI(params, "DLSS.Feature.Create.Flags", flags);
             SetI(params, "DLSS.Enable.Output.Subrects", 0);

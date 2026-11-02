@@ -63,7 +63,17 @@ The sections after this one are the record of the work from the first frame anal
   Balanced, M for Performance, L for Ultra Performance), was K; J, K, L, M or the DLL's default.
 - **Sharpening:** `sharpen` (on) and `sharpness` (0-2, default 0.20). AMD FSR applies its own
   RCAS up to 1 and an extra RCAS pass above it; DLSS, which has no sharpening of its own, gets the
-  whole range from that pass; TAA has its own pass (docs/MODS.md, "TAA sharpening").
+  whole range from that pass; TAA has its own pass (docs/MODS.md, "TAA sharpening"). The launcher's
+  and the menu's lines say which, for the upscaler chosen (0.4.4 beta 27d).
+- **Texture mip bias** (`mip_bias`, -2..+1, live): the scene's texture LOD bias while AMD FSR or DLSS
+  runs is log2(render / output) - 1, as both NVIDIA's DLSS guide and AMD's FSR docs ask
+  (`mipBias = log2(renderResolution/displayResolution) - 1.0`), plus `mip_bias`. From 0.4.4 beta 27d
+  for both (DLSS's -1 was the `dlss_mip_bias` switch, on by default; AMD FSR had the ratio alone). TAA
+  renders at the output: no bias.
+- **Exposure:** the game gives the upscalers no exposure value. AMD FSR runs with its auto exposure
+  (AMD recommends it unless there is a reason not to); DLSS with its own for the HDR scene (a
+  1920x1080 output), none for the game's tonemapped frame. 0.4.4 beta 27d: no settings for them
+  (`fsr4_auto_exposure`, on by default, and `dlss_auto_exposure`, off, are ignored if a file has them).
 - **Reactive mask** (`reactive`, off by default): AMD FSR's reactive mask (FSR 3.1 uses it; FSR 4
   may; up to 0.4.4 beta 26 FSR 4 got it blended over its output, `fsr4_reactive.comp`, removed); TAA
   and DLSS do not use it, and it is not made for them. FSR 3.1's tuning (`fsr3_*`) goes to AMD's FSR

@@ -52,6 +52,7 @@
 117000	Ambient Occlusion	Screen-space ambient occlusion.	环境光遮蔽	屏幕空间环境光遮蔽。
 117005	Motion Blur	Blur on fast camera and character moves. Needs a restart.	运动模糊	镜头和角色快速移动时的模糊。需重启游戏。
 117001	Anti-Aliasing	The game's own anti-aliasing (no upscaler). Needs a restart.	抗锯齿	游戏自带的抗锯齿（不使用超分辨率时）。需重启游戏。
+117009	Anti-Aliasing	Off: your upscaler or TAA does the anti-aliasing.	抗锯齿	关：由超分辨率或 TAA 负责抗锯齿。
 117002	Depth of Field	Blurs distant scenery. Needs a restart.	景深	模糊远处景物。需重启游戏。
 117020	Graphics		画质
 117003	Chromatic Aberration	Colour fringing at the frame's edges. Needs a restart.	色差	画面边缘的彩色偏移。需重启游戏。

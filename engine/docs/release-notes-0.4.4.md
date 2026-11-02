@@ -38,21 +38,27 @@ behind its tabs, Visuals holding Display to Interface; the Linux launchers are u
   **Steam Deck** output is its screen's 1280 × 800 (the list had 1280 × 720 under its name).
 - **Graphics:** everything about how the game is drawn, in one place. Best settings for this PC at
   the top, then **Upscaling and anti-aliasing:**
-  - **Anti-aliasing:** TAA, the game's own or Off, for Upscaler None. With an upscaler it is greyed,
-    with nothing chosen, and says the upscaler anti-aliases.
+  - **Anti-aliasing:** TAA, the game's own or Off, for Upscaler None. With an upscaler it is greyed
+    and its box says so ("Upscaler (DLSS)").
   - **Upscaler:** AMD FSR, DLSS or None, with what belongs to it under it:
     - **Quality** (was Quality preset): Auto (the default; it says what it picks, e.g. "Auto
       (Quality)"), Native AA (DLAA with DLSS), Quality, Balanced, Performance, Ultra Performance,
       Custom.
-    - **Render resolution**, under it: a slider showing the share of the output the game renders at
+    - **Render resolution**, beside it: a slider showing the share of the output the game renders at
       and its size, as the engine works it out ("67% — 1280 × 720"; on the Steam Deck the engine never
-      goes below 640 × 360, so Ultra Performance shows 50% — 640 × 400). Only Custom moves it.
+      goes below 640 × 360, so Ultra Performance shows 50% — 640 × 400). Only Custom moves it; it is
+      greyed otherwise.
     - **FSR version** (AMD FSR): Automatic, with the version it runs, and every version AMD offers on
       your graphics card, found by asking AMD's FSR SDK as the game does (in the background, once a
       launcher session). Versions AMD's driver provides are marked.
     - **DLSS model** (DLSS): Auto by default, and what Auto runs at the chosen quality.
-  - **Sharpening**, its strength under it.
-  - **Advanced:** character motion vectors, texture mip bias and DLSS's two finer settings.
+  - **Sharpening (RCAS)**, its strength under it. Its line says where it runs for the upscaler
+    chosen: after DLSS (which has none of its own), FSR's own, after TAA.
+  - **Advanced:** character motion vectors and texture mip bias. DLSS's sharper textures and auto
+    exposure are no longer settings: both upscalers get the texture detail and the exposure handling
+    NVIDIA and AMD advise.
+
+  The upscaling rows have tooltips with advice (hover a row's text, or the ⓘ in the Modern layout).
 
   Then **Detail** (model detail, texture filtering, shadows from dynamic lights, ambient occlusion,
   screen-space reflections) and **Effects** (depth of field, motion blur with its switch for
@@ -75,7 +81,8 @@ behind its tabs, Visuals holding Display to Interface; the Linux launchers are u
   camera, trophy notifications and their sound, sharpening strength, peak brightness), rows for a
   choice not made are hidden (the DLSS settings, the HDR UI settings with Expanded), and a setting
   that belongs to another sits under it, indented (sharpening strength, the render scale, the FSR
-  version, the DLSS model, peak brightness, the HDR UI settings).
+  version, the DLSS model, peak brightness, the HDR UI settings). A greyed row looks greyed on every
+  page (only its switch or box did).
 - Every setting is in one place (the in-game menu's language was on two pages), labels match the
   in-game menu's (Character motion vectors, FPS counter, HDR source, Blood Echo multiplier, Camera
   tuning, Render resolution, Anti-aliasing), and every hint names the page as both layouts call it.
@@ -83,7 +90,8 @@ behind its tabs, Visuals holding Display to Interface; the Linux launchers are u
   FSR version and the render scale too).
 - **The game's own anti-aliasing applies only without an upscaler** (Upscaler None, Anti-aliasing
   The game's own). Under AMD FSR, DLSS or TAA it only softened the picture they work from; a
-  settings file that has it on keeps it for when the upscaler is None.
+  settings file that has it on keeps it for when the upscaler is None. The game's System menu shows
+  its Anti-Aliasing as Off then (it showed On with DLAA), and its help line says why.
 - **The launcher and the game no longer overwrite each other's settings.** The game reads its
   settings when it starts and writes its own when you change them in game, so a change made in the
   launcher while the game ran was lost. The launcher now keeps those changes until the game exits
@@ -95,7 +103,8 @@ behind its tabs, Visuals holding Display to Interface; the Linux launchers are u
 - **The in-game menu (Insert or L3 + R3) matches Graphics:** Anti-aliasing, then the Upscaler with its
   Quality and locked render resolution slider, the FSR version (every version AMD offers here) or
   DLSS's model under it, Sharpening with its strength under it, and Advanced (character motion
-  vectors, texture mip bias, DLSS's two finer settings, sub-pixel jitter). The DLSS section went:
+  vectors, texture mip bias). With an upscaler, Anti-aliasing names it. The FSR and DLSS checks
+  (auto exposure, the jitter sign, sub-pixel jitter) are no longer in the menu. The DLSS section went:
   its rows are in those places. It shows what runs: "Running: FSR 3.1.6" (marked when AMD's driver
   provides it) and "Running: DLSS 310.9.16, model K". The FPS counter's upscaler item shows the same
   ("FSR 3.1.6", "DLSS K"). The game's own anti-aliasing moved from the game effects to
@@ -115,6 +124,10 @@ behind its tabs, Visuals holding Display to Interface; the Linux launchers are u
   6000 and newer. In the launcher (Graphics, under the upscaler) and the in-game menu, where the menu
   also names the version that runs. FSR 4.1 on AMD cards and FSR 2.3.4 have not been tested by the
   project yet (no AMD testers): FSR 3.1 is the way back should FSR 4.1 look wrong.
+- **Sharper textures with AMD FSR:** one mip level more texture detail than the render size alone
+  gives, as AMD's FSR documentation advises (DLSS had it already, as NVIDIA's guide asks; it was a
+  switch, now always). Texture mip bias still adds your own offset on top. AMD FSR's auto exposure
+  is always on, as AMD advises (it was an in-game checkbox, on by default).
 - When AMD FSR starts or its settings change, it builds its shaders for a few seconds; the game shows
   the picture at full size without it meanwhile.
 - **Without AMD's files** (they come with the package, in `engine\amd-fsr`), the game runs TAA

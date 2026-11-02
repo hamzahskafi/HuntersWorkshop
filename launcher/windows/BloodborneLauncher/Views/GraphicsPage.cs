@@ -13,8 +13,8 @@ namespace BloodborneLauncher.Views
     /// resolution, a slider that shows what the quality renders at and that only Custom moves; the FSR
     /// version from what AMD offers on this GPU (AmdFsrVersions); DLSS's model. Sharpening, the fine
     /// settings under Advanced, then Detail and the game's effects. A row that only matters for another's
-    /// choice sits under it (Nest). One short line per row, the details in its tooltip. Frame generation
-    /// is not offered (community-fixes-plan.md, Decisions).
+    /// choice sits under it (Nest). One short line per row, the details and advice in its tooltip (27d:
+    /// SetTip). Frame generation is not offered (community-fixes-plan.md, Decisions).
     /// </summary>
     public sealed class GraphicsPage : LauncherPage
     {
@@ -24,7 +24,7 @@ namespace BloodborneLauncher.Views
         public static readonly string[] LookEffects = { "effect_dof", "effect_motion_blur", "effect_chromatic_aberration" };
 
         private readonly FrameworkElement _aa;
-        private readonly SettingRow _aaRow, _qualityRow, _scaleRow, _fsrRow, _dlssModel, _dlssTextures, _dlssExposure;
+        private readonly SettingRow _aaRow, _qualityRow, _scaleRow, _fsrRow, _dlssModel;
         private readonly SettingRow _sharpenCard, _sharpnessCard, _mipBiasCard, _motionVectors;
         private readonly TextBlock _aaHint, _upscalerHint, _scaleHint, _fsrHint, _dlssHint, _motionBlurHint;
         private readonly ComboBox _quality = new() { Width = 240, VerticalAlignment = VerticalAlignment.Center };
@@ -47,8 +47,8 @@ namespace BloodborneLauncher.Views
 
             Group(L.T("Upscaling and anti-aliasing"));
             // 0.4.4 beta 27c: first (the tester's order). The anti-aliasing without an upscaler, the game's
-            // own pass among them: greyed, nothing chosen, while an upscaler anti-aliases itself (the engine
-            // leaves the game's pass out then: patches.cpp NoUpscaler).
+            // own pass among them: greyed with "Upscaler (DLSS)" in the box (27d) while an upscaler
+            // anti-aliases itself (the engine leaves the game's pass out then: patches.cpp NoUpscaler).
             _aa = ComboRow(SymbolRegular.Color24, L.T("Anti-aliasing"), L.T("Smooths edges when no upscaler runs"),
                 Choices.AntiAliasing, AntiAliasingNow, v =>
                 {
@@ -57,6 +57,7 @@ namespace BloodborneLauncher.Views
                     Ini.Set("effect_game_aa", v == "game" ? "1" : "0");
                 }, changed: () => { if (!_syncing) UpdateUpscaler(); });
             _aaRow = LastRow;
+            _aaRow.SetTip(L.T("TAA: smooth edges, live. The game's own: its PS4 pass, after a restart. Off: the sharpest, with jagged edges."));
             _aaHint = (TextBlock)_aaRow.Tag;
 
             // The upscalers, or None, where Anti-aliasing above decides (upscaler=taa or off). One FSR,
@@ -65,6 +66,7 @@ namespace BloodborneLauncher.Views
                 Choices.FrameUpscalers, () => Ini.Get("upscaler") is "fsr" or "dlss" ? Ini.Get("upscaler") : "none",
                 v => Ini.Set("upscaler", v != "none" ? v : Ini.Flag("effect_game_aa") ? "off" : "taa"), changed: UpdateUpscaler);
             _upscalerHint = (TextBlock)LastRow.Tag;
+            LastRow.SetTip(L.T("DLSS needs an NVIDIA RTX card; AMD FSR runs on any GPU. Both anti-alias as they upscale."));
 
             // Its quality: plain names, Auto first with what it picks for the output (ShowQuality).
             foreach (var _ in Choices.Presets) _quality.Items.Add(new ComboBoxItem());
@@ -82,13 +84,13 @@ namespace BloodborneLauncher.Views
                 UpdateUpscaler();
             };
 
-            // Under it, what the quality renders at: a slider (the share of the output per side) that only
-            // Custom moves; render_scale keeps it as the engine's ratio (77% is 1.30).
+            // Beside it, what the quality renders at: a slider (the share of the output per side) that only
+            // Custom moves, greyed otherwise (27d, the tester; one indent, as Quality's);
+            // render_scale keeps it as the engine's ratio (77% is 1.30).
             _scaleText.SetResourceReference(TextBlock.FontFamilyProperty, "MonoFont");
             _scaleRow = Add(Card(SymbolRegular.SlideSize24, L.T("Render resolution"),
                 L.T("The share of the output's width and height the game renders at. DLSS runs the nearest quality's model"),
                 Row(_scale, _scaleText), out _scaleHint));
-            Nest();
             Nest();
             _scale.ValueChanged += (_, _) =>
             {
@@ -103,6 +105,7 @@ namespace BloodborneLauncher.Views
             _fsrRow = Add(Card(SymbolRegular.BrainCircuit24, L.T("FSR version"), L.T("The versions AMD offers on this GPU; Automatic runs the newest"),
                 _fsr, out _fsrHint));
             Nest();
+            _fsrRow.SetTip(L.T("Newer is usually better. (driver) marks one AMD's graphics driver provides."));
             _fsr.SelectionChanged += (_, _) =>
             {
                 if (_syncing || _fsr.SelectedIndex < 0) return;
@@ -115,28 +118,28 @@ namespace BloodborneLauncher.Views
             IniCombo(SymbolRegular.BrainCircuit24, L.T("DLSS model"), L.T("Which NVIDIA model DLSS runs; also in game (Insert or L3 + R3)"),
                 Choices.DlssModels, "dlss_preset", changed: UpdateUpscaler);
             _dlssModel = Nest();
+            _dlssModel.SetTip(L.T("Auto: K from DLAA to Balanced, M at Performance, L at Ultra Performance."));
             _dlssHint = (TextBlock)_dlssModel.Tag;
 
-            IniToggle(SymbolRegular.Eyedropper24, L.T("Sharpening (RCAS)"), L.T("Turn it up if the picture looks soft"), "sharpen",
-                changed: UpdateUpscaler);
+            // Sharpening: its line says where it runs, for what runs (UpdateUpscaler; 27d, the tester).
+            IniToggle(SymbolRegular.Eyedropper24, L.T("Sharpening (RCAS)"), null, "sharpen", changed: UpdateUpscaler);
             _sharpenCard = LastRow;
-            SliderRow(SymbolRegular.SlideSize24, L.T("Sharpening strength"), L.T("Above 1 adds an extra pass"), 0, 2, 0.05,
-                () => ParseDouble(Ini.Get("sharpness"), 0.5), v => Ini.Set("sharpness", Fmt(v)));
+            _sharpenCard.SetTip(L.T("AMD's RCAS. Brings back detail that upscaling softens."));
+            SliderRow(SymbolRegular.SlideSize24, L.T("Sharpening strength"), null, 0, 2, 0.05,
+                () => ParseDouble(Ini.Get("sharpness"), 0.2), v => Ini.Set("sharpness", Fmt(v)));
             _sharpnessCard = Nest();
+            _sharpnessCard.SetTip(L.T("0.20 is light. High values can halo edges and show grain."));
 
-            // The fine settings most players leave alone; DLSS's own two with DLSS only.
+            // The fine settings most players leave alone (27d: two; DLSS's sharper textures folded into the
+            // bias, auto exposure as NVIDIA and AMD advise, without a row).
             var fine = Advanced();
             IniToggle(SymbolRegular.ArrowMove24, L.T("Character motion vectors"), L.T("Less ghosting on characters; costs about 10% FPS"), "object_motion", fine);
             _motionVectors = LastRow;
+            _motionVectors.SetTip(L.T("The game gives no motion for moving characters; this works it out. Off: faster, but moving enemies can trail. After a restart."));
             SliderRow(SymbolRegular.Image24, L.T("Texture mip bias"), L.T("Below 0 sharper textures, above 0 softer"),
                 -2, 1, 0.05, () => ParseDouble(Ini.Get("mip_bias", "0"), 0), v => Ini.Set("mip_bias", Fmt(v)), format: "+0.00;-0.00;0.00", into: fine, valueWidth: 56);
             _mipBiasCard = LastRow;
-            ToggleRow(SymbolRegular.Image24, L.T("DLSS sharper textures"), L.T("One more mip level of texture detail, as NVIDIA advises"),
-                () => Ini.Get("dlss_mip_bias", "1") != "0", v => Ini.Set("dlss_mip_bias", v ? "1" : "0"), fine);
-            _dlssTextures = LastRow;
-            ToggleRow(SymbolRegular.BrightnessHigh24, L.T("DLSS auto exposure"), L.T("Can calm ghosting in dark scenes"),
-                () => Ini.Get("dlss_auto_exposure", "0") == "1", v => Ini.Set("dlss_auto_exposure", v ? "1" : "0"), fine);
-            _dlssExposure = LastRow;
+            _mipBiasCard.SetTip(L.T("0 is what NVIDIA and AMD advise with an upscaler. Below 0 can shimmer."));
 
             // ==================== Detail ====================
             Group(L.T("Detail"));
@@ -220,9 +223,8 @@ namespace BloodborneLauncher.Views
                 _scale.Minimum = Choices.RenderPercentMin(ow, oh, live);
                 _scale.Value = Math.Clamp(custom ? Math.Round(100 / scale) : percent, _scale.Minimum, 100);
                 _scaleText.Text = $"{percent}% — {w} × {h}";
-                // Locked, not greyed: what it shows applies.
-                _scale.IsHitTestVisible = custom;
-                _scale.Focusable = custom;
+                // Greyed unless Custom (27d, the tester; it still shows what the quality renders at).
+                _scaleRow.IsEnabled = custom;
                 SetHint(_scaleHint, custom ? null : L.T("Choose Custom to set your own"));
             }
             finally { _syncing = false; }
@@ -270,32 +272,47 @@ namespace BloodborneLauncher.Views
                 "dlss" => "DLSS " + Paths.DlssVersion(ngx!),
                 _ => null,
             });
-            // The anti-aliasing an upscaler does itself: greyed, nothing chosen, kept for Upscaler None.
+            // The anti-aliasing an upscaler does itself: greyed, "Upscaler (DLSS)" in the box (27d, the tester),
+            // the choice kept for Upscaler None.
+            var upscalerName = value == "dlss" ? "DLSS" : "AMD FSR";
             _syncing = true;
             try
             {
-                if (upscaling) Unpick(_aa);
-                else Pick(_aa, Math.Max(0, Choices.IndexOf(Choices.AntiAliasing, AntiAliasingNow())));
+                if (upscaling) ShowInstead(_aa, L.F($"Upscaler ({upscalerName})"));
+                else
+                {
+                    ShowInstead(_aa, null);
+                    Pick(_aa, Math.Max(0, Choices.IndexOf(Choices.AntiAliasing, AntiAliasingNow())));
+                }
             }
             finally { _syncing = false; }
             _aaRow.IsEnabled = !upscaling;
-            if (upscaling) SetHint(_aaHint, L.F($"{(value == "dlss" ? "DLSS" : "AMD FSR")} anti-aliases (Upscaler below)"));
+            if (upscaling) SetHint(_aaHint, null);
             ShowQuality();
             var upscalerRows = upscaling ? Visibility.Visible : Visibility.Collapsed;
             _qualityRow.Visibility = upscalerRows;
             _scaleRow.Visibility = upscalerRows;
-            // RCAS runs after an upscaler or TAA only; character motion vectors too (ObjectMotion).
+            // RCAS runs after an upscaler or TAA only; character motion vectors too (ObjectMotion). The mip
+            // bias applies with an upscaler (TemporalUpscaler::SceneMipBias: TAA renders at the output).
             var temporal = value != "off";
             _sharpenCard.IsEnabled = temporal;
             _sharpnessCard.IsEnabled = temporal && Ini.Flag("sharpen"); // as in game
-            _mipBiasCard.IsEnabled = temporal;
+            _mipBiasCard.IsEnabled = upscaling;
             _motionVectors.IsEnabled = temporal;
+            // Where the sharpening runs, for what runs: FSR sharpens up to 1 itself and an RCAS pass adds
+            // the rest; DLSS has none of its own, so the pass does it all; TAA's runs after it.
+            _sharpenCard.SetInfo(value switch
+            {
+                "dlss" => L.T("After DLSS (it has none of its own)"),
+                "fsr" => L.T("FSR's own sharpening"),
+                "taa" => L.T("After TAA"),
+                _ => L.T("Needs an upscaler or TAA"),
+            });
+            _sharpnessCard.SetInfo(value == "fsr" ? L.T("Above 1 adds a second pass") : L.T("Higher is sharper"));
             _fsrRow.Visibility = value == "fsr" ? Visibility.Visible : Visibility.Collapsed;
             if (value == "fsr") ShowFsrVersions();
             var dlss = value == "dlss" ? Visibility.Visible : Visibility.Collapsed;
             _dlssModel.Visibility = dlss;
-            _dlssTextures.Visibility = dlss;
-            _dlssExposure.Visibility = dlss;
             if (value == "dlss")
             {
                 var (_, oh) = Choices.OutputSize(Ini.Get("output_res", "1920x1080"));

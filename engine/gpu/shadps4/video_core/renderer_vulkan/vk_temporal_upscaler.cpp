@@ -408,10 +408,9 @@ void TemporalUpscaler::PrepareFsr() {
     // The output size: the target's, or the size a frame turned out to have (Run's scene colour under a
     // third-party resolution patch; RecordFrameUpscaler), until the output changes.
     const u32 ow = fsr_width ? fsr_width : target_width, oh = fsr_height ? fsr_height : target_height;
-    const bool auto_exposure = settings.fsr4_auto_exposure.load(std::memory_order_relaxed);
     const std::string version = BbSettings::FsrVersion();
-    if (!amd_fsr->Ready(ow, oh, hdr, auto_exposure, version)) {
-        amd_fsr->Prepare(ow, oh, hdr, auto_exposure, version);
+    if (!amd_fsr->Ready(ow, oh, hdr, version)) {
+        amd_fsr->Prepare(ow, oh, hdr, version);
         fsr_building = !amd_fsr->Fatal();
     }
 }
@@ -1783,15 +1782,15 @@ float TemporalUpscaler::SceneMipBias() const {
     const float render = float(BbSettings::Get().active_render_width.load());
     const float output = float(Scaled() ? target_width : 1920u);
     const float scale_bias = render > 0.0f && render < output ? std::log2(render / output) : 0.0f;
-    // DLSS (DLAA too) wants one more mip level of texture detail than the render/output ratio
-    // (NVIDIA's DLSS programming guide). From AwesomeObserver/bloodborne_pc b3164c1
-    // (Evgeniy Doronin). dlss_mip_bias=0 (menu, BB_DLSS_MIP_BIAS=0): the ratio only, as before.
-    const bool dlss_extra = BbSettings::Get().dlss_mip_bias.load(std::memory_order_relaxed);
-    const bool dlss_on = BbSettings::Get().upscaler == BbSettings::UpscalerDlss && UseFrameUpscaler();
+    // DLSS (DLAA too) and AMD FSR want one more mip level of texture detail than the render/output
+    // ratio: NVIDIA's DLSS programming guide, and AMD's FSR docs (mipBias = log2(render/display) - 1).
+    // DLSS's from AwesomeObserver/bloodborne_pc b3164c1 (Evgeniy Doronin). 0.4.4 beta 27d: for both
+    // whenever they run (was DLSS's only, behind dlss_mip_bias; AMD FSR had the ratio alone).
+    const bool vendor_extra = UseFrameUpscaler();
     // bbport: mip_bias (menu, launcher), the player's own offset on top, as OptiScaler's override.
     const float offset = std::clamp(BbSettings::Get().mip_bias.load(std::memory_order_relaxed),
                                     BbSettings::MipBiasMin, BbSettings::MipBiasMax);
-    return scale_bias - (dlss_extra && dlss_on ? 1.0f : 0.0f) + offset;
+    return scale_bias - (vendor_extra ? 1.0f : 0.0f) + offset;
 }
 
 void TemporalUpscaler::DumpUpscale(vk::CommandBuffer cmdbuf, int dump, vk::Image input,
@@ -2734,14 +2733,13 @@ bool TemporalUpscaler::RecordFrameUpscaler(vk::CommandBuffer cmdbuf, UpscaleInpu
         .sharpness = std::min(settings.sharpness.load(), 1.0f),
         .sharpen = settings.sharpen,
         .reset = reset,
-        .auto_exposure = settings.fsr4_auto_exposure,
         .hdr = hdr,
     };
     // AMD FSR takes the reactive mask (render size, R8); DLSS none (ReactiveOn).
     if (!use_dlss && reactive && reactive_image) {
         frame.reactive = {vk::Image(reactive_image), *reactive_view, w, h, vk::Format::eR8Unorm};
     }
-    if (!use_dlss && !amd_fsr->Ready(ow, oh, hdr, frame.auto_exposure, BbSettings::FsrVersion())) {
+    if (!use_dlss && !amd_fsr->Ready(ow, oh, hdr, BbSettings::FsrVersion())) {
         // A frame of another size than the context was made for (a third-party resolution patch
         // renders the scene larger than the output): made again for it, the scene at full size
         // meanwhile (PrepareFsr, Active).

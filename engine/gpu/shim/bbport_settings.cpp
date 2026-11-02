@@ -133,8 +133,6 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         v.render_scale = Clamp(std::isfinite(f) && f > 0.0f ? f : 1.3f, RenderScaleMin, RenderScaleMax);
     } else if (key == "mip_bias") {
         v.mip_bias = Clamp(std::isfinite(f) ? f : 0.0f, MipBiasMin, MipBiasMax);
-    } else if (key == "dlss_auto_exposure") {
-        v.dlss_auto_exposure = i != 0;
     } else if (key == "preset") {
         // 0.4.4 beta 27c: "auto" (the default), or a preset's number as before.
         v.preset = value == "auto" || value.empty() ? PresetAuto : std::clamp(i, 0, PresetCount - 1);
@@ -213,8 +211,6 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         }
     } else if (key == "dlss_preset") {
         v.dlss_preset = DlssPresetFromText(value.c_str());
-    } else if (key == "dlss_mip_bias") {
-        v.dlss_mip_bias = i != 0;
     } else if (key == "optiscaler_compat") {
         v.optiscaler_compat = i != 0;
     } else if (key == "optiscaler_ngx_lock") {
@@ -223,8 +219,6 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         v.optiscaler_clean_thread = i != 0;
     } else if (key == "optiscaler_sync_submit") {
         v.optiscaler_sync_submit = value == "1" ? OptiSubmitOn : value == "0" ? OptiSubmitOff : OptiSubmitAuto;
-    } else if (key == "fsr4_auto_exposure") {
-        v.fsr4_auto_exposure = i != 0;
     } else if (key == "fsr4_invert_jitter") {
         v.fsr4_invert_jitter = i != 0;
     } else if (key == "widescreen") {
@@ -497,7 +491,7 @@ void Load() {
         {"BB_HDR_PEAK", "hdr_peak"},                {"BB_HDR_BOOST", "hdr_boost"},
         {"BB_HDR_MODE", "hdr_mode"},                {"BB_FRAME_GEN", "frame_gen"},
         {"BB_FRAME_GEN_CAP", "frame_gen_cap"},     {"BB_DLSS_PRESET", "dlss_preset"},
-        {"BB_DLSS_MIP_BIAS", "dlss_mip_bias"},   {"BB_FRAME_GEN_FRAMES", "frame_gen_frames"},
+        {"BB_FRAME_GEN_FRAMES", "frame_gen_frames"},
         {"BB_REFLEX", "reflex"},                   {"BB_RENDER_SCALE", "render_scale"},
         {"BB_MIP_BIAS", "mip_bias"},
     };
@@ -646,11 +640,8 @@ void Save() {
     put("fps_text_opacity", fixed(v.fps_text_opacity, 2));
     put("fps_border", flag(v.fps_border));
     put("hide_cursor", flag(v.hide_cursor));
-    put("fsr4_auto_exposure", flag(v.fsr4_auto_exposure));
     put("fsr4_invert_jitter", flag(v.fsr4_invert_jitter));
     put("dlss_preset", DlssPresetText(v.dlss_preset));
-    put("dlss_mip_bias", flag(v.dlss_mip_bias));
-    put("dlss_auto_exposure", flag(v.dlss_auto_exposure));
     put("optiscaler_compat", flag(v.optiscaler_compat));
     put("optiscaler_ngx_lock", flag(v.optiscaler_ngx_lock));
     put("optiscaler_clean_thread", flag(v.optiscaler_clean_thread));

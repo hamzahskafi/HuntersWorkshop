@@ -153,7 +153,7 @@ struct AmdFsr::Impl {
     ffxContext context{};
     struct Key {
         u32 width{}, height{};
-        bool hdr{}, auto_exposure{};
+        bool hdr{};
         std::string version = "auto"; ///< fsr_version: "auto" or a version's name
         bool operator==(const Key&) const = default;
     } made{}, wanted{};
@@ -305,10 +305,11 @@ struct AmdFsr::Impl {
         // AMD supports it, though it recommends inverted depth. The motion vectors are at the render
         // size, without jitter. The render size moves within the output with the preset (live):
         // dynamic resolution. HDR: the scene colour at a 1920x1080 output; elsewhere the game's
-        // tonemapped frame, decoded to linear light first (TemporalUpscaler::RunScaled).
-        desc.flags = FFX_UPSCALE_ENABLE_DYNAMIC_RESOLUTION |
-                     (key.hdr ? FFX_UPSCALE_ENABLE_HIGH_DYNAMIC_RANGE : 0u) |
-                     (key.auto_exposure ? FFX_UPSCALE_ENABLE_AUTO_EXPOSURE : 0u);
+        // tonemapped frame, decoded to linear light first (TemporalUpscaler::RunScaled). Auto exposure
+        // always: the game gives no exposure value, and AMD's FSR docs recommend it unless there is a
+        // reason not to (0.4.4 beta 27d: was fsr4_auto_exposure, on by default, a menu checkbox).
+        desc.flags = FFX_UPSCALE_ENABLE_DYNAMIC_RESOLUTION | FFX_UPSCALE_ENABLE_AUTO_EXPOSURE |
+                     (key.hdr ? FFX_UPSCALE_ENABLE_HIGH_DYNAMIC_RANGE : 0u);
         static const bool debug = [] {
             const char* env = std::getenv("BB_AMD_FSR_DEBUG");
             return env && env[0] == '1';
@@ -586,13 +587,13 @@ bool AmdFsr::Probe() {
     return impl->Probe();
 }
 
-void AmdFsr::Prepare(u32 ow, u32 oh, bool hdr, bool auto_exposure, const std::string& version) {
+void AmdFsr::Prepare(u32 ow, u32 oh, bool hdr, const std::string& version) {
     impl->Settle();
-    impl->Prepare({ow, oh, hdr, auto_exposure, BbSettings::FsrVersionKey(version)});
+    impl->Prepare({ow, oh, hdr, BbSettings::FsrVersionKey(version)});
 }
 
-bool AmdFsr::Ready(u32 ow, u32 oh, bool hdr, bool auto_exposure, const std::string& version) const {
-    return impl->Ready({ow, oh, hdr, auto_exposure, BbSettings::FsrVersionKey(version)});
+bool AmdFsr::Ready(u32 ow, u32 oh, bool hdr, const std::string& version) const {
+    return impl->Ready({ow, oh, hdr, BbSettings::FsrVersionKey(version)});
 }
 
 bool AmdFsr::Preparing() const noexcept {
@@ -652,8 +653,8 @@ AmdFsr::~AmdFsr() = default;
 bool AmdFsr::Probe() {
     return false;
 }
-void AmdFsr::Prepare(u32, u32, bool, bool, const std::string&) {}
-bool AmdFsr::Ready(u32, u32, bool, bool, const std::string&) const {
+void AmdFsr::Prepare(u32, u32, bool, const std::string&) {}
+bool AmdFsr::Ready(u32, u32, bool, const std::string&) const {
     return false;
 }
 bool AmdFsr::Preparing() const noexcept {
