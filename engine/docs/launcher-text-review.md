@@ -11,7 +11,7 @@ Hunter's Workshop is a port, and its texts read like the port's own notes: plain
 draft keeps that voice and fixes what is wrong or cut, rather than restyling everything.
 
 - **Today's texts stay** wherever they are right, with their translations (110 descriptions are translated
-  in all 13 languages). Tooltips change in 26 rows: 7 corrected (wrong or out of date), 19 added where
+  in all 13 languages). Tooltips change in 27 rows: 7 corrected (wrong or out of date), 20 added where
   today says nothing useful (mostly rows with no tooltip at all, such as the picture sliders).
 - **The line under the title** is new where Classic cuts today's text mid-sentence or it says too little
   (a variable's name alone, "Relaxed is the default"). A complete phrase of 60 characters or fewer, saying
@@ -43,7 +43,7 @@ column, *Default: …* is the line the row code adds.
 | **Game language** · Game | Line: The game's own text and voices · Tooltip: same text · Choices: English; Russian; Japanese; French; Spanish; German; Italian · Default: English | Same | Same + *Default: English* | Same |  |
 | **Player profile** · Saves | Line: Each profile has its own save files and trophies, so several… · Tooltip: Each profile has its own save files and trophies, so several people can play their own runs on this PC | Each player gets their own saves and trophies | Same | — |  |
 | **Saves folder** · Saves | — | — | — | — |  |
-| **Save backups** · Saves | Line: Before every start and every… · Tooltip: Before every start and every {SaveBackups.InGameEvery.TotalMinutes:0} minutes while playing, when this profile's saves changed. The newest {SaveBackups.Keep} from before starting and {SaveBackups.InGameKeep} from playing are kept | This profile's saves, backed up automatically | Same | — |  |
+| **Save backups** · Saves | Line: Before every start and every… · Tooltip: Before every start and every 10 minutes while playing, when this profile's saves changed. The newest 10 from before starting and 5 from playing are kept | This profile's saves, backed up automatically | Same | — |  |
 | **Import saves** · Saves | Line: From shadPS4, another Bloodborne port, or a PS4 save exported… · Tooltip: From shadPS4, another Bloodborne port, or a PS4 save exported decrypted (Apollo Save Tool, Save Wizard). This profile's saves are backed up first | From shadPS4, another port or a decrypted PS4 save | Same | — |  |
 
 ## Display
@@ -80,11 +80,13 @@ column, *Default: …* is the line the row code adds.
 
 ## Graphics
 
+Proposed: the Detail and Effects groups become two groups by where each setting comes from. **Game effects**: what the game has and a switch leaves out (depth of field, motion blur with its upscaler fix, chromatic aberration, ambient occlusion, shadows from dynamic lights); caption "The game's own effects. Off leaves one out; applied when the game starts". **Enhancements**: past what the game does (texture filtering, model detail, screen-space reflections); caption "Not in the original game, or past what it does. Applied when the game starts". Today both groups say "Patches to the game, applied when it starts". The in-game overlay menu's Game effects section would split the same way.
+
 | Setting | Today | Proposed line | Proposed tooltip | Proposed choices | Notes |
 | --- | --- | --- | --- | --- | --- |
 | **Best settings for this PC** | Line: Output resolution, frame rate, upscaler and quality for this… · Tooltip: Output resolution, frame rate, upscaler and quality for this PC | Suggested resolution, frame rate and upscaler for this PC | Same | — |  |
 | **Anti-aliasing** · Upscaling and anti-aliasing | Line: Smooths edges when no upscaler runs · Tooltip: Smooths edges when no upscaler runs  Off: the sharpest, with jagged edges. The game's own: its PS4 pass, after a restart. TAA: smooth edges, live. · Choices: Off; The game's own (Applied when the game starts); TAA · Status: With an upscaler the box shows "Upscaler (DLSS)" (or AMD FSR), greyed | Same | Same | Same | In-game menu: Anti-aliasing. |
-| **Upscaler** · Upscaling and anti-aliasing | Line: Renders below the output and fills it in · Tooltip: Renders below the output and fills it in  DLSS needs an NVIDIA RTX card; AMD FSR runs on any GPU. Both anti-alias as they upscale. · Choices: None; AMD FSR; DLSS (NVIDIA RTX) · Default: off · Status: Status line when an upscaler is unavailable on this PC | Same | Same + *Default: off* | Same | In-game menu: Upscaler. |
+| **Upscaler** · Upscaling and anti-aliasing | Line: Renders below the output and fills it in · Tooltip: Renders below the output and fills it in  DLSS needs an NVIDIA RTX card; AMD FSR runs on any GPU. Both anti-alias as they upscale. · Choices: None; AMD FSR; DLSS (NVIDIA RTX) · Default: None · Status: Status line when an upscaler is unavailable on this PC | Same | Same + *Default: None* | Same | In-game menu: Upscaler. |
 | **Upscaling quality** (was Quality) · Upscaling and anti-aliasing | Line: How far below the output the game renders… · Tooltip: How far below the output the game renders: lower is faster and softer. Auto: Native AA up to 1200 lines, Quality up to 1600, Performance above | How far below the output the game renders | Same | — | In-game menu: Quality (rename there too). Shown only with an upscaler; "Quality" alone reads as overall graphics quality. The rename you agreed. |
 | **Render resolution** · Upscaling and anti-aliasing | Line: The share of the output's width and height the game renders at. · Tooltip: The share of the output's width and height the game renders at. DLSS runs the nearest quality's model | Same | Same | — | In-game menu: Render resolution. |
 | **FSR version** · Upscaling and anti-aliasing | Line: The versions AMD offers on this GPU; Automatic runs the newest · Tooltip: The versions AMD offers on this GPU; Automatic runs the newest  Newer is usually better. (driver) marks one AMD's graphics driver provides. | Same | Same | — | In-game menu: FSR version. |
@@ -93,15 +95,15 @@ column, *Default: …* is the line the row code adds.
 | **Sharpening strength** · Upscaling and anti-aliasing | Tooltip: 0.20 is light. High values can halo edges and show grain. · Default: 0.20 · Status: Line set by the upscaler: AMD FSR "Above 1 adds a second pass", otherwise "Higher is sharper" | Same (set by the upscaler) | Same + *Default: 0.20* | — | In-game menu: Sharpness (rename there to Sharpening strength). |
 | **Character motion vectors** · Advanced | Line: Less ghosting on characters; costs about 10% FPS · Tooltip: Less ghosting on characters; costs about 10% FPS  The game gives no motion for moving characters; this works it out. Off: faster, but moving enemies can trail. After a restart. · Default: On | Same | Same + *Default: On* | — | In-game menu: Character motion vectors. |
 | **Texture mip bias** · Advanced | Line: Below 0 sharper textures, above 0 softer · Tooltip: Below 0 sharper textures, above 0 softer  0 is what NVIDIA and AMD advise with an upscaler. Below 0 can shimmer. · Default: 0 | Same | Same + *Default: 0* | — | In-game menu: Texture mip bias. |
-| **Model detail** · Detail | Choices: As in the game; Highest (-2); Lower (1); Lowest (2) · Default: As in the game | How far away models keep their full detail | Highest costs GPU time; Lower and Lowest help weaker GPUs + *Default: As in the game* | Lowest (2); Lower (1); As in the game; Highest (-2) | In-game menu: Model detail. |
-| **Texture filtering** · Detail | Line: Anisotropic filtering forced on the game's textures… · Tooltip: Anisotropic filtering forced on the game's textures: ground and walls seen at an angle stay sharp. Lower values cost a little less GPU time; Game's own leaves the game's filtering as it is BB_ANISO, default: 16x. Applied when the game starts · Choices: 16x; 8x; 4x; 2x; Game's own · Default: 16x | Sharper ground and walls seen at an angle | Same | Game's own first: Game's own; 2x; 4x; 8x; 16x |  |
-| **Ambient occlusion (SSAO)** · Detail | Default: On | Adds soft shading in corners and creases | — + *Default: On* | — | In-game menu: Ambient occlusion (SSAO). |
-| **Shadows from dynamic lights** · Detail | Default: On | Lamps and torches cast shadows; a heavy effect | One of the heaviest effects: off gives a large FPS gain + *Default: On* | — | In-game menu: Shadows from dynamic lights. |
-| **Screen-space reflections** · Detail | Line: Not in the original game · Tooltip: same text · Default: Off | Adds reflections on wet and shiny surfaces | Not in the original game. Costs GPU time + *Default: Off* | — | In-game menu: Screen-space reflections. |
-| **Chromatic aberration** · Effects | Default: Off | Adds colour fringes toward the screen's edges | — + *Default: Off* | — | In-game menu: Chromatic aberration. |
-| **Depth of field** · Effects | Default: On | Blurs what is out of focus | — + *Default: On* | — | In-game menu: Depth of field (DoF). |
-| **Motion blur** · Effects | Default: Off | Blurs the picture when the camera turns fast | Costs GPU time + *Default: Off* | — | In-game menu: Motion blur. |
-| **No motion blur smear with upscalers** · Effects | Line: With an upscaler at an output other than 1920x1080 the game's… · Tooltip: With an upscaler at an output other than 1920x1080 the game's motion blur is left out: the upscaler would smear it over the whole picture. Off (default): the blur stays. The Motion blur setting is not changed BB_UPSCALER_NO_BLUR, default: off. Applied when the game starts · Default: off | Leaves motion blur out at outputs other than 1080p | Same | — |  |
+| **Model detail** · Detail | Choices: As in the game; Highest (-2); Lower (1); Lowest (2) · Default: As in the game | How far away models keep their full detail | Highest costs GPU time; Lower and Lowest help weaker GPUs + *Default: As in the game* | Lowest (2); Lower (1); As in the game; Highest (-2) | In-game menu: Model detail (in-game: to an Enhancements section). Group: Enhancements. |
+| **Texture filtering** · Detail | Line: Anisotropic filtering forced on the game's textures… · Tooltip: Anisotropic filtering forced on the game's textures: ground and walls seen at an angle stay sharp. Lower values cost a little less GPU time; Game's own leaves the game's filtering as it is BB_ANISO, default: 16x. Applied when the game starts · Choices: 16x; 8x; 4x; 2x; Game's own · Default: 16x | Sharper ground and walls seen at an angle | Same | Game's own first: Game's own; 2x; 4x; 8x; 16x | Group: Enhancements. |
+| **Ambient occlusion (SSAO)** · Detail | Default: On | Adds soft shading in corners and creases | *Default: On* | — | In-game menu: Ambient occlusion (SSAO). Group: Game effects. |
+| **Shadows from dynamic lights** · Detail | Default: On | Lamps and torches cast shadows; a heavy effect | One of the heaviest effects: off gives a large FPS gain + *Default: On* | — | In-game menu: Shadows from dynamic lights. Group: Game effects. |
+| **Screen-space reflections** · Detail | Line: Not in the original game · Tooltip: same text · Default: Off | Adds reflections on wet and shiny surfaces | Not in the original game: Kyo's patch turns on reflections the game has only in its debug functions. Costs GPU time + *Default: Off* | — | In-game menu: Screen-space reflections (in-game: to an Enhancements section). Group: Enhancements. |
+| **Chromatic aberration** · Effects | Default: Off | Adds colour fringes toward the screen's edges | On in the original game; off here by default, for a clearer picture | — | In-game menu: Chromatic aberration. Group: Game effects. |
+| **Depth of field** · Effects | Default: On | Blurs what is out of focus | *Default: On* | — | In-game menu: Depth of field (DoF). Group: Game effects. |
+| **Motion blur** · Effects | Default: Off | Blurs the picture when the camera turns fast | On in the original game; off here by default, for a clearer picture. Costs GPU time | — | In-game menu: Motion blur. Group: Game effects. |
+| **No motion blur smear with upscalers** · Effects | Line: With an upscaler at an output other than 1920x1080 the game's… · Tooltip: With an upscaler at an output other than 1920x1080 the game's motion blur is left out: the upscaler would smear it over the whole picture. Off (default): the blur stays. The Motion blur setting is not changed BB_UPSCALER_NO_BLUR, default: off. Applied when the game starts · Default: off | Leaves motion blur out at outputs other than 1080p | Same | — | Group: Game effects, under Motion blur as today (a fix of Hunter's Workshop's for upscalers). |
 
 ## Interface
 
@@ -112,18 +114,18 @@ column, *Default: …* is the line the row code adds.
 | **Sharp UI** · Menus and HUD | Line: Menus, HUD and text drawn at the output resolution instead of… · Tooltip: Menus, HUD and text drawn at the output resolution instead of 1080p stretched up: much sharper at 1440p and 4K. New: on by default in betas while it is tested. Applied on the next launch · Default: On in betas, off in stable releases | Menus, HUD and text drawn at the output resolution | Same | — |  |
 | **Note while shaders build** · Menus and HUD | Line: "Building shaders" in a corner while the game builds shaders for… · Tooltip: "Building shaders" in a corner while the game builds shaders for a place it shows for the first time. Also in game: Insert or L3 + R3 · Default: On | Shows "Building shaders" while new shaders compile | Same + *Default: On* | — | In-game menu: Note while shaders build. |
 | **FPS counter** · FPS counter | Line: Also in game: Insert or L3 + R3 · Tooltip: same text · Default: Off | Frame rate and timings in a corner of the game | Same + *Default: Off* | — | In-game menu: FPS counter. |
-| **Frame rate** · FPS counter | Line: Shown in the FPS counter · Tooltip: same text · Default: On | — | None: the line says it all + *Default: On* | — | In-game menu: Frame rate. "Shown in the FPS counter" goes from the five items: they sit in its fold. |
-| **Frame time** · FPS counter | Line: Shown in the FPS counter · Tooltip: same text · Default: On | — | None: the line says it all + *Default: On* | — | In-game menu: Frame time. |
-| **Upscaler** · FPS counter | Line: Shown in the FPS counter · Tooltip: same text · Default: On | — | None: the line says it all + *Default: On* | — | In-game menu: Upscaler. |
-| **CPU usage** · FPS counter | Line: Shown in the FPS counter · Tooltip: same text · Default: Off | — | None: the line says it all + *Default: Off* | — | In-game menu: CPU usage. |
-| **GPU usage** · FPS counter | Line: Shown in the FPS counter · Tooltip: same text · Default: Off | — | None: the line says it all + *Default: Off* | — | In-game menu: GPU usage. |
-| **FPS counter position** · FPS counter | Choices: Top right; Top left; Bottom right; Bottom left; Top centre · Default: Top right | — | — + *Default: Top right* | Same | In-game menu: Position. |
-| **FPS counter size** · FPS counter | Default: 1.00 | — | — + *Default: 1.00* | — | In-game menu: Size. |
+| **Frame rate** · FPS counter | Line: Shown in the FPS counter · Tooltip: same text · Default: On | — | *Default: On* | — | In-game menu: Frame rate. "Shown in the FPS counter" goes from the five items: they sit in its fold. |
+| **Frame time** · FPS counter | Line: Shown in the FPS counter · Tooltip: same text · Default: On | — | *Default: On* | — | In-game menu: Frame time. |
+| **Upscaler** · FPS counter | Line: Shown in the FPS counter · Tooltip: same text · Default: On | — | *Default: On* | — | In-game menu: Upscaler. |
+| **CPU usage** · FPS counter | Line: Shown in the FPS counter · Tooltip: same text · Default: Off | — | *Default: Off* | — | In-game menu: CPU usage. |
+| **GPU usage** · FPS counter | Line: Shown in the FPS counter · Tooltip: same text · Default: Off | — | *Default: Off* | — | In-game menu: GPU usage. |
+| **FPS counter position** · FPS counter | Choices: Top right; Top left; Bottom right; Bottom left; Top centre · Default: Top right | — | *Default: Top right* | Same | In-game menu: Position. |
+| **FPS counter size** · FPS counter | Default: 1.00 | — | *Default: 1.00* | — | In-game menu: Size. |
 | **FPS counter text colour** · FPS counter | Line: Any colour in game: Insert or L3 + R3 › Other · Tooltip: same text · Choices: White; Yellow; Green; Cyan; Red; Orange; Pink; Black · Default: White | Same | Same + *Default: White* | Same | In-game menu: Text colour. |
-| **FPS counter text opacity** · FPS counter | Default: 1.00 | — | — + *Default: 1.00* | — | In-game menu: Text opacity. |
-| **FPS counter background** · FPS counter | Choices: Dark grey; Black; Dark red; Dark blue; White · Default: Dark grey | — | — + *Default: Dark grey* | Same | In-game menu: Background colour. |
-| **FPS counter background opacity** · FPS counter | Default: 0.50 | — | — + *Default: 0.50* | — | In-game menu: Background opacity. |
-| **FPS counter border** · FPS counter | Default: On | — | — + *Default: On* | — | In-game menu: Border. |
+| **FPS counter text opacity** · FPS counter | Default: 1.00 | — | *Default: 1.00* | — | In-game menu: Text opacity. |
+| **FPS counter background** · FPS counter | Choices: Dark grey; Black; Dark red; Dark blue; White · Default: Dark grey | — | *Default: Dark grey* | Same | In-game menu: Background colour. |
+| **FPS counter background opacity** · FPS counter | Default: 0.50 | — | *Default: 0.50* | — | In-game menu: Background opacity. |
+| **FPS counter border** · FPS counter | Default: On | — | *Default: On* | — | In-game menu: Border. |
 
 ## Gameplay
 
@@ -134,7 +136,7 @@ column, *Default: …* is the line the row code adds.
 | **Field of view** · Camera | — | — | 1.00 is the game's own | — | In-game menu: Camera FOV scale. |
 | **Distance** · Camera | — | — | 1.00 is the game's own | — | In-game menu: Camera distance scale. |
 | **Height** · Camera | — | — | 1.00 is the game's own | — | In-game menu: Camera height scale. |
-| **Skip intro videos** · Extras | Default: On | — | — + *Default: On* | — |  |
+| **Skip intro videos** · Extras | Default: On | — | *Default: On* | — |  |
 | **Free camera** · Extras | Line: Toggle with Cross + L3 / Space + Z · Tooltip: same text · Default: Off | Same | Same + *Default: Off* | — |  |
 | **Debug menu** · Extras | Line: Left touchpad / Tab. Needs the adhoc folder from Nexus mod #253… · Tooltip: Left touchpad / Tab. Needs the adhoc folder from Nexus mod #253 (adhoc/font) in the game's dvdroot_ps4 or as a mod; without it the patch is not applied · Default: Off | The game's developer menu (Left touchpad / Tab) | Same + *Default: Off* | — |  |
 | **Hunter's Dream mirror** · Extras | Line: The Dream's mirror opens the appearance editor (the game's… · Tooltip: The Dream's mirror opens the appearance editor (the game's unused "Put on Disguise"). Applied when the game starts | The Dream's mirror opens the appearance editor | Same | — |  |
@@ -211,7 +213,7 @@ column, *Default: …* is the line the row code adds.
 
 | Setting | Today | Proposed line | Proposed tooltip | Proposed choices | Notes |
 | --- | --- | --- | --- | --- | --- |
-| **Show this page when the game starts** | Default: On | — | — + *Default: On* | — |  |
+| **Show this page when the game starts** | Default: On | — | *Default: On* | — |  |
 | **Log level** · Log options | Line: How much the game writes into its log… · Tooltip: How much the game writes into its log: Standard for everyday play, Detailed when asked for a log of something odd, Debug only to chase a specific bug · Choices: Standard (What a problem report needs: the settings at the start, loading times, a summary every minute, warnings and errors); Detailed (Also every save, thread and semaphore the game makes, the draw counts every 5 seconds and the GPU side's notes: a larger log, for something odd); Debug (Warning: everything the GPU side can say. The log grows by many megabytes and the game runs slower. Only to chase a specific bug, then set it back) · Default: Standard | How much the game writes into its log | Same + *Default: Standard* | Same |  |
 | **Frame statistics in the log** · Log options | Line: BB_FRAME_STATS · Tooltip: same text · Default: On in betas, off in stable releases | Frame times and engine counters every 5 seconds | BB_FRAME_STATS: frame times and engine counters every 5 seconds. On in betas, so crash logs carry them + *Default: On in betas, off in stable releases* | — | Today it says only the variable's name. |
 | **Hitch reports** · Log options | Line: A frame slower than this puts every thread's wait and stack in… · Tooltip: A frame slower than this puts every thread's wait and stack in the log, for stutter reports. Pick about twice your frame time: 50 ms at 30 FPS, 40 at 60, 25 at 90, 20 at 120, 16 at 144 or uncapped. Each report pauses the game about 0.2 s; at most 12 a session, none in the first 20 s or just after a loading screen · Choices: Off; 16 ms (For 144 FPS or uncapped); 20 ms (For 120 FPS); 25 ms (For 90 FPS); 30 ms (60 FPS, every missed refresh: many reports); 40 ms (For 60 FPS); 50 ms (For 30 FPS); 100 ms (Long stalls only, at any frame rate) · Default: Off | Puts what held up slow frames in the log | Same + *Default: Off* | Same |  |
@@ -227,31 +229,31 @@ column, *Default: …* is the line the row code adds.
 
 | Setting | Today | Proposed line | Proposed tooltip | Proposed choices | Notes |
 | --- | --- | --- | --- | --- | --- |
-| **Launcher language** · Appearance | Line: Restart the launcher to apply the language. · Tooltip: same text · Choices: l.Name · Default: en | Same | Same | Same |  |
+| **Launcher language** · Appearance | Line: Restart the launcher to apply the language. · Tooltip: same text · Choices: one per launcher language | Same | Same | Same |  |
 | **Layout** · Appearance | Line: Classic: the sidebar and one card per setting. · Tooltip: Classic: the sidebar and one card per setting. Modern: tabs and compact rows · Choices: Classic; Modern · Default: Classic | Same | Same + *Default: Classic* | Same |  |
 | **Navigation** · Appearance | Line: Tabs across the top, or a sidebar with the pages in groups · Tooltip: same text · Choices: Tabs; Sidebar · Default: Tabs | Same | Same + *Default: Tabs* | Same |  |
-| **Theme** · Appearance | Line: The accent colour, and a faint tint of it in the launcher's… · Tooltip: The accent colour, and a faint tint of it in the launcher's surfaces · Choices: LauncherTheme.Themes · Default: default | The accent colour, and a faint tint of it | Same | Same |  |
+| **Theme** · Appearance | Line: The accent colour, and a faint tint of it in the launcher's… · Tooltip: The accent colour, and a faint tint of it in the launcher's surfaces · Choices: the themes | The accent colour, and a faint tint of it | Same | Same |  |
 | **Theme colour** · Appearance | Line: Pick a dot or type a colour as #RRGGBB · Tooltip: same text | Same | Same | — |  |
 | **Background** · Appearance | Line: The picture behind the glass panes · Tooltip: same text · Choices: Game artwork; Your picture; None · Default: Game artwork | Same | Same + *Default: Game artwork* | None first: None; Game artwork; Your picture |  |
 | **Picture** · Appearance | Line: A PNG, JPG or BMP; it fills the window · Tooltip: same text | Same | Same | — |  |
-| **Background blur** · Appearance | Choices: Strong; Light; Off · Default: Strong | — | — + *Default: Strong* | Off first: Off; Light; Strong |  |
-| **App icon** · Appearance | Line: The launcher's and the game window's icon. · Tooltip: The launcher's and the game window's icon. The game window takes it at its next start · Choices: AppIcon.Choices · Default: auto | Same | Same | Same |  |
+| **Background blur** · Appearance | Choices: Strong; Light; Off · Default: Strong | — | *Default: Strong* | Off first: Off; Light; Strong |  |
+| **App icon** · Appearance | Line: The launcher's and the game window's icon. · Tooltip: The launcher's and the game window's icon. The game window takes it at its next start · Choices: the icons | Same | Same | Same |  |
 | **Icon picture** · Appearance | Line: A PNG, JPG, BMP or ICO; square pictures look best · Tooltip: same text | Same | Same | — |  |
 | **Window buttons** · Appearance | Line: Windows: – □ ✕. macOS: the red, yellow and green dots · Tooltip: same text · Choices: Windows; macOS · Default: Windows | Same | Same + *Default: Windows* | Same |  |
-| **Window buttons side** · Appearance | Choices: Usual (macOS on the left, Windows on the right); Left; Right · Default: Usual | — | — + *Default: Usual* | Same |  |
+| **Window buttons side** · Appearance | Choices: Usual (macOS on the left, Windows on the right); Left; Right · Default: Usual | — | *Default: Usual* | Same |  |
 | **Engine folder** · Engine and launch | — | — | — | — | Its texts still describe the old start (run.py, Python, bin\bb-probe.exe): see Also found. |
-| **Start the game with** · Engine and launch | Choices: Hunter's Workshop (Prepares mods and patches, then starts the engine (out\bb-probe.exe)); Custom command (Runs a program of your choice with the settings as environment variables) · Default: Hunter's Workshop | — | — + *Default: Hunter's Workshop* | Same |  |
+| **Start the game with** · Engine and launch | Choices: Hunter's Workshop (Prepares mods and patches, then starts the engine (out\bb-probe.exe)); Custom command (Runs a program of your choice with the settings as environment variables) · Default: Hunter's Workshop | — | *Default: Hunter's Workshop* | Same |  |
 | **Command** · Engine and launch | Line: A program to run instead of Bloodborne.exe --run, with the… · Tooltip: A program to run instead of Bloodborne.exe --run, with the settings as environment variables | A program to run instead of bb-start.exe | A program to run instead of bb-start.exe, with the settings as environment variables | — | Tooltip corrected. Today it says "instead of Bloodborne.exe --run", the old start. |
 | **Arguments** · Engine and launch | — | — | — | — |  |
-| **Launcher settings** · Files | Line: ‹Paths.ConfigFile› · Tooltip: same text | Same | Same | — | The line is the file's path. |
-| **Game settings (config.ini)** · Files | Line: ‹Paths.IniPath› · Tooltip: same text | Same | Same | — | The line is the file's path. |
+| **Launcher settings** · Files | Line: the file's path · Tooltip: same text | Same | Same | — | The line is the file's path. |
+| **Game settings (config.ini)** · Files | Line: the file's path · Tooltip: same text | Same | Same | — | The line is the file's path. |
 | **Shader cache** · Files | Line: The game's compiled shaders, kept between starts (a new engine… · Tooltip: The game's compiled shaders, kept between starts (a new engine version clears them itself). Clear them if something draws wrong in every save, such as missing skin or hair; the next start compiles them again and stutters for a while | The game's compiled shaders, kept between starts | Same | — |  |
 | **Shader catalog** · Files | Line: Save your shaders as a catalog file, or add someone else's… · Tooltip: Save your shaders as a catalog file, or add someone else's: areas they have played don't pop in or stutter for you. It works with the same kind of graphics card; a catalog adds to your shaders, it never replaces them | Share shaders so areas don't stutter the first time | Same | — |  |
 | **Share your settings** · Share settings | Line: Graphics, effects, camera, controls, cheats and engine options… · Tooltip: Graphics, effects, camera, controls, cheats and engine options, as a code to paste in Discord or a file. Not included: display and HDR, the online account, folders and languages | Your settings as a code for Discord, or a file | Same | — |  |
 | **Import settings** · Share settings | Line: Someone's code or file. · Tooltip: Someone's code or file. You see what changes before anything is applied | Same | Same | — |  |
 | **Launcher updates** · Updates | — | — | — | — |  |
 | **Update channel** · Updates | Line: Stable: releases that have been tested. · Tooltip: Stable: releases that have been tested. Beta: every change as soon as it is done, before it is tested · Choices: Stable; Beta | Same | Same | Same |  |
-| **Check for updates at start** · Updates | Line: Looks at github.com/{Updater.Repository}/releases · Tooltip: same text · Default: On | Same | Same + *Default: On* | — |  |
+| **Check for updates at start** · Updates | Line: Looks at github.com/hamzahskafi/HuntersWorkshop/releases · Tooltip: same text · Default: On | Same | Same + *Default: On* | — |  |
 | **Version** · Updates | Line: Every published release, stable and beta, newest first. · Tooltip: Every published release, stable and beta, newest first. Install any of them, older ones too, to go back if a version gives you trouble. Your settings, saves, mods and profiles stay | Same | Same | — |  |
 | **Build** · Updates | — | — | — | — |  |
 
@@ -278,8 +280,8 @@ column, *Default: …* is the line the row code adds.
 
 | Setting | Today | Proposed line | Proposed tooltip | Proposed choices | Notes |
 | --- | --- | --- | --- | --- | --- |
-| **Blood Vials** · Items | Choices: Modes | Infinite, or kept at a set amount | — | Same | In-game menu: Blood Vials. |
-| **Quicksilver Bullets** · Items | Choices: Modes | Infinite, or kept at a set amount | — | Same | In-game menu: Quicksilver Bullets. |
+| **Blood Vials** · Items | Choices: Off; Infinite (Kept full at the normal carry limit, even if you have none. Items put into storage while it is on come back); Custom amount (Refilled to the amount below whenever it drops) | Infinite, or kept at a set amount | — | Same | In-game menu: Blood Vials. |
+| **Quicksilver Bullets** · Items | Choices: Off; Infinite (Kept full at the normal carry limit, even if you have none. Items put into storage while it is on come back); Custom amount (Refilled to the amount below whenever it drops) | Infinite, or kept at a set amount | — | Same | In-game menu: Quicksilver Bullets. |
 | **Infinite consumables** · Items | Line: Molotovs, throwing knives, pebbles, antidotes, papers and the… · Tooltip: Molotovs, throwing knives, pebbles, antidotes, papers and the like are not used up (not Blood Vials or Bullets, which are above, and not insight items) | Molotovs, knives, pebbles and the like aren't used up | Same | — | In-game menu: Infinite consumables. |
 | **Infinite stamina** · Character | Line: Your stamina stays full · Tooltip: same text | Same | Same | — | In-game menu: Infinite stamina. |
 | **Stealth** · Character | Line: Enemies don't notice you and your steps make no noise · Tooltip: same text | Same | Same | — | In-game menu: Stealth. |
@@ -288,16 +290,16 @@ column, *Default: …* is the line the row code adds.
 | **Keep Blood Echoes on death** · Blood Echoes | Line: Dying never drops your Blood Echoes, so there is nothing to pick… · Tooltip: Dying never drops your Blood Echoes, so there is nothing to pick back up | Dying never drops your Blood Echoes | Same | — | In-game menu: Keep Blood Echoes on death. |
 | **Blood Echo multiplier** · Blood Echoes | Line: Enemies already loaded give the new amount after you rest at a… · Tooltip: Enemies already loaded give the new amount after you rest at a lamp or reload · Choices: Normal; x2; x5; x10 · Default: Normal | More Blood Echoes from each enemy | Same + *Default: Normal* | Same | In-game menu: Blood Echo multiplier. |
 | **Add echoes or insight** · Blood Echoes | Line: In the in-game menu (Insert or L3 + R3)… · Tooltip: In the in-game menu (Insert or L3 + R3): +1,000, +10,000, +100,000 echoes and +1 insight | From the in-game overlay menu (Insert or L3 + R3) | Same | — |  |
-| **Amount** · Blood Echoes | Line: How many {title} to keep · Tooltip: same text | Same | Same | — |  |
+| **Amount** · Blood Echoes | Line: How many Blood Vials (or Quicksilver Bullets) to keep · Tooltip: same text | Same | Same | — |  |
 
 ## Trophies
 
 | Setting | Today | Proposed line | Proposed tooltip | Proposed choices | Notes |
 | --- | --- | --- | --- | --- | --- |
 | **Show in game** · Notification | Line: A small banner in a corner of the game's screen, without taking… · Tooltip: A small banner in a corner of the game's screen, without taking focus. In fullscreen it needs Display › Window mode › Borderless fullscreen · Default: On | A banner in a corner when you earn a trophy | Same + *Default: On* | — |  |
-| **Position** · Notification | Choices: Top right; Top left; Bottom right; Bottom left · Default: Top right | — | — + *Default: Top right* | Same |  |
-| **Play a sound** · Notification | Default: On | — | — + *Default: On* | — |  |
-| **Volume** · Notification | Default: 70 | — | — + *Default: 70* | — |  |
+| **Position** · Notification | Choices: Top right; Top left; Bottom right; Bottom left · Default: Top right | — | *Default: Top right* | Same |  |
+| **Play a sound** · Notification | Default: On | — | *Default: On* | — |  |
+| **Volume** · Notification | Default: 70 | — | *Default: 70* | — |  |
 | **Sound file** · Notification | Line: A sound of your own (WAV, MP3, MP4/M4A)… · Tooltip: A sound of your own (WAV, MP3, MP4/M4A); empty uses the built-in chime | A sound of your own; empty uses the built-in chime | Same | — |  |
 | **Try it** · Notification | Line: Shows a sample notification and plays the sound · Tooltip: same text | Same | Same | — |  |
 | **Trophy log** · Trophy data | — | — | — | — |  |
@@ -324,10 +326,11 @@ column, *Default: …* is the line the row code adds.
 
 ## What the step involves
 
-- 122 new lines and 26 new or corrected tooltips, translated into the 13 languages; every other tooltip
+- 122 new lines and 27 new or corrected tooltips, translated into the 13 languages; every other tooltip
   keeps its text and translations.
 - The row code: the line apart from the tooltip (no more cutting at 64 characters), and the default line.
 - Eight lists reordered or reworded: V-Sync, Area prefetch, Texture filtering, Model detail, Background,
   Background blur, In-game menu shortcut, and Frame rate's notes.
 - Two renames, and Quality and Sharpness renamed in the in-game menu (its 8 tables).
+- If agreed: Graphics' Game effects and Enhancements groups, in the launcher and the in-game overlay menu.
 - The fixes above. Both launchers built, the translation key check clean.

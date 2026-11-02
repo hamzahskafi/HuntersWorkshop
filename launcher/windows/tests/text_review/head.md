@@ -11,7 +11,7 @@ Hunter's Workshop is a port, and its texts read like the port's own notes: plain
 draft keeps that voice and fixes what is wrong or cut, rather than restyling everything.
 
 - **Today's texts stay** wherever they are right, with their translations (110 descriptions are translated
-  in all 13 languages). Tooltips change in 26 rows: 7 corrected (wrong or out of date), 19 added where
+  in all 13 languages). Tooltips change in 27 rows: 7 corrected (wrong or out of date), 20 added where
   today says nothing useful (mostly rows with no tooltip at all, such as the picture sliders).
 - **The line under the title** is new where Classic cuts today's text mid-sentence or it says too little
   (a variable's name alone, "Relaxed is the default"). A complete phrase of 60 characters or fewer, saying

@@ -20,10 +20,11 @@
 
 ## What the step involves
 
-- 122 new lines and 26 new or corrected tooltips, translated into the 13 languages; every other tooltip
+- 122 new lines and 27 new or corrected tooltips, translated into the 13 languages; every other tooltip
   keeps its text and translations.
 - The row code: the line apart from the tooltip (no more cutting at 64 characters), and the default line.
 - Eight lists reordered or reworded: V-Sync, Area prefetch, Texture filtering, Model detail, Background,
   Background blur, In-game menu shortcut, and Frame rate's notes.
 - Two renames, and Quality and Sharpness renamed in the in-game menu (its 8 tables).
+- If agreed: Graphics' Game effects and Enhancements groups, in the launcher and the in-game overlay menu.
 - The fixes above. Both launchers built, the translation key check clean.

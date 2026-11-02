@@ -99,6 +99,7 @@ def now_fields(r):
     if title == 'HDR output':  # its text is set in code apart from the row
         tip = "The game's picture on an HDR screen, with brighter highlights. Applied when the game starts"; line = brief(tip)
     if title == 'V-Sync': dv = 'On (latest frame)'
+    if title == 'Upscaler' and dv == 'off': dv = 'None'  # config.ini's value for the list's None
     return title, line, tip, ch, dv
 
 
@@ -108,8 +109,19 @@ def pkey(r):
     return (r['page'], r['title'])
 
 
+# Lists the extraction sees only by name.
+LISTS = {'Modes': "Off; Infinite (Kept full at the normal carry limit, even if you have none. Items put into storage while it "
+                  "is on come back); Custom amount (Refilled to the amount below whenever it drops)"}
+# Values the code puts into its texts, as the launcher shows them.
+VALUES = {'{SaveBackups.InGameEvery.TotalMinutes:0}': '10', '{SaveBackups.Keep}': '10', '{SaveBackups.InGameKeep}': '5',
+          '{Updater.Repository}': 'hamzahskafi/HuntersWorkshop', '{title}': 'Blood Vials (or Quicksilver Bullets)',
+          'l.Name': 'one per launcher language', 'LauncherTheme.Themes': 'the themes', 'AppIcon.Choices': 'the icons',
+          '‹Paths.ConfigFile›': "the file's path", '‹Paths.IniPath›': "the file's path"}
+
+
 def c(s):
     s = re.sub(r'\{(\d+)\}', r'\1', s or '')
+    for k, v in VALUES.items(): s = s.replace(k, v)
     return s.replace('|', '/').replace('\n', ' ').strip()
 
 
@@ -126,8 +138,8 @@ for r in expand():
     if tip_now and tip_now != line_now: parts.append(f"Tooltip: {c(tip_now)}")
     elif tip_now: parts.append("Tooltip: same text")
     if ch_now: parts.append("Choices: " + '; '.join(c(x['label']) + (f" ({c(x['note'])})" if x.get('note') else '') for x in ch_now))
-    elif r.get('choices_expr'): parts.append(f"Choices: {c(r['choices_expr'])}")
-    if def_now: parts.append(f"Default: {c(def_now)}")
+    elif r.get('choices_expr'): parts.append(f"Choices: {c(LISTS.get(r['choices_expr'], r['choices_expr']))}")
+    if def_now and def_now not in RAW_DEFAULTS: parts.append(f"Default: {c(def_now)}")
     extra = EXTRA_NOW.get((r['page'], title))
     if extra: parts.append(f"Status: {c(extra)}")
     today = ' · '.join(parts) or '—'
@@ -145,14 +157,14 @@ for r in expand():
     if isinstance(pl, str) and pl != KEEP and len(pl) > 60: problems.append(('line over 60', k, len(pl), pl))
     tp = p.get('tip')
     if tp is None: tp_txt = 'Same' if tip_now else '—'
-    elif tp == '': tp_txt = 'None: the line says it all'
+    elif tp == '': tp_txt = 'None: the line says it all' if pl else 'None'
     else: tp_txt = c(tp); count['tips'] += 1
     # The default line the row code adds, unless the text or the list already says it (engine switches'
     # tooltips end with "BB_X, default: …" today).
     said = ' '.join([tp if tp else '', tip_now or '' if tp is None else '', ' '.join(x['label'] for x in ch_now or [])]).lower()
     dp = (def_now or '').replace(' (default)', '').replace(' (Default)', '').replace(' (recommended)', '')
     if dp and dp != 'not set' and dp not in RAW_DEFAULTS and r['kind'] != 'engine' and 'default' not in said:
-        tp_txt += f" + *Default: {dp}*"
+        tp_txt = (f"*Default: {dp}*" if tp_txt in ('—', 'None') else tp_txt + f" + *Default: {dp}*")
     pch = c(p['choices']) if p.get('choices') else ('Same' if ch_now or r.get('choices_expr') else '—')
     if p.get('choices'): count['lists'] += 1
     notes = []
@@ -163,11 +175,20 @@ for r in expand():
 for k in P:
     if k not in seen: problems.append(('proposal for no row', k))
 
+# A proposal for a page as a whole, shown above its table.
+INTROS = {'Graphics': "Proposed: the Detail and Effects groups become two groups by where each setting comes from. "
+          "**Game effects**: what the game has and a switch leaves out (depth of field, motion blur with its upscaler fix, "
+          "chromatic aberration, ambient occlusion, shadows from dynamic lights); caption \"The game's own effects. Off "
+          "leaves one out; applied when the game starts\". **Enhancements**: past what the game does (texture filtering, "
+          "model detail, screen-space reflections); caption \"Not in the original game, or past what it does. Applied when "
+          "the game starts\". Today both groups say \"Patches to the game, applied when it starts\". The in-game overlay "
+          "menu's Game effects section would split the same way."}
+
 HEAD = "| Setting | Today | Proposed line | Proposed tooltip | Proposed choices | Notes |\n| --- | --- | --- | --- | --- | --- |\n"
 out = []
 for pg, rows in pages.items():
     table = HEAD + '\n'.join(rows) + '\n'
-    out.append(f"\n## {PAGES[pg]}\n\n" + table)
+    out.append(f"\n## {PAGES[pg]}\n\n" + (INTROS[pg] + "\n\n" if pg in INTROS else '') + table)
     if len(sys.argv) > 3:
         os.makedirs(sys.argv[3], exist_ok=True)
         open(os.path.join(sys.argv[3], f"{pg}.md"), 'w', encoding='utf-8').write(table)
