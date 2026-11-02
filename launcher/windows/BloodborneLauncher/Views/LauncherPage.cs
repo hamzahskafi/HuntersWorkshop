@@ -232,7 +232,6 @@ namespace BloodborneLauncher.Views
     public sealed class Segmented : Border
     {
         private readonly List<Border> _items = new();
-        private readonly IReadOnlyList<Choice> _choices;
         private readonly Grid _grid = new();
         private Border? _instead;
         public int SelectedIndex { get; private set; } = -1;
@@ -240,7 +239,6 @@ namespace BloodborneLauncher.Views
 
         public Segmented(IReadOnlyList<Choice> choices, Func<Choice, bool>? enabled = null)
         {
-            _choices = choices;
             CornerRadius = new CornerRadius(14);
             Padding = new Thickness(3);
             SetResourceReference(BackgroundProperty, "PillTrackBrush");
@@ -477,7 +475,7 @@ namespace BloodborneLauncher.Views
                         frame.Clip = new RectangleGeometry(new Rect(0, 0, e.NewSize.Width, e.NewSize.Height), 16, 16);
                     frame.SetResourceReference(Border.BackgroundProperty, "GlassPaneBrush");
                     frame.SetResourceReference(Border.BorderBrushProperty, "GlassPaneStrokeBrush");
-                    // A group shown only for one choice (ShowGroup hides its header): its box goes with it.
+                    // A group shown only for one choice (its header hidden): its box goes with it.
                     frame.SetBinding(VisibilityProperty, new System.Windows.Data.Binding(nameof(Visibility)) { Source = child });
                     Body.Children.Add(frame);
                     continue;
@@ -514,16 +512,6 @@ namespace BloodborneLauncher.Views
             (into ?? Body).Children.Add(header);
             _group = text;
             return header;
-        }
-
-        /// <summary>Shows or hides a whole group: its header and the panel its rows are in (in Modern
-        /// the group's box follows its header). For a group that belongs to one choice, as the DLSS rows
-        /// to the DLSS upscaler; the settings search skips the rows while it is hidden.</summary>
-        protected static void ShowGroup(TextBlock header, UIElement rows, bool show)
-        {
-            var visibility = show ? Visibility.Visible : Visibility.Collapsed;
-            header.Visibility = visibility;
-            rows.Visibility = visibility;
         }
 
         /// <summary>

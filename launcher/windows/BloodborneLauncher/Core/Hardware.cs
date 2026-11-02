@@ -20,8 +20,6 @@ namespace BloodborneLauncher.Core
 
         public int VramGb => (int)Math.Round(VramBytes / 1073741824.0);
         public bool Rtx => Vendor == "NVIDIA" && Gpu.Contains("RTX", StringComparison.OrdinalIgnoreCase);
-        /// <summary>Radeon RX 9000 (RDNA 4): FSR 4 runs natively.</summary>
-        public bool Rdna4 => Vendor == "AMD" && System.Text.RegularExpressions.Regex.IsMatch(Gpu, @"RX\s*9\d{3}");
         /// <summary>Integrated graphics: little dedicated memory, or a known integrated name.</summary>
         public bool Integrated => VramBytes < 2L << 30 || Gpu.Contains("UHD", StringComparison.OrdinalIgnoreCase) ||
                                   Gpu.Contains("Iris", StringComparison.OrdinalIgnoreCase) ||

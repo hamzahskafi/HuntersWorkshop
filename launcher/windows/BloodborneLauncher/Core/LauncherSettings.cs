@@ -11,7 +11,6 @@ namespace BloodborneLauncher.Core
     public sealed class LauncherSettings
     {
         public const string OnlineCommunity = "https://thehuntersdream.com";
-        public const string ShadnetServer = "srv.shadps4.net:31313";
 
         private JsonObject _data = new();
 
@@ -27,7 +26,6 @@ namespace BloodborneLauncher.Core
             ["mods_enabled"] = true,
             ["patches_dir"] = "",
             ["language"] = "1",
-            ["fullscreen"] = false,
             ["display_device"] = "",
             ["present_mode"] = "Mailbox",
             ["fps_mode"] = "60",
@@ -41,7 +39,6 @@ namespace BloodborneLauncher.Core
             ["hitch_report_ms"] = "0",
             ["pad_log"] = false,
             ["gpu_profile"] = false,
-            ["vk_validation"] = false,
             ["extra_env"] = "",
             ["dlc_enabled"] = true,
             ["online_password"] = "",
@@ -71,7 +68,6 @@ namespace BloodborneLauncher.Core
             ["app_icon_image"] = "", // custom: the picture chosen (AppIcon.CustomFile holds it as an icon)
             ["ui_window_buttons"] = "windows", // windows | mac
             ["ui_window_buttons_side"] = "usual", // usual (mac left, windows right) | left | right
-            ["fsr4_balanced"] = false,
             ["exp_vram_cleanup"] = true,
             // 0.9.37 beta 4: the dev setup, measured faster (PerfDefaults below switches older files once).
             ["exp_frame_pacing"] = true,
@@ -103,8 +99,6 @@ namespace BloodborneLauncher.Core
             ["audio_priority"] = false,
             ["sound_output"] = "",
             ["load_profile"] = false,
-            ["occlusion_default_on"] = true,
-            ["vram_budget_default_on"] = true,
             ["section_stats"] = false,
             ["shader_capture"] = false,
             ["overlay_keys"] = "both",
@@ -131,10 +125,9 @@ namespace BloodborneLauncher.Core
                         _data[key] = value?.DeepClone();
                     // Beta builds: textures kept up to 80% of the card (the 40% default evicted and
                     // reloaded hundreds a second on 6-8 GB cards); switched on once for older files.
-                    // The marker is only ever written by a beta: "vram_budget_default_on" is in
-                    // Defaults(), so a stable launcher saved it beside its own default (off) and a
-                    // player moving from stable to a beta kept the 40% marks (RTX 4060 at 3.4-4.3
-                    // GB of 2486 MiB: evictions, re-uploads and tiled write-backs every frame).
+                    // The marker is only ever written by a beta, so a player moving from a stable build
+                    // to a beta gets it too (RTX 4060 at 3.4-4.3 GB of 2486 MiB with the 40% marks:
+                    // evictions, re-uploads and tiled write-backs every frame).
                     if (Updater.CurrentBeta > 0 && !saved.ContainsKey("vram_budget_beta_on"))
                         _data["exp_vram_budget"] = true;
                     // 0.9.37 beta 8: beta builds write the frame statistics into the log, switched
@@ -251,25 +244,6 @@ namespace BloodborneLauncher.Core
                 if (v.TryGetValue<string>(out var s) && int.TryParse(s, out i)) return i;
             }
             return 0;
-        }
-
-        /// <summary>A string-to-string object (e.g. key_bindings), empty when absent.</summary>
-        public Dictionary<string, string> Map(string key)
-        {
-            var map = new Dictionary<string, string>(StringComparer.Ordinal);
-            if (_data[key] is JsonObject obj)
-                foreach (var (k, v) in obj)
-                    if (v is JsonValue value && value.TryGetValue<string>(out var s))
-                        map[k] = s;
-            return map;
-        }
-
-        public void SetMap(string key, IReadOnlyDictionary<string, string> map)
-        {
-            var obj = new JsonObject();
-            foreach (var (k, v) in map.OrderBy(p => p.Key, StringComparer.Ordinal))
-                obj[k] = v;
-            _data[key] = obj;
         }
 
         public void Set(string key, string value) => _data[key] = value;

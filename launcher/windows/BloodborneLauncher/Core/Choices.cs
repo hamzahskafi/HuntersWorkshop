@@ -37,40 +37,14 @@
             new(L.T("Off"), "off"),
         };
 
-        /// <summary>fsr_version in config.ini (0.4.4 beta 27): AMD's choice, or FSR 3.1.</summary>
-        public static readonly Choice[] FsrVersions =
-        {
-            new(L.T("Automatic (AMD's choice)"), "auto",
-                L.T("The newest version AMD's FSR SDK runs on this GPU: FSR 4.1 on Radeon RX 6000 and newer, FSR 3.1 on other GPUs")),
-            new("FSR 3.1", "3.1", L.T("AMD's FSR 3.1 on any GPU: to compare, or if FSR 4 looks wrong")),
-        };
-
-        /// <summary>frame_gen in config.ini: generated frames between the game's own (the engine's
-        /// vk_frame_generation.h; DLSS through NVIDIA Streamline, vk_streamline.h). Off by default.</summary>
+        /// <summary>frame_gen (Avalonia's Graphics page only): 0.4.4 beta 28 removed frame generation from the
+        /// engine, which ignores the key; this list goes with the Linux work.</summary>
         public static readonly Choice[] FrameGeneration =
         {
             new(L.T("Off"), "off"),
             new("FSR 3.1 (2x)", "fsr3", L.T("Needs an upscaler. Not in menus, movies or with HDR output")),
             new("DLSS (NVIDIA RTX 40/50)", "dlss",
                 L.T("NVIDIA's frame generation with Reflex: 2x on RTX 40, up to 6x on RTX 50. Needs an upscaler and Hardware-accelerated GPU scheduling. Applied when the game starts")),
-        };
-
-        /// <summary>frame_gen_frames: DLSS generated frames per real one (more than one: RTX 50).</summary>
-        public static readonly Choice[] FrameGenFrames =
-        {
-            new("2x", "1", L.T("One generated frame per real one (RTX 40 and 50)")),
-            new("3x", "2", L.T("RTX 50 only")),
-            new("4x", "3", L.T("RTX 50 only")),
-            new("5x", "4", L.T("RTX 50 only")),
-            new("6x", "5", L.T("RTX 50 only")),
-        };
-
-        /// <summary>reflex: NVIDIA Reflex low latency while DLSS Frame Generation is loaded.</summary>
-        public static readonly Choice[] Reflex =
-        {
-            new(L.T("On"), "on", L.T("Lower input lag. Always on while DLSS Frame Generation runs")),
-            new(L.T("On + Boost"), "boost", L.T("Also keeps the GPU clocks up: a little lower lag, more power")),
-            new(L.T("Off"), "off", L.T("Only while DLSS Frame Generation is off")),
         };
 
         /// <summary>Display › Window mode (0.4.4 beta 26): config.ini's fullscreen with the launcher's
@@ -341,18 +315,6 @@
             new(L.T("Spanish"), "3"),
             new(L.T("German"), "4"),
             new(L.T("Italian"), "5"),
-        };
-
-        public static readonly Choice[] HdrPaperWhite =
-        {
-            new(L.T("100 nits"), "100"), new(L.T("150 nits"), "150"), new(L.T("200 nits (default)"), "200"),
-            new(L.T("250 nits"), "250"), new(L.T("300 nits"), "300"), new(L.T("400 nits"), "400"),
-        };
-
-        public static readonly Choice[] HdrPeak =
-        {
-            new(L.T("400 nits"), "400"), new(L.T("600 nits"), "600"), new(L.T("800 nits"), "800"), new(L.T("1000 nits (default)"), "1000"),
-            new(L.T("1500 nits"), "1500"), new(L.T("2000 nits"), "2000"), new(L.T("4000 nits"), "4000"),
         };
 
         /// <summary>button_prompts: the game's button icons as keys while the keyboard or mouse is in use, always, or never.</summary>

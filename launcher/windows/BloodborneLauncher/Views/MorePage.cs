@@ -40,8 +40,6 @@ namespace BloodborneLauncher.Views
             Open(0);
         }
 
-        public bool HasSection(string key) => Array.FindIndex(_sections, s => s.Key == key) >= 0;
-
         public void ShowSection(string key)
         {
             var index = Array.FindIndex(_sections, s => s.Key == key);
@@ -51,8 +49,6 @@ namespace BloodborneLauncher.Views
         public IEnumerable<string> SectionKeys => _sections.Select(s => s.Key);
 
         /// <summary>The page types of the sections, made or not.</summary>
-        public IEnumerable<Type> SectionTypes => _sections.Select(s => s.Page);
-
         /// <summary>The key of the section shown (MainWindow.ReloadPages keeps it).</summary>
         public string? ShownKey => _current >= 0 ? _sections[_current].Key : null;
 

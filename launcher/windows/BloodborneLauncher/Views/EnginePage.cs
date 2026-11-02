@@ -227,13 +227,9 @@ namespace BloodborneLauncher.Views
         {
             EngineSwitches.Graphics => SymbolRegular.Sparkle24,
             EngineSwitches.Performance => SymbolRegular.TopSpeed24,
-            EngineSwitches.Memory => SymbolRegular.Storage24,
-            EngineSwitches.Upscalers => SymbolRegular.ZoomIn24,
-            EngineSwitches.Online => SymbolRegular.Globe24,
             EngineSwitches.Input => SymbolRegular.XboxController24,
             EngineSwitches.Sound => SymbolRegular.Speaker224,
             EngineSwitches.Fixes => SymbolRegular.ShieldCheckmark24,
-            EngineSwitches.Diagnostics => SymbolRegular.TextBulletListSquare24,
             _ => SymbolRegular.Bug24,
         };
 

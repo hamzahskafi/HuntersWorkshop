@@ -45,6 +45,7 @@ namespace BloodborneLauncher.Core
     {
         public const string Graphics = "Graphics";
         public const string Performance = "Performance";
+        // Groups no switch is in any more, named by the Avalonia launcher's page (it goes with the Linux work).
         public const string Memory = "Memory and VRAM";
         public const string Upscalers = "Upscalers";
         public const string Online = "Online";
@@ -52,7 +53,6 @@ namespace BloodborneLauncher.Core
         public const string Sound = "Sound";
         public const string Fixes = "Game fixes";
         public const string Diagnostics = "Diagnostics and logs";
-        public const string DirectVulkan = "Direct rendering";
 
         public static readonly string[] Groups = { Graphics, Performance, Input, Sound, Fixes };
 
@@ -68,11 +68,6 @@ namespace BloodborneLauncher.Core
         /// <summary>A switch that is on unless it is 0.</summary>
         private static EngineSwitch OnUnless0(string env, string group, string title, string hint) =>
             Toggle(env, group, title, hint, on: true);
-
-        private static EngineSwitch Number(string env, string group, string title, string hint, double value, double min, double max,
-            double step, string unit = "") =>
-            new(env, group, title, hint, SwitchKind.Number, value.ToString(step >= 1 ? "0" : "0.###", CultureInfo.InvariantCulture))
-            { Min = min, Max = max, Step = step, Unit = unit };
 
         private static EngineSwitch Pick(string env, string group, string title, string hint, string value, params Choice[] options) =>
             new(env, group, title, hint, SwitchKind.Choice, value) { Options = options };

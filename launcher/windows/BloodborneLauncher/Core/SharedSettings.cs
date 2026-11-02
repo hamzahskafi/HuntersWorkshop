@@ -22,13 +22,12 @@ namespace BloodborneLauncher.Core
         private static readonly string[] IniKeys =
         {
             "upscaler", "fsr_version", "preset", "render_scale", "sharpen", "sharpness", "show_fps", "show_fps_rate", "show_fps_frame_time", "show_fps_upscaler", "live_resolution", "model_lod", "object_motion",
-            "frame_gen", "frame_gen_cap",
             "jitter", "reactive", "widescreen", "pc_controls", "camera_controls", "graphics_controls",
             "change_appearance", "rebirth", "skip_intro",
         };
         private static readonly string[] IniPrefixes =
             { "graphics_", "camera_", "effect_", "reactive_", "fsr4_", "cheat_", "bind.", "mouse_", "pad_" };
-        private static readonly string[] LauncherKeys = { "present_mode", "fps_mode", "draw_pipe", "readbacks", "fsr4_balanced" };
+        private static readonly string[] LauncherKeys = { "present_mode", "fps_mode", "draw_pipe", "readbacks" };
         private static readonly string[] LauncherPrefixes = { "exp_", "cheat_" };
 
         /// <summary>What a setting is about: an import can leave the controls and cheats as they are.</summary>
