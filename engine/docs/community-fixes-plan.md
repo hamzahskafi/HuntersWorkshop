@@ -33,17 +33,32 @@ without the release candidate's independent review and long session. Left for la
 - **Checks not made before the release:** the launcher's texts on screen (100% and 150% scaling;
   English, German and Japanese; Classic and Modern) and the Insert menu's Enhancements section;
   Suggested settings with two monitors, a Share code exported and imported on another PC, Changed
-  switches with Extra variables set, the fixed-refresh frame lock greying out; a co-op session
-  (a summon) on the build without shadPS4's network libraries (sign-in, STUN and the relay are
-  checked).
+  switches with Extra variables set, the fixed-refresh frame lock greying out; joining another
+  world (summoned with the Small Resonant Bell, or invading) on the build without shadPS4's network
+  libraries. Hosting is checked: two invasions, 2026-11-03 (below).
 - **Untested for want of hardware:** AMD FSR 4.1 on Radeon cards, FSR 2.3.4, HDR output.
 - **Open decisions:** NVIDIA Reflex on `VK_NV_low_latency2` without Streamline; the GPU-path tracers
   that overlap; the System menu's PC pages under one parent entry.
 - **Lamp and candle flicker (B14):** closed; looked at again at 240 FPS and barely told from 30.
   Option C (the light module held to 30 steps a second) stays written down for a high-refresh report.
+- **Online, checked on 0.4.4 (two invasions, 2026-11-03): nothing to change.** The room, the
+  invader's join, the hole punch, traffic both ways and both leaves worked, at 60 FPS throughout.
+  - **Connections reported at once, by design.** The engine reports a connection to the game as
+    soon as the server gives the player's address. It reports a failure only when the server says
+    the player left or timed out. The probes' result is only logged.
+  - **The same elsewhere.** bbhost (`np_signaling.cpp`) and Lantern 0.9.39 beta 30 do the same, and
+    neither has a report against it. shadPS4's handshake (`signaling_handler.cpp`) would report a
+    failure after 30 s, later than the game's own handling.
+  - **The one long load.** A travel started as an invader arrived held its loading screen 26.7 s
+    until the game ended the session.
+  - **Players who never answered.** Four of the five players the game connected to never answered
+    the probes. The game also connects to players whose signs and ghosts it shows, and the relay is
+    the server's choice.
 - **Next work:** AMD FSR frame generation through the SDK; OptiScaler checked again; a DLSS test
   and cost table; the upscaler items left from the engine map (upscale-2 and -3), the SSR cost,
-  the unjittered passes; smoothness and hitches ("Smoothness leads" below).
+  the unjittered passes; smoothness and hitches ("Smoothness leads" below). Small: the punch's log
+  line says how long the probing took, as bbhost's does (`after N ms`), since log lines carry no
+  time.
 - **Linux:** the Avalonia launcher rebuilt on the Windows launcher's pages, with its stale texts, the
   dead DLSS model row and the 7 texts only it looks up.
 
