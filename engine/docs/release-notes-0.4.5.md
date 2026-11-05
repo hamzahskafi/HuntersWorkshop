@@ -38,11 +38,13 @@ and each costs about 5 µs however little it does (performance.md). The picture 
   render pass, with the same value. A face with nothing to draw is cleared where its copy is left
   out, so the blur never reads an uncleared image. `BB_SHADOW_CLEAR_FOLD=0` in Extra variables clears
   them on their own as in beta 4.
-  - **First run** (`20261105_230744`, fold on): 143.5 FPS at the lamp spot (GPU 6.96 ms a frame) and
-    130.3 at the second spot (7.67 ms), against beta 4's 141.5 and 127.9 in another session; the
-    run with the fold off gives the exact difference. Three quarters of the clears went into the
-    face's pass, the rest were faces with nothing drawn; no face put back. Since 0.4.4: 135.0 to
-    143.5 FPS at the lamp spot.
+  - **Measured** (`20261105_230744` on, `20261105_231328` off): at the lamp spot 141.2 to 143.5 FPS
+    (GPU 7.08 to 6.96 ms a frame), at the second spot 127.6 to 130.3 FPS (7.84 to 7.67 ms). Three
+    quarters of the clears went into the face's pass, the rest were faces with nothing drawn; no
+    face put back. With the fold off, the frame matches beta 4's, so the clears' new profile lines
+    cost nothing visible (each size's clears stay under the profile's top 30).
+  - **Since 0.4.4, step 1 in all:** 135.0 to 143.5 FPS at the lamp spot (GPU 7.40 to 6.96 ms) and
+    122.2 to 130.3 at the second spot (8.18 to 7.67 ms), the picture unchanged.
   - **Beta 6:** a face drawn with a depth image smaller than itself would have a render pass
     smaller than the face, and a clear folded into it would reach outside the pass (not allowed in
     Vulkan) and leave the rest uncleared. Such a face's clear is now done before its pass, on its

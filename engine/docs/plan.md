@@ -9,8 +9,10 @@ What comes next, and the rules and decisions it works under. Updated 2026-11-05.
   one chain through shared scratch images. Beta 4 (engine id 68) draws each face into its scratch
   image and leaves the copy out: 136.8 to 141.5 FPS at the lamp spot (GPU 7.31 to 7.07 ms), no face
   put back. Since 0.4.4: 135.0 to 141.5 FPS. Beta 5 (engine id 69) folds each face's clear into its
-  render pass and labels image clears in the GPU profile: 143.5 FPS at the lamp spot (GPU 6.96 ms),
-  fold on. Beta 6 (engine id 70) guards the fold against a pass smaller than the face.
+  render pass and labels image clears in the GPU profile: 141.2 to 143.5 FPS at the lamp spot (GPU
+  7.08 to 6.96 ms). Beta 6 (engine id 70) guards the fold against a pass smaller than the face.
+  Step 1 so far: 135.0 to 143.5 FPS at the lamp spot (−0.44 ms), 122.2 to 130.3 at the second
+  (−0.51 ms).
 - **Where the work goes:** the branch `claude/awesome-gates-cjba5e`, until a beta has its own
   (`claude/0.4.5-beta-N`).
 
@@ -184,9 +186,9 @@ involved.
 
 ### Waiting on the tester
 
-- **0.4.5 beta 5 at the lamp spot,** frame statistics and GPU time on: the FPS with
-  `BB_SHADOW_CLEAR_FOLD` on and off (the profile's `image clear` lines with it off). Beta 4's
-  shadows looked the same to the tester (2026-11-05); a check in other lamp-lit areas is coming.
+- **A check of the lamp shadows in other lamp-lit areas** on beta 6 (Yahar'gul, Cathedral Ward,
+  chalice dungeons): `faces put back` should stay at zero. Beta 4's and 5's shadows looked the same
+  to the tester at the lamp spot (2026-11-05).
 - **Optional, on beta 2 as it is:** `BB_SHADER_DISASM=2da7fe60` in Extra variables puts the code of
   the indirect dispatch that costs 0.12–0.14 ms into the log, for step 2.
 - **Whether to do the copy shader's move** (about 0.1–0.2 ms, the riskiest of step 1).
