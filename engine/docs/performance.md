@@ -260,9 +260,17 @@ Found on 2026-11-05 in the 1.09 executable.
     instructions an iteration, branchy (118 and 88 branches), 84 reciprocals and square roots;
   - then appends the particle to one of two lists (`DS_APPEND`) and writes its 176 bytes back.
   - Its cost is particles × list entries, work the game asks for; nothing in it is a step the PC
-    could drop. What the engine's translation adds (registers: the code reaches v152; the
-    branches; the legacy multiply, 27 of them) is for step 2, and needs its compiled module from
-    the GPU cache (`0x000000002da7fe60_0.spv`) to measure.
+    could drop.
+  - **Its translation, read from the tester's GPU cache** (two modules, `0x000000002da7fe60_0.spv`
+    of two builds; 2026-11-05): clean. The same two loops (two `OpLoopMerge`), structured control
+    flow with no flag variables, the particle lists taken with one atomic per subgroup (the newer
+    module; 0.4.4 beta 19), 59 divisions for the reciprocals. The one systematic cost is
+    deliberate: all 2,882 float adds, subtracts and multiplies keep `NoContraction`, so they round
+    as GCN's unfused `v_mad_f32` does. Pixel shaders let the driver fuse them since 0.4.4
+    (`BB_FS_CONTRACT`, about 10% less code); compute shaders don't. Doing the same here might save
+    a tenth of its 0.12 ms, and the particles' state carries from frame to frame, so the last-bit
+    differences would add up (invisibly). Not taken: `2da7fe60` is closed as real work, cleanly
+    translated.
 - **Beta 1's one step, removed in beta 2** (`ExecuteGroupCountHLE`, `gds_group_count.comp`, for the
   record): one thread read the count, wrote `(groups, 1, 1)`, and added `groups` to the counter.
   It was checked against the GCN code (beta 18's dump) and the SPIR-V the engine made of it (the
