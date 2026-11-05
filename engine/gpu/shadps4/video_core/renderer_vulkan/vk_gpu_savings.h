@@ -145,6 +145,9 @@ struct Counters {
     // out, and faces put back into the cube's layer before or after the copy (ShadowRedirect).
     std::atomic<std::uint64_t> shadow_faces_redirected{0}, shadow_copies_skipped{0},
         shadow_restores_before{0}, shadow_restores_after{0};
+    // 0.4.5 beta 5: their clears done as the face's render pass began, or where the copy was left
+    // out (nothing drawn into the face).
+    std::atomic<std::uint64_t> shadow_clears_folded{0}, shadow_clears_late{0};
 };
 
 /// Runtime::CopyColorAndDepth's kinds: depth->colour by the shader (0.4.4 beta 17), by a copy;
@@ -279,11 +282,14 @@ inline void Report() {
     const double copies_left_out = take(c.shadow_copies_skipped) / s;
     const double restores_before = take(c.shadow_restores_before) / s;
     const double restores_after = take(c.shadow_restores_after) / s;
+    const double clears_folded = take(c.shadow_clears_folded) / s;
+    const double clears_late = take(c.shadow_clears_late) / s;
     std::printf("  GPU steps per second (0.4.5): empty draws skipped %.1f; rectangle copies "
                 "(a040875f) %.1f; lamp shadow faces drawn into the scratch image %.1f, their "
-                "copies left out %.1f, faces put back %.1f before the copy and %.1f after\n",
+                "copies left out %.1f, faces put back %.1f before the copy and %.1f after; their "
+                "clears in the face's pass %.1f, at the copy %.1f\n",
                 empty_draws, rect_copies, faces, copies_left_out, restores_before,
-                restores_after);
+                restores_after, clears_folded, clears_late);
 }
 
 } // namespace Vulkan::GpuSavings

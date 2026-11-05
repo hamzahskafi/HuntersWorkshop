@@ -33,6 +33,11 @@ and each costs about 5 µs however little it does (performance.md). The picture 
     should anything else touch a face or its scratch image in between, it copies the face back where
     the game drew it.
   - `BB_SHADOW_COPY_SKIP=0` in Extra variables draws and copies as the game does.
+- **The lamp shadow faces' clears done as each face's drawing begins** (beta 5). Each face was cleared
+  as a step of its own before its drawing; it is now cleared as the first command of the face's
+  render pass, with the same value. A face with nothing to draw is cleared where its copy is left
+  out, so the blur never reads an uncleared image. `BB_SHADOW_CLEAR_FOLD=0` in Extra variables clears
+  them on their own as in beta 4.
 - **Not kept:** beta 1 also ran the game's shader `a954e79d` as one step instead of its loop of
   atomics. It was exact, but the GPU time didn't move: the 0.21 ms a frame the profile showed for it
   was the work after it, which had no label of its own. Beta 2 removes it (and
@@ -53,12 +58,14 @@ and each costs about 5 µs however little it does (performance.md). The picture 
   shadow copies with their images and constants; and how many other draws came between
   (`Shadow trace 1 ...` to `Shadow trace 1: end of the frame`). It tells whether a face's four
   levels can be merged.
+- **Image clears have their own lines in the GPU profile** (beta 5: `image clear WxH`). Their time
+  used to go to the line before them.
 - **The frame statistics count** the draws left out and the rectangle copies (`GPU steps per second
   (0.4.5)`), and the log names the first kinds of draw left out with their depth registers. From
   beta 4 also the lamp shadow faces drawn into the scratch image, the copies left out, and the faces
   put back (the first 8 named, with why).
 
-**To test beta 4:** the lamp spot as before (frame statistics and GPU time on): the FPS, then the
-same with `BB_SHADOW_COPY_SKIP=0` in Extra variables. Look at the lamp shadows on walls and floors
-with it on and off: edges, the seams between a lamp's faces, and the soft fade at their rims should
-be the same. Anything different is a bug; the switch tells which change it is.
+**To test beta 5:** the lamp spot as before (frame statistics and GPU time on): the FPS, then the
+same with `BB_SHADOW_CLEAR_FOLD=0` in Extra variables. With it off, the GPU profile shows what the
+clears cost (`image clear 256x256, one layer` and the other sizes); with it on, those lines are gone.
+The lamp shadows should look as in beta 4.

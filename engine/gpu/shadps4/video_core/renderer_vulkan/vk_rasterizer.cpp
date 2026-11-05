@@ -2196,10 +2196,39 @@ struct ShadowRedirect {
     VAddr cube = 0, scratch = 0;
     u32 layer = 0;
     VideoCore::ImageId cube_id{}, scratch_id{};
+    // 0.4.5 beta 5: the face's clear, held until the face's render pass begins on the scratch
+    // image (ShadowRedirectPassBegun), or done where the copy is left out if nothing was drawn.
+    bool clear_pending = false;
+    vk::ClearValue pending_clear{};
     u32 restores = 0;
     bool disabled = false;
 };
 ShadowRedirect shadow_redirect;
+
+// 0.4.5 beta 5 (BB_SHADOW_CLEAR_FOLD): a redirected face's clear folded into its render pass.
+bool ShadowClearFoldOn() {
+    static const bool on = [] {
+        const char* env = std::getenv("BB_SHADOW_CLEAR_FOLD");
+        const bool enabled = !(env && env[0] == '0');
+        std::printf("GPU steps: lamp shadow faces' clears %s\n",
+                    enabled ? "done as their render pass begins (BB_SHADOW_CLEAR_FOLD=0: on their "
+                              "own)"
+                            : "done on their own (BB_SHADOW_CLEAR_FOLD=0)");
+        return enabled;
+    }();
+    return on;
+}
+
+// 0.4.5 beta 5: an image clear's own label in the GPU profile; its time went to the label before
+// it (the lamp shadow faces' clears to the previous face's blur).
+void MarkImageClear(const VideoCore::Image& image, u32 layers) {
+    if (auto* profiler = GpuProfiler::Get()) {
+        const u32 w = image.info.size.width, h = image.info.size.height;
+        profiler->Mark(0xC1EA0000ull ^ (u64(w) << 32) ^ (u64(h) << 16) ^ layers, [w, h, layers] {
+            return fmt::format("image clear {}x{}{}", w, h, layers == 1 ? ", one layer" : "");
+        });
+    }
+}
 constexpr u32 SHADOW_REDIRECT_TRUST = 4;
 constexpr u32 SHADOW_REDIRECT_MAX_RESTORES = 64;
 
@@ -2610,6 +2639,7 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     UpdateDynamicState(pipeline, is_indexed);
     MarkPass(pipeline, state);
     scheduler.BeginRendering(state);
+    ShadowRedirectPassBegun(pipeline); // 0.4.5 beta 5
 
     const auto& vs_info = pipeline->GetStage(Shader::SwStage::Vertex);
     const auto& fetch_shader = pipeline->GetFetchShader();
@@ -2819,6 +2849,7 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
     UpdateDynamicState(pipeline, is_indexed);
     MarkPass(pipeline, state);
     scheduler.BeginRendering(state);
+    ShadowRedirectPassBegun(pipeline); // 0.4.5 beta 5
 
     ASSERT(stride == (is_indexed ? sizeof(VkDrawIndexedIndirectCommand)
                                  : sizeof(VkDrawIndirectCommand)));
@@ -3275,9 +3306,15 @@ bool Rasterizer::ShadowRedirectClear(VideoCore::ImageId cube_id, u32 layer,
         scratch.info.num_samples != 1 || scratch.info.props.is_depth) {
         return false;
     }
-    runtime.ClearImage(&scratch, {.base = {.level = 0, .layer = 0}, .extent = {.levels = 1,
-                                                                              .layers = 1}},
-                       clear);
+    if (ShadowClearFoldOn()) {
+        r.clear_pending = true;
+        r.pending_clear = clear;
+    } else {
+        MarkImageClear(scratch, 1);
+        runtime.ClearImage(&scratch,
+                           {.base = {.level = 0, .layer = 0}, .extent = {.levels = 1, .layers = 1}},
+                           clear);
+    }
     r.state = ShadowRedirect::State::Drawing;
     r.cube = cube.info.guest_address;
     r.scratch = learned->scratch;
@@ -3419,6 +3456,18 @@ bool Rasterizer::ShadowRedirectDispatch(const Shader::Info& cs, bool indirect) {
         const FaceCopy face = ReadFaceCopy(cs);
         if (face.valid && face.cube == r.cube && face.layer == r.layer &&
             face.scratch == r.scratch) {
+            if (r.clear_pending) {
+                // Nothing was drawn into the face: its clear is all the copy would carry.
+                r.clear_pending = false;
+                auto& scratch = texture_cache.GetImage(r.scratch_id);
+                if (scratch.info.guest_address == r.scratch) {
+                    runtime.ClearImage(&scratch,
+                                       {.base = {.level = 0, .layer = 0},
+                                        .extent = {.levels = 1, .layers = 1}},
+                                       r.pending_clear);
+                    GpuSavings::Count(GpuSavings::Get().shadow_clears_late);
+                }
+            }
             r.state = ShadowRedirect::State::Copied;
             GpuSavings::Count(GpuSavings::Get().shadow_copies_skipped);
             return true;
@@ -3426,6 +3475,34 @@ bool Rasterizer::ShadowRedirectDispatch(const Shader::Info& cs, bool indirect) {
     }
     ShadowRedirectRestore("a dispatch");
     return false;
+}
+
+// 0.4.5 beta 5: the face's render pass has begun on the scratch image: its held clear, as the
+// pass's first command (vkCmdClearAttachments over the whole image, the value ClearImage used).
+void Rasterizer::ShadowRedirectPassBegun(const GraphicsPipeline* pipeline) {
+    auto& r = shadow_redirect;
+    if (!r.clear_pending || r.state != ShadowRedirect::State::Drawing ||
+        (pipeline->GetGraphicsKey().mrt_mask & 1) == 0 || !cb_descs[0].first) {
+        return;
+    }
+    auto& image = texture_cache.GetImage(cb_descs[0].first);
+    const auto& info = image.info;
+    if (info.guest_address != r.scratch) {
+        return;
+    }
+    r.clear_pending = false;
+    image.flags |= VideoCore::ImageFlagBits::GpuModified; // as ClearImage marks it
+    image.flags &= ~VideoCore::ImageFlagBits::Dirty;
+    const vk::ClearAttachment attachment{.aspectMask = vk::ImageAspectFlagBits::eColor,
+                                         .colorAttachment = 0,
+                                         .clearValue = r.pending_clear};
+    const vk::ClearRect rect{.rect = {{0, 0}, {info.size.width, info.size.height}},
+                             .baseArrayLayer = 0,
+                             .layerCount = 1};
+    scheduler.Record([attachment, rect](vk::CommandBuffer cmdbuf) {
+        cmdbuf.clearAttachments(attachment, rect);
+    });
+    GpuSavings::Count(GpuSavings::Get().shadow_clears_folded);
 }
 
 void Rasterizer::ShadowRedirectFrame() {
@@ -3446,6 +3523,30 @@ void Rasterizer::ShadowRedirectRestore(const char* why) {
     r.state = ShadowRedirect::State::Idle;
     auto& scratch = texture_cache.GetImage(r.scratch_id);
     auto& cube = texture_cache.GetImage(r.cube_id);
+    if (r.clear_pending) {
+        // 0.4.5 beta 5: nothing drawn yet, the clear still held: the cube's layer gets the clear
+        // where the game put it, and the scratch image keeps what it held, as without the redirect.
+        r.clear_pending = false;
+        if (cube.info.guest_address == r.cube) {
+            runtime.ClearImage(&cube,
+                               {.base = {.level = 0, .layer = r.layer},
+                                .extent = {.levels = 1, .layers = 1}},
+                               r.pending_clear);
+        }
+        GpuSavings::Count(GpuSavings::Get().shadow_restores_before);
+        if (r.restores < 8) {
+            std::printf("GPU steps: a lamp shadow face's clear put back on cube @%llx layer %u "
+                        "(%s)\n",
+                        static_cast<unsigned long long>(r.cube), r.layer, why);
+        }
+        if (++r.restores == SHADOW_REDIRECT_MAX_RESTORES) {
+            r.disabled = true;
+            std::printf("GPU steps: lamp shadow faces put back %u times; the redirect is off for "
+                        "this session\n",
+                        SHADOW_REDIRECT_MAX_RESTORES);
+        }
+        return;
+    }
     if (scratch.info.guest_address != r.scratch || cube.info.guest_address != r.cube) {
         r.disabled = true;
         std::printf("GPU steps: a lamp shadow face could not be put back (%s): its images went "
@@ -4484,6 +4585,7 @@ bool Rasterizer::IsComputeImageClear(const Pipeline* pipeline) {
     if (one_layer && ShadowRedirectClear(image1_id, layer, clear)) {
         return true;
     }
+    MarkImageClear(image1, range.extent.layers); // 0.4.5 beta 5
     runtime.ClearImage(&image1, range, clear);
     return true;
 }
