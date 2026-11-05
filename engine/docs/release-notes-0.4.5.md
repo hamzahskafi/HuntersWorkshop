@@ -38,6 +38,16 @@ and each costs about 5 µs however little it does (performance.md). The picture 
   render pass, with the same value. A face with nothing to draw is cleared where its copy is left
   out, so the blur never reads an uncleared image. `BB_SHADOW_CLEAR_FOLD=0` in Extra variables clears
   them on their own as in beta 4.
+  - **First run** (`20261105_230744`, fold on): 143.5 FPS at the lamp spot (GPU 6.96 ms a frame) and
+    130.3 at the second spot (7.67 ms), against beta 4's 141.5 and 127.9 in another session; the
+    run with the fold off gives the exact difference. Three quarters of the clears went into the
+    face's pass, the rest were faces with nothing drawn; no face put back. Since 0.4.4: 135.0 to
+    143.5 FPS at the lamp spot.
+  - **Beta 6:** a face drawn with a depth image smaller than itself would have a render pass
+    smaller than the face, and a clear folded into it would reach outside the pass (not allowed in
+    Vulkan) and leave the rest uncleared. Such a face's clear is now done before its pass, on its
+    own. Bloodborne's faces use depth images of their own size (both traces), so nothing changes in
+    play. (Found by the tester's build review.)
 - **Not kept:** beta 1 also ran the game's shader `a954e79d` as one step instead of its loop of
   atomics. It was exact, but the GPU time didn't move: the 0.21 ms a frame the profile showed for it
   was the work after it, which had no label of its own. Beta 2 removes it (and

@@ -2639,7 +2639,7 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     UpdateDynamicState(pipeline, is_indexed);
     MarkPass(pipeline, state);
     scheduler.BeginRendering(state);
-    ShadowRedirectPassBegun(pipeline); // 0.4.5 beta 5
+    ShadowRedirectPassBegun(pipeline, state); // 0.4.5 beta 5
 
     const auto& vs_info = pipeline->GetStage(Shader::SwStage::Vertex);
     const auto& fetch_shader = pipeline->GetFetchShader();
@@ -2849,7 +2849,7 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
     UpdateDynamicState(pipeline, is_indexed);
     MarkPass(pipeline, state);
     scheduler.BeginRendering(state);
-    ShadowRedirectPassBegun(pipeline); // 0.4.5 beta 5
+    ShadowRedirectPassBegun(pipeline, state); // 0.4.5 beta 5
 
     ASSERT(stride == (is_indexed ? sizeof(VkDrawIndexedIndirectCommand)
                                  : sizeof(VkDrawIndirectCommand)));
@@ -3394,6 +3394,23 @@ void Rasterizer::ShadowRedirectDraw(const GraphicsPipeline* pipeline) {
             // The next draw's cb 0 is looked up again: the slot no longer describes the face.
             last_targets[0].key_size = 0;
             last_targets[0].generation = ~0ULL;
+            // 0.4.5 beta 6: the held clear covers the whole scratch image, a render pass only
+            // its smallest attachment (BeginRenderingFull: the colour target at its mip, the
+            // depth image whole). With a depth image smaller than the face, folding it into the
+            // pass would reach outside the render area (not allowed) and leave the rest
+            // uncleared: it is done here, before the pass, on its own.
+            if (r.clear_pending && db_desc.first) {
+                const auto& depth = texture_cache.GetImage(db_desc.first).info;
+                if (depth.size.width < scratch.info.size.width ||
+                    depth.size.height < scratch.info.size.height) {
+                    r.clear_pending = false;
+                    runtime.ClearImage(&scratch,
+                                       {.base = {.level = 0, .layer = 0},
+                                        .extent = {.levels = 1, .layers = 1}},
+                                       r.pending_clear);
+                    GpuSavings::Count(GpuSavings::Get().shadow_clears_late);
+                }
+            }
             return;
         }
         if (!touches(r.cube) && !touches(r.scratch)) {
@@ -3479,7 +3496,8 @@ bool Rasterizer::ShadowRedirectDispatch(const Shader::Info& cs, bool indirect) {
 
 // 0.4.5 beta 5: the face's render pass has begun on the scratch image: its held clear, as the
 // pass's first command (vkCmdClearAttachments over the whole image, the value ClearImage used).
-void Rasterizer::ShadowRedirectPassBegun(const GraphicsPipeline* pipeline) {
+void Rasterizer::ShadowRedirectPassBegun(const GraphicsPipeline* pipeline,
+                                         const RenderState& state) {
     auto& r = shadow_redirect;
     if (!r.clear_pending || r.state != ShadowRedirect::State::Drawing ||
         (pipeline->GetGraphicsKey().mrt_mask & 1) == 0 || !cb_descs[0].first) {
@@ -3490,13 +3508,25 @@ void Rasterizer::ShadowRedirectPassBegun(const GraphicsPipeline* pipeline) {
     if (info.guest_address != r.scratch) {
         return;
     }
+    if (state.width < info.size.width || state.height < info.size.height) {
+        // ShadowRedirectDraw clears before such a pass; a smaller area here is unexpected. The
+        // clear stays within the render area (as Vulkan requires), and it is said once.
+        static bool said = false;
+        if (!std::exchange(said, true)) {
+            std::printf("GPU steps: a lamp shadow face's pass covers %ux%u of its %ux%u scratch "
+                        "image; its clear covers the pass\n",
+                        state.width, state.height, info.size.width, info.size.height);
+        }
+    }
+    const u32 clear_width = std::min<u32>(info.size.width, state.width);
+    const u32 clear_height = std::min<u32>(info.size.height, state.height);
     r.clear_pending = false;
     image.flags |= VideoCore::ImageFlagBits::GpuModified; // as ClearImage marks it
     image.flags &= ~VideoCore::ImageFlagBits::Dirty;
     const vk::ClearAttachment attachment{.aspectMask = vk::ImageAspectFlagBits::eColor,
                                          .colorAttachment = 0,
                                          .clearValue = r.pending_clear};
-    const vk::ClearRect rect{.rect = {{0, 0}, {info.size.width, info.size.height}},
+    const vk::ClearRect rect{.rect = {{0, 0}, {clear_width, clear_height}},
                              .baseArrayLayer = 0,
                              .layerCount = 1};
     scheduler.Record([attachment, rect](vk::CommandBuffer cmdbuf) {

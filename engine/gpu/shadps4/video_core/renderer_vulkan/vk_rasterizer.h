@@ -433,7 +433,7 @@ private:
     void ShadowRedirectDraw(const GraphicsPipeline* pipeline);
     bool ShadowRedirectDispatch(const Shader::Info& cs, bool indirect);
     void ShadowRedirectFrame();
-    void ShadowRedirectPassBegun(const GraphicsPipeline* pipeline);
+    void ShadowRedirectPassBegun(const GraphicsPipeline* pipeline, const RenderState& state);
     void ShadowRedirectRestore(const char* why);
     bool DrawSamples(const GraphicsPipeline* pipeline, VAddr address) const;
     /// bbport: for a pipeline still compiling, records its bind as a command of its own, which a

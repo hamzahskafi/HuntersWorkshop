@@ -9,7 +9,8 @@ What comes next, and the rules and decisions it works under. Updated 2026-11-05.
   one chain through shared scratch images. Beta 4 (engine id 68) draws each face into its scratch
   image and leaves the copy out: 136.8 to 141.5 FPS at the lamp spot (GPU 7.31 to 7.07 ms), no face
   put back. Since 0.4.4: 135.0 to 141.5 FPS. Beta 5 (engine id 69) folds each face's clear into its
-  render pass and labels image clears in the GPU profile.
+  render pass and labels image clears in the GPU profile: 143.5 FPS at the lamp spot (GPU 6.96 ms),
+  fold on. Beta 6 (engine id 70) guards the fold against a pass smaller than the face.
 - **Where the work goes:** the branch `claude/awesome-gates-cjba5e`, until a beta has its own
   (`claude/0.4.5-beta-N`).
 
