@@ -29,7 +29,7 @@ that has been done. Paths are relative to `engine/`; shadPS4's (`video_core/...`
 - **After 0.4.4 (2026-11-05):** the VRAM cleanup of the game's data unused for 3 minutes
   (`EvictIdleCopies`, from bbport) is behind almost every long frame left at 60 FPS, and it churns
   uploads while VRAM has room. The evidence: [performance.md](performance.md); the work:
-  [plan.md](plan.md), step 1.
+  [plan.md](plan.md), step 3 (after the GPU steps, the tester's call).
 - **Not done:** step 1's per-frame figures and light hitch report, step 3.3 (pinning at load, model
   only) and step 3.4 (the full-screen image). Cause 3 (image memory per image) is as it was.
 

@@ -68,98 +68,99 @@ The decisions that still stand. How each was reached is in [archive/plan-0.4.4.m
 
 ## Now: performance
 
-The work after 0.4.4, in order. The evidence for each step is in [performance.md](performance.md).
-On the tester's PC the targets are smoothness at every frame rate, and about 1–1.3 ms back of a
-7.4 ms frame at the lamp spot without changing a setting or a pixel: 135 to about 155 FPS.
+The work after 0.4.4, in order: the tester's call (2026-11-05) puts fewer GPU steps first and the
+memory cleanup after them. The evidence for each item is in [performance.md](performance.md).
 
-**Step 0: measurements, no change in behaviour.**
+- **The targets:** about 1–1.3 ms back of a 7.4 ms frame at the lamp spot without changing a setting
+  or a pixel (135 to about 155 FPS), then smoothness at every frame rate.
+- **No measurement beta first.** The tester's logs already hold what the first items need (the copy
+  shader's movable copies counted since beta 18, `a954e79d` and `a040875f` decoded in beta 18). Each
+  change comes behind a switch, and its gain is the lamp spot's FPS with it on and off.
+- **What the logs don't hold yet comes with the first beta's changes:** a counter per item that shows
+  it acting, the empty draws' depth targets and `DB_RENDER_CONTROL` bits, and `BB_SHADER_DISASM` for
+  vertex and pixel shaders.
 
-- **Per VRAM cleanup:** MiB and blocks, stage B's time in it, whether a submission waited for its
-  bind, and how many blocks come back within 10 minutes of leaving (the churn).
-- **The minute line names its long frames by cause:** cleanup, load, bind wait, upload, compile
-  or write faults.
-- **GPU time per pass without the profiler's drain:** timestamps at pass ends only. That gives
-  the 2.2 ms in the profile's long tail and the real cost of a pass restart.
-- **The empty full-screen draws:** the depth target each one points at, and the depth unit's
-  bits (`DB_RENDER_CONTROL`).
-- **`BB_SHADER_DISASM` for vertex and pixel shaders** at their first draw, not only compute.
-- **A fixed route for every comparison:** the lamp spot under the 240 limit for 2 minutes; a
-  10-minute run at 60 FPS through one area; a chalice dungeon layer.
+**Step 1: fewer GPU steps.** Each item gives the same picture, bit for bit where a shader's output is
+involved.
 
-**Step 1: memory, for smoothness at every frame rate.**
-
-- **Evict by the VRAM budget, not by age alone.** While VRAM is below a share of the driver's
-  budget (`VK_EXT_memory_budget`, which `UpdateVramLevel` already reads), nothing leaves; above
-  that share, the oldest leaves first. The 8 GB laptops the cleanup was added for stay covered,
-  since their budget fills.
-- **Paced:** in play, at most a set amount a second; larger batches during loading screens.
-- **The bind waits only for the work that used the evicted blocks.** This needs a last-use tick
-  per block; until then, the unbinds go in batches on loading screens.
-- **Expected:** 3 of the 4 long-frame minutes of the 217 gone, with the uploads and write faults
-  of the churn.
-- **Later, if the logs still show stutter after loads:** eFMann's ideas ([archive/hitches-2026-10.md](archive/hitches-2026-10.md),
-  "Smoothness leads").
-
-**Step 2: fewer GPU steps.** Each item gives the same picture, bit for bit where a shader's
-output is involved.
-
-- **The copy shader: about 0.3–0.5 ms.** Gather its copies ahead of the render pass and run them
-  in a few larger dispatches, whenever they don't read what the pass draws. Only the order and
-  the number of dispatches change.
-- **The dynamic lights' shadows: about 0.5 ms.**
-  - Each face's filter levels in one compute dispatch instead of four passes, shipped only if
-    its output is bit for bit the passes'. This needs the pixel shader `0f61fd27` read first.
-  - The 48 `a040875f` copies in one dispatch.
-  - The shadow images kept in one layout, so no transitions.
-- **`a954e79d`: about 0.2 ms.** Run it wide in the engine, or beside graphics on a compute queue.
-- **The empty full-screen draws: about 0.1 ms.** Skip a draw with no target, no pixel shader, a
-  vertex shader without memory writes and no occlusion query open. It writes nothing on the PC,
-  whatever the game meant it for.
+- **Ready now:**
+  - **The empty full-screen draws: about 0.1 ms.** Skip a draw with no target, no pixel shader, a
+    vertex shader without memory writes and no occlusion query open. It writes nothing on the PC,
+    whatever the game meant it for.
+  - **The copy shader: about 0.3–0.5 ms.** Gather its copies ahead of the render pass and run them in
+    a few larger dispatches, whenever they don't read what the pass draws. Only the order and the
+    number of dispatches change.
+  - **The shadows' 48 `a040875f` copies: about 0.2 ms,** in one dispatch while their rectangles
+    don't overlap.
+  - **`a954e79d`: about 0.2 ms.** Run it wide in the engine, with the same counter result, or beside
+    graphics on a compute queue.
+- **Once the filter's pixel shader `0f61fd27` is read:** the shadows' filter chains, about 0.25 ms.
+  - Each face's levels in one compute dispatch instead of four passes, shipped only if its output is
+    bit for bit the passes';
+  - the shadow images kept in one layout, so no transitions.
 - **Smaller items:** `mem-4`; `upscale-2` and `-3` (0.29 ms at Quality, nothing at DLAA); the GPU
   idle between submissions (0.1 ms).
 
-**Step 3: shader code.** It acts on the shading, the part of the frame that scales with pixels
+**Step 2: shader code.** It acts on the shading, the part of the frame that scales with pixels
 (1.5–2 ms at 1080p).
 
-- Rank the game's shaders by GPU time from step 0, then check the top ones with
-  `bb-shader-gpu-stats` (`native_shader_compiler.md`). Look at registers and occupancy, inputs
-  still interpolated by GCN's formula (321 of 1,201), and the legacy multiply.
+- Rank the game's shaders by GPU time, then check the top ones with `bb-shader-gpu-stats`
+  (`native_shader_compiler.md`). Look at registers and occupancy, inputs still interpolated by GCN's
+  formula (321 of 1,201), and the legacy multiply.
 - Vertex shader contraction with an invariant position (`shader-5`, about 4% of vertex code).
-- The native compiler's step 2 (control flow without goto variables): measured in the lab
-  first, and built only if the hot shaders gain.
+- The native compiler's step 2 (control flow without goto variables): measured in the lab first, and
+  built only if the hot shaders gain.
+
+**Step 3: the memory cleanup, for smoothness at every frame rate.**
+
+- **Evict by the VRAM budget, not by age alone.** While VRAM is below a share of the driver's budget
+  (`VK_EXT_memory_budget`, which `UpdateVramLevel` already reads), nothing leaves; above that share,
+  the oldest leaves first. The 8 GB laptops the cleanup was added for stay covered, since their budget
+  fills.
+- **Paced:** in play, at most a set amount a second; larger batches during loading screens.
+- **The bind waits only for the work that used the evicted blocks.** This needs a last-use tick per
+  block; until then, the unbinds go in batches on loading screens.
+- **With it, the counters:** MiB and blocks per cleanup, stage B's time in it, bind waits, and blocks
+  coming back within 10 minutes (the churn).
+- **Expected:** 3 of the 4 long-frame minutes of the 217 gone, with the uploads and write faults of
+  the churn.
+- **Later, if the logs still show stutter after loads:** eFMann's ideas
+  ([archive/hitches-2026-10.md](archive/hitches-2026-10.md), "Smoothness leads").
 
 **Step 4: the CPU, for other PCs.**
 
-- Stage B on two threads (`parallel-stageb.md`, approach B), once a 6-core CPU or a frame rate
-  above about 230 FPS makes it the limit.
+- Stage B on two threads (`parallel-stageb.md`, approach B), once a 6-core CPU or a frame rate above
+  about 230 FPS makes it the limit.
 - The small CPU items with it: `idle-1`, `pipe-1`, `asc-2` and `rt-1`.
 
 **Later, if at all:**
 
+- A GPU timer at pass ends that doesn't wait at each label, if an item's gain needs a finer measure
+  than FPS.
 - Serve the copy shader's ranges from the engine's snapshots, so no copy runs (not the PC memory
   model; see performance.md).
-- Draws built from the game's GX objects and barriers taken from its drain calls, as bbhost does:
-  a renderer of a different kind, not a step of this plan.
+- Draws built from the game's GX objects and barriers taken from its drain calls, as bbhost does: a
+  renderer of a different kind, not a step of this plan.
 
 **Not reopened:**
 
 - `seg-1`, `renderer-3`, `renderer-4`, `renderer-6` and the refuted ideas (`engine-map.md` 5).
-- The October hitch leads (the game's job threads, the online summon, the PC memory model):
-  fixed, removed, or not the cause in 0.4.4's logs.
+- The October hitch leads (the game's job threads, the online summon, the PC memory model): fixed,
+  removed, or not the cause in 0.4.4's logs.
 
 ### Waiting on the tester
 
-- **The cleanup off, one session:** an hour at 60 FPS, ideally a chalice dungeon, with
-  `BB_VRAM_CLEANUP_SECONDS=0` in Extra variables. The launcher's "VRAM cleanup" row is another
-  cleanup, of textures, and stays on.
-- **The shadow and copy shaders, read before step 2's shader work.** They can come from the GPU
-  cache folder (`<user>\cache\CUSA03173\0x<hash>_<n>.bbs`), or from Log options → Capture shaders
+- **The filter and face shaders, before step 1's filter work.** They can come from the GPU cache folder
+  (`<user>\cache\CUSA03173\0x<hash>_<n>.bbs`), or from Log options → Capture shaders
   (`logs\shaders`). The hashes:
   - `0f61fd27` and `0b0acf50`: the filter;
   - `167daba6` and `1ae03d75`: the faces;
   - `a954e79d`.
 
   Read here only; game data never goes into the repository.
+- **The cleanup off, one session, before step 3 (whenever it suits):** an hour at 60 FPS, ideally a
+  chalice dungeon, with `BB_VRAM_CLEANUP_SECONDS=0` in Extra variables. The launcher's "VRAM cleanup"
+  row is another cleanup, of textures, and stays on.
 
 ## Next, after the performance work
 
