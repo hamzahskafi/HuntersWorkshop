@@ -252,6 +252,17 @@ Found on 2026-11-05 in the 1.09 executable.
   frame (23–27 µs each), the dispatch `a954e79d` prepares. `a954e79d` itself is no longer among
   the top 30 labels (under 0.065 ms a frame). `2da7fe60`'s groups come from `a954e79d`'s count, so
   its time is work the game asks for; what it does is for step 2 (`BB_SHADER_DISASM=2da7fe60`).
+- **`2da7fe60` is the game's particle update** (its code from the tester's log `20261105_224539`,
+  23,876 bytes, 4,969 instructions, 32 threads a group, groups from `a954e79d`'s count):
+  - each thread takes one particle from a list kept in GDS (`DS_CONSUME`), loads its 176 bytes of
+    state (half floats, 11 typed loads) and reads 25 values from two parameter textures;
+  - then two loops over lists the game keeps (likely forces and colliders): about 2,000 and 1,700
+    instructions an iteration, branchy (118 and 88 branches), 84 reciprocals and square roots;
+  - then appends the particle to one of two lists (`DS_APPEND`) and writes its 176 bytes back.
+  - Its cost is particles × list entries, work the game asks for; nothing in it is a step the PC
+    could drop. What the engine's translation adds (registers: the code reaches v152; the
+    branches; the legacy multiply, 27 of them) is for step 2, and needs its compiled module from
+    the GPU cache (`0x000000002da7fe60_0.spv`) to measure.
 - **Beta 1's one step, removed in beta 2** (`ExecuteGroupCountHLE`, `gds_group_count.comp`, for the
   record): one thread read the count, wrote `(groups, 1, 1)`, and added `groups` to the counter.
   It was checked against the GCN code (beta 18's dump) and the SPIR-V the engine made of it (the
