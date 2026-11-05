@@ -129,8 +129,27 @@ investigation, "Smoothness leads", the engine map's open ideas) with one order b
     20 passes a frame begin again after one.
   - The 5 single-workgroup dispatches of `a954e79d` take 37 µs each, while one workgroup keeps
     one of the GPU's 48 SMs busy.
-  - The pass at 32768×32768 with no targets (vertex shader only) runs 12.6 times a frame, at
-    7.9 µs each.
+  - The pass at 32768×32768 with no targets runs 12.6 times a frame, at 7.9 µs each. What it is
+    (found 2026-11-05, in the 1.09 executable):
+    - Its vertex shader `89cda9e4` is one of the game's built-in shaders, at 0x56bbde0. That is
+      the toolkit block of Sony's graphics library, beside the copy shader (`fefebf9f`) and
+      `a040875f`.
+    - It is 14 instructions: a full-screen rectangle from the vertex number, with no memory
+      writes. The game's init (0x2ab2030) loads it into 0x586c530, and five toolkit functions draw
+      with it: 0x2ab55a0, 0x2ab5a70, 0x2ab5f50 (eight callers in the game), 0x2ab6810 and
+      0x2ab6cb0.
+    - The draws in this pass have no pixel shader, no colour target and neither depth nor
+      stencil test on. On the PS4, such a draw does its work in the depth unit's compression
+      data (HTILE). This is how GCN drivers expand a depth buffer before it is sampled, which is
+      what radeonsi's depth flush does.
+    - On the PC there is no HTILE, so the draw does nothing: an empty pass at the largest size,
+      whose cost is its fixed one.
+    - The rate (12.6 a frame) matches the dynamic lights' shadow maps (12 of each filter size a
+      frame). The shadow A/B below confirms the tie.
+    - The same shader with depth on (256×256 D32, 784×784 D32S8) or with pixel shader
+      `38d65b32` (1920×1080 colour) is the toolkit's clears and copies. Those do real work.
+    - Not checked yet: the depth unit's register bits on these draws (`DB_RENDER_CONTROL`). A
+      counter will show them.
   - The profiler waits at each label, but it costs only 0.1–0.2 ms a frame in all
     (`engine-map.md` 1.4). So the steps already ran one after the other without it.
 - **The likely shares of the 7.4 ms:**
@@ -212,9 +231,15 @@ minutes each, with the GPU profile on (as `20261102_231754`):
 estimates are from the 134 FPS profile.
 
 - **The copy shader: 0.5–0.7 ms.** That is 64 dispatches, about 130 copy batches and 20 pass
-  restarts a frame. Its sources are mostly snapshots of CPU data. Two options:
-  - serve the copied ranges from their sources, so no copy runs;
-  - run the copies ahead of the render pass whenever they don't read what the pass draws.
+  restarts a frame. Its sources are mostly small snapshots of CPU data, 2.9 KiB on average, that
+  the engine already makes.
+  - **First:** gather the copies ahead of the render pass and run them in a few larger
+    dispatches, whenever they don't read what the pass draws. Only the order and the number of
+    dispatches change.
+  - **Later, if at all:** serve the copied ranges from those snapshots, so no copy runs. That is
+    not the PC memory model, which kept all of the game's memory in system RAM and moved blocks
+    in and out of VRAM. But the snapshots are reused within a frame or two, so the engine would
+    have to track each redirect: harder, and riskier.
 - **The game's small compute work: about 0.45 ms, with the GPU nearly idle.**
   - `a954e79d` (a `ds_append` loop on one workgroup, 5 a frame): rewrite it wide in the engine,
     or overlap it with graphics on a compute queue.
@@ -225,7 +250,9 @@ estimates are from the 134 FPS profile.
 - **Smaller items:**
   - `mem-4`;
   - `upscale-2` and `-3` (0.29 ms at Quality, nothing at DLAA);
-  - the vertex-only pass at 32768×32768: 12.6 a frame, 0.1 ms, origin unknown;
+  - the empty HTILE draws (the 32768×32768 pass, 12.6 a frame, 0.1 ms with its pass breaks)
+    skipped: a draw with no targets, no pixel shader, a vertex shader without memory writes and
+    no occlusion query open writes nothing on the PC;
   - the GPU idle between submissions: 0.1 ms.
 - **Together, about 1–1.5 ms of the 7.4**, which is 134 FPS to about 160 at that spot.
 
