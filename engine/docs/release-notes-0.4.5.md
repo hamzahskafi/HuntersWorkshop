@@ -20,6 +20,15 @@ and each costs about 5 µs however little it does (performance.md). The picture 
     135.0 to 137.0 FPS (GPU 7.40 to 7.30 ms a frame), and 122.2 to 123.7 FPS at the second spot
     (8.18 to 8.08 ms).
   - `BB_SKIP_EMPTY_DRAWS=0` in Extra variables draws them as before.
+- **Lamp shadow faces drawn where the game copies them** (beta 4). Each lamp's shadow is a cube map
+  of six faces; the game draws each face, copies it whole into a scratch image and blurs it from
+  there back into the face (48 faces a frame at the tester's lamp spot). The engine now draws the face
+  straight into the scratch image, so the copy has nothing to do and is left out; the blur writes the
+  face as before. Expected: about 0.25 ms a frame where lamps cast shadows.
+  - The engine learns each lamp's scratch image from the game's own copies first (4 of them), and
+    should anything else touch a face or its scratch image in between, it copies the face back where
+    the game drew it.
+  - `BB_SHADOW_COPY_SKIP=0` in Extra variables draws and copies as the game does.
 - **Not kept:** beta 1 also ran the game's shader `a954e79d` as one step instead of its loop of
   atomics. It was exact, but the GPU time didn't move: the 0.21 ms a frame the profile showed for it
   was the work after it, which had no label of its own. Beta 2 removes it (and
@@ -41,8 +50,11 @@ and each costs about 5 µs however little it does (performance.md). The picture 
   (`Shadow trace 1 ...` to `Shadow trace 1: end of the frame`). It tells whether a face's four
   levels can be merged.
 - **The frame statistics count** the draws left out and the rectangle copies (`GPU steps per second
-  (0.4.5)`), and the log names the first kinds of draw left out with their depth registers.
+  (0.4.5)`), and the log names the first kinds of draw left out with their depth registers. From
+  beta 4 also the lamp shadow faces drawn into the scratch image, the copies left out, and the faces
+  put back (the first 8 named, with why).
 
-**To test beta 3:** the lamp spot, with frame statistics and GPU time on (Log page), for about a
-minute in all: the first trace comes about 5 seconds after lamp shadows appear, the second about 40
-seconds later. The FPS should match beta 2's.
+**To test beta 4:** the lamp spot as before (frame statistics and GPU time on): the FPS, then the
+same with `BB_SHADOW_COPY_SKIP=0` in Extra variables. Look at the lamp shadows on walls and floors
+with it on and off: edges, the seams between a lamp's faces, and the soft fade at their rims should
+be the same. Anything different is a bug; the switch tells which change it is.

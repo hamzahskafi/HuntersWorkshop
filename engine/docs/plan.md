@@ -6,7 +6,8 @@ What comes next, and the rules and decisions it works under. Updated 2026-11-05.
   (engine id 65) left out the empty draws: +2 FPS at the lamp spot (GPU 7.40 to 7.30 ms). Beta 2
   (engine id 66) removes beta 1's `a954e79d` step, which gained nothing, and brings the profile and
   log lines step 1 needs next. Beta 3 (engine id 67) traced the shadow steps: 48 faces a frame in
-  one chain through shared scratch images.
+  one chain through shared scratch images. Beta 4 (engine id 68) draws each face into its scratch
+  image and leaves the copy out.
 - **Where the work goes:** the branch `claude/awesome-gates-cjba5e`, until a beta has its own
   (`claude/0.4.5-beta-N`).
 
@@ -117,9 +118,12 @@ involved.
   copied whole into a scratch image and blurred back, with one scratch image per size shared by all
   faces of that size. No step can move past another face's, so the merges written after beta 2 are
   withdrawn.
-  - **What is left:** draw each face into the scratch image directly (its clear too) and skip the
-    copy; the blur then reads what the copy would have written. The engine follows the pattern once
-    seen and copies the scratch image into the layer itself if a face ever goes otherwise.
+  - **In beta 4** (`BB_SHADOW_COPY_SKIP=0` to turn off): each face drawn into the scratch image
+    directly (its clear too) and the copy left out; the blur then reads what the copy would have
+    written. The engine learns each cube's scratch image from 4 of the game's copies, and copies
+    the face back into the cube's layer if anything else touches either first. The blur must cover
+    the face (viewport and scissors checked; the quad itself is not read), or the face is put back
+    before it.
   - **And possibly the face's colour clear** folded into its render pass; its cost isn't known (the
     engine's image clears have no profile label yet).
 - **Smaller items:** `mem-4`; `upscale-2` and `-3` (0.29 ms at Quality, nothing at DLAA); the GPU
@@ -174,8 +178,9 @@ involved.
 
 ### Waiting on the tester
 
-- **Whether to skip the shadow copies** (about 0.25 ms; beta 3's trace, `20261105_053410`, showed
-  the face merge impossible), or to close step 1 and go on.
+- **0.4.5 beta 4 at the lamp spot,** frame statistics and GPU time on: the FPS with
+  `BB_SHADOW_COPY_SKIP` on and off, and the lamp shadows compared (edges, seams between faces, the
+  soft rims).
 - **Optional, on beta 2 as it is:** `BB_SHADER_DISASM=2da7fe60` in Extra variables puts the code of
   the indirect dispatch that costs 0.12–0.14 ms into the log, for step 2.
 - **Whether to do the copy shader's move** (about 0.1–0.2 ms, the riskiest of step 1).

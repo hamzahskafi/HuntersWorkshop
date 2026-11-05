@@ -141,6 +141,10 @@ struct Counters {
     // 0.4.5 beta 1: the game's rectangle copies (a040875f). What is recorded around them goes to
     // the log separately (NoteRecordedStep in vk_rasterizer.cpp).
     std::atomic<std::uint64_t> rect_copies{0};
+    // 0.4.5 beta 4: lamp shadow faces drawn into their blur's scratch image, their copies left
+    // out, and faces put back into the cube's layer before or after the copy (ShadowRedirect).
+    std::atomic<std::uint64_t> shadow_faces_redirected{0}, shadow_copies_skipped{0},
+        shadow_restores_before{0}, shadow_restores_after{0};
 };
 
 /// Runtime::CopyColorAndDepth's kinds: depth->colour by the shader (0.4.4 beta 17), by a copy;
@@ -271,9 +275,15 @@ inline void Report() {
                 overlaps[1], depth_uploads, depth_upload_mb);
     const double empty_draws = take(c.empty_draws_skipped) / s;
     const double rect_copies = take(c.rect_copies) / s;
+    const double faces = take(c.shadow_faces_redirected) / s;
+    const double copies_left_out = take(c.shadow_copies_skipped) / s;
+    const double restores_before = take(c.shadow_restores_before) / s;
+    const double restores_after = take(c.shadow_restores_after) / s;
     std::printf("  GPU steps per second (0.4.5): empty draws skipped %.1f; rectangle copies "
-                "(a040875f) %.1f\n",
-                empty_draws, rect_copies);
+                "(a040875f) %.1f; lamp shadow faces drawn into the scratch image %.1f, their "
+                "copies left out %.1f, faces put back %.1f before the copy and %.1f after\n",
+                empty_draws, rect_copies, faces, copies_left_out, restores_before,
+                restores_after);
 }
 
 } // namespace Vulkan::GpuSavings

@@ -2116,7 +2116,8 @@ static void ShadowTraceFrame() {
 // A dispatch in the traced frame: the copy shader's and others in a row grouped by shader;
 // a040875f's each on a line with its images and the first 12 dwords of its constant buffer, as the
 // CPU holds them.
-static void ShadowTraceDispatch(const Shader::Info& cs, const AmdGpu::ComputeProgram* program) {
+static void ShadowTraceDispatch(const Shader::Info& cs, const AmdGpu::ComputeProgram* program,
+                                bool skipped = false) {
     auto& t = shadow_trace;
     if (!t.active) {
         return;
@@ -2160,8 +2161,130 @@ static void ShadowTraceDispatch(const Shader::Info& cs, const AmdGpu::ComputePro
         }
         break;
     }
+    if (skipped) {
+        text += " (left out: the face was drawn into the scratch image)";
+    }
     ShadowTracePrint(text);
 }
+
+// 0.4.5 beta 4 (BB_SHADOW_COPY_SKIP): a lamp shadow face drawn into its blur's scratch image, and
+// the game's copy of the face into that image left out (Rasterizer::ShadowRedirect*). Beta 3's
+// trace: each face is cleared (the game's compute clear, IsComputeImageClear), drawn into a layer
+// of the light's cube map, copied whole by a040875f into a scratch image of its size, and blurred
+// from there back into the layer; nothing reads the layer between the drawing and the blur. Drawn
+// into the scratch image, the face is there as the copy would have left it, and the blur writes
+// the layer as before. The engine learns which scratch image a cube's faces are copied into (a
+// whole-face copy followed by the blur from that image into that face, 4 times), and from then on
+// sends the face's clear and drawing there, until the copy comes and is left out, and the blur
+// covering the face follows. Anything else touching the face or the scratch image before that
+// puts the face back into the cube's layer first (an image copy). Recorded by one thread at a time.
+namespace {
+struct ShadowRedirect {
+    struct Learned {
+        VAddr cube;
+        VAddr scratch;
+        u32 seen;
+    };
+    std::array<Learned, 16> learned{};
+    u32 num_learned = 0;
+    // A whole-face copy not left out: the pattern if the next draw is the blur from that image.
+    bool observed = false;
+    VAddr observed_cube = 0, observed_scratch = 0;
+    u32 observed_layer = 0;
+    enum class State { Idle, Drawing, Copied };
+    State state = State::Idle;
+    VAddr cube = 0, scratch = 0;
+    u32 layer = 0;
+    VideoCore::ImageId cube_id{}, scratch_id{};
+    u32 restores = 0;
+    bool disabled = false;
+};
+ShadowRedirect shadow_redirect;
+constexpr u32 SHADOW_REDIRECT_TRUST = 4;
+constexpr u32 SHADOW_REDIRECT_MAX_RESTORES = 64;
+
+bool ShadowRedirectOn() {
+    static const bool on = [] {
+        const char* env = std::getenv("BB_SHADOW_COPY_SKIP");
+        const bool enabled = !(env && env[0] == '0');
+        std::printf("GPU steps: lamp shadow faces %s\n",
+                    enabled ? "drawn into their blur's scratch image, the game's copy left out "
+                              "(BB_SHADOW_COPY_SKIP=0: as the game does)"
+                            : "drawn and copied as the game does (BB_SHADOW_COPY_SKIP=0)");
+        return enabled;
+    }();
+    return on && !shadow_redirect.disabled;
+}
+
+void ShadowRedirectLearn(VAddr cube, VAddr scratch) {
+    auto& r = shadow_redirect;
+    for (u32 i = 0; i < r.num_learned; ++i) {
+        auto& entry = r.learned[i];
+        if (entry.cube != cube) {
+            continue;
+        }
+        if (entry.scratch != scratch) {
+            entry = {cube, scratch, 1};
+        } else if (++entry.seen == SHADOW_REDIRECT_TRUST) {
+            std::printf("GPU steps: lamp shadow cube @%llx: faces drawn into the scratch image "
+                        "@%llx from now on\n",
+                        static_cast<unsigned long long>(cube),
+                        static_cast<unsigned long long>(scratch));
+        }
+        return;
+    }
+    if (r.num_learned < r.learned.size()) {
+        r.learned[r.num_learned++] = {cube, scratch, 1};
+    }
+}
+
+// a040875f copying one whole layer (mip 0) of an image into a one-layer image of the same size:
+// from (0, 0) to (0, 0), the whole size (its constants, as the CPU holds them).
+struct FaceCopy {
+    bool valid = false;
+    VAddr cube = 0, scratch = 0;
+    u32 layer = 0;
+};
+FaceCopy ReadFaceCopy(const Shader::Info& cs) {
+    FaceCopy face;
+    if (cs.pgm_hash != RECT_COPY_SHADER_HASH || cs.images.size() != 2) {
+        return face;
+    }
+    const Shader::ImageResource* read = nullptr;
+    const Shader::ImageResource* write = nullptr;
+    for (const auto& image : cs.images) {
+        (image.is_written ? write : read) = &image;
+    }
+    if (!read || !write) {
+        return face;
+    }
+    const auto src = read->GetSharp(cs);
+    const auto dst = write->GetSharp(cs);
+    if (src.base_level != 0 || src.last_level != 0 || src.base_array != src.last_array ||
+        dst.base_level != 0 || dst.last_level != 0 || dst.base_array != 0 ||
+        dst.last_array != 0 || src.width != dst.width || src.height != dst.height) {
+        return face;
+    }
+    for (const auto& buffer : cs.buffers) {
+        if (buffer.buffer_type != Shader::BufferType::Guest || buffer.is_written) {
+            continue;
+        }
+        const auto sharp = buffer.GetSharp(cs);
+        if (!sharp.Valid() || sharp.GetSize() < 48 || (sharp.base_address & 3) != 0) {
+            return face;
+        }
+        std::array<u32, 12> c;
+        std::memcpy(c.data(), reinterpret_cast<const void*>(sharp.base_address), 48);
+        if (c[0] != 0 || c[1] != 0 || c[4] != 0 || c[5] != 0 || c[8] != u32(src.width) + 1 ||
+            c[9] != u32(src.height) + 1) {
+            return face;
+        }
+        face = {true, src.Address(), dst.Address(), u32(src.base_array)};
+        return face;
+    }
+    return face;
+}
+} // namespace
 static void NoteRecordedStep(const RecordedStep& step) {
     const bool rect_copy =
         step.kind == RecordedStep::Kind::Dispatch && step.hash == RECT_COPY_SHADER_HASH;
@@ -2246,6 +2369,7 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     motion_geometry = 0;
 
     PrepareRenderState(pipeline);
+    ShadowRedirectDraw(pipeline);
     NotifyUiDraw(pipeline);
     if (SkipEmptyDraw(pipeline)) {
         bind_prepared = nullptr;
@@ -2628,6 +2752,7 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
     motion_draw = false;
     motion_geometry = 0;
     PrepareRenderState(pipeline);
+    ShadowRedirectDraw(pipeline);
     NotifyUiDraw(pipeline);
     if (SkipEmptyDraw(pipeline)) {
         return;
@@ -2805,7 +2930,11 @@ void Rasterizer::DispatchRecord(const ComputePipeline* pipeline) {
     }
     DisasmCompute(cs.pgm_hash, cs_program, false);
     NoteRecordedStep({RecordedStep::Kind::Dispatch, cs.pgm_hash, cs_program.dim_x});
-    ShadowTraceDispatch(cs, &cs_program);
+    const bool skip_face_copy = ShadowRedirectDispatch(cs, false);
+    ShadowTraceDispatch(cs, &cs_program, skip_face_copy);
+    if (skip_face_copy) {
+        return;
+    }
     bool hle;
     {
         BB_SECTION(ShaderHle);
@@ -2985,6 +3114,7 @@ void Rasterizer::DispatchIndirectRecord(const ComputePipeline* pipeline, VAddr a
     const u64 cs_hash = pipeline->GetStage(Shader::SwStage::Compute).pgm_hash;
     DisasmCompute(cs_hash, CsRegs(), true);
     NoteRecordedStep({RecordedStep::Kind::IndirectDispatch, cs_hash, 0});
+    ShadowRedirectDispatch(pipeline->GetStage(Shader::SwStage::Compute), true);
     ShadowTraceDispatch(pipeline->GetStage(Shader::SwStage::Compute), nullptr);
 
     if (!BindResources(pipeline)) {
@@ -3091,6 +3221,281 @@ bool Rasterizer::SkipUncompiledDraw(const GraphicsPipeline* pipeline) {
         pipeline_compile_stats.skipped_pipelines.fetch_add(1, std::memory_order_relaxed);
     }
     return true;
+}
+
+// 0.4.5 beta 4: whether a stage of the draw samples an image at this address.
+bool Rasterizer::DrawSamples(const GraphicsPipeline* pipeline, VAddr address) const {
+    for (const Shader::Info* stage : pipeline->GetStages()) {
+        if (!stage) {
+            continue;
+        }
+        const PreparedStage* prepared = FindPreparedStage(*stage);
+        for (u32 i = 0; i < stage->images.size(); ++i) {
+            const auto sharp = prepared && prepared->image_sharps
+                                   ? prepared->image_sharps[i]
+                                   : stage->images[i].GetSharp(*stage);
+            if (sharp.Address() == address) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// 0.4.5 beta 4: the clear of a learned cube's face (IsComputeImageClear) goes to the scratch image.
+bool Rasterizer::ShadowRedirectClear(VideoCore::ImageId cube_id, u32 layer,
+                                     const vk::ClearValue& clear) {
+    auto& r = shadow_redirect;
+    if (!ShadowRedirectOn()) {
+        return false;
+    }
+    ShadowRedirectRestore("another clear"); // the dispatch before it did already
+    const auto& cube = texture_cache.GetImage(cube_id);
+    const ShadowRedirect::Learned* learned = nullptr;
+    for (u32 i = 0; i < r.num_learned; ++i) {
+        if (r.learned[i].cube == cube.info.guest_address &&
+            r.learned[i].seen >= SHADOW_REDIRECT_TRUST) {
+            learned = &r.learned[i];
+        }
+    }
+    if (!learned || cube.info.num_samples != 1 || layer >= cube.info.resources.layers) {
+        return false;
+    }
+    const u64 layer_size = cube.info.guest_size / std::max(cube.info.resources.layers, 1u);
+    const VideoCore::ImageId scratch_id =
+        texture_cache.FindImageFromRange(learned->scratch, layer_size, false);
+    if (!scratch_id) {
+        return false;
+    }
+    auto& scratch = texture_cache.GetImage(scratch_id);
+    if (scratch.info.pixel_format != cube.info.pixel_format ||
+        scratch.info.size.width != cube.info.size.width ||
+        scratch.info.size.height != cube.info.size.height ||
+        scratch.info.resources.levels != 1 || scratch.info.resources.layers != 1 ||
+        scratch.info.num_samples != 1 || scratch.info.props.is_depth) {
+        return false;
+    }
+    runtime.ClearImage(&scratch, {.base = {.level = 0, .layer = 0}, .extent = {.levels = 1,
+                                                                              .layers = 1}},
+                       clear);
+    r.state = ShadowRedirect::State::Drawing;
+    r.cube = cube.info.guest_address;
+    r.scratch = learned->scratch;
+    r.layer = layer;
+    r.cube_id = cube_id;
+    r.scratch_id = scratch_id;
+    GpuSavings::Count(GpuSavings::Get().shadow_faces_redirected);
+    return true;
+}
+
+// 0.4.5 beta 4: a draw, its targets chosen (PrepareRenderState): the face's drawing goes to the
+// scratch image; the blur ends the face; anything else touching either puts the face back.
+void Rasterizer::ShadowRedirectDraw(const GraphicsPipeline* pipeline) {
+    auto& r = shadow_redirect;
+    if (r.state == ShadowRedirect::State::Idle && !r.observed) {
+        return;
+    }
+    const u32 mrt_mask = pipeline->GetGraphicsKey().mrt_mask;
+    const auto face_target = [&](VAddr cube, u32 layer) {
+        const auto& [id, desc] = cb_descs[0];
+        if (mrt_mask != 1 || !id) {
+            return false;
+        }
+        const auto& range = desc.view_info.range;
+        return texture_cache.GetImage(id).info.guest_address == cube && range.base.level == 0 &&
+               range.base.layer == layer && range.extent.layers == 1;
+    };
+    const auto touches = [&](VAddr address) {
+        for (s32 cb = 0; cb < std::bit_width(mrt_mask); ++cb) {
+            if (cb_descs[cb].first &&
+                texture_cache.GetImage(cb_descs[cb].first).info.guest_address == address) {
+                return true;
+            }
+        }
+        if (db_desc.first && texture_cache.GetImage(db_desc.first).info.guest_address == address) {
+            return true;
+        }
+        return DrawSamples(pipeline, address);
+    };
+    if (r.state == ShadowRedirect::State::Idle) {
+        // The blur after a whole-face copy: the pattern, once more.
+        if (face_target(r.observed_cube, r.observed_layer) &&
+            DrawSamples(pipeline, r.observed_scratch) && !DrawSamples(pipeline, r.observed_cube)) {
+            ShadowRedirectLearn(r.observed_cube, r.observed_scratch);
+        }
+        r.observed = false;
+        return;
+    }
+    if (r.state == ShadowRedirect::State::Drawing) {
+        if (face_target(r.cube, r.layer) && !DrawSamples(pipeline, r.cube) &&
+            !DrawSamples(pipeline, r.scratch)) {
+            auto& scratch = texture_cache.GetImage(r.scratch_id);
+            if (scratch.info.guest_address != r.scratch) {
+                ShadowRedirectRestore("the scratch image went away");
+                return;
+            }
+            // A fast clear pending in the face's metadata is applied by the pass that begins on
+            // it (BeginRenderingFull, by the view's layer): not redirected.
+            const VAddr cmask = Regs().color_buffers[0].CmaskAddress();
+            if (cmask && (texture_cache.IsMetaCleared(cmask, r.layer) ||
+                          texture_cache.IsMetaCleared(cmask, 0))) {
+                ShadowRedirectRestore("a fast clear pending on the face");
+                return;
+            }
+            auto& [id, desc] = cb_descs[0];
+            for (auto& bound : bound_images) {
+                if (bound == id) {
+                    bound = r.scratch_id;
+                }
+            }
+            texture_cache.GetImage(id).binding.is_target = 0u;
+            scratch.binding.is_target = 1u;
+            desc.info = scratch.info;
+            desc.view_info.range = {.base = {.level = 0, .layer = 0},
+                                    .extent = {.levels = 1, .layers = 1}};
+            id = r.scratch_id;
+            // The next draw's cb 0 is looked up again: the slot no longer describes the face.
+            last_targets[0].key_size = 0;
+            last_targets[0].generation = ~0ULL;
+            return;
+        }
+        if (!touches(r.cube) && !touches(r.scratch)) {
+            return;
+        }
+        ShadowRedirectRestore("a draw using the face or the scratch image before the copy");
+        return;
+    }
+    // Copied: the blur from the scratch image into the face, covering it, ends the face.
+    if (face_target(r.cube, r.layer) && DrawSamples(pipeline, r.scratch) &&
+        !DrawSamples(pipeline, r.cube)) {
+        const auto& regs = Regs();
+        const auto& info = texture_cache.GetImage(r.cube_id).info;
+        const float w = float(info.size.width), h = float(info.size.height);
+        const auto& vp = regs.viewports[0];
+        const auto& vc = regs.viewport_control;
+        const float xs = vc.xscale_enable ? std::abs(vp.xscale) : 1.0f;
+        const float ys = vc.yscale_enable ? std::abs(vp.yscale) : 1.0f;
+        const float xo = vc.xoffset_enable ? vp.xoffset : 0.0f;
+        const float yo = vc.yoffset_enable ? vp.yoffset : 0.0f;
+        const auto& screen = regs.screen_scissor;
+        const auto& generic = regs.generic_scissor;
+        const bool covers = xo - xs <= 0.5f && xo + xs >= w - 0.5f && yo - ys <= 0.5f &&
+                            yo + ys >= h - 0.5f && screen.top_left_x <= 0 &&
+                            screen.top_left_y <= 0 && screen.bottom_right_x >= s32(w) &&
+                            screen.bottom_right_y >= s32(h) && generic.top_left_x == 0 &&
+                            generic.top_left_y == 0 && generic.bottom_right_x >= u32(w) &&
+                            generic.bottom_right_y >= u32(h) && regs.num_indices <= 6;
+        if (covers) {
+            r.state = ShadowRedirect::State::Idle;
+            return;
+        }
+        ShadowRedirectRestore("a blur not covering the whole face");
+        return;
+    }
+    if (!touches(r.cube) && !touches(r.scratch)) {
+        return;
+    }
+    ShadowRedirectRestore("a draw using the face or the scratch image after the copy");
+}
+
+// 0.4.5 beta 4: a dispatch. The face's copy into the scratch image is left out (true); any other
+// dispatch while a face is drawn elsewhere puts it back first.
+bool Rasterizer::ShadowRedirectDispatch(const Shader::Info& cs, bool indirect) {
+    auto& r = shadow_redirect;
+    if (r.state == ShadowRedirect::State::Idle) {
+        r.observed = false;
+        if (!indirect && cs.pgm_hash == RECT_COPY_SHADER_HASH && ShadowRedirectOn()) {
+            const FaceCopy face = ReadFaceCopy(cs);
+            if (face.valid) {
+                r.observed = true;
+                r.observed_cube = face.cube;
+                r.observed_scratch = face.scratch;
+                r.observed_layer = face.layer;
+            }
+        }
+        return false;
+    }
+    if (r.state == ShadowRedirect::State::Drawing && !indirect) {
+        const FaceCopy face = ReadFaceCopy(cs);
+        if (face.valid && face.cube == r.cube && face.layer == r.layer &&
+            face.scratch == r.scratch) {
+            r.state = ShadowRedirect::State::Copied;
+            GpuSavings::Count(GpuSavings::Get().shadow_copies_skipped);
+            return true;
+        }
+    }
+    ShadowRedirectRestore("a dispatch");
+    return false;
+}
+
+void Rasterizer::ShadowRedirectFrame() {
+    ShadowRedirectRestore("the frame's end");
+    shadow_redirect.observed = false;
+}
+
+// 0.4.5 beta 4: the face, drawn into the scratch image, copied into the cube's layer: where the
+// game drew it. After the left-out copy the scratch image also holds what the game's copy would
+// have left; before it, the scratch image holds the face early (the game's copy would overwrite it
+// whole). Counted; after 64 the redirect stops for the session.
+void Rasterizer::ShadowRedirectRestore(const char* why) {
+    auto& r = shadow_redirect;
+    if (r.state == ShadowRedirect::State::Idle) {
+        return;
+    }
+    const bool after_copy = r.state == ShadowRedirect::State::Copied;
+    r.state = ShadowRedirect::State::Idle;
+    auto& scratch = texture_cache.GetImage(r.scratch_id);
+    auto& cube = texture_cache.GetImage(r.cube_id);
+    if (scratch.info.guest_address != r.scratch || cube.info.guest_address != r.cube) {
+        r.disabled = true;
+        std::printf("GPU steps: a lamp shadow face could not be put back (%s): its images went "
+                    "away; the redirect is off for this session\n",
+                    why);
+        return;
+    }
+    const VideoCore::SubresourceRange src_range{.base = {.level = 0, .layer = 0},
+                                                .extent = {.levels = 1, .layers = 1}};
+    const VideoCore::SubresourceRange dst_range{.base = {.level = 0, .layer = r.layer},
+                                                .extent = {.levels = 1, .layers = 1}};
+    scheduler.EndRendering(GpuSavings::PassBreak::ImageTransferCopy);
+    bool flush = runtime.Transit(&scratch, vk::ImageLayout::eTransferSrcOptimal,
+                                 vk::PipelineStageFlagBits2::eCopy,
+                                 vk::AccessFlagBits2::eTransferRead, src_range);
+    flush |= runtime.Transit(&cube, vk::ImageLayout::eTransferDstOptimal,
+                             vk::PipelineStageFlagBits2::eCopy,
+                             vk::AccessFlagBits2::eTransferWrite, dst_range);
+    if (flush) {
+        runtime.FlushBarriers();
+    }
+    const vk::ImageCopy region{
+        .srcSubresource{.aspectMask = vk::ImageAspectFlagBits::eColor,
+                        .mipLevel = 0,
+                        .baseArrayLayer = 0,
+                        .layerCount = 1},
+        .dstSubresource{.aspectMask = vk::ImageAspectFlagBits::eColor,
+                        .mipLevel = 0,
+                        .baseArrayLayer = r.layer,
+                        .layerCount = 1},
+        .extent = {scratch.info.size.width, scratch.info.size.height, 1},
+    };
+    scheduler.Record([src = scratch.GetImage(), dst = cube.GetImage(),
+                      region](vk::CommandBuffer cmdbuf) {
+        cmdbuf.copyImage(src, vk::ImageLayout::eTransferSrcOptimal, dst,
+                         vk::ImageLayout::eTransferDstOptimal, region);
+    });
+    cube.flags |= VideoCore::ImageFlagBits::GpuModified;
+    auto& savings = GpuSavings::Get();
+    GpuSavings::Count(after_copy ? savings.shadow_restores_after : savings.shadow_restores_before);
+    if (r.restores < 8) {
+        std::printf("GPU steps: a lamp shadow face put back into cube @%llx layer %u (%s)\n",
+                    static_cast<unsigned long long>(r.cube), r.layer, why);
+    }
+    if (++r.restores == SHADOW_REDIRECT_MAX_RESTORES) {
+        r.disabled = true;
+        std::printf("GPU steps: lamp shadow faces put back %u times; the redirect is off for this "
+                    "session\n",
+                    SHADOW_REDIRECT_MAX_RESTORES);
+    }
 }
 
 // 0.4.5 beta 3: a draw in the traced frame (ShadowTrace): into a target up to 256 wide, grouped
@@ -4075,6 +4480,10 @@ bool Rasterizer::IsComputeImageClear(const Pipeline* pipeline) {
                                                 .extent = {.levels = 1, .layers = 1}}
                   : VideoCore::SubresourceRange{.base = {.level = 0, .layer = 0},
                                                 .extent = image1.info.resources};
+    // 0.4.5 beta 4: a lamp shadow face's clear goes to its blur's scratch image (ShadowRedirect).
+    if (one_layer && ShadowRedirectClear(image1_id, layer, clear)) {
+        return true;
+    }
     runtime.ClearImage(&image1, range, clear);
     return true;
 }
@@ -6386,6 +6795,7 @@ void Rasterizer::NoteFrameStart() {
         profiler->BeginFrame();
     }
     ShadowTraceFrame(); // 0.4.5 beta 3
+    ShadowRedirectFrame(); // 0.4.5 beta 4
     ReportUboStats();
     const u64 frame = BbStats::gpu_frames.fetch_add(1, std::memory_order_relaxed) + 1;
     // BB_BUFFER_STATS=1: how many earlier frames the GPU has not finished when the GPU thread
