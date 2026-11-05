@@ -20,7 +20,7 @@ a line says otherwise. Written on 2026-11-04 and 05 from the tester's logs:
     with a fixed cost of about 5 µs whatever its size.
   - **The largest single item** is the dynamic lights' shadows: 1.3–1.5 ms of a 7.4 ms frame.
 - **The CPU has room on this PC.** The game's thread waits 5.6 ms of a 7.4 ms frame for the GPU.
-- **What engine work can take back, with the settings unchanged:** about 0.6–0.8 ms at the lamp
+- **What engine work can take back, with the settings unchanged:** about 0.5–0.7 ms at the lamp
   spot (135 to about 145 FPS), and the cleanup's long frames. 0.4.5 beta 1 took the first 0.1 ms
   (135.0 to 137.0 FPS).
 
@@ -118,7 +118,7 @@ same steps.
 
 | Item | ms a frame | Removable without a visible change |
 |---|---|---|
-| The dynamic lights' shadows | 1.3–1.5 (run 2) | about 0.35, if each face's four levels can be reordered (see below) |
+| The dynamic lights' shadows | 1.3–1.5 (run 2) | about 0.25 by skipping each face's copy, and its clear's unmeasured cost (see below) |
 | DLAA, the upscaler's evaluate and merge | 1.03 (TAA 0.45) | nothing; a setting |
 | The copy shader | 0.37 or more, plus 20 pass restarts | most of it, with the copies ahead of the pass in fewer dispatches |
 | `a954e79d` and the indirect dispatch `2da7fe60` after it | 0.19–0.23, nearly all `2da7fe60`'s | not as steps; `2da7fe60` is real work (step 2) |
@@ -127,32 +127,13 @@ same steps.
 | G-buffer and other full-size passes | 2.4–3.4 | the shading's share, through shader code |
 | Model detail Highest over the game's default | 0.15–0.3 | nothing; a setting |
 
-The removable items together are about 0.6–0.8 ms (first written as 1–1.3 ms, with `a954e79d`'s
-row counted in and the shadows' filter taken for a chain).
+The removable items together are about 0.5–0.7 ms (first written as 1–1.3 ms, with `a954e79d`'s
+row counted in and the shadows read as more than one chain).
 
 ## What the items are
 
 ### The dynamic lights' shadows
 
-- **What the logs show:**
-  - two-channel half-float images (R16G16F) of 256×256 with 6 layers, which is a cube map, sampled;
-    at least two of them (images 129 and 133);
-  - each face drawn with depth (`167daba6`/`1ae03d75`) at 256, 128, 64 and 32 a side, each size
-    drawn on its own;
-  - `0b0acf50`/`0f61fd27` filtering at the same four sizes, 12 of each a frame (two lights times
-    six faces);
-  - `a040875f` copying rectangles into a 256×256 storage image, 48 a frame (decoded in 0.4.4 beta
-    18: an image load and an image store; the profile's "4x4x1 groups" is its first dispatch's
-    size only).
-- **The order, from 0.4.5 beta 2's log** (`20261105_051112`, what is recorded right before and
-  right after each copy, 30,000 copies at a time): before a copy, a face draw (`1ae03d75`) at 256,
-  128, 64 or 32, a quarter each (at 32 sometimes only the toolkit's depth clear); after it, the
-  filter (`0f61fd27`) at 256, 128, 64 or 32, a quarter each. So each level of each face goes
-  **draw, copy, filter**, 12 faces × 4 levels × 3 = 144 steps a frame, and the filter at one size
-  reads the level drawn at that size: **not a chain** 256→128→64→32 as first written here. Beta 1
-  found no two copies in a row for this reason.
-- **Confirmed by run 2:** with dynamic light shadows off, the chains, the copies and about 630
-  draws a frame are gone.
 - **What they are (read 2026-11-05, from the tester's compiled shaders):** variance shadow maps.
   - **The faces' pixel shader `1ae03d75`** writes the distance `d` and `d² + ¼·(ddx² + ddy²)`. Those
     are the two moments of a variance shadow map, with the derivative term its authors (Donnelly
@@ -160,25 +141,34 @@ row counted in and the shadows' filter taken for a chain).
     ahead of time; that gives soft shadow edges that don't shimmer.
   - **The filter's pixel shader `0f61fd27`** is a 13-tap weighted blur: the sum of 13 bilinear
     samples at explicit level 0. Each sample's offset (scaled by a texel size) and weight come from
-    two constant buffers. The same shader runs at 256, 128, 64 and 32 for every face; only its
-    constants differ. Its vertex shader `0b0acf50` passes a quad's position and texture
+    two constant buffers. Its vertex shader `0b0acf50` passes a quad's position and texture
     coordinate through.
-- **The cap:** in 503 profile windows the game never drew more than 17 faces a frame (about three
-  lights), so lamps beyond that add no shadow work.
-- **What merging would take, now that the order is known** (both options first written here
-  assumed the chain, and are withdrawn):
-  - The 12 faces most likely share their scratch targets (one per size), so steps of different
-    faces can't move past each other.
-  - Within one face the four sizes use different targets. Drawing the four levels first, then one
-    copy for four and one filter for four, would take a face from 12 steps to 6: about 72 steps a
-    frame, roughly 0.35 ms at about 5 µs each (the copies are 5.2 µs each, the filter passes 6 to
-    9 µs).
-  - It needs the engine to hold back the game's copy and filter until the face's last level is
-    drawn, and a compute version of the filter writing four sizes at once. That version reads
-    through the texture unit as the game's does, so it can be exact.
-  - Not known yet: that each size really has its own targets, and that nothing in a face's later
-    levels reads an earlier level's copy or filter. One frame's trace of these steps with their
-    images would tell.
+- **How the game draws them, from 0.4.5 beta 3's trace** (`20261105_053410`, two frames at the lamp
+  spot, the same both times):
+  - **8 lights, each a cube map** (R16G16F, 6 layers) at the light's own size: two at 256, two at
+    128, two at 64 and two at 32. 48 faces a frame. (Read before the trace as 12 faces at four
+    levels each, and before that as a 256→128→64→32 chain: both wrong.)
+  - **Each face, in order:** the game's compute clear `8b355b5a` of the layer (the engine runs it
+    as an image clear, `IsComputeImageClear`); the toolkit's depth clear (`89cda9e4`) of the size's
+    scratch depth image; the shadow casters into the cube's layer with that depth; `a040875f`
+    copying the whole layer into the size's scratch image (constants: from 0,0 to 0,0, the face's
+    size); the blur from the scratch image back into the layer.
+  - **One scratch depth image and one scratch blur image per size**, shared by the 12 faces of
+    that size's two lights. So each face's steps wait for the face before it, and no step can move
+    past another face's: the merge of a face's four levels, written here after beta 2, assumed
+    levels that don't exist and is withdrawn.
+  - About 5 steps a face besides the casters: 240 a frame. Run 2 (shadows off) drops them with
+    about 630 draws.
+- **What can still go, exactly, inside each face's chain:**
+  - **The copy (about 0.25 ms: 48 a frame, 5.2 µs each):** draw the face into the scratch image
+    instead of the cube's layer, clear included. The scratch image then holds what the copy would
+    have put there, the copy is skipped, and the blur writes the layer as before. Nothing reads the
+    layer between the casters and the blur in either trace. The engine has to decide at the face's
+    clear, before it sees the copy, so it would follow the pattern once seen, and copy the scratch
+    image into the layer itself if a face ever went otherwise.
+  - **The colour clear, folded into the face's render pass** as its load operation (48 a frame).
+    Its cost is not known: the engine's image clears have no profile label of their own, so they
+    are counted in the label before them (the previous face's blur).
 - **The rest of the shadows' cost** is drawing the objects near a light into its faces. That is
   real work, and it stays while the shadows are on.
 

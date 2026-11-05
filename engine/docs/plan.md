@@ -5,7 +5,8 @@ What comes next, and the rules and decisions it works under. Updated 2026-11-05.
 - **Where it stands:** 0.4.4 was released on 2026-11-03 (`cbec5a2`, engine id 64). 0.4.5 beta 1
   (engine id 65) left out the empty draws: +2 FPS at the lamp spot (GPU 7.40 to 7.30 ms). Beta 2
   (engine id 66) removes beta 1's `a954e79d` step, which gained nothing, and brings the profile and
-  log lines step 1 needs next. Beta 3 (engine id 67) traces the shadow steps.
+  log lines step 1 needs next. Beta 3 (engine id 67) traced the shadow steps: 48 faces a frame in
+  one chain through shared scratch images.
 - **Where the work goes:** the branch `claude/awesome-gates-cjba5e`, until a beta has its own
   (`claude/0.4.5-beta-N`).
 
@@ -74,7 +75,7 @@ The decisions that still stand. How each was reached is in [archive/plan-0.4.4.m
 The work after 0.4.4, in order: the tester's call (2026-11-05) puts fewer GPU steps first and the
 memory cleanup after them. The evidence for each item is in [performance.md](performance.md).
 
-- **The targets:** about 0.6–0.8 ms back of a 7.4 ms frame at the lamp spot without changing a
+- **The targets:** about 0.5–0.7 ms back of a 7.4 ms frame at the lamp spot without changing a
   setting or a pixel (135 to about 145 FPS; 0.1 ms of it done in beta 1), then smoothness at every
   frame rate. First written as 1–1.3 ms: `a954e79d`'s 0.2 ms turned out to be another shader's
   real work, and the shadows' merge is smaller than thought (see below).
@@ -111,17 +112,16 @@ involved.
     the 20 passes a frame begun again, not the copies themselves, which still run.
   - **The shadows' `a040875f` copies:** part of the shadow item below (each sits between a
     level's draw and its filter).
-- **The shadows: about 0.35 ms, if each face's four levels can be reordered.** Beta 2's log
-  showed the order: each level of each face is drawn, copied (`a040875f`) and filtered
-  (`0f61fd27`) on its own, 144 steps a frame, not the 256→128→64→32 chain both earlier options
-  assumed (withdrawn; performance.md, "The dynamic lights' shadows").
-  - **The one merge left:** within a face, draw its four levels first, then one copy and one filter
-    for all four (12 steps to 6). The engine would hold back the game's copy and filter until the
-    face's last level, and run a compute filter for the four sizes that reads through the texture
-    unit like the game's, so it can be exact.
-  - **First, one frame's trace** of these steps with their images (beta 3): whether each size has
-    its own targets, and whether a later level reads an earlier level's copy or filter. If either
-    fails, the shadows stay as they are.
+- **The shadows: about 0.25 ms, by skipping each face's copy.** Beta 3's trace (performance.md,
+  "The dynamic lights' shadows"): 8 lights' cube maps, 48 faces a frame, each face cleared, drawn,
+  copied whole into a scratch image and blurred back, with one scratch image per size shared by all
+  faces of that size. No step can move past another face's, so the merges written after beta 2 are
+  withdrawn.
+  - **What is left:** draw each face into the scratch image directly (its clear too) and skip the
+    copy; the blur then reads what the copy would have written. The engine follows the pattern once
+    seen and copies the scratch image into the layer itself if a face ever goes otherwise.
+  - **And possibly the face's colour clear** folded into its render pass; its cost isn't known (the
+    engine's image clears have no profile label yet).
 - **Smaller items:** `mem-4`; `upscale-2` and `-3` (0.29 ms at Quality, nothing at DLAA); the GPU
   idle between submissions (0.1 ms).
 
@@ -174,8 +174,8 @@ involved.
 
 ### Waiting on the tester
 
-- **0.4.5 beta 3 at the lamp spot** for about a minute, with frame statistics and GPU time on: its
-  log holds two traces of one frame's shadow steps (the tester chose the trace, 2026-11-05).
+- **Whether to skip the shadow copies** (about 0.25 ms; beta 3's trace, `20261105_053410`, showed
+  the face merge impossible), or to close step 1 and go on.
 - **Optional, on beta 2 as it is:** `BB_SHADER_DISASM=2da7fe60` in Extra variables puts the code of
   the indirect dispatch that costs 0.12–0.14 ms into the log, for step 2.
 - **Whether to do the copy shader's move** (about 0.1–0.2 ms, the riskiest of step 1).
