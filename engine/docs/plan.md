@@ -3,7 +3,9 @@
 What comes next, and the rules and decisions it works under. Updated 2026-11-05.
 
 - **Where it stands:** 0.4.4 was released on 2026-11-03 (`cbec5a2`, engine id 64). 0.4.5 beta 1
-  (engine id 65) has two of step 1's items: the empty draws left out and `a954e79d` as one step.
+  (engine id 65) left out the empty draws: +2 FPS at the lamp spot (GPU 7.40 to 7.30 ms). Beta 2
+  (engine id 66) removes beta 1's `a954e79d` step, which gained nothing, and brings the profile and
+  log lines step 1 needs next.
 - **Where the work goes:** the branch `claude/awesome-gates-cjba5e`, until a beta has its own
   (`claude/0.4.5-beta-N`).
 
@@ -72,37 +74,43 @@ The decisions that still stand. How each was reached is in [archive/plan-0.4.4.m
 The work after 0.4.4, in order: the tester's call (2026-11-05) puts fewer GPU steps first and the
 memory cleanup after them. The evidence for each item is in [performance.md](performance.md).
 
-- **The targets:** about 1–1.3 ms back of a 7.4 ms frame at the lamp spot without changing a setting
-  or a pixel (135 to about 155 FPS), then smoothness at every frame rate.
+- **The targets:** about 0.8–1.1 ms back of a 7.4 ms frame at the lamp spot without changing a
+  setting or a pixel (135 to about 150 FPS), then smoothness at every frame rate. (First written as
+  1–1.3 ms: `a954e79d`'s 0.2 ms turned out not to be its own; see below.)
 - **No measurement beta first.** The tester's logs already hold what the first items need (the copy
   shader's movable copies counted since beta 18, `a954e79d` and `a040875f` decoded in beta 18). Each
   change comes behind a switch, and its gain is the lamp spot's FPS with it on and off.
-- **What the logs didn't hold comes with beta 1:** a counter per item that shows it acting
-  (`GPU steps per second (0.4.5)`), the first kinds of empty draw with their depth registers, and the
-  `a040875f` copies that follow another. `BB_SHADER_DISASM` still dumps compute shaders only; vertex
-  and pixel shaders come when step 2 needs them.
+- **What the logs didn't hold comes with the betas:** a counter per item that shows it acting
+  (`GPU steps per second (0.4.5)`) and the first kinds of empty draw with their depth registers
+  (beta 1); a GPU profile label for indirect dispatches and what is recorded around the `a040875f`
+  copies (beta 2). `BB_SHADER_DISASM` still dumps compute shaders only; vertex and pixel shaders come
+  when step 2 needs them.
 
 **Step 1: fewer GPU steps.** Each item gives the same picture, bit for bit where a shader's output is
 involved.
 
-- **In 0.4.5 beta 1** (release-notes-0.4.5.md):
-  - **The empty full-screen draws: about 0.1 ms.** A draw is left out when nothing it could touch is
-    bound: no colour or depth target (as `PrepareRenderState` chose them), no stage writing memory,
-    no motion vector attachment, no occlusion query measuring it (`Rasterizer::SkipEmptyDraw`,
-    `BB_SKIP_EMPTY_DRAWS=0` to record them).
-  - **`a954e79d`: about 0.17 ms, exact.** The engine runs its own version when it sees this shader:
-    the same argument set, and one atomic add of `groups` to the counter instead of the loop of
-    single adds (`ExecuteGroupCountHLE`, `gds_group_count.comp`; `BB_GROUP_COUNT_HLE=0` for the
-    game's shader). The same integers in memory: checked against the shader's GCN code and its
-    SPIR-V translation (three 32-bit stores, the last `(groups, 1, 1)`; `DS_APPEND` at offset 0).
+- **Done:**
+  - **The empty full-screen draws, 0.1 ms (beta 1, measured).** A draw is left out when nothing it
+    could touch is bound: no colour or depth target (as `PrepareRenderState` chose them), no stage
+    writing memory, no motion vector attachment, no occlusion query measuring it
+    (`Rasterizer::SkipEmptyDraw`, `BB_SKIP_EMPTY_DRAWS=0` to record them). Lamp spot: 135.0 to
+    137.0 FPS, GPU 7.40 to 7.30 ms; second spot 122.2 to 123.7 FPS. All of them were one kind:
+    depth and stencil off, `DB_RENDER_CONTROL` 0x60 (the compress-disable bits), the in-place depth
+    expansion GCN drivers do.
+- **Dropped:** **`a954e79d` as one step** (beta 1, removed in beta 2). It was exact (one atomic add
+  of `groups` instead of the loop), but its profile label stayed at 0.21 ms a frame: the time was the
+  work after it, indirect dispatches with no label of their own. Beta 19's atomic change, which also
+  moved nothing, had pointed the same way. Beta 2 labels indirect dispatches, so what that time is
+  shows next.
 - **Next, with the tester's say:**
   - **The copy shader: about 0.1–0.2 ms, not the 0.3–0.5 first written.** Its copies would move
     ahead of a render pass that has already begun, so the engine would have to record work before
     commands it has already recorded, and its barrier tracking would have to follow. The gain is
     the 20 passes a frame begun again, not the copies themselves, which still run.
-  - **The shadows' 48 `a040875f` copies: about 0.2 ms,** in one dispatch while their rectangles
-    don't overlap, if they come one after another. Beta 1 counts that (`rectangle copies (a040875f)
-    ..., ... of them right after another`).
+  - **The shadows' `a040875f` copies (about 43 a frame): about 0.2 ms, but not on their own.**
+    Beta 1 found none right after another, so merging them means moving draws. If what sits
+    between them is the filter's passes (beta 2 logs the neighbours), they go with the exact
+    filter merge below, which would then gather both: roughly 0.4 ms together.
 - **The shadows' filter chains: about 0.2 ms; it waits on the tester's call.** The shader is read
   (a 13-tap weighted blur, the same at every level; performance.md).
   - **One compute dispatch per face, four levels:** the simpler change, but it rounds the smaller
@@ -164,9 +172,9 @@ involved.
 
 ### Waiting on the tester
 
-- **0.4.5 beta 1 at the lamp spot,** with frame statistics and GPU time on (Log page): the FPS as it
-  is, then with `BB_SKIP_EMPTY_DRAWS=0 BB_GROUP_COUNT_HLE=0` in Extra variables. The log then also
-  holds the empty draws' registers and the `a040875f` count. Anything drawn differently is a bug.
+- **0.4.5 beta 2 at the lamp spot,** with frame statistics and GPU time on (Log page): its profile
+  labels the indirect dispatches after `a954e79d`, and its log names what comes around the
+  `a040875f` copies. Beta 1's run (`20261105_044628`) gave the empty draws' gain.
 - **Whether to do the copy shader's move** (about 0.1–0.2 ms, the riskiest of step 1).
 - **The shadow filter's merge: which kind** (step 1). One dispatch per face, within one unit in the
   last place of a 16-bit value; or the exact one, with more engine change. The shaders themselves

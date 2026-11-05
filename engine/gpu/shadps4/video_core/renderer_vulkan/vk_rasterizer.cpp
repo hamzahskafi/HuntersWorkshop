@@ -1981,21 +1981,96 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset, const PreparedDraw* pre
 // BB_PROXY_TRACE (defined with BindTextures).
 static bool ProxyTraceOn();
 
-// 0.4.5 beta 1: whether the last draw or dispatch recorded was the toolkit's rectangle copy
-// a040875f (48 a frame for the lamp shadow maps): the frame statistics count those recorded right
-// after another, with no draw or other dispatch between, to tell whether merging them would pay.
-// Transfers between them are not seen. Draws and dispatches are recorded by one thread at a time.
+// 0.4.5: what is recorded around the toolkit's rectangle copy a040875f (about 43 a frame with the
+// lamp shadows on). Beta 1 found none right after another, so merging them means moving draws;
+// beta 2 names what comes before and after them, with frame statistics on: if it is the shadow
+// filter's passes (pixel shader 0f61fd27), the copies go with the filter's merge. The
+// most frequent neighbours go to the log every 30,000 copies. Transfers between them are not
+// seen. Draws and dispatches are recorded by one thread at a time.
 static constexpr u64 RECT_COPY_SHADER_HASH = 0xa040875f;
-static bool last_step_rect_copy = false;
-static void NoteRecordedStep(bool rect_copy) {
-    if (rect_copy) {
-        auto& savings = GpuSavings::Get();
-        GpuSavings::Count(savings.rect_copies);
-        if (last_step_rect_copy) {
-            GpuSavings::Count(savings.rect_copies_in_a_row);
+namespace {
+struct RecordedStep {
+    enum class Kind : u8 { Draw, DrawVs, IndirectDraw, IndirectDrawVs, Dispatch, IndirectDispatch };
+    Kind kind{};
+    u64 hash{};  // the pixel shader's (the vertex shader's when there is none), or the compute's
+    u32 size{};  // a draw's first target's width; a direct dispatch's groups across
+    bool operator==(const RecordedStep&) const = default;
+};
+struct StepTally {
+    std::array<std::pair<RecordedStep, u32>, 12> entries{};
+    u32 used = 0, others = 0;
+    void Add(const RecordedStep& step) {
+        for (u32 i = 0; i < used; ++i) {
+            if (entries[i].first == step) {
+                ++entries[i].second;
+                return;
+            }
+        }
+        if (used < entries.size()) {
+            entries[used++] = {step, 1};
+        } else {
+            ++others;
         }
     }
+    std::string Top(u32 total) {
+        std::sort(entries.begin(), entries.begin() + used,
+                  [](const auto& a, const auto& b) { return a.second > b.second; });
+        static constexpr std::array<const char*, 6> kinds{
+            "draw ps", "draw vs", "indirect draw ps", "indirect draw vs", "dispatch cs",
+            "indirect dispatch cs"};
+        std::string text;
+        for (u32 i = 0; i < used && i < 4; ++i) {
+            const auto& [step, count] = entries[i];
+            text += fmt::format("{}{:.0f}% {} {:016x}", i ? ", " : "", 100.0 * count / total,
+                                kinds[u32(step.kind)], step.hash);
+            if (step.kind < RecordedStep::Kind::Dispatch) {
+                text += fmt::format(" ({} wide)", step.size);
+            } else if (step.kind == RecordedStep::Kind::Dispatch) {
+                text += fmt::format(" ({} groups across)", step.size);
+            }
+        }
+        if (used > 4 || others) {
+            text += ", ...";
+        }
+        return text;
+    }
+};
+RecordedStep last_step{};
+bool last_step_rect_copy = false;
+StepTally before_copies, after_copies;
+u32 tallied_copies = 0;
+u32 tally_reports = 0;
+} // namespace
+static void NoteRecordedStep(const RecordedStep& step) {
+    const bool rect_copy =
+        step.kind == RecordedStep::Kind::Dispatch && step.hash == RECT_COPY_SHADER_HASH;
+    if (rect_copy) {
+        GpuSavings::Count(GpuSavings::Get().rect_copies);
+    }
+    if (!BbStats::enabled) {
+        return;
+    }
+    if (rect_copy) {
+        before_copies.Add(last_step);
+        ++tallied_copies;
+    }
+    if (last_step_rect_copy) {
+        after_copies.Add(step);
+    }
+    last_step = step;
     last_step_rect_copy = rect_copy;
+    if (tallied_copies >= 30000 && !rect_copy) {
+        if (tally_reports < 40) {
+            ++tally_reports;
+            std::printf("GPU steps: around the rectangle copies (a040875f), the last %u: before "
+                        "them %s; after them %s\n",
+                        tallied_copies, before_copies.Top(tallied_copies).c_str(),
+                        after_copies.Top(tallied_copies).c_str());
+        }
+        before_copies = {};
+        after_copies = {};
+        tallied_copies = 0;
+    }
 }
 static void FlushProxyReads(bool reduced, const VideoCore::Image* target);
 
@@ -2054,7 +2129,7 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
         bind_prepared = nullptr;
         return;
     }
-    NoteRecordedStep(false);
+    NoteDrawStep(pipeline, false);
     const PreparedDraw* draw_prepared = bind_prepared;
     const bool bound = BindResources(pipeline);
     bind_prepared = nullptr; // indirect draws and dispatches bind without prepared sharps
@@ -2435,7 +2510,7 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
     if (SkipEmptyDraw(pipeline)) {
         return;
     }
-    NoteRecordedStep(false);
+    NoteDrawStep(pipeline, true);
     if (!BindResources(pipeline)) {
         return;
     }
@@ -2607,7 +2682,7 @@ void Rasterizer::DispatchRecord(const ComputePipeline* pipeline) {
         upscaler->OnDispatch(cs.pgm_hash);
     }
     DisasmCompute(cs.pgm_hash, cs_program, false);
-    NoteRecordedStep(cs.pgm_hash == RECT_COPY_SHADER_HASH);
+    NoteRecordedStep({RecordedStep::Kind::Dispatch, cs.pgm_hash, cs_program.dim_x});
     bool hle;
     {
         BB_SECTION(ShaderHle);
@@ -2784,8 +2859,9 @@ void Rasterizer::DispatchIndirectRecord(const ComputePipeline* pipeline, VAddr a
     buffer_cache.NewPacket();
     scheduler.PopPendingOperations();
     const u32 offset = 0;
-    DisasmCompute(pipeline->GetStage(Shader::SwStage::Compute).pgm_hash, CsRegs(), true);
-    NoteRecordedStep(false);
+    const u64 cs_hash = pipeline->GetStage(Shader::SwStage::Compute).pgm_hash;
+    DisasmCompute(cs_hash, CsRegs(), true);
+    NoteRecordedStep({RecordedStep::Kind::IndirectDispatch, cs_hash, 0});
 
     if (!BindResources(pipeline)) {
         return;
@@ -2799,6 +2875,14 @@ void Rasterizer::DispatchIndirectRecord(const ComputePipeline* pipeline, VAddr a
     }
 
     scheduler.EndRendering(GpuSavings::PassBreak::Dispatch);
+    // 0.4.5 beta 2: a label of its own in the GPU profile. Without one its time went to the label
+    // before it: a954e79d's 0.21 ms a frame at the lamp spot stayed the same when beta 1 ran that
+    // shader as one step, so it was the work after it, the indirect dispatches it prepares.
+    if (auto* profiler = GpuProfiler::Get()) {
+        profiler->Mark(cs_hash ^ 0x1D15A1ull, [cs_hash] {
+            return fmt::format("dispatch indirect cs {:016x}", cs_hash);
+        });
+    }
     // bbport: the counts clamped before the game's pipeline and descriptors are bound (the clamp
     // binds its own); the crash report keeps reading the game's counts (CopyArgs). Off unless
     // BB_INDIRECT_CLAMP=1 (the launcher's "Particle work safety cap"): the clamp's dispatch and the
@@ -2883,6 +2967,24 @@ bool Rasterizer::SkipUncompiledDraw(const GraphicsPipeline* pipeline) {
         pipeline_compile_stats.skipped_pipelines.fetch_add(1, std::memory_order_relaxed);
     }
     return true;
+}
+
+// 0.4.5 beta 2: a recorded draw for NoteRecordedStep, after PrepareRenderState chose its targets.
+void Rasterizer::NoteDrawStep(const GraphicsPipeline* pipeline, bool indirect) {
+    if (!BbStats::enabled) {
+        return;
+    }
+    const auto stages = pipeline->GetStages();
+    const Shader::Info* ps = stages[u32(Shader::SwStage::Fragment)];
+    const Shader::Info* vs = stages[u32(Shader::SwStage::Vertex)];
+    using Kind = RecordedStep::Kind;
+    const Kind kind = indirect ? (ps ? Kind::IndirectDraw : Kind::IndirectDrawVs)
+                               : (ps ? Kind::Draw : Kind::DrawVs);
+    const VideoCore::ImageId target =
+        pipeline->GetGraphicsKey().mrt_mask != 0 && cb_descs[0].first ? cb_descs[0].first
+                                                                       : db_desc.first;
+    NoteRecordedStep({kind, ps ? ps->pgm_hash : vs ? vs->pgm_hash : 0,
+                      target ? texture_cache.GetImage(target).info.size.width : 0u});
 }
 
 // 0.4.5 beta 1: the game draws ~12 a frame that change nothing here: the toolkit's full-screen

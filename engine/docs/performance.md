@@ -20,8 +20,9 @@ a line says otherwise. Written on 2026-11-04 and 05 from the tester's logs:
     with a fixed cost of about 5 µs whatever its size.
   - **The largest single item** is the dynamic lights' shadows: 1.3–1.5 ms of a 7.4 ms frame.
 - **The CPU has room on this PC.** The game's thread waits 5.6 ms of a 7.4 ms frame for the GPU.
-- **What engine work can take back, with the settings unchanged:** about 1–1.3 ms at the lamp
-  spot (135 to about 155 FPS), and the cleanup's long frames.
+- **What engine work can take back, with the settings unchanged:** about 0.8–1.1 ms at the lamp
+  spot (135 to about 150 FPS), and the cleanup's long frames. 0.4.5 beta 1 took the first 0.1 ms
+  (135.0 to 137.0 FPS).
 
 ## Smoothness at 60 FPS
 
@@ -93,7 +94,7 @@ cost about 5 µs, whatever their size:
 | `a040875f`, 16 workgroups each | 48 | 5.1 µs |
 | The copy shader | 64 | 5.8 µs |
 | The empty pass at 32768×32768 | 12.6 | 7.9 µs |
-| `a954e79d`, one workgroup on one of the GPU's 48 SMs | 5 | 37 µs |
+| `a954e79d`, one workgroup on one of the GPU's 48 SMs, with what follows it (see below) | 5 | 37 µs |
 
 - **The profiler doesn't create the floor.** It waits at each label, but it costs only 0.1–0.2 ms
   a frame in all (`engine-map.md` 1.4). So the steps already ran one after the other without it.
@@ -120,13 +121,14 @@ same steps.
 | The dynamic lights' shadows | 1.3–1.5 (run 2) | about 0.5: the filter chains (0.24) and the 48 copies (0.25) as one job each |
 | DLAA, the upscaler's evaluate and merge | 1.03 (TAA 0.45) | nothing; a setting |
 | The copy shader | 0.37 or more, plus 20 pass restarts | most of it, with the copies ahead of the pass in fewer dispatches |
-| `a954e79d` | 0.19–0.23 | most of it, run wide or beside graphics |
+| `a954e79d` and the unlabelled work after it | 0.19–0.23 | not the shader's: see `a954e79d` below |
 | The empty full-screen draws | 0.10–0.13 | all of it |
 | GPU idle between submissions | 0.09–0.10 | part of it |
 | G-buffer and other full-size passes | 2.4–3.4 | the shading's share, through shader code |
 | Model detail Highest over the game's default | 0.15–0.3 | nothing; a setting |
 
-The removable items together are about 1–1.3 ms.
+The removable items together are about 0.8–1.1 ms (first written as 1–1.3 ms, with `a954e79d`'s
+row counted in).
 
 ## What the items are
 
@@ -139,7 +141,9 @@ The removable items together are about 1–1.3 ms.
   - each face filtered down 256→128→64→32 by `0b0acf50`/`0f61fd27`: 12 chains a frame, two lights
     times six faces;
   - `a040875f` copying 32×32 rectangles into a 256×256 storage image, 48 a frame (decoded in 0.4.4
-    beta 18: an image load and an image store).
+    beta 18: an image load and an image store). 0.4.5 beta 1 counted about 43 a frame at the lamp
+    spot and none recorded right after another: another draw or dispatch always sits between two.
+    Beta 2 logs which.
 - **Confirmed by run 2:** with dynamic light shadows off, the chains, the copies and about 630
   draws a frame are gone.
 - **What they are (read 2026-11-05, from the tester's compiled shaders):** variance shadow maps.
@@ -187,8 +191,14 @@ Found on 2026-11-05 in the 1.09 executable.
   sampled; radeonsi's depth flush does the same. On the PC there is no such data.
 - **Not the shadows:** the rate (12.6 a frame) matched the shadow maps, but with the shadows off
   (run 2) it stays at 12.5.
-- **Still to find:** the depth targets they act on, and the depth unit's register bits
-  (`DB_RENDER_CONTROL`). 0.4.5 beta 1 logs them for the first kinds it leaves out.
+- **Found in 0.4.5 beta 1's log** (`20261105_044628`): all of them are one kind. Depth control 0
+  (depth and stencil off) and `DB_RENDER_CONTROL` 0x60: only `DEPTH_COMPRESS_DISABLE` and
+  `STENCIL_COMPRESS_DISABLE`, on a valid depth buffer. That is exactly radeonsi's in-place depth
+  and stencil expansion (a rectangle with an all-off depth state and those two bits), so the guess
+  holds: the PS4 expands the depth buffer's HTILE data before it is read.
+- **Measured:** left out from beta 1 on, the 32768×32768 label (0.10–0.12 ms a frame) is gone;
+  lamp spot 135.0 to 137.0 FPS (GPU 7.40 to 7.30 ms), second spot 122.2 to 123.7 FPS (8.18 to
+  8.08 ms), against 0.4.4's run 1 with the same settings.
 - **0.4.5 beta 1 leaves them out** (`Rasterizer::SkipEmptyDraw`): any draw with no colour or depth
   target bound, no stage writing memory (written buffers, GDS included, storage images, image
   atomics, DMA), no motion vector attachment and no occlusion query measuring it. The state the
@@ -227,20 +237,26 @@ Found on 2026-11-05 in the 1.09 executable.
     The atomics' results are never read.
 - **So its effect is the counter raised by `groups`, and the three argument sets written.** One
   atomic add of `groups` leaves memory exactly as the loop does: the same integers, no rounding.
-- **Why it is slow here:** the PS4 does one on-chip operation per wave. Here every pass is an atomic
-  on a storage buffer standing in for GDS, all on one address. With a large `N` that is thousands
-  of serialized atomics: 37 µs, while the rest of the GPU waits. Beta 19's one atomic per subgroup
-  did not change it (about 44 µs either way).
-- **0.4.5 beta 1 runs it as one step** (`ExecuteGroupCountHLE`, `gds_group_count.comp`): one
-  thread reads the count, writes `(groups, 1, 1)`, and adds `groups` to the counter. Checked against
-  the GCN code (beta 18's dump) and the SPIR-V the engine made of it (the tester's shader files):
+- **It is not slow; the profile charged it with the work after it** (found with 0.4.5 beta 1).
+  The GPU profile labels a step when it begins and charges it until the next label. Indirect
+  dispatches had no label of their own, so the dispatches `a954e79d` prepares, which come right
+  after it, were counted as its time. Two changes to its atomics moved nothing: beta 19's one
+  atomic per subgroup (about 44 µs either way) and beta 1's single atomic (0.211–0.228 ms a frame
+  before, 0.212–0.214 after, 5 a frame). The first reading here, thousands of serialized atomics
+  while the GPU waits, was wrong.
+- **0.4.5 beta 2 labels indirect dispatches** (`dispatch indirect cs ...`), so what those 37 µs
+  are shows in its profile.
+- **Beta 1's one step, removed in beta 2** (`ExecuteGroupCountHLE`, `gds_group_count.comp`, for the
+  record): one thread read the count, wrote `(groups, 1, 1)`, and added `groups` to the counter.
+  It was checked against the GCN code (beta 18's dump) and the SPIR-V the engine made of it (the
+  tester's shader files), and ran 620 times a second without a decline:
   - the count is one dword, read as raw bits (`BUFFER_LOAD_FORMAT_X` of a 32-bit format; the
     `V_ADD_I32` works on the bits);
   - the three stores are 32-bit dwords at element 0, the last `(groups, 1, 1)` (the 1s are stored as
     the float with bits `0x00000001`);
   - `DS_APPEND` has offset 0, so the counter is at `user_data[2] >> 16` in GDS, as m0 = s2 gives.
-  - Anything else (another thread count, buffer layout, format, or a counter outside GDS) leaves the
-    dispatch to the game's shader, counted.
+  - anything else (another thread count, buffer layout, format, or a counter outside GDS) left the
+    dispatch to the game's shader.
 
 ## The CPU
 
