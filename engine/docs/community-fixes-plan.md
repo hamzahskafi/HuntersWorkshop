@@ -54,13 +54,140 @@ without the release candidate's independent review and long session. Left for la
   - **Players who never answered.** Four of the five players the game connected to never answered
     the probes. The game also connects to players whose signs and ghosts it shows, and the relay is
     the server's choice.
-- **Next work:** AMD FSR frame generation through the SDK; OptiScaler checked again; a DLSS test
-  and cost table; the upscaler items left from the engine map (upscale-2 and -3), the SSR cost,
-  the unjittered passes; smoothness and hitches ("Smoothness leads" below). Small: the punch's log
-  line says how long the probing took, as bbhost's does (`after N ms`), since log lines carry no
-  time.
+- **Next work:** the performance plan below comes first. Then: AMD FSR frame generation through
+  the SDK; OptiScaler checked again; a DLSS test and cost table; the SSR cost; the unjittered
+  passes. Small: the punch's log line says how long the probing took, as bbhost's does
+  (`after N ms`), since log lines carry no time.
 - **Linux:** the Avalonia launcher rebuilt on the Windows launcher's pages, with its stale texts, the
   dead DLSS model row and the 7 texts only it looks up.
+
+## Performance plan after 0.4.4 (2026-11-05)
+
+The tester's call (2026-11-04): performance is left on the table in how the engine runs its work,
+manages memory and handles the game's shaders. This plan replaces the scattered items (the hitch
+investigation, "Smoothness leads", the engine map's open ideas) with one order built on the
+0.4.4 logs. The PC: RTX 3070 Ti (8 GB), i5-14600KF, DLAA at 1080p.
+
+### What the 0.4.4 logs show
+
+- **At 60 FPS, one mechanism is behind almost every long frame.** The evidence: six sessions,
+  217 minutes of play (`20261103_040727` to `20261103_224104`).
+  - There were 5.8 frames over 33 ms an hour.
+  - Only 4 minutes had a frame of 50 ms or more. Three of them (61, 119 and 213 ms) fell in a
+    minute where the VRAM cleanup moved 260–880 MiB out. The fourth (85 ms) came right after a
+    load.
+  - The 137 minutes with neither a load nor a cleanup of 100 MiB had none.
+  - Write faults: median 27 a second, 90th percentile 201. The only 3 minutes over 1,000 a second
+    (2,103–2,913) all had a large cleanup.
+  - The log reports the cleanup only at each 256 MiB and at most 20 times, so the minute it is
+    charged to is approximate.
+- **The cleanup churns.** Take the hour of chalice dungeons (`20261103_220626`):
+  - 3.6 GB of the game's data left VRAM for being unused 180 s, while VRAM in use stayed at
+    2.9–4.2 GB of 7.2.
+  - The game's data in VRAM never passed 1.5 GB, so most of it left more than once. Each return
+    was an upload.
+- **Above 60 FPS the GPU is the limit, not the CPU.** Take the lamp spot under the 240 limit
+  (`20261102_231754`, 0.4.4):
+  - 134 FPS (7.4 ms a frame), with a GPU profile of 7.39 ms a frame.
+  - The game's thread waited 5.6 ms of every frame for the GPU. Stage B was 57% busy, and stage A
+    idle 28%.
+  - The profile's top 30 of 162 labels make 5.18 ms:
+    - G-buffer passes 1.36 ms; other full-size passes 1.10 ms;
+    - DLAA (the upscaler's evaluate and merge) 1.03 ms;
+    - the small shadow-like passes 0.70 ms; the game's compute 0.43 ms;
+    - the copy shader at least 0.37 ms: 64 dispatches, with about 130 copy batches a frame
+      unlabelled;
+    - GPU idle between submissions 0.09 ms.
+
+    The other 132 labels make 2.2 ms.
+  - Render passes begun again: 20 a frame for the copy shader and 7 for image barriers. The
+    profiler's own marks add 9.5.
+  - The profiler drains the GPU at each mark (`engine-map.md` 1.4), so each label is an upper
+    bound.
+- **No shader compiles in play:** 0 in every statistics window of that log; the warm-up built 866
+  of 877 cached pipelines at the start.
+
+So:
+
+- **Smoothness** is about the VRAM cleanup. Shader compiles, the game's job threads and stage B
+  are not the cause.
+- **Frame rate above about 130 FPS** on this PC is about GPU work. The engine's own share that can
+  be named is about 1.5 ms of 7.4 (the upscaler 1.03 at DLAA, the copy shader 0.37 or more, idle
+  0.09). How much the translated shaders cost inside the game's own passes is not measured.
+- **The CPU** has room on this PC. It matters on 6-core CPUs, and here above about 230 FPS
+  (stage B at 57% for 134).
+
+### The cleanup, in the code
+
+The cleanup is `EvictIdleCopies` (`buffer_cache.cpp`). It runs from `Maintain` on stage B, every
+10 s while VRAM has room (level 0 of `UpdateVramLevel`, below 85% of the driver's budget).
+
+- **What leaves:** every block of the game's data unused for 180 s (`BB_VRAM_CLEANUP_SECONDS`).
+  Each block is unbound from the arena with a sparse unbind of its own (`EvictVramBlock`), and its
+  pages are marked CPU-modified.
+- **The bind waits:** the next submission's sparse bind waits for all the work submitted before
+  it (`bind_wait_tick`, `SubmitPendingArenaBinds`). So the GPU's queue runs dry in that frame.
+- **A block comes back whole:** when it is used again, its whole 2 MiB group is bound and uploaded
+  again (`EnsureResident`). Its pages are watched again, so the game's next writes to them fault.
+- **Why it exists:** it was added (bbport) for 8 GB laptops whose VRAM grew from 2.6 to 5 GB in 90
+  minutes. On this PC, 3 GB of VRAM was free whenever it ran.
+
+### The plan, in order
+
+Each step is a beta of its own. Each is measured on the tester's PC against the step before, on
+the same route.
+
+**Step 0: measurements, no change in behaviour.**
+
+- **Per cleanup:** MiB and blocks, stage B's time in it, whether a submission waited for its bind,
+  and how many blocks come back within 10 minutes of leaving (the churn).
+- **The minute line names its long frames by cause:** cleanup, load, bind wait, upload, compile
+  or write faults.
+- **GPU time per pass without the profiler's drain:** timestamps at pass ends only. That gives
+  the 2.2 ms in the long tail and the real cost of the restarts.
+- **A fixed route for every comparison** (the spots are the tester's call): the lamp spot under
+  the 240 limit for 2 minutes; a 10-minute run at 60 FPS through one area; a chalice dungeon layer.
+
+**Step 1: memory, for smoothness at every frame rate.**
+
+- **Evict by the VRAM budget, not by age alone.** While VRAM is below a share of the driver's
+  budget (`VK_EXT_memory_budget`, which `UpdateVramLevel` already reads), nothing leaves; above
+  that share, the oldest leaves first. The 8 GB laptops stay covered, since their budget fills.
+- **Paced:** in play, at most a set amount a second; larger batches during loading screens.
+- **The bind waits only for the work that used the evicted blocks.** This needs a last-use tick
+  per block; until then, the unbinds go in batches on loading screens.
+- **Expected:** 3 of the 4 long-frame minutes gone, and the uploads and write faults of the churn
+  with them. Step 0's churn count shows how much.
+
+**Step 2: the GPU work the engine adds**, in the order of cost from step 0's per-pass times:
+
+- the copy shader: 64 dispatches, about 130 copy batches and 20 restarts a frame;
+- `mem-4`;
+- `upscale-2` and `-3`: 0.29 ms at Quality, nothing at DLAA;
+- the 32768×32768 pass with no attachments: 12.6 a frame, 0.1 ms, origin unknown;
+- the GPU idle between submissions.
+
+**Step 3: shader code.**
+
+- Rank the game's shaders by GPU time from step 0 (the G-buffer and full-size passes are 2.5 ms
+  together).
+- Check the top ones with `bb-shader-gpu-stats` (`native_shader_compiler.md`): registers and
+  occupancy, inputs still interpolated by GCN's formula (321 of 1,201), and the legacy multiply.
+- Vertex shader contraction with an invariant position (`shader-5`, about 4% of vertex code).
+- The native compiler's step 2 (control flow without goto variables): measured in the lab first,
+  and built only if the hot shaders gain.
+
+**Step 4: the CPU, for other PCs.**
+
+- Stage B on two threads (`parallel-stageb.md`, approach B), once a 6-core CPU or a frame rate
+  above about 230 FPS makes stage B the limit.
+- The small CPU items with it: `idle-1`, `pipe-1`, `asc-2` and `rt-1`.
+
+**Not reopened:**
+
+- `seg-1`, `renderer-3`, `renderer-4`, `renderer-6` and the refuted ideas (`engine-map.md` 5).
+- The earlier hitch leads (the game's job threads, the online summon, the PC memory model): fixed,
+  removed, or not the cause in 0.4.4's logs.
 
 ## Plan to 0.4.4 stable (decided 2026-10-31; done)
 
@@ -653,7 +780,9 @@ Investigated, not changed:
   0–255, the small one 0 or 1) are sent. Whatever stopped it was outside the engine. If it comes
   back, that commit's logging says which side it is.
 
-## Current investigation: the 40–120 ms hitches
+## Earlier investigation: the 40–120 ms hitches (2026-10-25)
+
+Superseded by "Performance plan after 0.4.4" above; kept for the record.
 
 | Log | What it showed |
 |---|---|
@@ -1193,6 +1322,8 @@ deprecated (310.4.0), K the default for DLAA/Quality/Balanced, M Performance, L 
 Automatic already); §3.21 DLSS through Streamline; §5.1.1 the loader library; §5.2.1 the Project ID.
 
 ## Smoothness leads (for the smoothness phase)
+
+Folded into "Performance plan after 0.4.4" above; kept for the record.
 
 - The hitch report's findings (above), first.
 - A1 (job convoy) and A2 (compression), as frame-time work rather than bug fixes.

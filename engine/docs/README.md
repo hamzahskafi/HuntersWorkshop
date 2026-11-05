@@ -16,7 +16,7 @@ features are in [archive/](archive/README.md) (was `history/`).
 
 - [community-fixes-plan.md](community-fixes-plan.md): every change since Hunter's Workshop began, with
   its measurements and credits (the main table, newest rows at the bottom), what is left after 0.4.4
-  (its "After 0.4.4" section), and the review of what other Bloodborne PC projects fixed.
+  (its "After 0.4.4" section), the performance plan built on 0.4.4's logs, and the review of what other Bloodborne PC projects fixed.
 - [launcher-text-review.md](launcher-text-review.md): every launcher row's title, line and tooltip, with
   the texts proposed for 0.4.4's text pass (applied).
 - [engine-map.md](engine-map.md): how the engine works (threads, a frame from the game's commands to
