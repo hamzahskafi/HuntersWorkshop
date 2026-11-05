@@ -425,6 +425,8 @@ private:
     /// 0.4.5 beta 2: notes a draw about to be recorded, for what comes around the rectangle
     /// copies (NoteRecordedStep, with frame statistics).
     void NoteDrawStep(const GraphicsPipeline* pipeline, bool indirect);
+    /// 0.4.5 beta 3: a draw in the frame the shadow trace lists (NoteDrawStep).
+    void TraceShadowDraw(const GraphicsPipeline* pipeline, bool indirect);
     /// bbport: for a pipeline still compiling, records its bind as a command of its own, which a
     /// recording thread runs once the pipeline is there (it waits for it): returns null, the
     /// draw or dispatch command binds nothing. Recording on this thread: waits here and returns

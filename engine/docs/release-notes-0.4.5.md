@@ -33,9 +33,16 @@ and each costs about 5 µs however little it does (performance.md). The picture 
   statistics on (beta 2): every 30,000 copies, the log names the draws and dispatches most often
   recorded right before and right after them (`GPU steps: around the rectangle copies ...`). Beta 1
   found none right after another; this tells whether they can merge with the shadow filter's passes.
+  Beta 2's log answered it: each level of each shadow face is drawn, copied and filtered on its own.
+- **A trace of the shadow steps** (beta 3), with frame statistics on: twice a session (the 600th and
+  the 6,000th frame with lamp shadows), one whole frame's draws into targets up to 256 wide, grouped
+  while their targets stay the same, with their shaders, targets and textures; every dispatch, the
+  shadow copies with their images and constants; and how many other draws came between
+  (`Shadow trace 1 ...` to `Shadow trace 1: end of the frame`). It tells whether a face's four
+  levels can be merged.
 - **The frame statistics count** the draws left out and the rectangle copies (`GPU steps per second
   (0.4.5)`), and the log names the first kinds of draw left out with their depth registers.
 
-**To test beta 2:** the lamp spot again, with frame statistics and GPU time on (Log page), as for
-beta 1. The FPS should match beta 1's; the log brings the new profile labels and the copies'
-neighbours.
+**To test beta 3:** the lamp spot, with frame statistics and GPU time on (Log page), for about a
+minute in all: the first trace comes about 5 seconds after lamp shadows appear, the second about 40
+seconds later. The FPS should match beta 2's.

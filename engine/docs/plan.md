@@ -5,7 +5,7 @@ What comes next, and the rules and decisions it works under. Updated 2026-11-05.
 - **Where it stands:** 0.4.4 was released on 2026-11-03 (`cbec5a2`, engine id 64). 0.4.5 beta 1
   (engine id 65) left out the empty draws: +2 FPS at the lamp spot (GPU 7.40 to 7.30 ms). Beta 2
   (engine id 66) removes beta 1's `a954e79d` step, which gained nothing, and brings the profile and
-  log lines step 1 needs next.
+  log lines step 1 needs next. Beta 3 (engine id 67) traces the shadow steps.
 - **Where the work goes:** the branch `claude/awesome-gates-cjba5e`, until a beta has its own
   (`claude/0.4.5-beta-N`).
 
@@ -119,9 +119,9 @@ involved.
     for all four (12 steps to 6). The engine would hold back the game's copy and filter until the
     face's last level, and run a compute filter for the four sizes that reads through the texture
     unit like the game's, so it can be exact.
-  - **First, one frame's trace** of these steps with their images: whether each size has its own
-    targets, and whether a later level reads an earlier level's copy or filter. If either fails,
-    the shadows stay as they are.
+  - **First, one frame's trace** of these steps with their images (beta 3): whether each size has
+    its own targets, and whether a later level reads an earlier level's copy or filter. If either
+    fails, the shadows stay as they are.
 - **Smaller items:** `mem-4`; `upscale-2` and `-3` (0.29 ms at Quality, nothing at DLAA); the GPU
   idle between submissions (0.1 ms).
 
@@ -174,8 +174,8 @@ involved.
 
 ### Waiting on the tester
 
-- **Whether to trace the shadow steps** (a beta with one frame's draws, copies and filters and
-  their images), toward the 0.35 ms merge; or to leave the shadows and go on.
+- **0.4.5 beta 3 at the lamp spot** for about a minute, with frame statistics and GPU time on: its
+  log holds two traces of one frame's shadow steps (the tester chose the trace, 2026-11-05).
 - **Optional, on beta 2 as it is:** `BB_SHADER_DISASM=2da7fe60` in Extra variables puts the code of
   the indirect dispatch that costs 0.12–0.14 ms into the log, for step 2.
 - **Whether to do the copy shader's move** (about 0.1–0.2 ms, the riskiest of step 1).
