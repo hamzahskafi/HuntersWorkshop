@@ -154,6 +154,11 @@ struct Counters {
     // and were not held (the game's memory bound in place, or the limit) (vk_copy_hold.h).
     std::atomic<std::uint64_t> copy_hold_batches{0}, copy_hold_dispatches{0},
         copy_hold_flushes{0}, copy_hold_conflicts{0}, copy_hold_refused{0};
+    // 0.4.5 beta 10: merged dispatches of the copy shader's batches (buffer_address_copy.comp),
+    // the batches and ranges in them, and batches recorded on their own (no GPU address, or
+    // ranges not whole dwords) (vk_shader_hle.cpp, RecordMerged).
+    std::atomic<std::uint64_t> copy_merge_dispatches{0}, copy_merge_batches{0},
+        copy_merge_ranges{0}, copy_merge_alone{0};
 };
 
 /// Runtime::CopyColorAndDepth's kinds: depth->colour by the shader (0.4.4 beta 17), by a copy;
@@ -295,15 +300,20 @@ inline void Report() {
     const double held_flushes = take(c.copy_hold_flushes) / s;
     const double held_early = take(c.copy_hold_conflicts) / s;
     const double held_refused = take(c.copy_hold_refused) / s;
+    const double merged = take(c.copy_merge_dispatches) / s;
+    const double merged_batches = take(c.copy_merge_batches) / s;
+    const double merged_ranges = take(c.copy_merge_ranges) / s;
+    const double merged_alone = take(c.copy_merge_alone) / s;
     std::printf("  GPU steps per second (0.4.5): empty draws skipped %.1f; rectangle copies "
                 "(a040875f) %.1f; lamp shadow faces drawn into the scratch image %.1f, their "
                 "copies left out %.1f, faces put back %.1f before the copy and %.1f after; their "
                 "clears in the face's pass %.1f, on their own %.1f; copy shader batches held to "
                 "their pass's end %.1f (dispatches held whole %.1f), recorded %.1f times, %.1f of "
-                "them early (a binding touched them), not held %.1f\n",
+                "them early (a binding touched them), not held %.1f; copy shader batches "
+                "merged %.1f in %.1f dispatches (%.0f ranges), on their own %.1f\n",
                 empty_draws, rect_copies, faces, copies_left_out, restores_before,
                 restores_after, clears_folded, clears_late, held, held_whole, held_flushes,
-                held_early, held_refused);
+                held_early, held_refused, merged_batches, merged, merged_ranges, merged_alone);
 }
 
 } // namespace Vulkan::GpuSavings

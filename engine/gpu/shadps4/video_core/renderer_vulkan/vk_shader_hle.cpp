@@ -17,6 +17,7 @@
 #include "video_core/renderer_vulkan/vk_shader_util.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
+#include "video_core/host_shaders/buffer_address_copy_comp.h"
 #include "video_core/host_shaders/buffer_multi_copy_comp.h"
 #include "bbport_sections.h"
 #include "bbport_toggles.h"
@@ -189,46 +190,262 @@ bool CopyHoldOn() {
     return on;
 }
 
-/// Records the held batches as they would have been (MultiCopy or a buffer copy, each with the
-/// barriers it needs then), after ending the pass (`why`). Called by the scheduler where a pass
-/// ends, by the runtime before a barrier or for a binding that touches them.
+/// 0.4.5 beta 10: BB_COPY_MERGE=0 records each batch on its own (MultiCopy or a buffer copy), as
+/// in beta 9.
+bool CopyMergeOn() {
+    static const bool on = [] {
+        const char* env = std::getenv("BB_COPY_MERGE");
+        const bool enabled = !(env && env[0] == '0');
+        std::printf("GPU steps: copy shader batches %s\n",
+                    enabled ? "recorded together, one dispatch by GPU address where their order "
+                              "allows (BB_COPY_MERGE=0: one command each)"
+                            : "recorded one command each (BB_COPY_MERGE=0)");
+        return enabled;
+    }();
+    return on;
+}
+
+/// One range of buffer_address_copy.comp's table (std430: 32 bytes).
+struct AddressRange {
+    u32 src_lo, src_hi, dst_lo, dst_hi;
+    u32 dwords, pad0, pad1, pad2;
+};
+static_assert(sizeof(AddressRange) == 32);
+
+/// Whether two ranges overlap.
+bool Overlap(u64 a_min, u64 a_max, u64 b_min, u64 b_max) {
+    return a_min < b_max && b_min < a_max;
+}
+
+/// Whether batch `b` must come after batch `a` (one reads or writes what the other writes):
+/// then they cannot run as threads of one dispatch. By their bounds in the game's memory (the
+/// same memory can be in two buffers), and in their buffers.
+bool Ordered(const CopyHold::Batch& a, const CopyHold::Batch& b) {
+    const bool guest = Overlap(a.dst_guest, a.dst_guest_end, b.src_guest, b.src_guest_end) ||
+                       Overlap(a.dst_guest, a.dst_guest_end, b.dst_guest, b.dst_guest_end) ||
+                       Overlap(a.src_guest, a.src_guest_end, b.dst_guest, b.dst_guest_end);
+    const bool buffer =
+        (a.dst == b.src && Overlap(a.dst_min, a.dst_max, b.src_min, b.src_max)) ||
+        (a.dst == b.dst && Overlap(a.dst_min, a.dst_max, b.dst_min, b.dst_max)) ||
+        (a.src == b.dst && Overlap(a.src_min, a.src_max, b.dst_min, b.dst_max));
+    return guest || buffer;
+}
+
+/// Whether a batch can go into a merged dispatch: both buffers have a GPU address, and its
+/// ranges are whole dwords (as MultiCopy's).
+bool Mergeable(const CopyHold::Batch& batch, std::span<const vk::BufferCopy> copies) {
+    if (!batch.src->BufferDeviceAddress() || !batch.dst->BufferDeviceAddress()) {
+        return false;
+    }
+    for (const auto& copy : copies) {
+        if ((copy.srcOffset | copy.dstOffset | copy.size) & 3) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/// Records `group` (batches of the held list) as one dispatch of buffer_address_copy.comp, after
+/// a barrier if any of them needs one (`barrier`: what came before it touched their bytes).
+void RecordGroup(Rasterizer& rasterizer, std::span<const CopyHold::Batch* const> group,
+                 bool barrier) {
+    auto& runtime = rasterizer.GetRuntime();
+    auto& scheduler = runtime.GetScheduler();
+    const auto& instance = runtime.GetInstance();
+    const auto& held = CopyHold::state;
+
+    struct Pipeline {
+        vk::UniqueDescriptorSetLayout set_layout;
+        vk::UniquePipelineLayout layout;
+        vk::UniquePipeline pipeline;
+    };
+    static Pipeline pipe = [&] {
+        const auto device = instance.GetDevice();
+        Pipeline p;
+        const vk::DescriptorSetLayoutBinding binding{
+            .binding = 0,
+            .descriptorType = vk::DescriptorType::eStorageBuffer,
+            .descriptorCount = 1,
+            .stageFlags = vk::ShaderStageFlagBits::eCompute,
+        };
+        p.set_layout = Check(device.createDescriptorSetLayoutUnique({
+            .flags = vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptorKHR,
+            .bindingCount = 1,
+            .pBindings = &binding,
+        }));
+        const vk::PushConstantRange range{.stageFlags = vk::ShaderStageFlagBits::eCompute,
+                                          .offset = 0,
+                                          .size = sizeof(u32)};
+        p.layout = Check(device.createPipelineLayoutUnique({
+            .setLayoutCount = 1,
+            .pSetLayouts = &*p.set_layout,
+            .pushConstantRangeCount = 1,
+            .pPushConstantRanges = &range,
+        }));
+        const auto module = CompileSPV(BUFFER_ADDRESS_COPY_COMP, device);
+        p.pipeline = Check(device.createComputePipelineUnique(
+            {}, vk::ComputePipelineCreateInfo{
+                    .stage = {.stage = vk::ShaderStageFlagBits::eCompute,
+                              .module = module,
+                              .pName = "main"},
+                    .layout = *p.layout,
+                }));
+        device.destroyShaderModule(module);
+        return p;
+    }();
+
+    thread_local std::vector<AddressRange> table;
+    table.clear();
+    for (const auto* batch : group) {
+        const u64 src_base = batch->src->BufferDeviceAddress();
+        const u64 dst_base = batch->dst->BufferDeviceAddress();
+        for (u32 i = batch->first; i < batch->first + batch->count; ++i) {
+            const auto& copy = held.copies[i];
+            const u64 src = src_base + copy.srcOffset;
+            const u64 dst = dst_base + copy.dstOffset;
+            table.push_back({static_cast<u32>(src), static_cast<u32>(src >> 32),
+                             static_cast<u32>(dst), static_cast<u32>(dst >> 32),
+                             static_cast<u32>(copy.size / 4), 0, 0, 0});
+        }
+    }
+    auto& stream = rasterizer.GetBufferCache().GetStreamBuffer();
+    const u64 table_size = table.size() * sizeof(AddressRange);
+    const u64 table_offset = stream.Copy(table.data(), table_size, instance.StorageMinAlignment());
+
+    scheduler.EndRendering(GpuSavings::PassBreak::CopyShader);
+    if (auto* profiler = GpuProfiler::Get()) {
+        profiler->Mark(0xC0B1ull, [] { return std::string{"copy shader HLE: barrier + dispatch"}; });
+    }
+    auto& savings = GpuSavings::Get();
+    // (The batches done by dispatch, as MultiCopy counts them: one each.)
+    savings.hle_dispatches.fetch_add(group.size(), std::memory_order_relaxed);
+    if (barrier) {
+        savings.hle_barriers.fetch_add(1, std::memory_order_relaxed);
+        runtime.FlushBarriers();
+    }
+    const u32 count = static_cast<u32>(table.size());
+    scheduler.RecordCrumb({.name = "HLE copy shader (merged)"},
+                          [table_buffer = stream.Handle(), table_offset, table_size,
+                           count](vk::CommandBuffer cmdbuf) {
+                              const vk::DescriptorBufferInfo info{table_buffer, table_offset,
+                                                                  table_size};
+                              const vk::WriteDescriptorSet write{
+                                  .dstBinding = 0,
+                                  .descriptorCount = 1,
+                                  .descriptorType = vk::DescriptorType::eStorageBuffer,
+                                  .pBufferInfo = &info};
+                              cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, *pipe.pipeline);
+                              cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute,
+                                                          *pipe.layout, 0, write);
+                              cmdbuf.pushConstants(*pipe.layout, vk::ShaderStageFlagBits::eCompute,
+                                                   0, sizeof(count), &count);
+                              cmdbuf.dispatch(count, 1, 1);
+                          });
+    for (const auto* batch : group) {
+        runtime.AccessBuffer(batch->src, batch->src_min, batch->src_max - batch->src_min,
+                             vk::PipelineStageFlagBits2::eComputeShader,
+                             vk::AccessFlagBits2::eShaderRead);
+        runtime.AccessBuffer(batch->dst, batch->dst_min, batch->dst_max - batch->dst_min,
+                             vk::PipelineStageFlagBits2::eComputeShader,
+                             vk::AccessFlagBits2::eShaderWrite);
+    }
+    GpuSavings::Count(savings.copy_merge_dispatches);
+    savings.copy_merge_batches.fetch_add(group.size(), std::memory_order_relaxed);
+    savings.copy_merge_ranges.fetch_add(count, std::memory_order_relaxed);
+}
+
+/// Records the held batches in order, in as few dispatches as their order allows: a batch that
+/// reads or writes what an earlier one of the group writes (or writes what it reads) starts the
+/// next group, after a barrier. One that cannot be merged goes on its own, as before.
+void RecordMerged(Rasterizer& rasterizer) {
+    auto& runtime = rasterizer.GetRuntime();
+    const auto& held = CopyHold::state;
+    thread_local std::vector<const CopyHold::Batch*> group;
+    group.clear();
+    bool barrier = false;
+    size_t ranges = 0;
+    const auto record = [&] {
+        if (!group.empty()) {
+            RecordGroup(rasterizer, group, barrier);
+        }
+        group.clear();
+        barrier = false;
+        ranges = 0;
+    };
+    for (const auto& batch : held.batches) {
+        const auto copies =
+            std::span<const vk::BufferCopy>{held.copies}.subspan(batch.first, batch.count);
+        if (!Mergeable(batch, copies)) {
+            record();
+            GpuSavings::Count(GpuSavings::Get().copy_merge_alone);
+            if (!MultiCopy(rasterizer, batch.src, batch.dst, copies)) {
+                runtime.CopyBuffer(batch.src, batch.dst, copies);
+            }
+            continue;
+        }
+        bool after = ranges + batch.count > CopyHold::MaxMergedRanges;
+        for (size_t i = 0; !after && i < group.size(); ++i) {
+            after = Ordered(*group[i], batch);
+        }
+        if (after) {
+            record();
+        }
+        // What came before (recorded, so in the barrier tracker) touched its bytes: a barrier
+        // before it, and so a group of its own from here (the tracker answers for every buffer
+        // while the GX region is reached through two, Runtime::NoteAliasedAccess).
+        const bool needs_barrier =
+            runtime.IsBufferAccessed(batch.src, batch.src_min, batch.src_max - batch.src_min) ||
+            runtime.IsBufferAccessed(batch.dst, batch.dst_min, batch.dst_max - batch.dst_min, true);
+        if (needs_barrier && !group.empty()) {
+            record();
+        }
+        barrier = barrier || needs_barrier;
+        group.push_back(&batch);
+        ranges += batch.count;
+    }
+    record();
+}
+
+/// Records the held batches (held to the end of their pass, or of their dispatch), after ending
+/// the pass (`why`): merged (RecordMerged), or each as before (MultiCopy or a buffer copy, with
+/// the barriers it needs then). Called by the scheduler where a pass ends, by the runtime before
+/// a barrier or for a binding that touches them, and by ExecuteCopyShaderHLE at its end.
 void FlushHeldCopies(void* context, GpuSavings::PassBreak why) {
     auto& rasterizer = *static_cast<Rasterizer*>(context);
     auto& runtime = rasterizer.GetRuntime();
     auto& held = CopyHold::state;
     held.flushing = true;
     runtime.GetScheduler().EndRendering(why);
-    GpuSavings::Count(GpuSavings::Get().copy_hold_flushes);
+    if (held.pass_held) {
+        GpuSavings::Count(GpuSavings::Get().copy_hold_flushes);
+    }
     // The statistics of the dispatch being run, if any (a flush can come from its uploads).
     const bool in_pass = std::exchange(copy_dispatch_in_pass, false);
-    for (const auto& batch : held.batches) {
-        const auto copies =
-            std::span<const vk::BufferCopy>{held.copies}.subspan(batch.first, batch.count);
-        if (!MultiCopy(rasterizer, batch.src, batch.dst, copies)) {
-            runtime.CopyBuffer(batch.src, batch.dst, copies);
+    if (CopyMergeOn() && runtime.GetInstance().IsBufferDeviceAddressSupported()) {
+        RecordMerged(rasterizer);
+    } else {
+        for (const auto& batch : held.batches) {
+            const auto copies =
+                std::span<const vk::BufferCopy>{held.copies}.subspan(batch.first, batch.count);
+            if (!MultiCopy(rasterizer, batch.src, batch.dst, copies)) {
+                runtime.CopyBuffer(batch.src, batch.dst, copies);
+            }
         }
     }
     copy_dispatch_in_pass = in_pass;
     held.batches.clear();
     held.copies.clear();
+    held.pass_held = false;
     held.flushing = false;
 }
 
-/// Holds a batch (its offsets in its buffers) to the end of the open pass, if its source is a
-/// snapshot or the VRAM copy and its destination the VRAM copy, neither in place.
-bool HoldBatch(Rasterizer& rasterizer, const VideoCore::Buffer* src, u8 src_path, VAddr src_addr,
-               u64 src_size, const VideoCore::Buffer* dst, u8 dst_path, VAddr dst_addr,
-               u64 dst_size, std::span<const vk::BufferCopy> copies) {
+/// Adds a batch (its offsets in its buffers) to the held list: to the end of the pass
+/// (`pass_held`) or of its dispatch. False when the list is full.
+bool AppendHeld(Rasterizer& rasterizer, const VideoCore::Buffer* src, VAddr src_addr, u64 src_size,
+                const VideoCore::Buffer* dst, VAddr dst_addr, u64 dst_size,
+                std::span<const vk::BufferCopy> copies, bool pass_held) {
     auto& held = CopyHold::state;
-    if (!rasterizer.GetRuntime().GetScheduler().IsRendering() || held.flushing) {
-        return false; // the pass ended meanwhile (an upload for this batch): recorded as before
-    }
-    auto& buffer_cache = rasterizer.GetBufferCache();
-    const bool src_ok =
-        src_path == 1 || (src_path == 2 && !buffer_cache.IsAnyInPlace(src_addr, src_size));
-    const bool dst_ok = dst_path == 2 && !buffer_cache.IsAnyInPlace(dst_addr, dst_size);
-    if (!src_ok || !dst_ok || held.batches.size() >= CopyHold::MaxBatches || copies.empty()) {
-        GpuSavings::Count(GpuSavings::Get().copy_hold_refused);
+    if (held.flushing || held.batches.size() >= CopyHold::MaxBatches || copies.empty()) {
         return false;
     }
     if (!held.flush) {
@@ -236,8 +453,13 @@ bool HoldBatch(Rasterizer& rasterizer, const VideoCore::Buffer* src, u8 src_path
         held.context = &rasterizer;
         held.scheduler = &rasterizer.GetRuntime().GetScheduler();
     }
-    CopyHold::Batch batch{src, dst, static_cast<u32>(held.copies.size()),
-                          static_cast<u32>(copies.size()), ~0ull, 0, ~0ull, 0};
+    CopyHold::Batch batch{src,      dst,
+                          static_cast<u32>(held.copies.size()),
+                          static_cast<u32>(copies.size()),
+                          ~0ull,    0,
+                          ~0ull,    0,
+                          src_addr, src_addr + src_size,
+                          dst_addr, dst_addr + dst_size};
     for (const auto& copy : copies) {
         batch.src_min = std::min<u64>(batch.src_min, copy.srcOffset);
         batch.src_max = std::max<u64>(batch.src_max, copy.srcOffset + copy.size);
@@ -246,6 +468,27 @@ bool HoldBatch(Rasterizer& rasterizer, const VideoCore::Buffer* src, u8 src_path
     }
     held.copies.insert(held.copies.end(), copies.begin(), copies.end());
     held.batches.push_back(batch);
+    held.pass_held |= pass_held;
+    return true;
+}
+
+/// Holds a batch to the end of the open pass, if its source is a snapshot or the VRAM copy and
+/// its destination the VRAM copy, neither in place.
+bool HoldBatch(Rasterizer& rasterizer, const VideoCore::Buffer* src, u8 src_path, VAddr src_addr,
+               u64 src_size, const VideoCore::Buffer* dst, u8 dst_path, VAddr dst_addr,
+               u64 dst_size, std::span<const vk::BufferCopy> copies) {
+    if (!rasterizer.GetRuntime().GetScheduler().IsRendering() || CopyHold::state.flushing) {
+        return false; // the pass ended meanwhile (an upload for this batch): recorded as before
+    }
+    auto& buffer_cache = rasterizer.GetBufferCache();
+    const bool src_ok =
+        src_path == 1 || (src_path == 2 && !buffer_cache.IsAnyInPlace(src_addr, src_size));
+    const bool dst_ok = dst_path == 2 && !buffer_cache.IsAnyInPlace(dst_addr, dst_size);
+    if (!src_ok || !dst_ok ||
+        !AppendHeld(rasterizer, src, src_addr, src_size, dst, dst_addr, dst_size, copies, true)) {
+        GpuSavings::Count(GpuSavings::Get().copy_hold_refused);
+        return false;
+    }
     GpuSavings::Count(GpuSavings::Get().copy_hold_batches);
     return true;
 }
@@ -540,6 +783,11 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
         }
         CopyTrace::CopyBegin(); // 0.4.5 beta 8
     }
+    // 0.4.5 beta 10: the batches not held to the pass's end are held to the end of this dispatch
+    // and recorded there, merged (FlushHeldCopies).
+    const bool merge = !batches.empty() && CopyMergeOn() &&
+                       runtime.GetInstance().IsBufferDeviceAddressSupported();
+    bool flush_at_end = false;
     u32 held_batches = 0;
     u32 batch_start = 0;
     for (const auto& batch : batches) {
@@ -591,12 +839,22 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
                               dst_offset_max - dst_offset_min, vk_copies)) {
             ++held_batches;
         } else {
-            if (hold) {
+            if (scheduler.IsRendering()) {
                 // The held ones first (Scheduler::EndRendering), then this one, as before.
                 scheduler.EndRendering(GpuSavings::PassBreak::CopyShader);
             }
-            if (!MultiCopy(rasterizer, src_buf, dst_buf, vk_copies)) {
-                runtime.CopyBuffer(src_buf, dst_buf, vk_copies);
+            if (merge && AppendHeld(rasterizer, src_buf,
+                                    src_buf_sharp.base_address + src_offset_min,
+                                    src_offset_max - src_offset_min, dst_buf,
+                                    dst_buf_sharp.base_address + dst_offset_min,
+                                    dst_offset_max - dst_offset_min, vk_copies, false)) {
+                flush_at_end = true;
+            } else {
+                // Anything held goes first, in order.
+                CopyHold::Flush(&scheduler, GpuSavings::PassBreak::CopyShader);
+                if (!MultiCopy(rasterizer, src_buf, dst_buf, vk_copies)) {
+                    runtime.CopyBuffer(src_buf, dst_buf, vk_copies);
+                }
             }
         }
         // The first batch's only (the audit): one copied without MultiCopy leaves it unread, and
@@ -606,6 +864,9 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
     }
     if (hold && held_batches == batches.size()) {
         GpuSavings::Count(GpuSavings::Get().copy_hold_dispatches);
+    }
+    if (flush_at_end) {
+        CopyHold::Flush(&scheduler, GpuSavings::PassBreak::CopyShader);
     }
     CopyTrace::CopyEnd();
     return true;

@@ -36,6 +36,9 @@ struct Batch {
     const VideoCore::Buffer* dst;
     u32 first, count; ///< its ranges in State::copies
     u64 src_min, src_max, dst_min, dst_max;
+    /// Beta 10: its bounds in the game's memory (two buffers can hold the same memory: the GX
+    /// region's own and the arena), for the order of merged batches.
+    VAddr src_guest, src_guest_end, dst_guest, dst_guest_end;
 };
 
 /// Records the held batches (vk_shader_hle.cpp), ending the pass first.
@@ -49,12 +52,17 @@ struct State {
     void* context = nullptr;
     /// The scheduler the copies are held for (the presenter has its own: not that one).
     const void* scheduler = nullptr;
+    /// Beta 10: whether any of them is held to the pass's end (the others, outside a pass or not
+    /// to be held across it, only to the end of their copy-shader dispatch, to be merged).
+    bool pass_held = false;
 };
 
 inline State state;
 
 /// Batches held at most; past it the pass ends as before.
 constexpr size_t MaxBatches = 1024;
+/// Ranges in one merged dispatch at most (a workgroup each; Vulkan guarantees 65535).
+constexpr size_t MaxMergedRanges = 65535;
 
 /// Whether copies are held for `scheduler` and none is being recorded now.
 [[nodiscard]] inline bool Pending(const void* scheduler) noexcept {

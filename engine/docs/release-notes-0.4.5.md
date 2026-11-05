@@ -44,6 +44,13 @@ compared went from 140–145 FPS in 0.4.2 to 210.
   - A draw that does touch them first gets them first, the pass ending there as before. Copies
     reading the game's own memory in place are not held.
   - `BB_COPY_HOLD=0` in Extra variables does them where they come, as before.
+  - Beta 9's logs: about 95 copy batches a frame held, 12 fewer passes begun again a frame, no draw
+    ever touching them; about 0.05 ms.
+- **The copy shader's copies merged** (beta 10, in test). Its copies were about 188 GPU commands
+  a frame. They now run as one command for each place they are done (a pass's end, or the end of a
+  copy-shader dispatch outside a pass), split only where one copy needs another's result: one
+  shader that reaches every buffer by its GPU address. `BB_COPY_MERGE=0` in Extra variables does
+  them one command each, as before.
 
 ## Diagnostics
 
@@ -53,7 +60,8 @@ compared went from 140–145 FPS in 0.4.2 to 210.
 - **The frame statistics count** the steps taken out (`GPU steps per second (0.4.5)`): the draws left
   out, the rectangle copies and those left out, the lamp shadow faces drawn into their scratch images,
   their clears, and any faces put back; from beta 9 the copy shader's batches held to their pass's
-  end, the times they were done, how many of those early, and those not held.
+  end, the times they were done, how many of those early, and those not held; from beta 10 the
+  batches merged and their dispatches.
 - **A trace of the copy shader** (beta 8), with frame statistics on: twice a session (the 600th and
   the 6,000th frame of play), one frame's copy-shader dispatches in their passes: for each pass, how
   many copies came at its start, inside it, and at its end, and of those inside how many could move

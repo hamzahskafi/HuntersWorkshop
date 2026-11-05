@@ -244,7 +244,12 @@ Found on 2026-11-05 in the 1.09 executable.
     the pass.
 - **Beta 9 holds them to the pass's end** (`vk_copy_hold.h`, `BB_COPY_HOLD=0`: off): recorded where
   the pass ends anyway, in order; a binding that touches one sends them first. Its counters are in
-  `GPU steps per second (0.4.5)`. Next, if it holds up: a pass's held copies in one dispatch.
+  `GPU steps per second (0.4.5)`. Its logs: no binding ever touched a held copy; restarts 12
+  fewer a frame, about 0.05 ms; the copy shader's own time unchanged (0.365 ms): its cost is its
+  ~188 copy commands a frame.
+- **Beta 10 merges them** (`buffer_address_copy.comp`, `RecordMerged`, `BB_COPY_MERGE=0`: off): one
+  dispatch by GPU address for each pass end and each copy-shader dispatch outside a pass, split
+  where one batch needs another's result.
 - **Later, if at all: serve the copied ranges from the snapshots,** so no copy runs. That is not
   the PC memory model, which kept all of the game's memory in system RAM and moved blocks in and
   out of VRAM. But the snapshots are reused within a frame or two, so each redirect would need

@@ -185,10 +185,10 @@ memory cleanup after them. The evidence for each item is in [performance.md](per
 
 ### Waiting on the tester
 
-- **0.4.5 beta 9, copies held to the pass's end** (the go-ahead, 2026-11-05): the lamp spot with
-  frame statistics on, `BB_COPY_HOLD=0` in Extra variables against none, as for betas 4 and 5; and
-  a look around for anything drawn wrong (the copies feed later passes: skinned characters,
-  lights, effects).
+- **0.4.5 beta 10, the copies merged** (the go-ahead, 2026-11-06; beta 9 confirmed in two
+  sessions, no early flush): the lamp spot and the second spot with frame statistics and profile
+  on, `BB_COPY_MERGE=0` in Extra variables against none; the copy shader's line in the profile
+  (0.365 ms in beta 9); and a look around (the copies feed skinned characters, lights, effects).
 - **The cleanup off, one session, before step 3 (in a real play session, later):** an hour at 60
   FPS, ideally a chalice dungeon, with `BB_VRAM_CLEANUP_SECONDS=0` in Extra variables. The launcher's "VRAM cleanup"
   row is another cleanup, of textures, and stays on.
