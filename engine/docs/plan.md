@@ -103,6 +103,17 @@ memory cleanup after them. The evidence for each item is in [performance.md](per
     place work ahead of commands already recorded: the riskiest change of step 1. Beta 8 traces one
     frame's copies in their passes (`vk_copy_trace.h`, no change in behaviour); then the decision.
     Estimate 0.15–0.3 ms, everywhere.
+    - **Beta 8's trace (2026-11-05, performance.md):** 53 copy dispatches a frame, 25 inside a pass
+      and 28 at its end; every copy inside could move to its pass's start, and **no draw later in
+      the same pass reads what any copy wrote**. So the copies can wait for the pass's end instead:
+      nothing goes ahead of recorded commands.
+    - **Proposed for beta 9, with the tester's say: copies held to the pass's end.** A copy-shader
+      dispatch that comes inside a pass leaves it open; its copies are recorded where the pass ends
+      anyway (other targets, an upload, a barrier, a submission), before what ended it. A draw or
+      dispatch that binds bytes a held copy writes, or writes bytes it reads, sends the held copies
+      first (the pass ends, as today). Copies reading the game's memory in place are not held. A
+      switch for the A/B, and counters. Then beta 10: a pass's held copies in one dispatch by buffer
+      address (188 copy commands a frame to about 30).
     - **What others do (read 2026-11-05).** **bbhost** (droogie, `bdc5cdf`): copy-backs of renamed
       dynamic buffers end 55% of its draw runs, and it makes them *copy versions*: the bytes go into
       a staging copy at the copy, the draws after it bind that copy, and the copies into place wait
@@ -174,8 +185,7 @@ memory cleanup after them. The evidence for each item is in [performance.md](per
 
 ### Waiting on the tester
 
-- **0.4.5 beta 8 at the lamp spot for about a minute** (frame statistics on): its log holds two
-  copy traces. The tester chose the copy shader next (2026-11-05).
+- **The go-ahead for beta 9** (copies held to the pass's end; beta 8's traces read 2026-11-05).
 - **The cleanup off, one session, before step 3 (in a real play session, later):** an hour at 60
   FPS, ideally a chalice dungeon, with `BB_VRAM_CLEANUP_SECONDS=0` in Extra variables. The launcher's "VRAM cleanup"
   row is another cleanup, of textures, and stays on.

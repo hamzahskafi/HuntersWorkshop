@@ -225,6 +225,23 @@ Found on 2026-11-05 in the 1.09 executable.
     the 20 passes a frame begun again after one. And the pass has already begun when a copy comes,
     so the engine would record the copy before commands already recorded, with the barrier
     tracking following it: the riskiest change of step 1.
+- **Beta 8's trace** (the tester's lamp spot, `20261105_235054`, 143 FPS; the 600th and the
+  6,000th frame, the same both times): 53 copy-shader dispatches a frame, about 3.5 batches each
+  (188 copy commands a frame: 64 dispatches and 124 `vkCmdCopyBuffer`), 0.38 ms in the profile.
+  - None at a pass's start; 25–26 inside a pass; 27–28 at a pass's end (after its last draw,
+    before other targets). Inside: the sun's shadow (5, in a pass of 66 steps), the G-buffer (9,
+    of 239 steps), the lighting (2), the post passes (about 8), the last 2D pass (2). Each lamp
+    shadow pass has one, at its end.
+  - **Every copy inside a pass could move to its start:** no earlier draw or dispatch of the pass
+    read or wrote what it writes, or wrote what it reads.
+  - **And no later draw or dispatch of the same pass reads what any copy wrote:** what they copy
+    is read by later passes. So the copies can as well wait until the pass ends, the easier
+    direction: nothing goes ahead of commands already recorded. It is bbhost's deferral without
+    its staging copies, which bbhost needs because its draws read the copies at once.
+  - Uniform buffers the GPU command thread copies into the constant ring are not in the trace;
+    it copies none whose bytes the GPU writes or will write (`CollectRingBindings`), so none of
+    the copies' destinations. Images are not in it either; what fills an image from memory ends
+    the pass.
 - **Later, if at all: serve the copied ranges from the snapshots,** so no copy runs. That is not
   the PC memory model, which kept all of the game's memory in system RAM and moved blocks in and
   out of VRAM. But the snapshots are reused within a frame or two, so each redirect would need
