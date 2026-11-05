@@ -188,7 +188,11 @@ Found on 2026-11-05 in the 1.09 executable.
 - **Not the shadows:** the rate (12.6 a frame) matched the shadow maps, but with the shadows off
   (run 2) it stays at 12.5.
 - **Still to find:** the depth targets they act on, and the depth unit's register bits
-  (`DB_RENDER_CONTROL`).
+  (`DB_RENDER_CONTROL`). 0.4.5 beta 1 logs them for the first kinds it leaves out.
+- **0.4.5 beta 1 leaves them out** (`Rasterizer::SkipEmptyDraw`): any draw with no colour or depth
+  target bound, no stage writing memory (written buffers, GDS included, storage images, image
+  atomics, DMA), no motion vector attachment and no occlusion query measuring it. The state the
+  engine keeps from a draw's targets is updated as for a recorded draw.
 - **The same shader doing real work:** with depth on (256×256 D32, 784×784 D32S8), or with pixel
   shader `38d65b32` (1920×1080 colour), it is the toolkit's clears and copies.
 
@@ -204,6 +208,10 @@ Found on 2026-11-05 in the 1.09 executable.
   whenever they don't read what the pass draws. Only the order and the number of dispatches
   change. Beta 18 counted which copies qualify: at least those with a snapshot source and no
   barrier needed.
+  - **Its gain, looked at again for 0.4.5:** about 0.1–0.2 ms. The copies still run; what goes is
+    the 20 passes a frame begun again after one. And the pass has already begun when a copy comes,
+    so the engine would record the copy before commands already recorded, with the barrier
+    tracking following it: the riskiest change of step 1.
 - **Later, if at all: serve the copied ranges from the snapshots,** so no copy runs. That is not
   the PC memory model, which kept all of the game's memory in system RAM and moved blocks in and
   out of VRAM. But the snapshots are reused within a frame or two, so each redirect would need
@@ -223,6 +231,16 @@ Found on 2026-11-05 in the 1.09 executable.
   on a storage buffer standing in for GDS, all on one address. With a large `N` that is thousands
   of serialized atomics: 37 µs, while the rest of the GPU waits. Beta 19's one atomic per subgroup
   did not change it (about 44 µs either way).
+- **0.4.5 beta 1 runs it as one step** (`ExecuteGroupCountHLE`, `gds_group_count.comp`): one
+  thread reads the count, writes `(groups, 1, 1)`, and adds `groups` to the counter. Checked against
+  the GCN code (beta 18's dump) and the SPIR-V the engine made of it (the tester's shader files):
+  - the count is one dword, read as raw bits (`BUFFER_LOAD_FORMAT_X` of a 32-bit format; the
+    `V_ADD_I32` works on the bits);
+  - the three stores are 32-bit dwords at element 0, the last `(groups, 1, 1)` (the 1s are stored as
+    the float with bits `0x00000001`);
+  - `DS_APPEND` has offset 0, so the counter is at `user_data[2] >> 16` in GDS, as m0 = s2 gives.
+  - Anything else (another thread count, buffer layout, format, or a counter outside GDS) leaves the
+    dispatch to the game's shader, counted.
 
 ## The CPU
 

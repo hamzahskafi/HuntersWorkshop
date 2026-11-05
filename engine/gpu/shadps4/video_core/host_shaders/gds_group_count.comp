@@ -1,0 +1,31 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// Hunter's Workshop 0.4.5 beta 1: the game's compute shader a954e79d in one step (vk_shader_hle.cpp,
+// ExecuteGroupCountHLE). The game's shader (32 threads, one group) reads an item count, writes
+// (groups, 1, 1) as indirect dispatch arguments, then raises a GDS counter by one per 32 items in
+// a loop of single increments whose results nothing reads. Here: the same arguments, and the
+// counter raised by `groups` in one atomic add, the same integers in memory as the loop leaves.
+#version 450
+
+layout(local_size_x = 1) in;
+
+layout(std430, binding = 0) readonly buffer Count { uint count_data[]; };
+layout(std430, binding = 1) buffer Arguments { uint args[]; };
+layout(std430, binding = 2) buffer Gds { uint gds[]; };
+
+// Dword indices into the bound ranges.
+layout(push_constant) uniform Push {
+    uint count_at;
+    uint args_at;
+    uint gds_at;
+} push;
+
+void main() {
+    // V_ADD_I32 v1, 31, v1; V_LSHRREV_B32 v1, 5, v1: a 32-bit add that wraps, as uint does.
+    const uint groups = (count_data[push.count_at] + 31u) >> 5u;
+    // The game's three TBUFFER_STORE_FORMAT_XYZ go to the same element; the last leaves these.
+    args[push.args_at + 0u] = groups;
+    args[push.args_at + 1u] = 1u;
+    args[push.args_at + 2u] = 1u;
+    // The DS_APPEND loop adds 1 for every value of thread + 32k below `groups`: `groups` in all.
+    atomicAdd(gds[push.gds_at], groups);
+}

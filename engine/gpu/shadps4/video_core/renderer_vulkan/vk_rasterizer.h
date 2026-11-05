@@ -419,6 +419,9 @@ private:
     /// bbport (docs/pipeline_compiles.md): whether the direct draw being recorded, whose
     /// pipeline is still compiling, is left out: scene geometry, for a bounded time.
     bool SkipUncompiledDraw(const GraphicsPipeline* pipeline);
+    /// 0.4.5 beta 1: whether the draw being recorded, its targets chosen (PrepareRenderState),
+    /// changes nothing: no colour or depth target, no stage writing memory, not measured.
+    bool SkipEmptyDraw(const GraphicsPipeline* pipeline);
     /// bbport: for a pipeline still compiling, records its bind as a command of its own, which a
     /// recording thread runs once the pipeline is there (it waits for it): returns null, the
     /// draw or dispatch command binds nothing. Recording on this thread: waits here and returns

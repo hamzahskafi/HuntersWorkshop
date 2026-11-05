@@ -1980,6 +1980,23 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset, const PreparedDraw* pre
 
 // BB_PROXY_TRACE (defined with BindTextures).
 static bool ProxyTraceOn();
+
+// 0.4.5 beta 1: whether the last draw or dispatch recorded was the toolkit's rectangle copy
+// a040875f (48 a frame for the lamp shadow maps): the frame statistics count those recorded right
+// after another, with no draw or other dispatch between, to tell whether merging them would pay.
+// Transfers between them are not seen. Draws and dispatches are recorded by one thread at a time.
+static constexpr u64 RECT_COPY_SHADER_HASH = 0xa040875f;
+static bool last_step_rect_copy = false;
+static void NoteRecordedStep(bool rect_copy) {
+    if (rect_copy) {
+        auto& savings = GpuSavings::Get();
+        GpuSavings::Count(savings.rect_copies);
+        if (last_step_rect_copy) {
+            GpuSavings::Count(savings.rect_copies_in_a_row);
+        }
+    }
+    last_step_rect_copy = rect_copy;
+}
 static void FlushProxyReads(bool reduced, const VideoCore::Image* target);
 
 void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw* used_prepared,
@@ -2033,6 +2050,11 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
 
     PrepareRenderState(pipeline);
     NotifyUiDraw(pipeline);
+    if (SkipEmptyDraw(pipeline)) {
+        bind_prepared = nullptr;
+        return;
+    }
+    NoteRecordedStep(false);
     const PreparedDraw* draw_prepared = bind_prepared;
     const bool bound = BindResources(pipeline);
     bind_prepared = nullptr; // indirect draws and dispatches bind without prepared sharps
@@ -2410,6 +2432,10 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
     motion_geometry = 0;
     PrepareRenderState(pipeline);
     NotifyUiDraw(pipeline);
+    if (SkipEmptyDraw(pipeline)) {
+        return;
+    }
+    NoteRecordedStep(false);
     if (!BindResources(pipeline)) {
         return;
     }
@@ -2581,6 +2607,7 @@ void Rasterizer::DispatchRecord(const ComputePipeline* pipeline) {
         upscaler->OnDispatch(cs.pgm_hash);
     }
     DisasmCompute(cs.pgm_hash, cs_program, false);
+    NoteRecordedStep(cs.pgm_hash == RECT_COPY_SHADER_HASH);
     bool hle;
     {
         BB_SECTION(ShaderHle);
@@ -2758,6 +2785,7 @@ void Rasterizer::DispatchIndirectRecord(const ComputePipeline* pipeline, VAddr a
     scheduler.PopPendingOperations();
     const u32 offset = 0;
     DisasmCompute(pipeline->GetStage(Shader::SwStage::Compute).pgm_hash, CsRegs(), true);
+    NoteRecordedStep(false);
 
     if (!BindResources(pipeline)) {
         return;
@@ -2854,6 +2882,90 @@ bool Rasterizer::SkipUncompiledDraw(const GraphicsPipeline* pipeline) {
     if (first) {
         pipeline_compile_stats.skipped_pipelines.fetch_add(1, std::memory_order_relaxed);
     }
+    return true;
+}
+
+// 0.4.5 beta 1: the game draws ~12 a frame that change nothing here: the toolkit's full-screen
+// rectangle (vertex shader 89cda9e4) with no pixel shader, no colour target and depth and
+// stencil off; on the PS4 likely depth-metadata work the PC has no counterpart for
+// (docs/performance.md). Each was recorded as a render pass of its own with no attachments, at
+// the largest framebuffer size, ending the pass before it. Left out when nothing it could touch
+// is bound: no colour or depth target (as PrepareRenderState just chose them), no stage writing
+// memory (written buffers, GDS included, storage images, image atomics, DMA), no motion vector
+// attachment, and no occlusion query measuring it. The state PrepareRenderState and NotifyUiDraw
+// keep is updated as for a recorded draw. BB_SKIP_EMPTY_DRAWS=0 records them.
+bool Rasterizer::SkipEmptyDraw(const GraphicsPipeline* pipeline) {
+    static const bool enabled = [] {
+        const char* env = std::getenv("BB_SKIP_EMPTY_DRAWS");
+        const bool on = !(env && env[0] == '0');
+        std::printf("GPU steps: draws with no target and no memory writes %s\n",
+                    on ? "are left out (BB_SKIP_EMPTY_DRAWS=0: recorded)"
+                       : "are recorded (BB_SKIP_EMPTY_DRAWS=0)");
+        return on;
+    }();
+    if (!enabled || db_desc.first || (occlusion && occlusion->Measuring())) {
+        return false;
+    }
+    const auto& key = pipeline->GetGraphicsKey();
+    if (key.motion_vectors) {
+        return false;
+    }
+    for (s32 cb = 0; cb < std::bit_width(key.mrt_mask); ++cb) {
+        if (cb_descs[cb].first) {
+            return false;
+        }
+    }
+    for (const Shader::Info* stage : pipeline->GetStages()) {
+        if (!stage) {
+            continue;
+        }
+        if (stage->translation_failed || stage->uses_dma || stage->has_storage_images) {
+            return false;
+        }
+        for (const auto& buffer : stage->buffers) {
+            if (buffer.is_written) {
+                return false;
+            }
+        }
+        for (const auto& image : stage->images) {
+            if (image.is_written || image.is_atomic) {
+                return false;
+            }
+        }
+    }
+    // The first kinds left out go to the log with the registers that would tell what the PS4
+    // does with them (the depth-metadata guess). Recorded by one thread at a time.
+    struct Kind {
+        u64 vs;
+        u32 depth_control, render_control, color_mode;
+        bool operator==(const Kind&) const = default;
+    };
+    static std::array<Kind, 8> logged{};
+    static u32 num_logged = 0;
+    const auto& regs = Regs();
+    const auto stages = pipeline->GetStages();
+    const Shader::Info* vs = stages[u32(Shader::SwStage::Vertex)];
+    const Kind kind{vs ? vs->pgm_hash : 0, std::bit_cast<u32>(regs.depth_control),
+                    std::bit_cast<u32>(regs.depth_render_control),
+                    u32(regs.color_control.mode)};
+    if (num_logged < logged.size() &&
+        std::find(logged.begin(), logged.begin() + num_logged, kind) ==
+            logged.begin() + num_logged) {
+        logged[num_logged++] = kind;
+        const auto& rc = regs.depth_render_control;
+        std::printf("GPU steps: a draw left out: vertex shader %016llx, %s; depth control %08x, "
+                    "DB_RENDER_CONTROL %08x (depth clear %u, stencil clear %u, resummarize %u, "
+                    "decompress %u), depth buffer %s %llx; colour mode %u, target mask %x\n",
+                    static_cast<unsigned long long>(kind.vs),
+                    stages[u32(Shader::SwStage::Fragment)] ? "a pixel shader" : "no pixel shader",
+                    kind.depth_control, kind.render_control, u32(rc.depth_clear_enable),
+                    u32(rc.stencil_clear_enable), u32(rc.resummarize_enable),
+                    u32(rc.decompress_enable),
+                    regs.depth_buffer.DepthValid() ? "at" : "invalid, at",
+                    static_cast<unsigned long long>(regs.depth_buffer.DepthAddress()),
+                    kind.color_mode, u32(key.mrt_mask));
+    }
+    GpuSavings::Count(GpuSavings::Get().empty_draws_skipped);
     return true;
 }
 

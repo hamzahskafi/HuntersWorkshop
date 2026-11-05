@@ -135,6 +135,13 @@ struct Counters {
     std::array<std::atomic<std::uint64_t>, 2> overlap_conversions{};
     // 0.4.4 beta 18: uploads of the game's memory into depth images (Runtime::UploadImage).
     std::atomic<std::uint64_t> depth_uploads{0}, depth_upload_bytes{0};
+    // 0.4.5 beta 1: GPU steps taken out. Draws with no target and no memory writes, left out
+    // (Rasterizer::SkipEmptyDraw); the game's a954e79d run as one step (ExecuteGroupCountHLE),
+    // and those left to the game's shader because a check failed.
+    std::atomic<std::uint64_t> empty_draws_skipped{0}, group_count_hle{0}, group_count_declined{0};
+    // 0.4.5 beta 1: the game's rectangle copies (a040875f), and those recorded right after
+    // another, with no draw or other dispatch between (NoteRecordedStep): how many could go as one.
+    std::atomic<std::uint64_t> rect_copies{0}, rect_copies_in_a_row{0};
 };
 
 /// Runtime::CopyColorAndDepth's kinds: depth->colour by the shader (0.4.4 beta 17), by a copy;
@@ -263,6 +270,15 @@ inline void Report() {
                 color_refusals[1], color_refusals[2], color_refusals[3], color_refusals[4],
                 color_refusals[5], color_refusals[6], kinds[3], kinds[4], kinds[5], overlaps[0],
                 overlaps[1], depth_uploads, depth_upload_mb);
+    const double empty_draws = take(c.empty_draws_skipped) / s;
+    const double group_counts = take(c.group_count_hle) / s;
+    const double group_declined = take(c.group_count_declined) / s;
+    const double rect_copies = take(c.rect_copies) / s;
+    const double rects_in_a_row = take(c.rect_copies_in_a_row) / s;
+    std::printf("  GPU steps per second (0.4.5): empty draws skipped %.1f; a954e79d as one step "
+                "%.1f (left to the game's shader %.1f); rectangle copies (a040875f) %.1f, %.1f of "
+                "them right after another\n",
+                empty_draws, group_counts, group_declined, rect_copies, rects_in_a_row);
 }
 
 } // namespace Vulkan::GpuSavings

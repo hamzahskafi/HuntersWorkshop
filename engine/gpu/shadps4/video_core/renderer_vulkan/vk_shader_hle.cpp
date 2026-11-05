@@ -18,6 +18,8 @@
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/host_shaders/buffer_multi_copy_comp.h"
+#include "video_core/host_shaders/gds_group_count_comp.h"
+#include "video_core/texture_cache/texture_cache.h"
 #include "bbport_sections.h"
 #include "bbport_toggles.h"
 #include "video_core/renderer_vulkan/vk_gpu_profiler.h"
@@ -29,6 +31,8 @@ extern std::unique_ptr<AmdGpu::Liverpool> liverpool;
 namespace Vulkan {
 
 static constexpr u64 COPY_SHADER_HASH = 0xfefebf9f;
+// 0.4.5 beta 1: the game's group count shader (ExecuteGroupCountHLE).
+static constexpr u64 GROUP_COUNT_SHADER_HASH = 0xa954e79d;
 
 // 0.4.4 beta 20: whether the game dispatch being run interrupted a render pass, sampled at its
 // start (ExecuteCopyShaderHLE), before its uploads, copies or the profiler's mark end the pass,
@@ -499,11 +503,223 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
     return true;
 }
 
+// 0.4.5 beta 1: the game's compute shader a954e79d (5 dispatches a frame where the dynamic lights
+// cast shadows, 37 us each) as one step. Its code (BB_SHADER_DISASM in 0.4.4 beta 18; 32 threads,
+// one group):
+//   BUFFER_LOAD_FORMAT_X       N from the first buffer, element 0
+//   TBUFFER_LOAD_FORMAT_XY     the second buffer, element 0, bytes 4..11
+//   V_ADD_I32 31 / V_LSHRREV 5 groups = (N + 31) >> 5
+//   TBUFFER_STORE_FORMAT_XYZ   three stores to element 0 of the second buffer; the last leaves
+//                              (groups, 1, 1)
+//   loop while thread < groups: DS_APPEND at GDS (m0 = user data 2), thread += 32
+// The loop's appends add one for every value of thread + 32k below `groups`, `groups` in all, and
+// their results are never read. gds_group_count.comp writes the same arguments and adds `groups`
+// to the counter in one atomic: the same integers in memory. On the PC every pass of the loop was
+// an atomic on one address of the storage buffer standing in for GDS, thousands of them in a row
+// while the rest of the GPU waited. Anything that does not match what the code above assumes is
+// left to the game's shader (counted). BB_GROUP_COUNT_HLE=0 turns it off.
+static bool ExecuteGroupCountHLE(const Shader::Info& info, const AmdGpu::ComputeProgram& cs_program,
+                                 Rasterizer& rasterizer) {
+    static const bool enabled = [] {
+        const char* env = std::getenv("BB_GROUP_COUNT_HLE");
+        const bool on = !(env && env[0] == '0');
+        std::printf("GPU steps: the game's group count shader a954e79d %s\n",
+                    on ? "runs as one step (BB_GROUP_COUNT_HLE=0: the game's shader)"
+                       : "runs as the game's shader (BB_GROUP_COUNT_HLE=0)");
+        return on;
+    }();
+    if (!enabled) {
+        return false;
+    }
+    auto& savings = GpuSavings::Get();
+    const auto decline = [&] {
+        GpuSavings::Count(savings.group_count_declined);
+        return false;
+    };
+    // One group of 32 threads: the code counts with the thread's index in the group only.
+    if (cs_program.dim_x != 1 || cs_program.dim_y != 1 || cs_program.dim_z != 1 ||
+        cs_program.num_thread_x.full != 32 || cs_program.num_thread_y.full != 1 ||
+        cs_program.num_thread_z.full != 1) {
+        return decline();
+    }
+    // Two of the game's buffers (the count, read; the arguments, written) and GDS.
+    const Shader::BufferResource* count_desc = nullptr;
+    const Shader::BufferResource* args_desc = nullptr;
+    bool gds = false;
+    for (const auto& desc : info.buffers) {
+        if (desc.buffer_type == Shader::BufferType::GdsBuffer) {
+            gds = true;
+        } else if (desc.buffer_type != Shader::BufferType::Guest) {
+            continue;
+        } else if (desc.is_written) {
+            if (args_desc) {
+                return decline();
+            }
+            args_desc = &desc;
+        } else {
+            if (count_desc) {
+                return decline();
+            }
+            count_desc = &desc;
+        }
+    }
+    if (!gds || !count_desc || !args_desc) {
+        return decline();
+    }
+    const auto count_sharp = count_desc->GetSharp(info);
+    const auto args_sharp = args_desc->GetSharp(info);
+    using AmdGpu::DataFormat;
+    using AmdGpu::NumberFormat;
+    const auto count_nfmt = count_sharp.GetNumberFmt();
+    // BUFFER_LOAD_FORMAT_X of a 32-bit format reads the dword as it is (the translation loads it
+    // as a float and adds to its bits); element 0 must be in range, and plain addressing.
+    if (!count_sharp.Valid() || count_sharp.num_records == 0 ||
+        count_sharp.GetDataFmt() != DataFormat::Format32 ||
+        (count_nfmt != NumberFormat::Float && count_nfmt != NumberFormat::Uint &&
+         count_nfmt != NumberFormat::Sint) ||
+        count_sharp.swizzle_enable || count_sharp.add_tid_enable ||
+        (count_sharp.base_address & 3) != 0) {
+        return decline();
+    }
+    // Element 0's first 12 bytes must be in range (structured: within the stride).
+    if (!args_sharp.Valid() || args_sharp.num_records == 0 || args_sharp.swizzle_enable ||
+        args_sharp.add_tid_enable || (args_sharp.base_address & 3) != 0 ||
+        (args_sharp.GetStride() != 0 && args_sharp.GetStride() < 12) ||
+        (args_sharp.GetStride() == 0 && args_sharp.num_records < 12)) {
+        return decline();
+    }
+    auto& buffer_cache = rasterizer.GetBufferCache();
+    const auto* gds_buffer = buffer_cache.GetGdsBuffer();
+    // m0 = user data 2: the counter's byte offset in its high half (the translation's
+    // BitFieldUExtract(ud_2, 16, 16) >> 2).
+    const u64 gds_offset = cs_program.user_data[2] >> 16;
+    if ((gds_offset & 3) != 0 || gds_offset + 4 > gds_buffer->SizeBytes()) {
+        return decline();
+    }
+
+    auto& runtime = rasterizer.GetRuntime();
+    auto& scheduler = runtime.GetScheduler();
+    const auto& instance = runtime.GetInstance();
+    const u64 align = instance.StorageMinAlignment();
+
+    const auto [count_buffer, count_offset] =
+        buffer_cache.ObtainBuffer(count_sharp.base_address, sizeof(u32), false);
+    const auto [args_buffer, args_offset] =
+        buffer_cache.ObtainBuffer(args_sharp.base_address, 3 * sizeof(u32), true);
+    {
+        // Raw storage-buffer writes can make an aliased cached image stale, as BindBuffers says.
+        const VideoCore::InvalidateReason reason{"group count"};
+        rasterizer.GetTextureCache().InvalidateMemoryFromGPU(args_sharp.base_address,
+                                                             3 * sizeof(u32));
+    }
+    if ((count_offset & 3) != 0 || (args_offset & 3) != 0) {
+        return decline();
+    }
+    // Bound from the storage alignment below each, the dword's index pushed.
+    const u64 count_base = Common::AlignDown(count_offset, align);
+    const u64 args_base = Common::AlignDown(args_offset, align);
+    const u64 gds_base = Common::AlignDown(gds_offset, align);
+    const u64 count_size = count_offset + sizeof(u32) - count_base;
+    const u64 args_size = args_offset + 3 * sizeof(u32) - args_base;
+    const u64 gds_size = gds_offset + sizeof(u32) - gds_base;
+    const std::array<u32, 3> push{static_cast<u32>((count_offset - count_base) / 4),
+                                  static_cast<u32>((args_offset - args_base) / 4),
+                                  static_cast<u32>((gds_offset - gds_base) / 4)};
+
+    struct Pipeline {
+        vk::UniqueDescriptorSetLayout set_layout;
+        vk::UniquePipelineLayout layout;
+        vk::UniquePipeline pipeline;
+    };
+    static Pipeline pipe = [&] {
+        const auto device = instance.GetDevice();
+        Pipeline p;
+        std::array<vk::DescriptorSetLayoutBinding, 3> bindings{};
+        for (u32 i = 0; i < 3; ++i) {
+            bindings[i] = {.binding = i,
+                           .descriptorType = vk::DescriptorType::eStorageBuffer,
+                           .descriptorCount = 1,
+                           .stageFlags = vk::ShaderStageFlagBits::eCompute};
+        }
+        p.set_layout = Check(device.createDescriptorSetLayoutUnique({
+            .flags = vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptorKHR,
+            .bindingCount = static_cast<u32>(bindings.size()),
+            .pBindings = bindings.data(),
+        }));
+        const vk::PushConstantRange range{.stageFlags = vk::ShaderStageFlagBits::eCompute,
+                                          .offset = 0,
+                                          .size = 3 * sizeof(u32)};
+        p.layout = Check(device.createPipelineLayoutUnique({
+            .setLayoutCount = 1,
+            .pSetLayouts = &*p.set_layout,
+            .pushConstantRangeCount = 1,
+            .pPushConstantRanges = &range,
+        }));
+        const auto module = CompileSPV(GDS_GROUP_COUNT_COMP, device);
+        p.pipeline = Check(device.createComputePipelineUnique(
+            {}, vk::ComputePipelineCreateInfo{
+                    .stage = {.stage = vk::ShaderStageFlagBits::eCompute,
+                              .module = module,
+                              .pName = "main"},
+                    .layout = *p.layout,
+                }));
+        device.destroyShaderModule(module);
+        return p;
+    }();
+
+    // A dispatch ends the open render pass, as the game's own would.
+    scheduler.EndRendering(GpuSavings::PassBreak::Dispatch);
+    if (auto* profiler = GpuProfiler::Get()) {
+        profiler->Mark(0xA954ull, [] { return std::string{"a954e79d as one step"}; });
+    }
+    if (runtime.IsBufferAccessed(count_buffer, count_offset, sizeof(u32)) ||
+        runtime.IsBufferAccessed(args_buffer, args_offset, 3 * sizeof(u32), true) ||
+        runtime.IsBufferAccessed(gds_buffer, gds_offset, sizeof(u32), true)) {
+        runtime.FlushBarriers();
+    }
+    scheduler.RecordCrumb({.name = "a954e79d as one step"},
+                          [count = count_buffer->Handle(), args = args_buffer->Handle(),
+                           gds_handle = gds_buffer->Handle(), count_base, count_size, args_base,
+                           args_size, gds_base, gds_size, push](vk::CommandBuffer cmdbuf) {
+                              const std::array<vk::DescriptorBufferInfo, 3> infos{{
+                                  {count, count_base, count_size},
+                                  {args, args_base, args_size},
+                                  {gds_handle, gds_base, gds_size},
+                              }};
+                              std::array<vk::WriteDescriptorSet, 3> writes{};
+                              for (u32 i = 0; i < 3; ++i) {
+                                  writes[i] = {.dstBinding = i,
+                                               .descriptorCount = 1,
+                                               .descriptorType = vk::DescriptorType::eStorageBuffer,
+                                               .pBufferInfo = &infos[i]};
+                              }
+                              cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, *pipe.pipeline);
+                              cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute,
+                                                          *pipe.layout, 0, writes);
+                              cmdbuf.pushConstants(*pipe.layout, vk::ShaderStageFlagBits::eCompute,
+                                                   0, static_cast<u32>(sizeof(push)), push.data());
+                              cmdbuf.dispatch(1, 1, 1);
+                          });
+    runtime.AccessBuffer(count_buffer, count_offset, sizeof(u32),
+                         vk::PipelineStageFlagBits2::eComputeShader,
+                         vk::AccessFlagBits2::eShaderRead);
+    runtime.AccessBuffer(args_buffer, args_offset, 3 * sizeof(u32),
+                         vk::PipelineStageFlagBits2::eComputeShader,
+                         vk::AccessFlagBits2::eShaderWrite);
+    runtime.AccessBuffer(gds_buffer, gds_offset, sizeof(u32),
+                         vk::PipelineStageFlagBits2::eComputeShader,
+                         vk::AccessFlagBits2::eShaderWrite);
+    GpuSavings::Count(savings.group_count_hle);
+    return true;
+}
+
 bool ExecuteShaderHLE(const Shader::Info& info, const AmdGpu::Regs& regs,
                       const AmdGpu::ComputeProgram& cs_program, Rasterizer& rasterizer) {
     switch (info.pgm_hash) {
     case COPY_SHADER_HASH:
         return ExecuteCopyShaderHLE(info, cs_program, rasterizer);
+    case GROUP_COUNT_SHADER_HASH:
+        return ExecuteGroupCountHLE(info, cs_program, rasterizer);
     default:
         return false;
     }
