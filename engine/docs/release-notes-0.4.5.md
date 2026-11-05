@@ -46,7 +46,6 @@ compared went from 140–145 FPS in 0.4.2 to 210.
 - **The frame statistics count** the steps taken out (`GPU steps per second (0.4.5)`): the draws left
   out, the rectangle copies and those left out, the lamp shadow faces drawn into their scratch images,
   their clears, and any faces put back.
-
 - **A trace of the copy shader** (beta 8), with frame statistics on: twice a session (the 600th and
   the 6,000th frame of play), one frame's copy-shader dispatches in their passes: for each pass, how
   many copies came at its start, inside it, and at its end, and of those inside how many could move

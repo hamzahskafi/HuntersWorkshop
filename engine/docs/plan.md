@@ -103,6 +103,25 @@ memory cleanup after them. The evidence for each item is in [performance.md](per
     place work ahead of commands already recorded: the riskiest change of step 1. Beta 8 traces one
     frame's copies in their passes (`vk_copy_trace.h`, no change in behaviour); then the decision.
     Estimate 0.15–0.3 ms, everywhere.
+    - **What others do (read 2026-11-05).** **bbhost** (droogie, `bdc5cdf`): copy-backs of renamed
+      dynamic buffers end 55% of its draw runs, and it makes them *copy versions*: the bytes go into
+      a staging copy at the copy, the draws after it bind that copy, and the copies into place wait
+      for the next transfer batch, dispatch or submission, with no pass end or barrier at the copy
+      (`gpu_internal.h`, `docs/list-resolve.md`). It also merges copies into runs (`copy_runs.h`)
+      and leaves image copies unmade by sending their reads elsewhere (`copy_elide.h`, the general
+      form of beta 4's shadow redirect). **bbport 0.7** (deadinside28, `BB_COPY_SKIP_SAME`, on by
+      default): of each copy shader call only the copies that change their destination run (the
+      last copy into exactly it wrote the same bytes, nothing copied over it since), checked on a
+      thread of its own; a call left with none is left out. +1–4% in heavy views. Built on its own
+      buffer code (stage A); for HW it would compare the source bytes when the copy is recorded.
+      **shadPS4 upstream**: one `vkCmdCopyBuffer` per buffer pair; HW is past it.
+    - **What HW measured before:** a render pass begun again with no barrier costs a few µs (0.4.4
+      beta 21), so the restarts are not the cost; the copies' own dispatches and barriers are (about
+      5 µs a step). Moving copies pays only if they then run in fewer dispatches.
+    - **The choice, after the trace:** (a) a pass's movable copies in one dispatch at its start;
+      (b) bbhost's copy versions, no pass end at all (larger: the draws after a copy bind its
+      staging copy); (c) bbport's copies that change nothing left out, which first needs a count of
+      how many change nothing.
   - **Smaller items:** `mem-4`; `upscale-2` and `-3` (0.29 ms at Quality, nothing at DLAA); the GPU
     idle between submissions (about 0.1 ms, 3 a frame).
 
