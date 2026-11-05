@@ -6,8 +6,14 @@ What changed since 0.4.4, for the release page. The engine work behind each line
 
 ## Fewer GPU steps
 
-The GPU is the limit at the busiest spots, and not because of pixels: the frame has about 240 steps
-and each costs about 5 µs however little it does (performance.md). The picture is the same.
+The GPU is the limit at the busiest spots, and not because of pixels: the frame has about 240 steps,
+and each costs about 5 µs however little it does (performance.md). 0.4.5 takes out steps that do
+nothing on the PC or that the PC can do another way. The picture is the same.
+
+**Measured** (RTX 3070 Ti, DLAA, Model detail Highest, the tester's lamp spot and a second spot,
+against 0.4.4): **135.0 to 143.5 FPS** (GPU 7.40 to 6.96 ms a frame) and **122.2 to 130.3 FPS**
+(8.18 to 7.67 ms). The gain grows with the lamps casting shadows; one lamp-lit scene the tester
+compared went from 140–145 FPS in 0.4.2 to 210.
 
 - **Draws that change nothing are left out** (beta 1). The game draws about 12 a frame with the
   toolkit's full-screen rectangle, no pixel shader, no colour target, depth and stencil off, and only
@@ -15,69 +21,36 @@ and each costs about 5 µs however little it does (performance.md). The picture 
   compression data in place before it is read; the PC has no such data. Here each one was a render
   pass of its own, and it ended the pass before it. A draw is left out only when nothing it could
   touch is bound: no colour or depth target, no shader writing memory, no motion vectors, no
-  occlusion query measuring it.
-  - **Measured** (RTX 3070 Ti, DLAA, Model detail Highest, the tester's lamp spot, against 0.4.4):
-    135.0 to 137.0 FPS (GPU 7.40 to 7.30 ms a frame), and 122.2 to 123.7 FPS at the second spot
-    (8.18 to 8.08 ms).
-  - `BB_SKIP_EMPTY_DRAWS=0` in Extra variables draws them as before.
+  occlusion query measuring it. About 0.1 ms.
 - **Lamp shadow faces drawn where the game copies them** (beta 4). Each lamp's shadow is a cube map
-  of six faces; the game draws each face, copies it whole into a scratch image and blurs it from
-  there back into the face (48 faces a frame at the tester's lamp spot). The engine now draws the face
+  of six faces, 48 faces a frame at the lamp spot; the game clears each face, draws it, copies it
+  whole into a scratch image and blurs it from there back into the face. The engine draws the face
   straight into the scratch image, so the copy has nothing to do and is left out; the blur writes the
-  face as before.
-  - **Measured** (same PC and settings, `20261105_223017` on and `20261105_223222` off): at the lamp
-    spot 136.8 to 141.5 FPS (GPU 7.31 to 7.07 ms a frame), at the second spot 124.8 to 127.9 FPS (8.03
-    to 7.82 ms). All 48 faces a frame drawn into their scratch images, no face put back. Since 0.4.4:
-    135.0 to 141.5 FPS at the lamp spot.
-  - The engine learns each lamp's scratch image from the game's own copies first (4 of them), and
-    should anything else touch a face or its scratch image in between, it copies the face back where
-    the game drew it.
-  - `BB_SHADOW_COPY_SKIP=0` in Extra variables draws and copies as the game does.
-- **The lamp shadow faces' clears done as each face's drawing begins** (beta 5). Each face was cleared
-  as a step of its own before its drawing; it is now cleared as the first command of the face's
-  render pass, with the same value. A face with nothing to draw is cleared where its copy is left
-  out, so the blur never reads an uncleared image. `BB_SHADOW_CLEAR_FOLD=0` in Extra variables clears
-  them on their own as in beta 4.
-  - **Measured** (`20261105_230744` on, `20261105_231328` off): at the lamp spot 141.2 to 143.5 FPS
-    (GPU 7.08 to 6.96 ms a frame), at the second spot 127.6 to 130.3 FPS (7.84 to 7.67 ms). Three
-    quarters of the clears went into the face's pass, the rest were faces with nothing drawn; no
-    face put back. With the fold off, the frame matches beta 4's, so the clears' new profile lines
-    cost nothing visible (each size's clears stay under the profile's top 30).
-  - **Since 0.4.4, step 1 in all:** 135.0 to 143.5 FPS at the lamp spot (GPU 7.40 to 6.96 ms) and
-    122.2 to 130.3 at the second spot (8.18 to 7.67 ms), the picture unchanged.
-  - **Beta 6:** a face drawn with a depth image smaller than itself would have a render pass
-    smaller than the face, and a clear folded into it would reach outside the pass (not allowed in
-    Vulkan) and leave the rest uncleared. Such a face's clear is now done before its pass, on its
-    own. Bloodborne's faces use depth images of their own size (both traces), so nothing changes in
-    play. (Found by the tester's build review.)
-- **Not kept:** beta 1 also ran the game's shader `a954e79d` as one step instead of its loop of
-  atomics. It was exact, but the GPU time didn't move: the 0.21 ms a frame the profile showed for it
-  was the work after it, which had no label of its own. Beta 2 removes it (and
-  `BB_GROUP_COUNT_HLE`).
+  face as before. About 0.24 ms.
+  - The engine learns each lamp's scratch image from the game's own copies first (4 of them). Should
+    anything else touch a face or its scratch image in between, it copies the face back where the
+    game drew it (counted as `faces put back`; none in any test).
+  - `BB_SHADOW_COPY_SKIP=0` in Extra variables draws, clears and copies as the game does. It stays
+    until 0.4.5 stable, in case a rarer scene shows a shadow problem.
+- **The lamp shadow faces' clears done as each face's drawing begins** (beta 5). Each face was
+  cleared as a step of its own; it is now cleared as the first command of the face's render pass,
+  with the same value. A face with nothing to draw is cleared where its copy is left out, and a face
+  whose pass is smaller than itself (a smaller depth image; beta 6, from the tester's build review;
+  not seen in Bloodborne) before its pass. About 0.12–0.17 ms.
 
 ## Diagnostics
 
-- **The GPU profile labels indirect dispatches** (`dispatch indirect cs ...`, beta 2). Their time used
-  to go to the label before them.
-- **What comes around the shadows' rectangle copies** (`a040875f`, about 43 a frame), with frame
-  statistics on (beta 2): every 30,000 copies, the log names the draws and dispatches most often
-  recorded right before and right after them (`GPU steps: around the rectangle copies ...`). Beta 1
-  found none right after another; this tells whether they can merge with the shadow filter's passes.
-  Beta 2's log answered it: each level of each shadow face is drawn, copied and filtered on its own.
-- **A trace of the shadow steps** (beta 3), with frame statistics on: twice a session (the 600th and
-  the 6,000th frame with lamp shadows), one whole frame's draws into targets up to 256 wide, grouped
-  while their targets stay the same, with their shaders, targets and textures; every dispatch, the
-  shadow copies with their images and constants; and how many other draws came between
-  (`Shadow trace 1 ...` to `Shadow trace 1: end of the frame`). It tells whether a face's four
-  levels can be merged.
-- **Image clears have their own lines in the GPU profile** (beta 5: `image clear WxH`). Their time
-  used to go to the line before them.
-- **The frame statistics count** the draws left out and the rectangle copies (`GPU steps per second
-  (0.4.5)`), and the log names the first kinds of draw left out with their depth registers. From
-  beta 4 also the lamp shadow faces drawn into the scratch image, the copies left out, and the faces
-  put back (the first 8 named, with why).
+- **The GPU profile labels indirect dispatches** (`dispatch indirect cs ...`) and **image clears**
+  (`image clear WxH`); their time used to go to the label before them. This is how `a954e79d`'s
+  0.21 ms turned out to be the game's particle update after it.
+- **The frame statistics count** the steps taken out (`GPU steps per second (0.4.5)`): the draws left
+  out, the rectangle copies and those left out, the lamp shadow faces drawn into their scratch images,
+  their clears, and any faces put back.
 
-**To test beta 5:** the lamp spot as before (frame statistics and GPU time on): the FPS, then the
-same with `BB_SHADOW_CLEAR_FOLD=0` in Extra variables. With it off, the GPU profile shows what the
-clears cost (`image clear 256x256, one layer` and the other sizes); with it on, those lines are gone.
-The lamp shadows should look as in beta 4.
+## Tried and not kept
+
+- Beta 1 ran the game's shader `a954e79d` as one step instead of its loop of atomics. It was exact,
+  but the time was the particle update after it; beta 2 removed it.
+- Betas 1 to 3 logged the empty draws' depth registers, what is recorded around the shadow copies,
+  and one frame's shadow steps. Beta 7 removed them once they had answered their questions, with the
+  switches `BB_SKIP_EMPTY_DRAWS` and `BB_SHADOW_CLEAR_FOLD` (settled; the tester, 2026-11-05).

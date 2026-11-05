@@ -422,11 +422,6 @@ private:
     /// 0.4.5 beta 1: whether the draw being recorded, its targets chosen (PrepareRenderState),
     /// changes nothing: no colour or depth target, no stage writing memory, not measured.
     bool SkipEmptyDraw(const GraphicsPipeline* pipeline);
-    /// 0.4.5 beta 2: notes a draw about to be recorded, for what comes around the rectangle
-    /// copies (NoteRecordedStep, with frame statistics).
-    void NoteDrawStep(const GraphicsPipeline* pipeline, bool indirect);
-    /// 0.4.5 beta 3: a draw in the frame the shadow trace lists (NoteDrawStep).
-    void TraceShadowDraw(const GraphicsPipeline* pipeline, bool indirect);
     /// 0.4.5 beta 4 (BB_SHADOW_COPY_SKIP): lamp shadow faces drawn into their blur's scratch
     /// image, the game's copy of each face into it left out (ShadowRedirect, vk_rasterizer.cpp).
     bool ShadowRedirectClear(VideoCore::ImageId cube_id, u32 layer, const vk::ClearValue& clear);

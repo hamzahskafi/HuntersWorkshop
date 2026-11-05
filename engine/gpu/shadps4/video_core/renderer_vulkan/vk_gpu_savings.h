@@ -138,8 +138,8 @@ struct Counters {
     // 0.4.5 beta 1: draws with no target and no memory writes, left out
     // (Rasterizer::SkipEmptyDraw).
     std::atomic<std::uint64_t> empty_draws_skipped{0};
-    // 0.4.5 beta 1: the game's rectangle copies (a040875f). What is recorded around them goes to
-    // the log separately (NoteRecordedStep in vk_rasterizer.cpp).
+    // 0.4.5 beta 1: the game's rectangle copies (a040875f), all of them; beta 4 leaves the lamp
+    // shadow faces' out (ShadowRedirectDispatch in vk_rasterizer.cpp).
     std::atomic<std::uint64_t> rect_copies{0};
     // 0.4.5 beta 4: lamp shadow faces drawn into their blur's scratch image, their copies left
     // out, and faces put back into the cube's layer before or after the copy (ShadowRedirect).

@@ -1981,191 +1981,8 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset, const PreparedDraw* pre
 // BB_PROXY_TRACE (defined with BindTextures).
 static bool ProxyTraceOn();
 
-// 0.4.5: what is recorded around the toolkit's rectangle copy a040875f (about 43 a frame with the
-// lamp shadows on). Beta 1 found none right after another, so merging them means moving draws;
-// beta 2 names what comes before and after them, with frame statistics on: if it is the shadow
-// filter's passes (pixel shader 0f61fd27), the copies go with the filter's merge. The
-// most frequent neighbours go to the log every 30,000 copies. Transfers between them are not
-// seen. Draws and dispatches are recorded by one thread at a time.
+// The toolkit's rectangle copy shader (0.4.4 beta 18: an image load and an image store).
 static constexpr u64 RECT_COPY_SHADER_HASH = 0xa040875f;
-namespace {
-struct RecordedStep {
-    enum class Kind : u8 { Draw, DrawVs, IndirectDraw, IndirectDrawVs, Dispatch, IndirectDispatch };
-    Kind kind{};
-    u64 hash{};  // the pixel shader's (the vertex shader's when there is none), or the compute's
-    u32 size{};  // a draw's first target's width; a direct dispatch's groups across
-    bool operator==(const RecordedStep&) const = default;
-};
-struct StepTally {
-    std::array<std::pair<RecordedStep, u32>, 12> entries{};
-    u32 used = 0, others = 0;
-    void Add(const RecordedStep& step) {
-        for (u32 i = 0; i < used; ++i) {
-            if (entries[i].first == step) {
-                ++entries[i].second;
-                return;
-            }
-        }
-        if (used < entries.size()) {
-            entries[used++] = {step, 1};
-        } else {
-            ++others;
-        }
-    }
-    std::string Top(u32 total) {
-        std::sort(entries.begin(), entries.begin() + used,
-                  [](const auto& a, const auto& b) { return a.second > b.second; });
-        static constexpr std::array<const char*, 6> kinds{
-            "draw ps", "draw vs", "indirect draw ps", "indirect draw vs", "dispatch cs",
-            "indirect dispatch cs"};
-        std::string text;
-        for (u32 i = 0; i < used && i < 4; ++i) {
-            const auto& [step, count] = entries[i];
-            text += fmt::format("{}{:.0f}% {} {:016x}", i ? ", " : "", 100.0 * count / total,
-                                kinds[u32(step.kind)], step.hash);
-            if (step.kind < RecordedStep::Kind::Dispatch) {
-                text += fmt::format(" ({} wide)", step.size);
-            } else if (step.kind == RecordedStep::Kind::Dispatch) {
-                text += fmt::format(" ({} groups across)", step.size);
-            }
-        }
-        if (used > 4 || others) {
-            text += ", ...";
-        }
-        return text;
-    }
-};
-RecordedStep last_step{};
-bool last_step_rect_copy = false;
-StepTally before_copies, after_copies;
-u32 tallied_copies = 0;
-u32 tally_reports = 0;
-} // namespace
-// 0.4.5 beta 3: one frame's trace of the shadow steps, twice a session, with frame statistics on.
-// Beta 2 showed each level of each lamp shadow face drawn, copied (a040875f) and filtered on its
-// own. Merging a face's four levels needs each size to have its own targets and no later level to
-// read an earlier level's copy or filter: the trace lists, in order, the draws into targets up to
-// 256 wide (grouped while their targets stay the same, with the first draw's shaders and
-// textures), every dispatch (a040875f's with its images and constants), and how many other draws
-// came between. It starts at a frame start: the 600th and the 6,000th frame with at least 24
-// rectangle copies. Recorded by one thread at a time.
-namespace {
-struct ShadowTrace {
-    u32 copies_this_frame = 0;
-    u32 shadow_frames = 0;
-    u32 traces = 0;
-    u32 lines = 0;
-    bool active = false;
-    u32 other_draws = 0;  // draws into larger targets since the last line
-    u64 run_key = 0;      // the draws being grouped: their targets
-    u32 run_draws = 0;
-    bool run_shaders_vary = false;
-    u64 run_ps = 0;
-    std::string run_text;
-};
-ShadowTrace shadow_trace;
-constexpr u32 SHADOW_TRACE_MAX_LINES = 800;
-
-void ShadowTracePrint(const std::string& text) {
-    auto& t = shadow_trace;
-    if (t.lines < SHADOW_TRACE_MAX_LINES) {
-        ++t.lines;
-        std::printf("  %s\n", text.c_str());
-    }
-}
-void ShadowTraceFlush() {
-    auto& t = shadow_trace;
-    if (t.other_draws) {
-        ShadowTracePrint(fmt::format("({} other draws)", t.other_draws));
-        t.other_draws = 0;
-    }
-    if (t.run_draws) {
-        ShadowTracePrint(fmt::format("draws x{} {}{}", t.run_draws, t.run_text,
-                                     t.run_shaders_vary ? " (other shaders too)" : ""));
-        t.run_draws = 0;
-        t.run_key = 0;
-    }
-}
-std::string TraceSharp(const AmdGpu::Image& image) {
-    return fmt::format("@{:x} {}x{} mips {}-{} layers {}-{}", image.Address(), u32(image.width) + 1,
-                       u32(image.height) + 1, u32(image.base_level), u32(image.last_level),
-                       u32(image.base_array), u32(image.last_array));
-}
-} // namespace
-static void ShadowTraceFrame() {
-    auto& t = shadow_trace;
-    if (t.active) {
-        ShadowTraceFlush();
-        std::printf("Shadow trace %u: end of the frame (%u lines)\n", t.traces + 1, t.lines);
-        t.active = false;
-        ++t.traces;
-    }
-    if (BbStats::enabled && t.traces < 2 && t.copies_this_frame >= 24) {
-        ++t.shadow_frames;
-        if (t.shadow_frames == 600 || t.shadow_frames == 6000) {
-            t.active = true;
-            t.lines = 0;
-            std::printf("Shadow trace %u (0.4.5 beta 3), one frame in order: draws into targets up "
-                        "to 256 wide, grouped while their targets stay the same (the first draw's "
-                        "shaders and textures); every dispatch; other draws counted between\n",
-                        t.traces + 1);
-        }
-    }
-    t.copies_this_frame = 0;
-}
-// A dispatch in the traced frame: the copy shader's and others in a row grouped by shader;
-// a040875f's each on a line with its images and the first 12 dwords of its constant buffer, as the
-// CPU holds them.
-static void ShadowTraceDispatch(const Shader::Info& cs, const AmdGpu::ComputeProgram* program,
-                                bool skipped = false) {
-    auto& t = shadow_trace;
-    if (!t.active) {
-        return;
-    }
-    if (cs.pgm_hash != RECT_COPY_SHADER_HASH) {
-        const u64 key = cs.pgm_hash ^ 0xD15Aull;
-        if (t.run_draws && t.run_key == key) {
-            ++t.run_draws;
-            return;
-        }
-        ShadowTraceFlush();
-        t.run_key = key;
-        t.run_draws = 1;
-        t.run_shaders_vary = false;
-        t.run_text = program ? fmt::format("(dispatches) cs {:016x}, the first {}x{}x{} groups",
-                                           cs.pgm_hash, program->dim_x, program->dim_y,
-                                           program->dim_z)
-                             : fmt::format("(indirect dispatches) cs {:016x}", cs.pgm_hash);
-        return;
-    }
-    ShadowTraceFlush();
-    std::string text = fmt::format("copy a040875f {}x{} groups:", program ? program->dim_x : 0,
-                                   program ? program->dim_y : 0);
-    for (const auto& image : cs.images) {
-        text += fmt::format(" [{}] {}", image.is_written ? "write" : "read",
-                            TraceSharp(image.GetSharp(cs)));
-    }
-    for (const auto& buffer : cs.buffers) {
-        if (buffer.buffer_type != Shader::BufferType::Guest || buffer.is_written) {
-            continue;
-        }
-        const auto sharp = buffer.GetSharp(cs);
-        if (!sharp.Valid() || sharp.GetSize() < 48 || (sharp.base_address & 3) != 0) {
-            continue;
-        }
-        std::array<u32, 12> dwords;
-        std::memcpy(dwords.data(), reinterpret_cast<const void*>(sharp.base_address), 48);
-        text += "; constants";
-        for (const u32 dword : dwords) {
-            text += fmt::format(" {}", dword);
-        }
-        break;
-    }
-    if (skipped) {
-        text += " (left out: the face was drawn into the scratch image)";
-    }
-    ShadowTracePrint(text);
-}
 
 // 0.4.5 beta 4 (BB_SHADOW_COPY_SKIP): a lamp shadow face drawn into its blur's scratch image, and
 // the game's copy of the face into that image left out (Rasterizer::ShadowRedirect*). Beta 3's
@@ -2204,20 +2021,6 @@ struct ShadowRedirect {
     bool disabled = false;
 };
 ShadowRedirect shadow_redirect;
-
-// 0.4.5 beta 5 (BB_SHADOW_CLEAR_FOLD): a redirected face's clear folded into its render pass.
-bool ShadowClearFoldOn() {
-    static const bool on = [] {
-        const char* env = std::getenv("BB_SHADOW_CLEAR_FOLD");
-        const bool enabled = !(env && env[0] == '0');
-        std::printf("GPU steps: lamp shadow faces' clears %s\n",
-                    enabled ? "done as their render pass begins (BB_SHADOW_CLEAR_FOLD=0: on their "
-                              "own)"
-                            : "done on their own (BB_SHADOW_CLEAR_FOLD=0)");
-        return enabled;
-    }();
-    return on;
-}
 
 // 0.4.5 beta 5: an image clear's own label in the GPU profile; its time went to the label before
 // it (the lamp shadow faces' clears to the previous face's blur).
@@ -2314,38 +2117,6 @@ FaceCopy ReadFaceCopy(const Shader::Info& cs) {
     return face;
 }
 } // namespace
-static void NoteRecordedStep(const RecordedStep& step) {
-    const bool rect_copy =
-        step.kind == RecordedStep::Kind::Dispatch && step.hash == RECT_COPY_SHADER_HASH;
-    if (rect_copy) {
-        GpuSavings::Count(GpuSavings::Get().rect_copies);
-        ++shadow_trace.copies_this_frame;
-    }
-    if (!BbStats::enabled) {
-        return;
-    }
-    if (rect_copy) {
-        before_copies.Add(last_step);
-        ++tallied_copies;
-    }
-    if (last_step_rect_copy) {
-        after_copies.Add(step);
-    }
-    last_step = step;
-    last_step_rect_copy = rect_copy;
-    if (tallied_copies >= 30000 && !rect_copy) {
-        if (tally_reports < 40) {
-            ++tally_reports;
-            std::printf("GPU steps: around the rectangle copies (a040875f), the last %u: before "
-                        "them %s; after them %s\n",
-                        tallied_copies, before_copies.Top(tallied_copies).c_str(),
-                        after_copies.Top(tallied_copies).c_str());
-        }
-        before_copies = {};
-        after_copies = {};
-        tallied_copies = 0;
-    }
-}
 static void FlushProxyReads(bool reduced, const VideoCore::Image* target);
 
 void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw* used_prepared,
@@ -2404,7 +2175,6 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
         bind_prepared = nullptr;
         return;
     }
-    NoteDrawStep(pipeline, false);
     const PreparedDraw* draw_prepared = bind_prepared;
     const bool bound = BindResources(pipeline);
     bind_prepared = nullptr; // indirect draws and dispatches bind without prepared sharps
@@ -2787,7 +2557,6 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
     if (SkipEmptyDraw(pipeline)) {
         return;
     }
-    NoteDrawStep(pipeline, true);
     if (!BindResources(pipeline)) {
         return;
     }
@@ -2960,11 +2729,8 @@ void Rasterizer::DispatchRecord(const ComputePipeline* pipeline) {
         upscaler->OnDispatch(cs.pgm_hash);
     }
     DisasmCompute(cs.pgm_hash, cs_program, false);
-    NoteRecordedStep({RecordedStep::Kind::Dispatch, cs.pgm_hash, cs_program.dim_x});
-    const bool skip_face_copy = ShadowRedirectDispatch(cs, false);
-    ShadowTraceDispatch(cs, &cs_program, skip_face_copy);
-    if (skip_face_copy) {
-        return;
+    if (ShadowRedirectDispatch(cs, false)) {
+        return; // 0.4.5 beta 4: a lamp shadow face's copy, left out
     }
     bool hle;
     {
@@ -3144,9 +2910,7 @@ void Rasterizer::DispatchIndirectRecord(const ComputePipeline* pipeline, VAddr a
     const u32 offset = 0;
     const u64 cs_hash = pipeline->GetStage(Shader::SwStage::Compute).pgm_hash;
     DisasmCompute(cs_hash, CsRegs(), true);
-    NoteRecordedStep({RecordedStep::Kind::IndirectDispatch, cs_hash, 0});
     ShadowRedirectDispatch(pipeline->GetStage(Shader::SwStage::Compute), true);
-    ShadowTraceDispatch(pipeline->GetStage(Shader::SwStage::Compute), nullptr);
 
     if (!BindResources(pipeline)) {
         return;
@@ -3306,15 +3070,9 @@ bool Rasterizer::ShadowRedirectClear(VideoCore::ImageId cube_id, u32 layer,
         scratch.info.num_samples != 1 || scratch.info.props.is_depth) {
         return false;
     }
-    if (ShadowClearFoldOn()) {
-        r.clear_pending = true;
-        r.pending_clear = clear;
-    } else {
-        MarkImageClear(scratch, 1);
-        runtime.ClearImage(&scratch,
-                           {.base = {.level = 0, .layer = 0}, .extent = {.levels = 1, .layers = 1}},
-                           clear);
-    }
+    // 0.4.5 beta 5: held, and done as the face's render pass begins (ShadowRedirectPassBegun).
+    r.clear_pending = true;
+    r.pending_clear = clear;
     r.state = ShadowRedirect::State::Drawing;
     r.cube = cube.info.guest_address;
     r.scratch = learned->scratch;
@@ -3456,6 +3214,9 @@ void Rasterizer::ShadowRedirectDraw(const GraphicsPipeline* pipeline) {
 // dispatch while a face is drawn elsewhere puts it back first.
 bool Rasterizer::ShadowRedirectDispatch(const Shader::Info& cs, bool indirect) {
     auto& r = shadow_redirect;
+    if (!indirect && cs.pgm_hash == RECT_COPY_SHADER_HASH) {
+        GpuSavings::Count(GpuSavings::Get().rect_copies);
+    }
     if (r.state == ShadowRedirect::State::Idle) {
         r.observed = false;
         if (!indirect && cs.pgm_hash == RECT_COPY_SHADER_HASH && ShadowRedirectOn()) {
@@ -3629,111 +3390,18 @@ void Rasterizer::ShadowRedirectRestore(const char* why) {
     }
 }
 
-// 0.4.5 beta 3: a draw in the traced frame (ShadowTrace): into a target up to 256 wide, grouped
-// with the draws before it while the targets stay the same; else counted as another draw.
-void Rasterizer::TraceShadowDraw(const GraphicsPipeline* pipeline, bool indirect) {
-    auto& t = shadow_trace;
-    const u32 mrt_mask = pipeline->GetGraphicsKey().mrt_mask;
-    u64 key = 0x5AD0ull;
-    u32 width = 0;
-    std::string targets;
-    for (s32 cb = 0; cb < std::bit_width(mrt_mask); ++cb) {
-        const auto& [id, desc] = cb_descs[cb];
-        if (!id) {
-            continue;
-        }
-        const auto& info = texture_cache.GetImage(id).info;
-        const auto& base = desc.view_info.range.base;
-        width = std::max(width, info.size.width);
-        key = key * 31 + info.guest_address + base.level * 7 + base.layer * 131 + cb;
-        targets += fmt::format(" colour {} @{:x} {}x{} {} mip {} layer {};", cb, info.guest_address,
-                               info.size.width, info.size.height,
-                               vk::to_string(info.pixel_format), base.level, base.layer);
-    }
-    if (db_desc.first) {
-        const auto& info = texture_cache.GetImage(db_desc.first).info;
-        const auto& base = db_desc.second.view_info.range.base;
-        width = std::max(width, info.size.width);
-        key = key * 31 + info.guest_address + base.level * 7 + base.layer * 131 + 97;
-        targets += fmt::format(" depth @{:x} {}x{} {} mip {} layer {};", info.guest_address,
-                               info.size.width, info.size.height,
-                               vk::to_string(info.pixel_format), base.level, base.layer);
-    }
-    if (width == 0 || width > 256) {
-        if (t.run_draws) {
-            ShadowTraceFlush();
-        }
-        ++t.other_draws;
-        return;
-    }
-    const auto stages = pipeline->GetStages();
-    const Shader::Info* ps = stages[u32(Shader::SwStage::Fragment)];
-    const Shader::Info* vs = stages[u32(Shader::SwStage::Vertex)];
-    const u64 ps_hash = ps ? ps->pgm_hash : 0;
-    if (t.run_draws && t.run_key == key) {
-        ++t.run_draws;
-        t.run_shaders_vary |= ps_hash != t.run_ps;
-        return;
-    }
-    ShadowTraceFlush();
-    t.run_key = key;
-    t.run_draws = 1;
-    t.run_shaders_vary = false;
-    t.run_ps = ps_hash;
-    std::string textures;
-    if (ps) {
-        const PreparedStage* prepared = FindPreparedStage(*ps);
-        for (u32 i = 0; i < ps->images.size() && i < 4; ++i) {
-            const auto sharp = prepared && prepared->image_sharps ? prepared->image_sharps[i]
-                                                                  : ps->images[i].GetSharp(*ps);
-            textures += fmt::format("{}{}", i ? "; " : "", TraceSharp(sharp));
-        }
-    }
-    t.run_text = fmt::format("{}vs {:016x} ps {:016x} into{} textures: {}",
-                             indirect ? "(indirect) " : "", vs ? vs->pgm_hash : 0, ps_hash,
-                             targets, textures.empty() ? std::string{"none"} : textures);
-}
-
-// 0.4.5 beta 2: a recorded draw for NoteRecordedStep, after PrepareRenderState chose its targets.
-void Rasterizer::NoteDrawStep(const GraphicsPipeline* pipeline, bool indirect) {
-    if (!BbStats::enabled) {
-        return;
-    }
-    if (shadow_trace.active) {
-        TraceShadowDraw(pipeline, indirect);
-    }
-    const auto stages = pipeline->GetStages();
-    const Shader::Info* ps = stages[u32(Shader::SwStage::Fragment)];
-    const Shader::Info* vs = stages[u32(Shader::SwStage::Vertex)];
-    using Kind = RecordedStep::Kind;
-    const Kind kind = indirect ? (ps ? Kind::IndirectDraw : Kind::IndirectDrawVs)
-                               : (ps ? Kind::Draw : Kind::DrawVs);
-    const VideoCore::ImageId target =
-        pipeline->GetGraphicsKey().mrt_mask != 0 && cb_descs[0].first ? cb_descs[0].first
-                                                                       : db_desc.first;
-    NoteRecordedStep({kind, ps ? ps->pgm_hash : vs ? vs->pgm_hash : 0,
-                      target ? texture_cache.GetImage(target).info.size.width : 0u});
-}
-
 // 0.4.5 beta 1: the game draws ~12 a frame that change nothing here: the toolkit's full-screen
-// rectangle (vertex shader 89cda9e4) with no pixel shader, no colour target and depth and
-// stencil off; on the PS4 likely depth-metadata work the PC has no counterpart for
-// (docs/performance.md). Each was recorded as a render pass of its own with no attachments, at
-// the largest framebuffer size, ending the pass before it. Left out when nothing it could touch
-// is bound: no colour or depth target (as PrepareRenderState just chose them), no stage writing
-// memory (written buffers, GDS included, storage images, image atomics, DMA), no motion vector
-// attachment, and no occlusion query measuring it. The state PrepareRenderState and NotifyUiDraw
-// keep is updated as for a recorded draw. BB_SKIP_EMPTY_DRAWS=0 records them.
+// rectangle (vertex shader 89cda9e4) with no pixel shader, no colour target, depth and stencil
+// off, and DB_RENDER_CONTROL's two compress-disable bits: GCN's in-place depth expansion, for the
+// depth unit's compression data the PC doesn't have (docs/performance.md). Each was recorded as a
+// render pass of its own with no attachments, at the largest framebuffer size, ending the pass
+// before it. Left out when nothing it could touch is bound: no colour or depth target (as
+// PrepareRenderState just chose them), no stage writing memory (written buffers, GDS included,
+// storage images, image atomics, DMA), no motion vector attachment, and no occlusion query
+// measuring it. The state PrepareRenderState and NotifyUiDraw keep is updated as for a recorded
+// draw.
 bool Rasterizer::SkipEmptyDraw(const GraphicsPipeline* pipeline) {
-    static const bool enabled = [] {
-        const char* env = std::getenv("BB_SKIP_EMPTY_DRAWS");
-        const bool on = !(env && env[0] == '0');
-        std::printf("GPU steps: draws with no target and no memory writes %s\n",
-                    on ? "are left out (BB_SKIP_EMPTY_DRAWS=0: recorded)"
-                       : "are recorded (BB_SKIP_EMPTY_DRAWS=0)");
-        return on;
-    }();
-    if (!enabled || db_desc.first || (occlusion && occlusion->Measuring())) {
+    if (db_desc.first || (occlusion && occlusion->Measuring())) {
         return false;
     }
     const auto& key = pipeline->GetGraphicsKey();
@@ -3762,38 +3430,6 @@ bool Rasterizer::SkipEmptyDraw(const GraphicsPipeline* pipeline) {
                 return false;
             }
         }
-    }
-    // The first kinds left out go to the log with the registers that would tell what the PS4
-    // does with them (the depth-metadata guess). Recorded by one thread at a time.
-    struct Kind {
-        u64 vs;
-        u32 depth_control, render_control, color_mode;
-        bool operator==(const Kind&) const = default;
-    };
-    static std::array<Kind, 8> logged{};
-    static u32 num_logged = 0;
-    const auto& regs = Regs();
-    const auto stages = pipeline->GetStages();
-    const Shader::Info* vs = stages[u32(Shader::SwStage::Vertex)];
-    const Kind kind{vs ? vs->pgm_hash : 0, std::bit_cast<u32>(regs.depth_control),
-                    std::bit_cast<u32>(regs.depth_render_control),
-                    u32(regs.color_control.mode)};
-    if (num_logged < logged.size() &&
-        std::find(logged.begin(), logged.begin() + num_logged, kind) ==
-            logged.begin() + num_logged) {
-        logged[num_logged++] = kind;
-        const auto& rc = regs.depth_render_control;
-        std::printf("GPU steps: a draw left out: vertex shader %016llx, %s; depth control %08x, "
-                    "DB_RENDER_CONTROL %08x (depth clear %u, stencil clear %u, resummarize %u, "
-                    "decompress %u), depth buffer %s %llx; colour mode %u, target mask %x\n",
-                    static_cast<unsigned long long>(kind.vs),
-                    stages[u32(Shader::SwStage::Fragment)] ? "a pixel shader" : "no pixel shader",
-                    kind.depth_control, kind.render_control, u32(rc.depth_clear_enable),
-                    u32(rc.stencil_clear_enable), u32(rc.resummarize_enable),
-                    u32(rc.decompress_enable),
-                    regs.depth_buffer.DepthValid() ? "at" : "invalid, at",
-                    static_cast<unsigned long long>(regs.depth_buffer.DepthAddress()),
-                    kind.color_mode, u32(key.mrt_mask));
     }
     GpuSavings::Count(GpuSavings::Get().empty_draws_skipped);
     return true;
@@ -6926,7 +6562,6 @@ void Rasterizer::NoteFrameStart() {
     if (auto* profiler = GpuProfiler::Get()) {
         profiler->BeginFrame();
     }
-    ShadowTraceFrame(); // 0.4.5 beta 3
     ShadowRedirectFrame(); // 0.4.5 beta 4
     ReportUboStats();
     const u64 frame = BbStats::gpu_frames.fetch_add(1, std::memory_order_relaxed) + 1;

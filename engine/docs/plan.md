@@ -2,17 +2,10 @@
 
 What comes next, and the rules and decisions it works under. Updated 2026-11-05.
 
-- **Where it stands:** 0.4.4 was released on 2026-11-03 (`cbec5a2`, engine id 64). 0.4.5 beta 1
-  (engine id 65) left out the empty draws: +2 FPS at the lamp spot (GPU 7.40 to 7.30 ms). Beta 2
-  (engine id 66) removes beta 1's `a954e79d` step, which gained nothing, and brings the profile and
-  log lines step 1 needs next. Beta 3 (engine id 67) traced the shadow steps: 48 faces a frame in
-  one chain through shared scratch images. Beta 4 (engine id 68) draws each face into its scratch
-  image and leaves the copy out: 136.8 to 141.5 FPS at the lamp spot (GPU 7.31 to 7.07 ms), no face
-  put back. Since 0.4.4: 135.0 to 141.5 FPS. Beta 5 (engine id 69) folds each face's clear into its
-  render pass and labels image clears in the GPU profile: 141.2 to 143.5 FPS at the lamp spot (GPU
-  7.08 to 6.96 ms). Beta 6 (engine id 70) guards the fold against a pass smaller than the face.
-  Step 1 so far: 135.0 to 143.5 FPS at the lamp spot (−0.44 ms), 122.2 to 130.3 at the second
-  (−0.51 ms).
+- **Where it stands:** 0.4.4 was released on 2026-11-03 (`cbec5a2`, engine id 64). 0.4.5 is in
+  beta: beta 7 (engine id 71) holds step 1's three changes and the cleanup after them. Step 1 took
+  the lamp spot from 135.0 to 143.5 FPS (GPU 7.40 to 6.96 ms) and the second spot from 122.2 to
+  130.3 (8.18 to 7.67 ms), the picture unchanged (release-notes-0.4.5.md).
 - **Where the work goes:** the branch `claude/awesome-gates-cjba5e`, until a beta has its own
   (`claude/0.4.5-beta-N`).
 
@@ -81,61 +74,36 @@ The decisions that still stand. How each was reached is in [archive/plan-0.4.4.m
 The work after 0.4.4, in order: the tester's call (2026-11-05) puts fewer GPU steps first and the
 memory cleanup after them. The evidence for each item is in [performance.md](performance.md).
 
-- **The targets:** about 0.5–0.7 ms back of a 7.4 ms frame at the lamp spot without changing a
-  setting or a pixel (135 to about 145 FPS; 0.1 ms of it done in beta 1), then smoothness at every
-  frame rate. First written as 1–1.3 ms: `a954e79d`'s 0.2 ms turned out to be another shader's
-  real work, and the shadows' merge is smaller than thought (see below).
-- **No measurement beta first.** The tester's logs already hold what the first items need (the copy
-  shader's movable copies counted since beta 18, `a954e79d` and `a040875f` decoded in beta 18). Each
-  change comes behind a switch, and its gain is the lamp spot's FPS with it on and off.
-- **What the logs didn't hold comes with the betas:** a counter per item that shows it acting
-  (`GPU steps per second (0.4.5)`) and the first kinds of empty draw with their depth registers
-  (beta 1); a GPU profile label for indirect dispatches and what is recorded around the `a040875f`
-  copies (beta 2). `BB_SHADER_DISASM` still dumps compute shaders only; vertex and pixel shaders come
-  when step 2 needs them.
+- **The targets:** time back at the busiest spots without changing a setting or a pixel, then
+  smoothness at every frame rate.
+- **Each change behind a switch while it is tested;** its gain is the lamp spot's FPS with it on and
+  off. Settled switches are removed with the tester's agreement (beta 7: `BB_SKIP_EMPTY_DRAWS`,
+  `BB_SHADOW_CLEAR_FOLD`).
 
-**Step 1: fewer GPU steps.** Each item gives the same picture, bit for bit where a shader's output is
-involved.
+**Step 1: fewer GPU steps (done, but for one item).** Each change gives the same picture.
 
 - **Done:**
-  - **The empty full-screen draws, 0.1 ms (beta 1, measured).** A draw is left out when nothing it
-    could touch is bound: no colour or depth target (as `PrepareRenderState` chose them), no stage
-    writing memory, no motion vector attachment, no occlusion query measuring it
-    (`Rasterizer::SkipEmptyDraw`, `BB_SKIP_EMPTY_DRAWS=0` to record them). Lamp spot: 135.0 to
-    137.0 FPS, GPU 7.40 to 7.30 ms; second spot 122.2 to 123.7 FPS. All of them were one kind:
-    depth and stencil off, `DB_RENDER_CONTROL` 0x60 (the compress-disable bits), the in-place depth
-    expansion GCN drivers do.
-- **Dropped:** **`a954e79d` as one step** (beta 1, removed in beta 2). It was exact (one atomic add
-  of `groups` instead of the loop), but its profile label stayed at 0.21 ms a frame: the time was the
-  work after it, indirect dispatches with no label of their own. Beta 19's atomic change, which also
-  moved nothing, had pointed the same way. Beta 2's labels split it: the indirect dispatch
-  `2da7fe60` (0.12–0.14 ms a frame, 5 of them) is the cost, and `a954e79d` is under 0.065 ms. Real
-  work, so it goes to step 2.
-- **Next, with the tester's say:**
-  - **The copy shader: about 0.1–0.2 ms, not the 0.3–0.5 first written.** Its copies would move
-    ahead of a render pass that has already begun, so the engine would have to record work before
-    commands it has already recorded, and its barrier tracking would have to follow. The gain is
-    the 20 passes a frame begun again, not the copies themselves, which still run.
-  - **The shadows' `a040875f` copies:** part of the shadow item below (each sits between a
-    level's draw and its filter).
-- **The shadows: about 0.25 ms, by skipping each face's copy.** Beta 3's trace (performance.md,
-  "The dynamic lights' shadows"): 8 lights' cube maps, 48 faces a frame, each face cleared, drawn,
-  copied whole into a scratch image and blurred back, with one scratch image per size shared by all
-  faces of that size. No step can move past another face's, so the merges written after beta 2 are
-  withdrawn.
-  - **In beta 4** (`BB_SHADOW_COPY_SKIP=0` to turn off): each face drawn into the scratch image
-    directly (its clear too) and the copy left out; the blur then reads what the copy would have
-    written. The engine learns each cube's scratch image from 4 of the game's copies, and copies
-    the face back into the cube's layer if anything else touches either first. The blur must cover
-    the face (viewport and scissors checked; the quad itself is not read), or the face is put back
-    before it.
-  - **In beta 5** (`BB_SHADOW_CLEAR_FOLD=0` to turn off): the face's clear held until its render
-    pass begins on the scratch image, then done as the pass's first command
-    (`vkCmdClearAttachments`, the same value); with nothing drawn, done where the copy is left out;
-    put back as a clear of the cube's layer if anything else comes first. Image clears get their
-    own profile label, so the switch shows what the 48 clears cost.
-- **Smaller items:** `mem-4`; `upscale-2` and `-3` (0.29 ms at Quality, nothing at DLAA); the GPU
-  idle between submissions (0.1 ms).
+  - **The empty full-screen draws, 0.1 ms** (beta 1, `Rasterizer::SkipEmptyDraw`): GCN's in-place
+    depth expansions, which change nothing on the PC.
+  - **Lamp shadow faces drawn into their blur's scratch image, the copy left out, 0.24 ms** (beta 4,
+    `ShadowRedirect`). `BB_SHADOW_COPY_SKIP=0` turns it off until 0.4.5 stable, then it goes.
+  - **Their clears folded into the face's render pass, 0.12–0.17 ms** (beta 5; beta 6 keeps the
+    fold inside a pass smaller than the face).
+  - **Beta 7, the cleanup:** the copy-neighbour tally (beta 2), the shadow trace (beta 3) and the
+    empty draws' register log (beta 1) removed once answered, with two settled switches. Kept: the
+    counters (`GPU steps per second (0.4.5)`), the profile labels for indirect dispatches and image
+    clears, the put-back safety net.
+- **Closed:** `a954e79d` (beta 1's one step gained nothing: its 0.21 ms was the indirect dispatch
+  after it) and that dispatch, `2da7fe60`: the game's particle update, cleanly translated, real work
+  (performance.md).
+- **Left, with the tester's say:**
+  - **The copy shader:** 0.38 ms a frame in 64 dispatches, and about 23 render passes a frame begun
+    again after one of them. Moving a pass's copies ahead of it, in fewer dispatches, needs to know
+    that no earlier draw in the pass touches what they copy, and to place work ahead of commands
+    already recorded: the riskiest change of step 1. First a trace of one frame's copies in their
+    passes (no change in behaviour), then the decision. Estimate 0.15–0.3 ms.
+  - **Smaller items:** `mem-4`; `upscale-2` and `-3` (0.29 ms at Quality, nothing at DLAA); the GPU
+    idle between submissions (about 0.1 ms, 3 a frame).
 
 **Step 2: shader code.** It acts on the shading, the part of the frame that scales with pixels
 (1.5–2 ms at 1080p).
@@ -186,14 +154,10 @@ involved.
 
 ### Waiting on the tester
 
-- **A check of the lamp shadows in other lamp-lit areas** on beta 6 (Yahar'gul, Cathedral Ward,
-  chalice dungeons): `faces put back` should stay at zero. Beta 4's and 5's shadows looked the same
-  to the tester at the lamp spot (2026-11-05).
-- **Optional, on beta 2 as it is:** `BB_SHADER_DISASM=2da7fe60` in Extra variables puts the code of
-  the indirect dispatch that costs 0.12–0.14 ms into the log, for step 2.
-- **Whether to do the copy shader's move** (about 0.1–0.2 ms, the riskiest of step 1).
-- **The cleanup off, one session, before step 3 (whenever it suits):** an hour at 60 FPS, ideally a
-  chalice dungeon, with `BB_VRAM_CLEANUP_SECONDS=0` in Extra variables. The launcher's "VRAM cleanup"
+- **Whether to trace the copy shader next** (step 1's last item), or go to step 2. The lamp
+  shadows looked right in every lamp-lit area the tester visited (2026-11-05).
+- **The cleanup off, one session, before step 3 (in a real play session, later):** an hour at 60
+  FPS, ideally a chalice dungeon, with `BB_VRAM_CLEANUP_SECONDS=0` in Extra variables. The launcher's "VRAM cleanup"
   row is another cleanup, of textures, and stays on.
 
 ## Next, after the performance work
