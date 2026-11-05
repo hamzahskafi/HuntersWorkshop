@@ -161,7 +161,8 @@ row counted in and the shadows read as more than one chain).
     about 630 draws.
 - **What can still go, exactly, inside each face's chain:**
   - **The copy (about 0.25 ms: 48 a frame, 5.2 µs each), left out from 0.4.5 beta 4**
-    (`ShadowRedirect`, `BB_SHADOW_COPY_SKIP`): draw the face into the scratch image instead of the
+    (`ShadowRedirect`, `BB_SHADOW_COPY_SKIP`; measured 0.24 ms, 136.8 to 141.5 FPS at the lamp spot,
+    every face redirected, none put back): draw the face into the scratch image instead of the
     cube's layer, clear included. The scratch image then holds what the copy would
     have put there, the copy is skipped, and the blur writes the layer as before. Nothing reads the
     layer between the casters and the blur in either trace. The engine has to decide at the face's

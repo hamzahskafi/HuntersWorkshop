@@ -7,7 +7,8 @@ What comes next, and the rules and decisions it works under. Updated 2026-11-05.
   (engine id 66) removes beta 1's `a954e79d` step, which gained nothing, and brings the profile and
   log lines step 1 needs next. Beta 3 (engine id 67) traced the shadow steps: 48 faces a frame in
   one chain through shared scratch images. Beta 4 (engine id 68) draws each face into its scratch
-  image and leaves the copy out.
+  image and leaves the copy out: 136.8 to 141.5 FPS at the lamp spot (GPU 7.31 to 7.07 ms), no face
+  put back. Since 0.4.4: 135.0 to 141.5 FPS.
 - **Where the work goes:** the branch `claude/awesome-gates-cjba5e`, until a beta has its own
   (`claude/0.4.5-beta-N`).
 
@@ -178,9 +179,8 @@ involved.
 
 ### Waiting on the tester
 
-- **0.4.5 beta 4 at the lamp spot,** frame statistics and GPU time on: the FPS with
-  `BB_SHADOW_COPY_SKIP` on and off, and the lamp shadows compared (edges, seams between faces, the
-  soft rims).
+- **Beta 4's lamp shadows compared by eye** with `BB_SHADOW_COPY_SKIP` on and off (edges, seams
+  between faces, the soft rims). Its FPS came on 2026-11-05: +4.7 at the lamp spot.
 - **Optional, on beta 2 as it is:** `BB_SHADER_DISASM=2da7fe60` in Extra variables puts the code of
   the indirect dispatch that costs 0.12–0.14 ms into the log, for step 2.
 - **Whether to do the copy shader's move** (about 0.1–0.2 ms, the riskiest of step 1).

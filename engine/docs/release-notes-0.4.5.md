@@ -24,7 +24,11 @@ and each costs about 5 µs however little it does (performance.md). The picture 
   of six faces; the game draws each face, copies it whole into a scratch image and blurs it from
   there back into the face (48 faces a frame at the tester's lamp spot). The engine now draws the face
   straight into the scratch image, so the copy has nothing to do and is left out; the blur writes the
-  face as before. Expected: about 0.25 ms a frame where lamps cast shadows.
+  face as before.
+  - **Measured** (same PC and settings, `20261105_223017` on and `20261105_223222` off): at the lamp
+    spot 136.8 to 141.5 FPS (GPU 7.31 to 7.07 ms a frame), at the second spot 124.8 to 127.9 FPS (8.03
+    to 7.82 ms). All 48 faces a frame drawn into their scratch images, no face put back. Since 0.4.4:
+    135.0 to 141.5 FPS at the lamp spot.
   - The engine learns each lamp's scratch image from the game's own copies first (4 of them), and
     should anything else touch a face or its scratch image in between, it copies the face back where
     the game drew it.
