@@ -244,9 +244,22 @@ estimates are from the 134 FPS profile.
   - `a954e79d` (a `ds_append` loop on one workgroup, 5 a frame): rewrite it wide in the engine,
     or overlap it with graphics on a compute queue.
   - `a040875f` (48 dispatches of 16 workgroups): one dispatch, if they are independent.
-- **The chains of small passes: 0.7–1 ms**, if the shadow A/B confirms them:
-  - images that stay in one layout, so no transitions;
-  - a light's filtering levels in one compute dispatch instead of four passes.
+- **The chains of small passes: 0.7–1 ms**, if the shadow A/B confirms them.
+  - **What the logs show:** two-channel half-float images (R16G16F) of 256×256 with 6 layers,
+    which is a cube map, sampled. There are at least two of them (images 129 and 133).
+  - **How they are drawn:** they are drawn with depth (`167daba6`/`1ae03d75`, at 64 to 256 a
+    side). Then they are filtered down 256→128→64→32 by `0b0acf50`/`0f61fd27`, 12 chains a frame:
+    two lights times six faces.
+  - **Then copied:** `a040875f` copies 32×32 rectangles into a 256×256 storage image, 48 a frame.
+  - **Most likely:** point-light shadows stored as two moments (depth and depth squared), the
+    kind meant to be pre-filtered.
+  - **To read next:** the pixel shader `0f61fd27`. `BB_SHADER_DISASM` covers compute shaders
+    only; step 0 extends it to vertex and pixel shaders at their first draw.
+  - **The plan for them:**
+    - images that stay in one layout, so no transitions;
+    - each face's filtering levels in one compute dispatch instead of four passes, shipped
+      only if its output is bit for bit the passes' (each level rounded to half floats as
+      stored).
 - **Smaller items:**
   - `mem-4`;
   - `upscale-2` and `-3` (0.29 ms at Quality, nothing at DLAA);
