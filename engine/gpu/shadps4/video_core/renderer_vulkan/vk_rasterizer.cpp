@@ -37,6 +37,7 @@
 #include "video_core/buffer_cache/buffer_cache.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/pipeline_compile_queue.h"
+#include "video_core/renderer_vulkan/vk_copy_hold.h"
 #include "video_core/renderer_vulkan/vk_copy_trace.h"
 #include "video_core/renderer_vulkan/vk_gpu_savings.h"
 #include "video_core/renderer_vulkan/indirect_dispatch_limits.h"
@@ -3665,6 +3666,13 @@ bool Rasterizer::BindResources(const Pipeline* pipeline) {
     }
 
     if (uses_dma) {
+        // 0.4.5 beta 9: a shader reading the game's memory by address may read what a held copy
+        // of the copy shader writes: the held copies first, and a barrier after them.
+        if (CopyHold::Pending(&scheduler)) {
+            GpuSavings::Count(GpuSavings::Get().copy_hold_conflicts);
+            CopyHold::Flush(&scheduler, GpuSavings::PassBreak::CopyShader);
+            needs_barrier = true;
+        }
         buffer_cache.SynchronizeDmaBuffers();
         fault_process_pending = true;
     }

@@ -933,6 +933,7 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
     }
     const bool stats = BufferStatsEnabled();
     const auto note_hle = [&](u32 path) {
+        last_obtain_path = static_cast<u8>(path);
         if (hle_obtain) {
             ++hle_path_calls[(is_written ? 3 : 0) + path];
             hle_path_bytes[(is_written ? 3 : 0) + path] += size;

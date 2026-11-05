@@ -107,7 +107,7 @@ memory cleanup after them. The evidence for each item is in [performance.md](per
       and 28 at its end; every copy inside could move to its pass's start, and **no draw later in
       the same pass reads what any copy wrote**. So the copies can wait for the pass's end instead:
       nothing goes ahead of recorded commands.
-    - **Proposed for beta 9, with the tester's say: copies held to the pass's end.** A copy-shader
+    - **Built as beta 9 (the tester's go-ahead): copies held to the pass's end.** A copy-shader
       dispatch that comes inside a pass leaves it open; its copies are recorded where the pass ends
       anyway (other targets, an upload, a barrier, a submission), before what ended it. A draw or
       dispatch that binds bytes a held copy writes, or writes bytes it reads, sends the held copies
@@ -185,7 +185,10 @@ memory cleanup after them. The evidence for each item is in [performance.md](per
 
 ### Waiting on the tester
 
-- **The go-ahead for beta 9** (copies held to the pass's end; beta 8's traces read 2026-11-05).
+- **0.4.5 beta 9, copies held to the pass's end** (the go-ahead, 2026-11-05): the lamp spot with
+  frame statistics on, `BB_COPY_HOLD=0` in Extra variables against none, as for betas 4 and 5; and
+  a look around for anything drawn wrong (the copies feed later passes: skinned characters,
+  lights, effects).
 - **The cleanup off, one session, before step 3 (in a real play session, later):** an hour at 60
   FPS, ideally a chalice dungeon, with `BB_VRAM_CLEANUP_SECONDS=0` in Extra variables. The launcher's "VRAM cleanup"
   row is another cleanup, of textures, and stays on.

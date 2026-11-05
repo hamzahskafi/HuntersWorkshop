@@ -37,6 +37,13 @@ compared went from 140–145 FPS in 0.4.2 to 210.
   with the same value. A face with nothing to draw is cleared where its copy is left out, and a face
   whose pass is smaller than itself (a smaller depth image; beta 6, from the tester's build review;
   not seen in Bloodborne) before its pass. About 0.12–0.17 ms.
+- **The copy shader's copies done where their render pass ends** (beta 9, in test). The game's
+  copy shader (about 53 dispatches a frame) ended the render pass it came in, about 20 times a
+  frame in passes that then began again. Beta 8's trace showed that nothing later in the same pass
+  reads what it copies, so its copies now wait for the pass's end and run there, in their order.
+  - A draw that does touch them first gets them first, the pass ending there as before. Copies
+    reading the game's own memory in place are not held.
+  - `BB_COPY_HOLD=0` in Extra variables does them where they come, as before.
 
 ## Diagnostics
 
@@ -45,7 +52,8 @@ compared went from 140–145 FPS in 0.4.2 to 210.
   0.21 ms turned out to be the game's particle update after it.
 - **The frame statistics count** the steps taken out (`GPU steps per second (0.4.5)`): the draws left
   out, the rectangle copies and those left out, the lamp shadow faces drawn into their scratch images,
-  their clears, and any faces put back.
+  their clears, and any faces put back; from beta 9 the copy shader's batches held to their pass's
+  end, the times they were done, how many of those early, and those not held.
 - **A trace of the copy shader** (beta 8), with frame statistics on: twice a session (the 600th and
   the 6,000th frame of play), one frame's copy-shader dispatches in their passes: for each pass, how
   many copies came at its start, inside it, and at its end, and of those inside how many could move

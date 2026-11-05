@@ -131,6 +131,10 @@ public:
     /// CopySourceStreamLimit they take the stream path, untracked (see ObtainBuffer).
     static inline thread_local bool copy_source = false;
     static inline std::array<u64, 6> hle_path_calls{}, hle_path_bytes{};
+    /// 0.4.5 beta 9: the path this thread's last ObtainBuffer took: 0 in place (the game's
+    /// memory), 1 the stream buffer (a snapshot), 2 the arena (the VRAM copy); 0xFF if none of
+    /// them. For the copy shader's held copies (vk_copy_hold.h), reset before each call there.
+    static inline thread_local u8 last_obtain_path = 0xFF;
     /// Bindings inside the game's GX region (bbport_gx_ring.h), by how they are served, with their
     /// bytes (the stats, in vk_shader_hle.cpp): small read-only ones copied (the stream path), read,
     /// texel and written ones in place (BB_GX_IN_PLACE), read-only ones across its edge copied, and

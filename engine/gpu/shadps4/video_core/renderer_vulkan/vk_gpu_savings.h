@@ -148,6 +148,12 @@ struct Counters {
     // 0.4.5 beta 5: their clears done as the face's render pass began, or on their own (nothing
     // drawn into the face: where the copy was left out; beta 6: before a pass smaller than it).
     std::atomic<std::uint64_t> shadow_clears_folded{0}, shadow_clears_late{0};
+    // 0.4.5 beta 9: the copy shader's batches held to the end of their render pass, its
+    // dispatches held whole (the pass left open), the times the held copies were recorded, of
+    // those the times a binding touching them sent them early, and batches that came in a pass
+    // and were not held (the game's memory bound in place, or the limit) (vk_copy_hold.h).
+    std::atomic<std::uint64_t> copy_hold_batches{0}, copy_hold_dispatches{0},
+        copy_hold_flushes{0}, copy_hold_conflicts{0}, copy_hold_refused{0};
 };
 
 /// Runtime::CopyColorAndDepth's kinds: depth->colour by the shader (0.4.4 beta 17), by a copy;
@@ -284,12 +290,20 @@ inline void Report() {
     const double restores_after = take(c.shadow_restores_after) / s;
     const double clears_folded = take(c.shadow_clears_folded) / s;
     const double clears_late = take(c.shadow_clears_late) / s;
+    const double held = take(c.copy_hold_batches) / s;
+    const double held_whole = take(c.copy_hold_dispatches) / s;
+    const double held_flushes = take(c.copy_hold_flushes) / s;
+    const double held_early = take(c.copy_hold_conflicts) / s;
+    const double held_refused = take(c.copy_hold_refused) / s;
     std::printf("  GPU steps per second (0.4.5): empty draws skipped %.1f; rectangle copies "
                 "(a040875f) %.1f; lamp shadow faces drawn into the scratch image %.1f, their "
                 "copies left out %.1f, faces put back %.1f before the copy and %.1f after; their "
-                "clears in the face's pass %.1f, on their own %.1f\n",
+                "clears in the face's pass %.1f, on their own %.1f; copy shader batches held to "
+                "their pass's end %.1f (dispatches held whole %.1f), recorded %.1f times, %.1f of "
+                "them early (a binding touched them), not held %.1f\n",
                 empty_draws, rect_copies, faces, copies_left_out, restores_before,
-                restores_after, clears_folded, clears_late);
+                restores_after, clears_folded, clears_late, held, held_whole, held_flushes,
+                held_early, held_refused);
 }
 
 } // namespace Vulkan::GpuSavings

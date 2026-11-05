@@ -242,6 +242,9 @@ Found on 2026-11-05 in the 1.09 executable.
     it copies none whose bytes the GPU writes or will write (`CollectRingBindings`), so none of
     the copies' destinations. Images are not in it either; what fills an image from memory ends
     the pass.
+- **Beta 9 holds them to the pass's end** (`vk_copy_hold.h`, `BB_COPY_HOLD=0`: off): recorded where
+  the pass ends anyway, in order; a binding that touches one sends them first. Its counters are in
+  `GPU steps per second (0.4.5)`. Next, if it holds up: a pass's held copies in one dispatch.
 - **Later, if at all: serve the copied ranges from the snapshots,** so no copy runs. That is not
   the PC memory model, which kept all of the game's memory in system RAM and moved blocks in and
   out of VRAM. But the snapshots are reused within a frame or two, so each redirect would need

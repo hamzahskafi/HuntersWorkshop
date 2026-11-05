@@ -21,6 +21,7 @@
 #include "bbport_sections.h"
 #include "bbport_toggles.h"
 #include "video_core/renderer_vulkan/vk_gpu_profiler.h"
+#include "video_core/renderer_vulkan/vk_copy_hold.h"
 #include "video_core/renderer_vulkan/vk_copy_trace.h"
 #include "video_core/renderer_vulkan/vk_gpu_savings.h"
 #include "video_core/renderer_vulkan/motion_copy_sources.h"
@@ -174,6 +175,81 @@ static bool MultiCopy(Rasterizer& rasterizer, const VideoCore::Buffer* src,
 }
 
 namespace {
+/// 0.4.5 beta 9 (vk_copy_hold.h): BB_COPY_HOLD=0 records each batch where it comes, ending the
+/// pass, as before.
+bool CopyHoldOn() {
+    static const bool on = [] {
+        const char* env = std::getenv("BB_COPY_HOLD");
+        const bool enabled = !(env && env[0] == '0');
+        std::printf("GPU steps: copy shader batches that come in a render pass %s\n",
+                    enabled ? "held to its end (BB_COPY_HOLD=0: recorded where they come)"
+                            : "recorded where they come, ending the pass (BB_COPY_HOLD=0)");
+        return enabled;
+    }();
+    return on;
+}
+
+/// Records the held batches as they would have been (MultiCopy or a buffer copy, each with the
+/// barriers it needs then), after ending the pass (`why`). Called by the scheduler where a pass
+/// ends, by the runtime before a barrier or for a binding that touches them.
+void FlushHeldCopies(void* context, GpuSavings::PassBreak why) {
+    auto& rasterizer = *static_cast<Rasterizer*>(context);
+    auto& runtime = rasterizer.GetRuntime();
+    auto& held = CopyHold::state;
+    held.flushing = true;
+    runtime.GetScheduler().EndRendering(why);
+    GpuSavings::Count(GpuSavings::Get().copy_hold_flushes);
+    // The statistics of the dispatch being run, if any (a flush can come from its uploads).
+    const bool in_pass = std::exchange(copy_dispatch_in_pass, false);
+    for (const auto& batch : held.batches) {
+        const auto copies =
+            std::span<const vk::BufferCopy>{held.copies}.subspan(batch.first, batch.count);
+        if (!MultiCopy(rasterizer, batch.src, batch.dst, copies)) {
+            runtime.CopyBuffer(batch.src, batch.dst, copies);
+        }
+    }
+    copy_dispatch_in_pass = in_pass;
+    held.batches.clear();
+    held.copies.clear();
+    held.flushing = false;
+}
+
+/// Holds a batch (its offsets in its buffers) to the end of the open pass, if its source is a
+/// snapshot or the VRAM copy and its destination the VRAM copy, neither in place.
+bool HoldBatch(Rasterizer& rasterizer, const VideoCore::Buffer* src, u8 src_path, VAddr src_addr,
+               u64 src_size, const VideoCore::Buffer* dst, u8 dst_path, VAddr dst_addr,
+               u64 dst_size, std::span<const vk::BufferCopy> copies) {
+    auto& held = CopyHold::state;
+    if (!rasterizer.GetRuntime().GetScheduler().IsRendering() || held.flushing) {
+        return false; // the pass ended meanwhile (an upload for this batch): recorded as before
+    }
+    auto& buffer_cache = rasterizer.GetBufferCache();
+    const bool src_ok =
+        src_path == 1 || (src_path == 2 && !buffer_cache.IsAnyInPlace(src_addr, src_size));
+    const bool dst_ok = dst_path == 2 && !buffer_cache.IsAnyInPlace(dst_addr, dst_size);
+    if (!src_ok || !dst_ok || held.batches.size() >= CopyHold::MaxBatches || copies.empty()) {
+        GpuSavings::Count(GpuSavings::Get().copy_hold_refused);
+        return false;
+    }
+    if (!held.flush) {
+        held.flush = &FlushHeldCopies;
+        held.context = &rasterizer;
+        held.scheduler = &rasterizer.GetRuntime().GetScheduler();
+    }
+    CopyHold::Batch batch{src, dst, static_cast<u32>(held.copies.size()),
+                          static_cast<u32>(copies.size()), ~0ull, 0, ~0ull, 0};
+    for (const auto& copy : copies) {
+        batch.src_min = std::min<u64>(batch.src_min, copy.srcOffset);
+        batch.src_max = std::max<u64>(batch.src_max, copy.srcOffset + copy.size);
+        batch.dst_min = std::min<u64>(batch.dst_min, copy.dstOffset);
+        batch.dst_max = std::max<u64>(batch.dst_max, copy.dstOffset + copy.size);
+    }
+    held.copies.insert(held.copies.end(), copies.begin(), copies.end());
+    held.batches.push_back(batch);
+    GpuSavings::Count(GpuSavings::Get().copy_hold_batches);
+    return true;
+}
+
 /// One batch of the copy shader's ranges: the end of its ranges and their bounds.
 struct CopyBatch {
     u32 end;
@@ -450,15 +526,21 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
     // 0.4.4 beta 20: the pass this dispatch interrupts ends here, named as the copy shader's:
     // its uploads (ObtainBuffer), copies and the profiler's mark would end it anyway, each under
     // its own name. Counted once per game dispatch.
+    // 0.4.5 beta 9: in an open pass, the batches are held to its end (HoldBatch) and the pass
+    // goes on; one that is not held ends it here, after the held ones.
+    auto& scheduler = runtime.GetScheduler();
+    const bool hold = !batches.empty() && CopyHoldOn() && scheduler.IsRendering();
     if (!batches.empty()) {
-        auto& scheduler = runtime.GetScheduler();
         copy_dispatch_in_pass = scheduler.PassOpen(); // (or cut, nothing ended since)
         if (copy_dispatch_in_pass) {
             GpuSavings::Count(GpuSavings::Get().hle_dispatches_in_pass);
         }
-        scheduler.EndRendering(GpuSavings::PassBreak::CopyShader);
+        if (!hold) {
+            scheduler.EndRendering(GpuSavings::PassBreak::CopyShader);
+        }
         CopyTrace::CopyBegin(); // 0.4.5 beta 8
     }
+    u32 held_batches = 0;
     u32 batch_start = 0;
     for (const auto& batch : batches) {
         const u32 batch_end = batch.end;
@@ -471,11 +553,15 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
         BbSections::Scope obtain_scope{BbSections::HleObtain};
         VideoCore::BufferCache::hle_obtain = BbStats::enabled;
         VideoCore::BufferCache::copy_source = true;
+        VideoCore::BufferCache::last_obtain_path = 0xFF;
         const auto [src_buf, src_buf_offset] = buffer_cache.ObtainBuffer(
             src_buf_sharp.base_address + src_offset_min, src_offset_max - src_offset_min, false);
+        const u8 src_path = VideoCore::BufferCache::last_obtain_path;
         VideoCore::BufferCache::copy_source = false;
+        VideoCore::BufferCache::last_obtain_path = 0xFF;
         const auto [dst_buf, dst_buf_offset] = buffer_cache.ObtainBuffer(
             dst_buf_sharp.base_address + dst_offset_min, dst_offset_max - dst_offset_min, true);
+        const u8 dst_path = VideoCore::BufferCache::last_obtain_path;
         VideoCore::BufferCache::hle_obtain = false;
         obtain_scope.End();
         BB_SECTION(HleCopy);
@@ -498,13 +584,28 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
         // Execute buffer copies.
         LOG_TRACE(Render_Vulkan, "HLE buffer copy: src_size = {}, dst_size = {}",
                   src_offset_max - src_offset_min, dst_offset_max - dst_offset_min);
-        if (!MultiCopy(rasterizer, src_buf, dst_buf, vk_copies)) {
-            runtime.CopyBuffer(src_buf, dst_buf, vk_copies);
+        if (hold && HoldBatch(rasterizer, src_buf, src_path,
+                              src_buf_sharp.base_address + src_offset_min,
+                              src_offset_max - src_offset_min, dst_buf, dst_path,
+                              dst_buf_sharp.base_address + dst_offset_min,
+                              dst_offset_max - dst_offset_min, vk_copies)) {
+            ++held_batches;
+        } else {
+            if (hold) {
+                // The held ones first (Scheduler::EndRendering), then this one, as before.
+                scheduler.EndRendering(GpuSavings::PassBreak::CopyShader);
+            }
+            if (!MultiCopy(rasterizer, src_buf, dst_buf, vk_copies)) {
+                runtime.CopyBuffer(src_buf, dst_buf, vk_copies);
+            }
         }
         // The first batch's only (the audit): one copied without MultiCopy leaves it unread, and
         // a later batch's would read it after the first batch's copy.
         copy_dispatch_in_pass = false;
         batch_start = batch_end;
+    }
+    if (hold && held_batches == batches.size()) {
+        GpuSavings::Count(GpuSavings::Get().copy_hold_dispatches);
     }
     CopyTrace::CopyEnd();
     return true;
