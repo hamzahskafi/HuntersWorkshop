@@ -250,7 +250,10 @@ Found on 2026-11-05 in the 1.09 executable.
 - **Beta 10 merges them** (`buffer_address_copy.comp`, `RecordMerged`, `BB_COPY_MERGE=0`: off): one
   dispatch by GPU address for each pass end and each copy-shader dispatch outside a pass, split
   where one batch needs another's result. Its logs: no gain; 86 dispatches and 48 barriers a frame,
-  as it split its groups at every barrier. Beta 11 puts one barrier before each group.
+  as it split its groups at every barrier. Beta 11 puts one barrier before each group. In the
+  tester's three-build scene: 6.74 ms a frame with neither (beta 7), 6.68 held (beta 9), 6.61 held
+  and merged (beta 11). Beta 12 lets the batches of one copy-shader dispatch share a group when its
+  sources and destinations are apart in the game's memory.
   - **What the barriers are:** most copies write over constants that draws earlier in the frame
     read (or, at the 4 KiB grain reads are tracked at, bytes beside them), so the copy waits for
     those draws to finish. That wait, not the copy commands, looks like the copy shader's cost.

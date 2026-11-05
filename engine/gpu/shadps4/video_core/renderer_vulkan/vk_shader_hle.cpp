@@ -221,6 +221,10 @@ bool Overlap(u64 a_min, u64 a_max, u64 b_min, u64 b_max) {
 /// then they cannot run as threads of one dispatch. By their bounds in the game's memory (the
 /// same memory can be in two buffers), and in their buffers.
 bool Ordered(const CopyHold::Batch& a, const CopyHold::Batch& b) {
+    // Beta 12: two batches of one dispatch whose sources and destinations are apart.
+    if (a.dispatch != 0 && a.dispatch == b.dispatch) {
+        return false;
+    }
     const bool guest = Overlap(a.dst_guest, a.dst_guest_end, b.src_guest, b.src_guest_end) ||
                        Overlap(a.dst_guest, a.dst_guest_end, b.dst_guest, b.dst_guest_end) ||
                        Overlap(a.src_guest, a.src_guest_end, b.dst_guest, b.dst_guest_end);
@@ -442,7 +446,7 @@ void FlushHeldCopies(void* context, GpuSavings::PassBreak why) {
 /// (`pass_held`) or of its dispatch. False when the list is full.
 bool AppendHeld(Rasterizer& rasterizer, const VideoCore::Buffer* src, VAddr src_addr, u64 src_size,
                 const VideoCore::Buffer* dst, VAddr dst_addr, u64 dst_size,
-                std::span<const vk::BufferCopy> copies, bool pass_held) {
+                std::span<const vk::BufferCopy> copies, bool pass_held, u32 dispatch) {
     auto& held = CopyHold::state;
     if (held.flushing || held.batches.size() >= CopyHold::MaxBatches || copies.empty()) {
         return false;
@@ -458,7 +462,8 @@ bool AppendHeld(Rasterizer& rasterizer, const VideoCore::Buffer* src, VAddr src_
                           ~0ull,    0,
                           ~0ull,    0,
                           src_addr, src_addr + src_size,
-                          dst_addr, dst_addr + dst_size};
+                          dst_addr, dst_addr + dst_size,
+                          dispatch};
     for (const auto& copy : copies) {
         batch.src_min = std::min<u64>(batch.src_min, copy.srcOffset);
         batch.src_max = std::max<u64>(batch.src_max, copy.srcOffset + copy.size);
@@ -475,7 +480,7 @@ bool AppendHeld(Rasterizer& rasterizer, const VideoCore::Buffer* src, VAddr src_
 /// its destination the VRAM copy, neither in place.
 bool HoldBatch(Rasterizer& rasterizer, const VideoCore::Buffer* src, u8 src_path, VAddr src_addr,
                u64 src_size, const VideoCore::Buffer* dst, u8 dst_path, VAddr dst_addr,
-               u64 dst_size, std::span<const vk::BufferCopy> copies) {
+               u64 dst_size, std::span<const vk::BufferCopy> copies, u32 dispatch) {
     if (!rasterizer.GetRuntime().GetScheduler().IsRendering() || CopyHold::state.flushing) {
         return false; // the pass ended meanwhile (an upload for this batch): recorded as before
     }
@@ -484,7 +489,8 @@ bool HoldBatch(Rasterizer& rasterizer, const VideoCore::Buffer* src, u8 src_path
         src_path == 1 || (src_path == 2 && !buffer_cache.IsAnyInPlace(src_addr, src_size));
     const bool dst_ok = dst_path == 2 && !buffer_cache.IsAnyInPlace(dst_addr, dst_size);
     if (!src_ok || !dst_ok ||
-        !AppendHeld(rasterizer, src, src_addr, src_size, dst, dst_addr, dst_size, copies, true)) {
+        !AppendHeld(rasterizer, src, src_addr, src_size, dst, dst_addr, dst_size, copies, true,
+                    dispatch)) {
         GpuSavings::Count(GpuSavings::Get().copy_hold_refused);
         return false;
     }
@@ -786,6 +792,30 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
     // and recorded there, merged (FlushHeldCopies).
     const bool merge = !batches.empty() && CopyMergeOn() &&
                        runtime.GetInstance().IsBufferDeviceAddressSupported();
+    // Beta 12: this dispatch's number for its batches, when its sources and destinations are
+    // apart in the game's memory (then no range reads what another writes; GroupByDestination
+    // keeps the same rule); 0 when they overlap, and its batches keep their order.
+    static u32 dispatch_serial = 0;
+    u32 dispatch_id = 0;
+    if (merge) {
+        u64 src_lo = ~0ull, src_hi = 0, dst_lo = ~0ull, dst_hi = 0;
+        for (const auto& batch : batches) {
+            src_lo = std::min<u64>(src_lo, batch.src_min);
+            src_hi = std::max<u64>(src_hi, batch.src_max);
+            dst_lo = std::min<u64>(dst_lo, batch.dst_min);
+            dst_hi = std::max<u64>(dst_hi, batch.dst_max);
+        }
+        const VAddr src_base = src_buf_sharp.base_address;
+        const VAddr dst_base = dst_buf_sharp.base_address;
+        const bool apart = src_base + src_hi <= dst_base + dst_lo ||
+                           dst_base + dst_hi <= src_base + src_lo;
+        if (apart) {
+            dispatch_id = ++dispatch_serial;
+            if (dispatch_id == 0) {
+                dispatch_id = ++dispatch_serial; // (past 2^32 dispatches)
+            }
+        }
+    }
     bool flush_at_end = false;
     u32 held_batches = 0;
     u32 batch_start = 0;
@@ -835,7 +865,7 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
                               src_buf_sharp.base_address + src_offset_min,
                               src_offset_max - src_offset_min, dst_buf, dst_path,
                               dst_buf_sharp.base_address + dst_offset_min,
-                              dst_offset_max - dst_offset_min, vk_copies)) {
+                              dst_offset_max - dst_offset_min, vk_copies, dispatch_id)) {
             ++held_batches;
         } else {
             if (scheduler.IsRendering()) {
@@ -846,7 +876,8 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
                                     src_buf_sharp.base_address + src_offset_min,
                                     src_offset_max - src_offset_min, dst_buf,
                                     dst_buf_sharp.base_address + dst_offset_min,
-                                    dst_offset_max - dst_offset_min, vk_copies, false)) {
+                                    dst_offset_max - dst_offset_min, vk_copies, false,
+                                    dispatch_id)) {
                 flush_at_end = true;
             } else {
                 // Anything held goes first, in order.

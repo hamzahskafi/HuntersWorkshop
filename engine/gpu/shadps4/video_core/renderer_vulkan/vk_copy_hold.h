@@ -39,6 +39,10 @@ struct Batch {
     /// Beta 10: its bounds in the game's memory (two buffers can hold the same memory: the GX
     /// region's own and the arena), for the order of merged batches.
     VAddr src_guest, src_guest_end, dst_guest, dst_guest_end;
+    /// Beta 12: its copy-shader dispatch, when that dispatch's sources and destinations do not
+    /// overlap in the game's memory (0 otherwise): batches of one such dispatch need no order
+    /// among themselves, as the game's shader runs all its ranges at once.
+    u32 dispatch;
 };
 
 /// Records the held batches (vk_shader_hle.cpp), ending the pass first.

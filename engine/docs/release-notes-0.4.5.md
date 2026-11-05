@@ -53,6 +53,9 @@ compared went from 140–145 FPS in 0.4.2 to 210.
   them one command each, as before.
   - Beta 10 gained nothing: it split its groups at every barrier (48 a frame). Beta 11 puts one
     barrier before each group instead.
+  - The tester's three builds in one scene: 6.74 ms a frame without either change, 6.68 with the
+    copies held, 6.61 held and merged (about 148 to 151 FPS). Beta 12 lets one dispatch's copies
+    share a command (the game's shader runs them all at once): about 69 commands a frame to 35.
 
 ## Diagnostics
 

@@ -185,13 +185,10 @@ memory cleanup after them. The evidence for each item is in [performance.md](per
 
 ### Waiting on the tester
 
-- **0.4.5 beta 11, one barrier per group of merged copies** (beta 10: no gain, 48 barriers a
-  frame): the lamp spot for about a minute with nothing set, then again in a new session with
-  `BB_COPY_MERGE=0` in Extra variables (the same spot, the profile on both times). The differences
-  are small, so the two runs need the same place and the same build. If merging still gains
-  nothing, beta 12 takes it out and keeps holding: the copy shader's cost is then its barriers
-  (the game rewriting constants that earlier draws read), which only renaming its buffers would
-  remove (bbhost's copy versions; a project of its own).
+- **0.4.5 beta 12, one dispatch's copies in one group** (the go-ahead, 2026-11-06; beta 11 kept:
+  0.07 ms in the tester's three-build scene): the same scene, beta 11, then beta 12, then beta 11
+  again (the GPU warms through the runs), profile and frame statistics on. If beta 12 gains, it
+  stays; if not, beta 11's state is final. Either way step 1 closes there.
 - **The cleanup off, one session, before step 3 (in a real play session, later):** an hour at 60
   FPS, ideally a chalice dungeon, with `BB_VRAM_CLEANUP_SECONDS=0` in Extra variables. The launcher's "VRAM cleanup"
   row is another cleanup, of textures, and stays on.
