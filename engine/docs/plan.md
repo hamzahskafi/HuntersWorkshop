@@ -74,9 +74,10 @@ The decisions that still stand. How each was reached is in [archive/plan-0.4.4.m
 The work after 0.4.4, in order: the tester's call (2026-11-05) puts fewer GPU steps first and the
 memory cleanup after them. The evidence for each item is in [performance.md](performance.md).
 
-- **The targets:** about 0.8–1.1 ms back of a 7.4 ms frame at the lamp spot without changing a
-  setting or a pixel (135 to about 150 FPS), then smoothness at every frame rate. (First written as
-  1–1.3 ms: `a954e79d`'s 0.2 ms turned out not to be its own; see below.)
+- **The targets:** about 0.6–0.8 ms back of a 7.4 ms frame at the lamp spot without changing a
+  setting or a pixel (135 to about 145 FPS; 0.1 ms of it done in beta 1), then smoothness at every
+  frame rate. First written as 1–1.3 ms: `a954e79d`'s 0.2 ms turned out to be another shader's
+  real work, and the shadows' merge is smaller than thought (see below).
 - **No measurement beta first.** The tester's logs already hold what the first items need (the copy
   shader's movable copies counted since beta 18, `a954e79d` and `a040875f` decoded in beta 18). Each
   change comes behind a switch, and its gain is the lamp spot's FPS with it on and off.
@@ -100,26 +101,27 @@ involved.
 - **Dropped:** **`a954e79d` as one step** (beta 1, removed in beta 2). It was exact (one atomic add
   of `groups` instead of the loop), but its profile label stayed at 0.21 ms a frame: the time was the
   work after it, indirect dispatches with no label of their own. Beta 19's atomic change, which also
-  moved nothing, had pointed the same way. Beta 2 labels indirect dispatches, so what that time is
-  shows next.
+  moved nothing, had pointed the same way. Beta 2's labels split it: the indirect dispatch
+  `2da7fe60` (0.12–0.14 ms a frame, 5 of them) is the cost, and `a954e79d` is under 0.065 ms. Real
+  work, so it goes to step 2.
 - **Next, with the tester's say:**
   - **The copy shader: about 0.1–0.2 ms, not the 0.3–0.5 first written.** Its copies would move
     ahead of a render pass that has already begun, so the engine would have to record work before
     commands it has already recorded, and its barrier tracking would have to follow. The gain is
     the 20 passes a frame begun again, not the copies themselves, which still run.
-  - **The shadows' `a040875f` copies (about 43 a frame): about 0.2 ms, but not on their own.**
-    Beta 1 found none right after another, so merging them means moving draws. If what sits
-    between them is the filter's passes (beta 2 logs the neighbours), they go with the exact
-    filter merge below, which would then gather both: roughly 0.4 ms together.
-- **The shadows' filter chains: about 0.2 ms; it waits on the tester's call.** The shader is read
-  (a 13-tap weighted blur, the same at every level; performance.md).
-  - **One compute dispatch per face, four levels:** the simpler change, but it rounds the smaller
-    levels' last bit differently from the GPU's texture unit. The test would be at most one unit
-    in the last place of each 16-bit value.
-  - **Or exact:** each level's 12 faces in one dispatch through the texture unit, 4 steps instead of
-    48. The engine holds the game's filter draws back until a level's faces are known: more
-    engine change for the same gain.
-  - Either way, the shadow images stay in one layout, so no transitions.
+  - **The shadows' `a040875f` copies:** part of the shadow item below (each sits between a
+    level's draw and its filter).
+- **The shadows: about 0.35 ms, if each face's four levels can be reordered.** Beta 2's log
+  showed the order: each level of each face is drawn, copied (`a040875f`) and filtered
+  (`0f61fd27`) on its own, 144 steps a frame, not the 256→128→64→32 chain both earlier options
+  assumed (withdrawn; performance.md, "The dynamic lights' shadows").
+  - **The one merge left:** within a face, draw its four levels first, then one copy and one filter
+    for all four (12 steps to 6). The engine would hold back the game's copy and filter until the
+    face's last level, and run a compute filter for the four sizes that reads through the texture
+    unit like the game's, so it can be exact.
+  - **First, one frame's trace** of these steps with their images: whether each size has its own
+    targets, and whether a later level reads an earlier level's copy or filter. If either fails,
+    the shadows stay as they are.
 - **Smaller items:** `mem-4`; `upscale-2` and `-3` (0.29 ms at Quality, nothing at DLAA); the GPU
   idle between submissions (0.1 ms).
 
@@ -172,13 +174,11 @@ involved.
 
 ### Waiting on the tester
 
-- **0.4.5 beta 2 at the lamp spot,** with frame statistics and GPU time on (Log page): its profile
-  labels the indirect dispatches after `a954e79d`, and its log names what comes around the
-  `a040875f` copies. Beta 1's run (`20261105_044628`) gave the empty draws' gain.
+- **Whether to trace the shadow steps** (a beta with one frame's draws, copies and filters and
+  their images), toward the 0.35 ms merge; or to leave the shadows and go on.
+- **Optional, on beta 2 as it is:** `BB_SHADER_DISASM=2da7fe60` in Extra variables puts the code of
+  the indirect dispatch that costs 0.12–0.14 ms into the log, for step 2.
 - **Whether to do the copy shader's move** (about 0.1–0.2 ms, the riskiest of step 1).
-- **The shadow filter's merge: which kind** (step 1). One dispatch per face, within one unit in the
-  last place of a 16-bit value; or the exact one, with more engine change. The shaders themselves
-  came on 2026-11-05 (compiled modules from the GPU cache, read here only).
 - **The cleanup off, one session, before step 3 (whenever it suits):** an hour at 60 FPS, ideally a
   chalice dungeon, with `BB_VRAM_CLEANUP_SECONDS=0` in Extra variables. The launcher's "VRAM cleanup"
   row is another cleanup, of textures, and stays on.

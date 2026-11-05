@@ -20,8 +20,8 @@ a line says otherwise. Written on 2026-11-04 and 05 from the tester's logs:
     with a fixed cost of about 5 µs whatever its size.
   - **The largest single item** is the dynamic lights' shadows: 1.3–1.5 ms of a 7.4 ms frame.
 - **The CPU has room on this PC.** The game's thread waits 5.6 ms of a 7.4 ms frame for the GPU.
-- **What engine work can take back, with the settings unchanged:** about 0.8–1.1 ms at the lamp
-  spot (135 to about 150 FPS), and the cleanup's long frames. 0.4.5 beta 1 took the first 0.1 ms
+- **What engine work can take back, with the settings unchanged:** about 0.6–0.8 ms at the lamp
+  spot (135 to about 145 FPS), and the cleanup's long frames. 0.4.5 beta 1 took the first 0.1 ms
   (135.0 to 137.0 FPS).
 
 ## Smoothness at 60 FPS
@@ -118,17 +118,17 @@ same steps.
 
 | Item | ms a frame | Removable without a visible change |
 |---|---|---|
-| The dynamic lights' shadows | 1.3–1.5 (run 2) | about 0.5: the filter chains (0.24) and the 48 copies (0.25) as one job each |
+| The dynamic lights' shadows | 1.3–1.5 (run 2) | about 0.35, if each face's four levels can be reordered (see below) |
 | DLAA, the upscaler's evaluate and merge | 1.03 (TAA 0.45) | nothing; a setting |
 | The copy shader | 0.37 or more, plus 20 pass restarts | most of it, with the copies ahead of the pass in fewer dispatches |
-| `a954e79d` and the unlabelled work after it | 0.19–0.23 | not the shader's: see `a954e79d` below |
+| `a954e79d` and the indirect dispatch `2da7fe60` after it | 0.19–0.23, nearly all `2da7fe60`'s | not as steps; `2da7fe60` is real work (step 2) |
 | The empty full-screen draws | 0.10–0.13 | all of it |
 | GPU idle between submissions | 0.09–0.10 | part of it |
 | G-buffer and other full-size passes | 2.4–3.4 | the shading's share, through shader code |
 | Model detail Highest over the game's default | 0.15–0.3 | nothing; a setting |
 
-The removable items together are about 0.8–1.1 ms (first written as 1–1.3 ms, with `a954e79d`'s
-row counted in).
+The removable items together are about 0.6–0.8 ms (first written as 1–1.3 ms, with `a954e79d`'s
+row counted in and the shadows' filter taken for a chain).
 
 ## What the items are
 
@@ -137,13 +137,20 @@ row counted in).
 - **What the logs show:**
   - two-channel half-float images (R16G16F) of 256×256 with 6 layers, which is a cube map, sampled;
     at least two of them (images 129 and 133);
-  - each face drawn with depth (`167daba6`/`1ae03d75`, at 64 to 256 a side);
-  - each face filtered down 256→128→64→32 by `0b0acf50`/`0f61fd27`: 12 chains a frame, two lights
-    times six faces;
-  - `a040875f` copying 32×32 rectangles into a 256×256 storage image, 48 a frame (decoded in 0.4.4
-    beta 18: an image load and an image store). 0.4.5 beta 1 counted about 43 a frame at the lamp
-    spot and none recorded right after another: another draw or dispatch always sits between two.
-    Beta 2 logs which.
+  - each face drawn with depth (`167daba6`/`1ae03d75`) at 256, 128, 64 and 32 a side, each size
+    drawn on its own;
+  - `0b0acf50`/`0f61fd27` filtering at the same four sizes, 12 of each a frame (two lights times
+    six faces);
+  - `a040875f` copying rectangles into a 256×256 storage image, 48 a frame (decoded in 0.4.4 beta
+    18: an image load and an image store; the profile's "4x4x1 groups" is its first dispatch's
+    size only).
+- **The order, from 0.4.5 beta 2's log** (`20261105_051112`, what is recorded right before and
+  right after each copy, 30,000 copies at a time): before a copy, a face draw (`1ae03d75`) at 256,
+  128, 64 or 32, a quarter each (at 32 sometimes only the toolkit's depth clear); after it, the
+  filter (`0f61fd27`) at 256, 128, 64 or 32, a quarter each. So each level of each face goes
+  **draw, copy, filter**, 12 faces × 4 levels × 3 = 144 steps a frame, and the filter at one size
+  reads the level drawn at that size: **not a chain** 256→128→64→32 as first written here. Beta 1
+  found no two copies in a row for this reason.
 - **Confirmed by run 2:** with dynamic light shadows off, the chains, the copies and about 630
   draws a frame are gone.
 - **What they are (read 2026-11-05, from the tester's compiled shaders):** variance shadow maps.
@@ -158,16 +165,20 @@ row counted in).
     coordinate through.
 - **The cap:** in 503 profile windows the game never drew more than 17 faces a frame (about three
   lights), so lamps beyond that add no shadow work.
-- **Why four passes:** each level is made from the one before it. One pass per level was the way
-  to do that when the game was made; single-pass downsampling (AMD's SPD) came about 2020.
-- **Why one job can't be bit for bit:** the passes read each level through the GPU's texture unit
-  (bilinear filtering in hardware). One job per face would keep the smaller levels on chip and
-  filter them with its own arithmetic, which rounds differently in the last bit.
-  - Since 0.4.4 the driver may also fuse this shader's multiply-adds (`BB_FS_CONTRACT`), so its
-    last bit already depends on the driver.
-  - **An exact alternative:** each level's 12 faces in one dispatch, all read through the texture
-    unit: 4 steps instead of 48. It needs the engine to hold the game's filter draws back until
-    the faces of a level are all known.
+- **What merging would take, now that the order is known** (both options first written here
+  assumed the chain, and are withdrawn):
+  - The 12 faces most likely share their scratch targets (one per size), so steps of different
+    faces can't move past each other.
+  - Within one face the four sizes use different targets. Drawing the four levels first, then one
+    copy for four and one filter for four, would take a face from 12 steps to 6: about 72 steps a
+    frame, roughly 0.35 ms at about 5 µs each (the copies are 5.2 µs each, the filter passes 6 to
+    9 µs).
+  - It needs the engine to hold back the game's copy and filter until the face's last level is
+    drawn, and a compute version of the filter writing four sizes at once. That version reads
+    through the texture unit as the game's does, so it can be exact.
+  - Not known yet: that each size really has its own targets, and that nothing in a face's later
+    levels reads an earlier level's copy or filter. One frame's trace of these steps with their
+    images would tell.
 - **The rest of the shadows' cost** is drawing the objects near a light into its faces. That is
   real work, and it stays while the shadows are on.
 
@@ -244,8 +255,11 @@ Found on 2026-11-05 in the 1.09 executable.
   atomic per subgroup (about 44 µs either way) and beta 1's single atomic (0.211–0.228 ms a frame
   before, 0.212–0.214 after, 5 a frame). The first reading here, thousands of serialized atomics
   while the GPU waits, was wrong.
-- **0.4.5 beta 2 labels indirect dispatches** (`dispatch indirect cs ...`), so what those 37 µs
-  are shows in its profile.
+- **0.4.5 beta 2 labels indirect dispatches** (`dispatch indirect cs ...`), and its profile
+  (`20261105_051112`) splits the time: `dispatch indirect cs 2da7fe60`, 5 a frame, 0.117–0.136 ms a
+  frame (23–27 µs each), the dispatch `a954e79d` prepares. `a954e79d` itself is no longer among
+  the top 30 labels (under 0.065 ms a frame). `2da7fe60`'s groups come from `a954e79d`'s count, so
+  its time is work the game asks for; what it does is for step 2 (`BB_SHADER_DISASM=2da7fe60`).
 - **Beta 1's one step, removed in beta 2** (`ExecuteGroupCountHLE`, `gds_group_count.comp`, for the
   record): one thread read the count, wrote `(groups, 1, 1)`, and added `groups` to the counter.
   It was checked against the GCN code (beta 18's dump) and the SPIR-V the engine made of it (the
