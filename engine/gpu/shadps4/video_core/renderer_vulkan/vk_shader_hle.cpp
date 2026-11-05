@@ -356,7 +356,8 @@ void RecordGroup(Rasterizer& rasterizer, std::span<const CopyHold::Batch* const>
 
 /// Records the held batches in order, in as few dispatches as their order allows: a batch that
 /// reads or writes what an earlier one of the group writes (or writes what it reads) starts the
-/// next group, after a barrier. One that cannot be merged goes on its own, as before.
+/// next group, after a barrier; a group that needs a barrier before it gets one. One that cannot
+/// be merged goes on its own, as before.
 void RecordMerged(Rasterizer& rasterizer) {
     auto& runtime = rasterizer.GetRuntime();
     const auto& held = CopyHold::state;
@@ -390,16 +391,14 @@ void RecordMerged(Rasterizer& rasterizer) {
         if (after) {
             record();
         }
-        // What came before (recorded, so in the barrier tracker) touched its bytes: a barrier
-        // before it, and so a group of its own from here (the tracker answers for every buffer
-        // while the GX region is reached through two, Runtime::NoteAliasedAccess).
-        const bool needs_barrier =
-            runtime.IsBufferAccessed(batch.src, batch.src_min, batch.src_max - batch.src_min) ||
-            runtime.IsBufferAccessed(batch.dst, batch.dst_min, batch.dst_max - batch.dst_min, true);
-        if (needs_barrier && !group.empty()) {
-            record();
-        }
-        barrier = barrier || needs_barrier;
+        // What came before (recorded, so in the barrier tracker) touched its bytes: one barrier
+        // before the group covers it with the rest (beta 11; beta 10 began a group at each such
+        // batch: 48 barriers and 86 dispatches a frame at the lamp spot). What one batch of the
+        // group needs from another is Ordered's, above, by buffer and by the game's memory.
+        barrier = barrier ||
+                  runtime.IsBufferAccessed(batch.src, batch.src_min, batch.src_max - batch.src_min) ||
+                  runtime.IsBufferAccessed(batch.dst, batch.dst_min, batch.dst_max - batch.dst_min,
+                                           true);
         group.push_back(&batch);
         ranges += batch.count;
     }

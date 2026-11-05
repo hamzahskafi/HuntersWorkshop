@@ -249,7 +249,11 @@ Found on 2026-11-05 in the 1.09 executable.
   ~188 copy commands a frame.
 - **Beta 10 merges them** (`buffer_address_copy.comp`, `RecordMerged`, `BB_COPY_MERGE=0`: off): one
   dispatch by GPU address for each pass end and each copy-shader dispatch outside a pass, split
-  where one batch needs another's result.
+  where one batch needs another's result. Its logs: no gain; 86 dispatches and 48 barriers a frame,
+  as it split its groups at every barrier. Beta 11 puts one barrier before each group.
+  - **What the barriers are:** most copies write over constants that draws earlier in the frame
+    read (or, at the 4 KiB grain reads are tracked at, bytes beside them), so the copy waits for
+    those draws to finish. That wait, not the copy commands, looks like the copy shader's cost.
 - **Later, if at all: serve the copied ranges from the snapshots,** so no copy runs. That is not
   the PC memory model, which kept all of the game's memory in system RAM and moved blocks in and
   out of VRAM. But the snapshots are reused within a frame or two, so each redirect would need

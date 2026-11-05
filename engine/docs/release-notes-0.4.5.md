@@ -51,6 +51,8 @@ compared went from 140–145 FPS in 0.4.2 to 210.
   copy-shader dispatch outside a pass), split only where one copy needs another's result: one
   shader that reaches every buffer by its GPU address. `BB_COPY_MERGE=0` in Extra variables does
   them one command each, as before.
+  - Beta 10 gained nothing: it split its groups at every barrier (48 a frame). Beta 11 puts one
+    barrier before each group instead.
 
 ## Diagnostics
 
