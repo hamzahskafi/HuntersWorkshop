@@ -92,12 +92,18 @@ involved.
     number of dispatches change.
   - **The shadows' 48 `a040875f` copies: about 0.2 ms,** in one dispatch while their rectangles
     don't overlap.
-  - **`a954e79d`: about 0.2 ms.** Run it wide in the engine, with the same counter result, or beside
-    graphics on a compute queue.
-- **Once the filter's pixel shader `0f61fd27` is read:** the shadows' filter chains, about 0.25 ms.
-  - Each face's levels in one compute dispatch instead of four passes, shipped only if its output is
-    bit for bit the passes';
-  - the shadow images kept in one layout, so no transitions.
+  - **`a954e79d`: about 0.17 ms, exact.** The engine runs its own version when it sees this shader:
+    the same three argument sets, and one atomic add of `groups` to the counter instead of the loop
+    of single adds (performance.md). The same integers in memory.
+- **The shadows' filter chains: about 0.2 ms; it waits on the tester's call.** The shader is read
+  (a 13-tap weighted blur, the same at every level; performance.md).
+  - **One compute dispatch per face, four levels:** the simpler change, but it rounds the smaller
+    levels' last bit differently from the GPU's texture unit. The test would be at most one unit
+    in the last place of each 16-bit value.
+  - **Or exact:** each level's 12 faces in one dispatch through the texture unit, 4 steps instead of
+    48. The engine holds the game's filter draws back until a level's faces are known: more
+    engine change for the same gain.
+  - Either way, the shadow images stay in one layout, so no transitions.
 - **Smaller items:** `mem-4`; `upscale-2` and `-3` (0.29 ms at Quality, nothing at DLAA); the GPU
   idle between submissions (0.1 ms).
 
@@ -150,14 +156,9 @@ involved.
 
 ### Waiting on the tester
 
-- **The filter and face shaders, before step 1's filter work.** They can come from the GPU cache folder
-  (`<user>\cache\CUSA03173\0x<hash>_<n>.bbs`), or from Log options → Capture shaders
-  (`logs\shaders`). The hashes:
-  - `0f61fd27` and `0b0acf50`: the filter;
-  - `167daba6` and `1ae03d75`: the faces;
-  - `a954e79d`.
-
-  Read here only; game data never goes into the repository.
+- **The shadow filter's merge: which kind** (step 1). One dispatch per face, within one unit in the
+  last place of a 16-bit value; or the exact one, with more engine change. The shaders themselves
+  came on 2026-11-05 (compiled modules from the GPU cache, read here only).
 - **The cleanup off, one session, before step 3 (whenever it suits):** an hour at 60 FPS, ideally a
   chalice dungeon, with `BB_VRAM_CLEANUP_SECONDS=0` in Extra variables. The launcher's "VRAM cleanup"
   row is another cleanup, of textures, and stays on.

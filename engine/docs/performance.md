@@ -142,18 +142,30 @@ The removable items together are about 1–1.3 ms.
     beta 18: an image load and an image store).
 - **Confirmed by run 2:** with dynamic light shadows off, the chains, the copies and about 630
   draws a frame are gone.
-- **Most likely what they are:** point-light shadows stored as two moments, depth and depth
-  squared. Unlike a plain depth map, two moments can be averaged, so the game blurs them ahead of
-  time. That gives soft shadow edges that don't shimmer, and the smaller levels are softer copies.
+- **What they are (read 2026-11-05, from the tester's compiled shaders):** variance shadow maps.
+  - **The faces' pixel shader `1ae03d75`** writes the distance `d` and `d² + ¼·(ddx² + ddy²)`. Those
+    are the two moments of a variance shadow map, with the derivative term its authors (Donnelly
+    and Lauritzen) add. Unlike a plain depth map, moments can be averaged, so the game blurs them
+    ahead of time; that gives soft shadow edges that don't shimmer.
+  - **The filter's pixel shader `0f61fd27`** is a 13-tap weighted blur: the sum of 13 bilinear
+    samples at explicit level 0. Each sample's offset (scaled by a texel size) and weight come from
+    two constant buffers. The same shader runs at 256, 128, 64 and 32 for every face; only its
+    constants differ. Its vertex shader `0b0acf50` passes a quad's position and texture
+    coordinate through.
 - **The cap:** in 503 profile windows the game never drew more than 17 faces a frame (about three
   lights), so lamps beyond that add no shadow work.
 - **Why four passes:** each level is made from the one before it. One pass per level was the way
   to do that when the game was made; single-pass downsampling (AMD's SPD) came about 2020.
-- **What one job changes:** the same reads, math and levels, with each level rounded to half
-  floats as it is stored. It ships only if its output is bit for bit the passes'.
+- **Why one job can't be bit for bit:** the passes read each level through the GPU's texture unit
+  (bilinear filtering in hardware). One job per face would keep the smaller levels on chip and
+  filter them with its own arithmetic, which rounds differently in the last bit.
+  - Since 0.4.4 the driver may also fuse this shader's multiply-adds (`BB_FS_CONTRACT`), so its
+    last bit already depends on the driver.
+  - **An exact alternative:** each level's 12 faces in one dispatch, all read through the texture
+    unit: 4 steps instead of 48. It needs the engine to hold the game's filter draws back until
+    the faces of a level are all known.
 - **The rest of the shadows' cost** is drawing the objects near a light into its faces. That is
   real work, and it stays while the shadows are on.
-- **Still to read:** the filter's pixel shader `0f61fd27`.
 
 ### The empty full-screen draws (the 32768×32768 pass)
 
@@ -199,11 +211,18 @@ Found on 2026-11-05 in the 1.09 executable.
 
 ### `a954e79d`
 
-- **What it is:** 32 threads in one workgroup, 5 a frame (decoded in beta 18). It reads an item
-  count, writes indirect dispatch arguments, then loops adding to a GDS counter (`DS_APPEND`).
-- **Why it is slow here:** the PS4 does one on-chip operation per wave. Here each one is an atomic
-  add per lane on a storage buffer standing in for GDS. One workgroup keeps one SM busy for
-  37 µs, and the rest of the GPU waits.
+- **What it does** (decoded in beta 18; read in full from the tester's compiled shader on
+  2026-11-05): 32 threads in one workgroup, 5 a frame.
+  - It reads an item count `N` and computes `groups = (N + 31) / 32`.
+  - It writes three sets of indirect dispatch arguments: `groups` with values from its buffer, or 1.
+  - Then its 32 threads loop over `groups` in steps of 32, each pass adding 1 to a GDS counter.
+    The atomics' results are never read.
+- **So its effect is the counter raised by `groups`, and the three argument sets written.** One
+  atomic add of `groups` leaves memory exactly as the loop does: the same integers, no rounding.
+- **Why it is slow here:** the PS4 does one on-chip operation per wave. Here every pass is an atomic
+  on a storage buffer standing in for GDS, all on one address. With a large `N` that is thousands
+  of serialized atomics: 37 µs, while the rest of the GPU waits. Beta 19's one atomic per subgroup
+  did not change it (about 44 µs either way).
 
 ## The CPU
 
