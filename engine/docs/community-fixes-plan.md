@@ -107,6 +107,47 @@ investigation, "Smoothness leads", the engine map's open ideas) with one order b
 - **No shader compiles in play:** 0 in every statistics window of that log; the warm-up built 866
   of 877 cached pipelines at the start.
 
+### Why the GPU is the limit (94 profiled sessions, 2,671 profile windows)
+
+- **Most of the GPU's frame does not depend on resolution.** Two pairs on one build each, at the
+  same scene density, compare rendering at 1280x720 with rendering at 1920x1080. That is 56% fewer
+  pixels.
+  - **DLSS (engine 43, 1,750–1,850 draws):** 7.28 ms against 8.20, 11% less.
+  - **FSR 3.1 (engine 61, `cdaacc45` against `34a7f0a1`):** 6.36 ms against 7.22, 12% less.
+  - **What follows:** set the upscaler aside (about 1 ms either way). Then about 1.6 ms of the frame
+    scales with pixels, and about 5.6 ms does not. Some post-processing stays at 1080p in both
+    runs, so the scaling part is a little larger than that.
+  - **The G-buffer passes alone:** 3.35 against 2.26 ms, a third less for 56% fewer pixels. Half
+    of them is geometry and per-draw cost: about 1,800 draws, Model LOD -2 (Highest), and 3.6 M
+    character vertices a frame stored for motion.
+- **About 240 GPU steps a frame have a floor of about 5 µs each, whatever their size.** At 134 FPS
+  (`20261102_231754`, the top 30 labels):
+  - Each pass costs about the same at any size: 32×32 at 5.8 µs, 64×64 at 5.2, 128×128 at 5.8,
+    256×256 at 8.7. Twelve of each size run a frame.
+  - The game's 48 dispatches of `a040875f` (16 workgroups each) take 5.1 µs each.
+  - The copy shader's 64 dispatches take 5.8 µs each. 42 a frame interrupt a render pass, and
+    20 passes a frame begin again after one.
+  - The 5 single-workgroup dispatches of `a954e79d` take 37 µs each, while one workgroup keeps
+    one of the GPU's 48 SMs busy.
+  - The pass at 32768×32768 with no targets (vertex shader only) runs 12.6 times a frame, at
+    7.9 µs each.
+  - The profiler waits at each label, but it costs only 0.1–0.2 ms a frame in all
+    (`engine-map.md` 1.4). So the steps already ran one after the other without it.
+- **The likely shares of the 7.4 ms:**
+  - DLAA: 1.0 ms, set by the setting.
+  - Pixel shading: 1.5–2 ms.
+  - Geometry, in the G-buffer and shadow passes: about 1.5 ms.
+  - Fixed per-step costs of small, serialized steps: about 2–3 ms. Step 0's timer, which does
+    not wait at each label, settles this split.
+- **Not resolution, not shader code, first.** The shader changes of 2026-10-22 cut pixel-shader
+  code by 16%. That acts on the 1.5–2 ms of shading. The steps and the geometry are the larger
+  share.
+- **A hint from bbhost, not a measurement.** At Old Yharnam on an RTX 4070 uncapped, its meter
+  reads 108 FPS with the GPU 46% busy, about 4.3 ms of GPU a frame (`docs/performance.md`). That
+  is another place with other settings, so the two can't be compared directly. bbhost takes its
+  barriers from the game's own GX drain calls and builds draws from GX's objects, instead of
+  reconstructing them from the command buffers (`docs/rendering.md`, "Native or emulated").
+
 So:
 
 - **Smoothness** is about the VRAM cleanup. Shader compiles, the game's job threads and stage B
@@ -159,15 +200,37 @@ the same route.
 - **Expected:** 3 of the 4 long-frame minutes gone, and the uploads and write faults of the churn
   with them. Step 0's churn count shows how much.
 
-**Step 2: the GPU work the engine adds**, in the order of cost from step 0's per-pass times:
+**Before step 2: three A/B runs on 0.4.4, no new build.** The lamp spot under the 240 limit, two
+minutes each, with the GPU profile on (as `20261102_231754`):
 
-- the copy shader: 64 dispatches, about 130 copy batches and 20 restarts a frame;
-- `mem-4`;
-- `upscale-2` and `-3`: 0.29 ms at Quality, nothing at DLAA;
-- the 32768×32768 pass with no attachments: 12.6 a frame, 0.1 ms, origin unknown;
-- the GPU idle between submissions.
+- Model detail at the game's default against Highest: how much of the frame is geometry.
+- Dynamic light shadows off against on: whether the small R16G16F passes are the lights' shadow
+  maps and their filtering, about 0.7–1 ms.
+- TAA against DLAA: the upscaler's share without DLSS's evaluate.
 
-**Step 3: shader code.**
+**Step 2: fewer and cheaper GPU steps**, in the order of cost from step 0's per-pass times. The
+estimates are from the 134 FPS profile.
+
+- **The copy shader: 0.5–0.7 ms.** That is 64 dispatches, about 130 copy batches and 20 pass
+  restarts a frame. Its sources are mostly snapshots of CPU data. Two options:
+  - serve the copied ranges from their sources, so no copy runs;
+  - run the copies ahead of the render pass whenever they don't read what the pass draws.
+- **The game's small compute work: about 0.45 ms, with the GPU nearly idle.**
+  - `a954e79d` (a `ds_append` loop on one workgroup, 5 a frame): rewrite it wide in the engine,
+    or overlap it with graphics on a compute queue.
+  - `a040875f` (48 dispatches of 16 workgroups): one dispatch, if they are independent.
+- **The chains of small passes: 0.7–1 ms**, if the shadow A/B confirms them:
+  - images that stay in one layout, so no transitions;
+  - a light's filtering levels in one compute dispatch instead of four passes.
+- **Smaller items:**
+  - `mem-4`;
+  - `upscale-2` and `-3` (0.29 ms at Quality, nothing at DLAA);
+  - the vertex-only pass at 32768×32768: 12.6 a frame, 0.1 ms, origin unknown;
+  - the GPU idle between submissions: 0.1 ms.
+- **Together, about 1–1.5 ms of the 7.4**, which is 134 FPS to about 160 at that spot.
+
+**Step 3: shader code.** After step 2: it acts on the 1.5–2 ms of shading and on the geometry's
+vertex shaders.
 
 - Rank the game's shaders by GPU time from step 0 (the G-buffer and full-size passes are 2.5 ms
   together).
