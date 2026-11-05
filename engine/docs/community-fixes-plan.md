@@ -144,23 +144,38 @@ investigation, "Smoothness leads", the engine map's open ideas) with one order b
       what radeonsi's depth flush does.
     - On the PC there is no HTILE, so the draw does nothing: an empty pass at the largest size,
       whose cost is its fixed one.
-    - The rate (12.6 a frame) matches the dynamic lights' shadow maps (12 of each filter size a
-      frame). The shadow A/B below confirms the tie.
+    - Not the dynamic lights' shadows, although the rate (12.6 a frame) matched their maps:
+      with the shadows off (run 2 below) it stays at 12.5 a frame. Which depth targets it
+      acts on is still to find.
     - The same shader with depth on (256×256 D32, 784×784 D32S8) or with pixel shader
       `38d65b32` (1920×1080 colour) is the toolkit's clears and copies. Those do real work.
     - Not checked yet: the depth unit's register bits on these draws (`DB_RENDER_CONTROL`). A
       counter will show them.
   - The profiler waits at each label, but it costs only 0.1–0.2 ms a frame in all
     (`engine-map.md` 1.4). So the steps already ran one after the other without it.
-- **The likely shares of the 7.4 ms:**
-  - DLAA: 1.0 ms, set by the setting.
-  - Pixel shading: 1.5–2 ms.
-  - Geometry, in the G-buffer and shadow passes: about 1.5 ms.
-  - Fixed per-step costs of small, serialized steps: about 2–3 ms. Step 0's timer, which does
-    not wait at each label, settles this split.
+- **The four runs of 2026-11-05 (0.4.4, the lamp spot under the 240 limit).** Each run changes
+  one thing from the run before it. The figures are at the first spot (about 1,345 draws); the
+  tester's second spot (about 1,770 draws) gives the same steps.
+
+  | Run (log) | FPS | GPU ms | Draws a frame | Step |
+  |---|---|---|---|---|
+  | 1 baseline: DLAA, Model detail Highest, dynamic light shadows on (`20261105_024658`) | 134.9 | 7.41 | 1,345 | |
+  | 2 dynamic light shadows off (`20261105_025037`) | 168.8 | 5.92 | 712 | −1.49 ms (−1.34 at the second spot) |
+  | 3 and Model detail at the game's default (`20261105_025406`) | 173.4 | 5.77 | 767 | −0.15 ms (−0.32) |
+  | 4 and TAA instead of DLAA (`20261105_025720`) | 194.9 | 5.13 | 766 | −0.64 ms (−0.68) |
+
+  - **The dynamic lights' shadows are the largest single item: 1.3–1.5 ms, a fifth of the
+    frame.** They add about 630 draws a frame, the objects near a light drawn again into its cube
+    faces. They are also behind the 48 `a040875f` copies, which are gone in run 2, and about
+    0.1 ms of the copy shader.
+  - **Model detail is a small share (0.15–0.3 ms).** Geometry is less of the frame than the
+    estimate before these runs (about 1.5 ms).
+  - **DLAA over TAA: about 0.65 ms.** The upscaler's label is 1.09 against 0.45 ms.
+  - **The 32768×32768 empty pass stays at 12.5 a frame in every run.** So it is not the
+    shadows' (see above); the depth targets it acts on are still to find.
 - **Not resolution, not shader code, first.** The shader changes of 2026-10-22 cut pixel-shader
-  code by 16%. That acts on the 1.5–2 ms of shading. The steps and the geometry are the larger
-  share.
+  code by 16%. That acts on the shading, the part that scales with pixels. The steps are the
+  larger share.
 - **A hint from bbhost, not a measurement.** At Old Yharnam on an RTX 4070 uncapped, its meter
   reads 108 FPS with the GPU 46% busy, about 4.3 ms of GPU a frame (`docs/performance.md`). That
   is another place with other settings, so the two can't be compared directly. bbhost takes its
@@ -219,13 +234,8 @@ the same route.
 - **Expected:** 3 of the 4 long-frame minutes gone, and the uploads and write faults of the churn
   with them. Step 0's churn count shows how much.
 
-**Before step 2: three A/B runs on 0.4.4, no new build.** The lamp spot under the 240 limit, two
-minutes each, with the GPU profile on (as `20261102_231754`):
-
-- Model detail at the game's default against Highest: how much of the frame is geometry.
-- Dynamic light shadows off against on: whether the small R16G16F passes are the lights' shadow
-  maps and their filtering, about 0.7–1 ms.
-- TAA against DLAA: the upscaler's share without DLSS's evaluate.
+**Before step 2: three A/B runs on 0.4.4, no new build.** Done on 2026-11-05: the four runs
+above.
 
 **Step 2: fewer and cheaper GPU steps**, in the order of cost from step 0's per-pass times. The
 estimates are from the 134 FPS profile.
@@ -243,8 +253,11 @@ estimates are from the 134 FPS profile.
 - **The game's small compute work: about 0.45 ms, with the GPU nearly idle.**
   - `a954e79d` (a `ds_append` loop on one workgroup, 5 a frame): rewrite it wide in the engine,
     or overlap it with graphics on a compute queue.
-  - `a040875f` (48 dispatches of 16 workgroups): one dispatch, if they are independent.
-- **The chains of small passes: 0.7–1 ms**, if the shadow A/B confirms them.
+  - `a040875f` (48 dispatches of 16 workgroups): one dispatch, if they are independent. They
+    are the shadows' (gone with them in run 2).
+- **The chains of small passes: about 0.25 ms**, plus the 0.25 ms of `a040875f` above. They are
+  the dynamic lights' shadows, confirmed by run 2. Of the shadows' 1.3–1.5 ms, about 0.5 ms is
+  fixed costs, which these two items remove. The rest is drawing the objects into the faces.
   - **What the logs show:** two-channel half-float images (R16G16F) of 256×256 with 6 layers,
     which is a cube map, sampled. There are at least two of them (images 129 and 133).
   - **How they are drawn:** they are drawn with depth (`167daba6`/`1ae03d75`, at 64 to 256 a
@@ -267,7 +280,8 @@ estimates are from the 134 FPS profile.
     skipped: a draw with no targets, no pixel shader, a vertex shader without memory writes and
     no occlusion query open writes nothing on the PC;
   - the GPU idle between submissions: 0.1 ms.
-- **Together, about 1–1.5 ms of the 7.4**, which is 134 FPS to about 160 at that spot.
+- **Together, about 1–1.3 ms of the 7.4**, which is 134 FPS to about 155 at that spot, with
+  every setting as it is.
 
 **Step 3: shader code.** After step 2: it acts on the 1.5–2 ms of shading and on the geometry's
 vertex shaders.
