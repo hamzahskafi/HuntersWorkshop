@@ -27,6 +27,7 @@
 #include "imgui/renderer/texture_manager.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_optiscaler.h"
+#include "video_core/renderer_vulkan/vk_copy_trace.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "bbport_threads.h"
 
@@ -196,6 +197,7 @@ void Scheduler::BeginRendering(const RenderState& new_state) {
     if (is_rendering && render_state == new_state) {
         return;
     }
+    CopyTrace::PassBegin(render_state == new_state); // 0.4.5 beta 8, with frame statistics
     // bbport: a cut of the command stream (MaybeSplit) closed this render pass; it continues
     // in the next command buffer without clearing its attachments again.
     const bool resume = resume_rendering && !is_rendering && render_state == new_state;

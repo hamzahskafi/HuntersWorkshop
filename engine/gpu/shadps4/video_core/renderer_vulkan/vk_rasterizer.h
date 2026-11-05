@@ -429,6 +429,8 @@ private:
     bool ShadowRedirectDispatch(const Shader::Info& cs, bool indirect);
     void ShadowRedirectFrame();
     void ShadowRedirectPassBegun(const GraphicsPipeline* pipeline, const RenderState& state);
+    /// 0.4.5 beta 8: the targets of the pass just begun, for the copy trace (vk_copy_trace.h).
+    void CopyTraceTargets(const GraphicsPipeline* pipeline);
     void ShadowRedirectRestore(const char* why);
     bool DrawSamples(const GraphicsPipeline* pipeline, VAddr address) const;
     /// bbport: for a pipeline still compiling, records its bind as a command of its own, which a

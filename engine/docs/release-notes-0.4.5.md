@@ -47,6 +47,12 @@ compared went from 140–145 FPS in 0.4.2 to 210.
   out, the rectangle copies and those left out, the lamp shadow faces drawn into their scratch images,
   their clears, and any faces put back.
 
+- **A trace of the copy shader** (beta 8), with frame statistics on: twice a session (the 600th and
+  the 6,000th frame of play), one frame's copy-shader dispatches in their passes: for each pass, how
+  many copies came at its start, inside it, and at its end, and of those inside how many could move
+  to its start (no earlier draw or dispatch of the pass touching what they copy), with the reason
+  for the first that couldn't (`Copy trace 1 ...` to `Copy trace 1: end of the frame`).
+
 ## Tried and not kept
 
 - Beta 1 ran the game's shader `a954e79d` as one step instead of its loop of atomics. It was exact,

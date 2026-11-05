@@ -97,11 +97,12 @@ memory cleanup after them. The evidence for each item is in [performance.md](per
   after it) and that dispatch, `2da7fe60`: the game's particle update, cleanly translated, real work
   (performance.md).
 - **Left, with the tester's say:**
-  - **The copy shader:** 0.38 ms a frame in 64 dispatches, and about 23 render passes a frame begun
-    again after one of them. Moving a pass's copies ahead of it, in fewer dispatches, needs to know
-    that no earlier draw in the pass touches what they copy, and to place work ahead of commands
-    already recorded: the riskiest change of step 1. First a trace of one frame's copies in their
-    passes (no change in behaviour), then the decision. Estimate 0.15–0.3 ms.
+  - **The copy shader:** 0.35–0.45 ms a frame in every scene of play (60–78 dispatches), and 20–25
+    render passes a frame begun again after one of them. Moving a pass's copies ahead of it, in
+    fewer dispatches, needs to know that no earlier draw in the pass touches what they copy, and to
+    place work ahead of commands already recorded: the riskiest change of step 1. Beta 8 traces one
+    frame's copies in their passes (`vk_copy_trace.h`, no change in behaviour); then the decision.
+    Estimate 0.15–0.3 ms, everywhere.
   - **Smaller items:** `mem-4`; `upscale-2` and `-3` (0.29 ms at Quality, nothing at DLAA); the GPU
     idle between submissions (about 0.1 ms, 3 a frame).
 
@@ -154,8 +155,8 @@ memory cleanup after them. The evidence for each item is in [performance.md](per
 
 ### Waiting on the tester
 
-- **Whether to trace the copy shader next** (step 1's last item), or go to step 2. The lamp
-  shadows looked right in every lamp-lit area the tester visited (2026-11-05).
+- **0.4.5 beta 8 at the lamp spot for about a minute** (frame statistics on): its log holds two
+  copy traces. The tester chose the copy shader next (2026-11-05).
 - **The cleanup off, one session, before step 3 (in a real play session, later):** an hour at 60
   FPS, ideally a chalice dungeon, with `BB_VRAM_CLEANUP_SECONDS=0` in Extra variables. The launcher's "VRAM cleanup"
   row is another cleanup, of textures, and stays on.

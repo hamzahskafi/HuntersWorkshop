@@ -21,6 +21,7 @@
 #include "bbport_sections.h"
 #include "bbport_toggles.h"
 #include "video_core/renderer_vulkan/vk_gpu_profiler.h"
+#include "video_core/renderer_vulkan/vk_copy_trace.h"
 #include "video_core/renderer_vulkan/vk_gpu_savings.h"
 #include "video_core/renderer_vulkan/motion_copy_sources.h"
 
@@ -456,6 +457,7 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
             GpuSavings::Count(GpuSavings::Get().hle_dispatches_in_pass);
         }
         scheduler.EndRendering(GpuSavings::PassBreak::CopyShader);
+        CopyTrace::CopyBegin(); // 0.4.5 beta 8
     }
     u32 batch_start = 0;
     for (const auto& batch : batches) {
@@ -485,6 +487,14 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
             copy.dstOffset = copy.dstOffset - dst_offset_min + dst_buf_offset;
         }
 
+        if (CopyTrace::state.copying) {
+            const u64 src_key = CopyTrace::Key(static_cast<VkBuffer>(src_buf->Handle()));
+            const u64 dst_key = CopyTrace::Key(static_cast<VkBuffer>(dst_buf->Handle()));
+            for (const auto& copy : vk_copies) {
+                CopyTrace::CopyRange(src_key, copy.srcOffset, dst_key, copy.dstOffset, copy.size);
+            }
+        }
+
         // Execute buffer copies.
         LOG_TRACE(Render_Vulkan, "HLE buffer copy: src_size = {}, dst_size = {}",
                   src_offset_max - src_offset_min, dst_offset_max - dst_offset_min);
@@ -496,6 +506,7 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
         copy_dispatch_in_pass = false;
         batch_start = batch_end;
     }
+    CopyTrace::CopyEnd();
     return true;
 }
 
