@@ -14,7 +14,7 @@ namespace BloodborneLauncher.Views
     /// version from what AMD offers on this GPU (AmdFsrVersions); DLSS's model. Sharpening, the fine
     /// settings under Advanced, then Detail and the game's effects. A row that only matters for another's
     /// choice sits under it (Nest). One short line per row, the details and advice in its tooltip (27d:
-    /// SetTip). Frame generation is not offered (community-fixes-plan.md, Decisions).
+    /// SetTip). Frame generation is not offered (docs/plan.md, Decisions).
     /// </summary>
     public sealed class GraphicsPage : LauncherPage
     {

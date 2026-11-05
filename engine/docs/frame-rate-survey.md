@@ -109,7 +109,7 @@ Nothing new; each was already right.
 - Already corrected: the clip drive's path B (0x1915fab, plus paths A and C, which the list left at
   1/30), grass, the jump momentum (0.95 a frame, 4 lanes), the ghost fades, and the 0.1-a-frame timers.
   Since 0.4.0 beta 5 the grass wind steps by half the frame's time and weighs its force by the game's
-  1/60 (B13 in `docs/community-fixes-plan.md`).
+  1/60 (B13 in `docs/community-fixes.md`).
 - 8 entries where the list writes the game's own 1/30:
   - 4 are steps, which the table sets for the rate (0x1972a80, 0x4d2577c, 0x4d29170, 0xf383ca).
   - 4 are frame counts turned into seconds, right as they are: 0x4caf1c0 (0x131e64e), 0x4d26364 (the

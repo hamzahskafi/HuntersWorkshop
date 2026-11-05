@@ -1,8 +1,8 @@
 # Archive: documents kept for the record
 
 Nothing here describes the engine as it is. How it works now: [engine-map.md](../engine-map.md);
-every change and measurement since Hunter's Workshop began:
-[community-fixes-plan.md](../community-fixes-plan.md). Links inside these files may point at files
+every change and measurement since Hunter's Workshop began: [changelog.md](../changelog.md); what
+comes next: [plan.md](../plan.md). Links inside these files may point at files
 one folder up (`../`). (Called `docs/history/` until 0.4.4 beta 28.)
 
 ## From bbport
@@ -81,3 +81,12 @@ Oldest first:
   4.1.1); moved in 0.4.4 beta 28.
 - [launcher-layout-proposal.md](launcher-layout-proposal.md) (English): the launcher's reorganisation
   as proposed and built in 0.4.4 betas 26 to 27d.
+- [a1-a12-integration-0.4.0.md](a1-a12-integration-0.4.0.md): how the first batch of community fixes
+  (A1–A12) went into 0.4.0 beta 1, 2026-10-25; the fixes themselves are in
+  [community-fixes.md](../community-fixes.md). Moved out of the plan on 2026-11-05.
+- [hitches-2026-10.md](hitches-2026-10.md): the 40–120 ms hitches investigated with hitch reports, the PC
+  memory model measured on and off, and the smoothness leads, 2026-10-25 and 26; the smoothness work
+  after 0.4.4 is in [performance.md](../performance.md). Moved out of the plan on 2026-11-05.
+- [plan-0.4.4.md](plan-0.4.4.md): the plan to 0.4.4 stable, beta by beta (23 to 28), with the decisions
+  as they stood and the questions settled, 2026-10-31 to 11-03; the decisions that stand are in
+  [plan.md](../plan.md). Moved out of the plan on 2026-11-05.

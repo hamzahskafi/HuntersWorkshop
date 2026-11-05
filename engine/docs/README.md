@@ -12,16 +12,21 @@ features are in [archive/](archive/README.md) (was `history/`).
 - [COMPATIBILITY.md](COMPATIBILITY.md): graphics cards and drivers, and what the engine does on each.
 - [hdr.md](hdr.md): HDR output and its settings.
 
-## The project's log and map
+## The plan, the log and the map
 
-- [community-fixes-plan.md](community-fixes-plan.md): every change since Hunter's Workshop began, with
-  its measurements and credits (the main table, newest rows at the bottom), what is left after 0.4.4
-  (its "After 0.4.4" section), the performance plan built on 0.4.4's logs, and the review of what other Bloodborne PC projects fixed.
-- [launcher-text-review.md](launcher-text-review.md): every launcher row's title, line and tooltip, with
-  the texts proposed for 0.4.4's text pass (applied).
+- [plan.md](plan.md): what comes next (the performance work after 0.4.4, then the rest), the ground
+  rules, the decisions that stand, the checks still to make and what waits on the tester.
+- [performance.md](performance.md): what the 0.4.4 logs show about smoothness and frame rate: the
+  VRAM cleanup's long frames, where the GPU's frame goes, and what each costly item is.
+- [changelog.md](changelog.md): every change since Hunter's Workshop began, with its measurements and
+  credits, newest at the bottom.
+- [community-fixes.md](community-fixes.md): what the other Bloodborne PC projects fixed, vetted against
+  Hunter's Workshop, and the reviews of bbport 0.7, Lantern 0.9.38 and 0.9.39, and bbhost.
 - [engine-map.md](engine-map.md): how the engine works (threads, a frame from the game's commands to
   the screen, where the GPU and CPU time goes) and the reviewed optimization ideas, with the status of
-  each after 0.4.4 beta 21 at its top.
+  each after 0.4.4 beta 21 at its top; the open ones are ordered in plan.md.
+- [launcher-text-review.md](launcher-text-review.md): every launcher row's title, line and tooltip, with
+  the texts proposed for 0.4.4's text pass (applied).
 
 ## How parts of the engine work
 

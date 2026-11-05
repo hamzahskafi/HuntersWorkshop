@@ -1,10 +1,12 @@
 # Hunter's Workshop: engine map and reviewed optimization ideas
 
-As of 0.4.4 beta 19 (commit `9b8b057`, 2026-10-31). Written for the project owner. What has been done about each item since is kept in `community-fixes-plan.md` (from 0.4.4 beta 20 on); this document is not updated after the fact.
+As of 0.4.4 beta 19 (commit `9b8b057`, 2026-10-31). Written for the project owner. What has been done about each item since is kept in `changelog.md` (from 0.4.4 beta 20 on); this document is not updated after the fact.
 
 ## Status after 0.4.4 beta 21
 
-What became of each idea and bug below; the measurements and reasons are in `community-fixes-plan.md` (the beta 20 and 21 rows and the rows between them). The sections that follow are kept as written at beta 19, with their file:line references of that commit.
+Since 0.4.4 (2026-11-05): the open items below are ordered in [plan.md](plan.md), "Now: performance", on the evidence in [performance.md](performance.md).
+
+What became of each idea and bug below; the measurements and reasons are in `changelog.md` (the beta 20 and 21 rows and the rows between them). The sections that follow are kept as written at beta 19, with their file:line references of that commit.
 
 | Id | Status | Note |
 |---|---|---|
@@ -205,7 +207,7 @@ Profiling also costs about 0.1 to 0.15 ms (8.48 ms profiled against 8.30 to 8.39
 
 ### 1.6 Where the area maps disagreed, and how this document resolves it
 
-1. **"Copy-shader dispatches inside a pass: none" (beta 18, `community-fixes-plan.md:66`).** The memory skeptic used this as evidence against `mem-4`. The renderer skeptic showed it is invalid: it was measured with `BB_GPU_PROFILE` on, and the profiler ends the pass before the counter looks (`renderer-1`). This document follows the renderer skeptic: whether the copy shader splits passes is **unknown until re-measured**. That also reopens the listed idea "run copy-shader copies before the render pass", which was closed on this data.
+1. **"Copy-shader dispatches inside a pass: none" (beta 18, `changelog.md`, beta 18 row).** The memory skeptic used this as evidence against `mem-4`. The renderer skeptic showed it is invalid: it was measured with `BB_GPU_PROFILE` on, and the profiler ends the pass before the counter looks (`renderer-1`). This document follows the renderer skeptic: whether the copy shader splits passes is **unknown until re-measured**. That also reopens the listed idea "run copy-shader copies before the render pass", which was closed on this data.
 2. **How many restarts nobody can explain.** The renderer mapper said 13 G-buffer restarts are invisible to beta 18's counter. Its skeptic replied that beta 18 saw about 31 byte-identical restarts a frame. What was missing was what ended them, and beta 19 now tags that. Both are partly right. Even in beta 19, two kinds of restart are still counted nowhere: restarts whose state changed (clears, the motion slot, the depth view or layout), and restarts after a recording cut (`renderer-2`, `seg-1`).
 3. **Cost of a restart.** The renderer area measured it in beta 14. With `BB_VK_SEGMENT_KB=2048`, the G-buffer went from 26 to 13 passes and from 2.75 to 2.63-2.69 ms, with GPU busy and FPS unchanged. That is about 5 to 9 us per restart without a barrier. The command-area mapper proposed `seg-1` with a 3 to 10 us guess and did not cite this result. This document uses the beta 14 numbers.
 4. **Breadcrumbs.** The renderer mapper could not tell whether they run on the tester's card. Its skeptic found the tester's logs (driver 617.42) print breadcrumb lines, so they are active (`renderer-7`).
@@ -290,7 +292,7 @@ Priority 1, partly confirmed. Command-processing area (scheduler code).
   2. End the pass with the suspending flag before a cut, and begin the next segment with the resuming flag (same targets, no clear).
 
   Skeptic correction: at cut time `MaybeSplit` cannot know what the next segment records first. If that is not a draw in the same pass (a barrier, a transfer, `EnterDirectMode`, or the submission's own pass end at `:1040`/`:1136`), record "resume, then end" there. That case costs what it costs today. The upscaler's direct segment keeps ending the pass.
-- **Evidence.** There is a measured upper bound from beta 14 (`community-fixes-plan.md`, beta 14 row): 2048 KiB segments cut the G-buffer from 26 to 13 passes and from 38 to 5.6 command buffers a frame. The G-buffer label went from 2.75 to 2.63-2.69 ms, but **GPU busy and FPS did not change**. This measured bound comes from the renderer area. The command-area mapper's own estimate (10 to 20 restarts at 3 to 10 us each) was a guess.
+- **Evidence.** There is a measured upper bound from beta 14 (`changelog.md`, beta 14 row): 2048 KiB segments cut the G-buffer from 26 to 13 passes and from 38 to 5.6 command buffers a frame. The G-buffer label went from 2.75 to 2.63-2.69 ms, but **GPU busy and FPS did not change**. This measured bound comes from the renderer area. The command-area mapper's own estimate (10 to 20 restarts at 3 to 10 us each) was a guess.
 - **Expected effect.** At most about 0.06 to 0.12 ms of G-buffer time at the lamp spot. It may not show in GPU busy at all, as in beta 14. Unlike the 2048 KiB experiment, recording stays parallel. Cost on AMD and Intel is not measured.
 - **Risk.** Medium. Vulkan's suspend and resume rules must hold: identical attachments, and no other actions or barriers in between. Validation layers (`BB_VK_VALIDATION=1`) catch violations.
 - **How to test.**
@@ -367,7 +369,7 @@ Priority 3, partly confirmed. Memory area. Windows only.
 
 - **What and where.** For a GX-region binding over 16 KiB, the GX branch (`buffer_cache.cpp:1166`) returns before the copy-source rule is used (`:1246-1251`, `:1261`; `vk_shader_hle.cpp:527-529`, `588-590`). So copy-shader sources of 16 to 64 KiB are read by the GPU from system memory. Sources of 16 KiB or less are snapshotted into the stream buffer.
 - **Skeptic corrections.**
-  1. This is not a clash between two rules. The copy-source rule exists to keep these spans off the tracked path (write faults), not to put them in video memory (`buffer_cache.cpp:1238-1245`; `community-fixes-plan.md:45`).
+  1. This is not a clash between two rules. The copy-source rule exists to keep these spans off the tracked path (write faults), not to put them in video memory (`buffer_cache.cpp:1238-1245`; `changelog.md`, the GX region rows of 0.4.4).
   2. The gain is bounded. A near-empty dispatch on video memory (cs a040875f) costs about 5 us and a copy dispatch about 7 us. So PCIe latency is at most about 2 us times 54, or about 0.1 ms a frame, and likely less.
   3. GX in place measured equal to the tracked path within 0.05 ms (`gpu-memory.md:334`). A GPU-copy variant of the same idea (`ShadowCopy`) measured slower, 48 to 44 FPS (`buffer_cache.h:298-302`).
 - **Disagreement resolved.** The skeptic also called the benefit "more copies could run before the pass" refuted, citing beta 18's "no copy-shader dispatches inside a pass". `renderer-1` shows that count is invalid, so this benefit is **unknown**, not refuted.
@@ -521,7 +523,7 @@ Priority 4, partly confirmed. Shader area.
 
 - **What and where.** Each stored vertex writes x, y, z and w (`emit_spirv_special.cpp:139-152`). The next frame's load replaces z with a "valid" flag (`:182-183`), and the fragment code reads only x, y and w plus that flag (`:190-223`). Nothing else reads the buffer (`vk_object_motion.cpp:103-122`, `199-200`).
 - **Fix.** Skip the z store, but keep the 16-byte slot and the aligned 16-byte load. Do not pack to 12 bytes: that breaks the aligned load (`:172-174`). Because it is a shader change, the switch needs a recompile path: a motion shader version bump, or a flag in the draw parameters.
-- **Evidence.** Bounded by measurement. With toggle bit 29, all history stores and loads together cost about 0.1 ms (G-buffer 2.31 to 2.19-2.20 ms, `community-fixes-plan.md:64`). One store in four is well under 0.03 ms. The bytes may not even reach memory, because partly written 32-byte sectors may need a fill. What is certain is one store instruction fewer per stored vertex (about 2.83 million a frame).
+- **Evidence.** Bounded by measurement. With toggle bit 29, all history stores and loads together cost about 0.1 ms (G-buffer 2.31 to 2.19-2.20 ms, `changelog.md`, beta 16 row). One store in four is well under 0.03 ms. The bytes may not even reach memory, because partly written 32-byte sectors may need a fill. What is certain is one store instruction fewer per stored vertex (about 2.83 million a frame).
 - **Expected effect.** Under 0.03 ms. Do it only alongside other motion-shader work.
 - **Risk.** Very low.
 - **How to test.** The G-buffer labels with the switch on and off. The "Show motion vectors (debug)" view must look identical.
@@ -535,7 +537,7 @@ Priority 4, partly confirmed. Memory area. Shares a root with `renderer-6`.
 - **Skeptic corrections.**
   - This happens only on the tracked path. If the destination is in the GX region, only a 64 KiB tick is noted (`buffer_cache.cpp:1166-1182`, `57-62`).
   - Most claimed consequences are already measured as negligible:
-    - Object motion: since beta 16, 354 to 358 of about 362 GPU-written small skeletons are unchanged and only 7 small draws are stored (`community-fixes-plan.md:64`). Beta 15 traced only 3 of 360 palettes to the copy shader (`:63`).
+    - Object motion: since beta 16, 354 to 358 of about 362 GPU-written small skeletons are unchanged and only 7 small draws are stored (`changelog.md`, beta 16 row). Beta 15 traced only 3 of 360 palettes to the copy shader (`:63`).
     - Readbacks: write faults are about 1 a second in play (`gpu-memory.md:314`).
     - Write ticks work in 64 KiB pages, so exact bytes would not help.
     - The write-stamp lock is uncontended.
@@ -784,7 +786,7 @@ Priority 4, partly confirmed.
 Priority 4, confirmed.
 
 - **What and where.** `ShadowCopy` (`buffer_cache.cpp:3041-3080`) is reached only from the in-place branch (`:1223-1227`). It is live only with `BB_GUEST_IN_PLACE=1` and `BB_SHADOWS=1`. Its own comment records 85 copies and 20 MB a frame for 48 to 44 FPS (`buffer_cache.h:298-302`). The default cost is trivial (`:1143`, `:3912`, `:3976`; `vk_rasterizer.cpp:5723`).
-- **Fix.** Delete it. Record the removal and its measurement in `community-fixes-plan.md` with bbport's credit. The measurement is also evidence against copying in-place data into video memory (relevant to `mem-4`).
+- **Fix.** Delete it. Record the removal and its measurement in `changelog.md` with bbport's credit. The measurement is also evidence against copying in-place data into video memory (relevant to `mem-4`).
 
 ### 3.14 Empty `FrameCapture::Poll` called on every packet (`renderer-9`)
 
@@ -822,9 +824,9 @@ Priority 1, confirmed. Measurement bug.
 
   Those read "transfer", never "copy shader".
 - **Why it matters.**
-  - Beta 18's conclusion, "copy shader dispatches inside a pass: none ... running its copies before the pass gains nothing" (`community-fixes-plan.md:66`), came from a run with frame statistics and the GPU profile on. It is not evidence.
+  - Beta 18's conclusion, "copy shader dispatches inside a pass: none ... running its copies before the pass gains nothing" (`changelog.md`, beta 18 row), came from a run with frame statistics and the GPU profile on. It is not evidence.
   - The plan's remark that "the GPU profiler is not it (it marks only where a pass begins anyway)" overlooks this mark. `MarkPass` fires only where a pass begins (`vk_rasterizer.cpp:6197-6200`); the copy-shader mark does not.
-  - **The beta 19 test plan** (`community-fixes-plan.md:67`) again says "frame statistics and GPU profile on". Read against this finding, the beta 19 "render pass reasons" line from that run will show copy-shader splits as "profiler". This is this document's inference from the plan row and the skeptic's finding.
+  - **The beta 19 test plan** (`changelog.md`, beta 19 row) again says "frame statistics and GPU profile on". Read against this finding, the beta 19 "render pass reasons" line from that run will show copy-shader splits as "profiler". This is this document's inference from the plan row and the skeptic's finding.
 - **Fix.** Sample `in_pass` and tag once per game dispatch at the top of `ExecuteCopyShaderHLE`, before the `ObtainBuffer` calls (`:527`, `:588`). At minimum, move the mark after `:131`. Caveat: an upload's own `FlushBarriers` inside `ObtainBuffer` clears the tracker before `MultiCopy` checks it (`:137-148`), so "no barrier needed" can be over-counted.
 - **Interim rule.** Read pass counts and pass reasons only from runs **without** `BB_GPU_PROFILE`. Take milliseconds from a separate profiled run.
 - **Expected effect.** Correct inputs; it reopens "run copy-shader copies before the render pass". No FPS change by itself.
@@ -957,11 +959,11 @@ Priority 4, partly confirmed.
 
 ## 5. Refuted ideas (do not chase)
 
-- **`mem-1`: 128 MiB staging buffer per depth/colour copy without maintenance8.** Already fixed. Beta 19's plan row (`community-fixes-plan.md:67`, item 3, "this commit") sizes the request to the copy, and beta 19 also moves these copies to shaders. Beta 18 counted zero such copies on the tester.
-- **`mem-2`: skip the upload when converting between depth and colour images.** Already on the list with a better root fix (`community-fixes-plan.md:67`). Beta 18 counted zero conversions. The skip is also unsafe: it leaves the image's memory hashes unrecorded, which reopens the "black character-creator preview" bug that the guard at `texture_cache.cpp:1319-1337` fixed.
+- **`mem-1`: 128 MiB staging buffer per depth/colour copy without maintenance8.** Already fixed. Beta 19's plan row (`changelog.md`, beta 19 row, item 3, "this commit") sizes the request to the copy, and beta 19 also moves these copies to shaders. Beta 18 counted zero such copies on the tester.
+- **`mem-2`: skip the upload when converting between depth and colour images.** Already on the list with a better root fix (`changelog.md`, beta 19 row). Beta 18 counted zero conversions. The skip is also unsafe: it leaves the image's memory hashes unrecorded, which reopens the "black character-creator preview" bug that the guard at `texture_cache.cpp:1319-1337` fixed.
 - **`mem-6`: tag uploads and transfers as pass enders, then move them before the pass.** Beta 19 tags every pass ender. The transfers it lists are rare in play. The likely real causes (draw-time barrier flushes; submissions clearing the resume flag, `vk_scheduler.cpp:1131-1137`) were missing from it. Its second step had no number and a high ordering risk.
 - **`shader-4`: GDS append and consume, one atomic per subgroup.** Shipped in beta 19 (`BB_GDS_APPEND=lane` restores per-lane atomics). Its effect on `cs a954e79d` is still to be measured. The shipped pattern relies on reconvergence that core Vulkan does not strictly guarantee without `VK_KHR_shader_maximal_reconvergence`. It is the standard idiom every major driver handles, so it is not a defect to act on.
-- **`shader-10`: retire `BB_UBO_EXACT`, `BB_EARLY_Z`, `BB_UBO_STAGES`.** No gain: one branch per buffer. `BB_EARLY_Z` was re-measured in 0.4.4 (`community-fixes-plan.md:61`) and is the console-faithful comparison mode (`profile.h:71-73`). No recorded result settles `BB_UBO_STAGES`' question.
+- **`shader-10`: retire `BB_UBO_EXACT`, `BB_EARLY_Z`, `BB_UBO_STAGES`.** No gain: one branch per buffer. `BB_EARLY_Z` was re-measured in 0.4.4 (`changelog.md`) and is the console-faithful comparison mode (`profile.h:71-73`). No recorded result settles `BB_UBO_STAGES`' question.
 
 ---
 

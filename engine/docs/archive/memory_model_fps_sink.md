@@ -107,7 +107,7 @@ climbing, and the FPS with them.
 
 Later (2026-10-25 and 26): this A/B was not run as planned, but five Hunter's Workshop 0.3.0
 sessions with the model on (RTX 3070 Ti, i5-14600KF, 60 FPS) showed no sinking: the in-place share
-followed the area (0.1 to 551 MB a frame) and did not climb (`docs/community-fixes-plan.md`, "PC
+followed the area (0.1 to 551 MB a frame) and did not climb ([hitches-2026-10.md](hitches-2026-10.md), "PC
 memory model (`BB_GUEST_IN_PLACE`), on and off"). They had more late frames than the sessions with
 it off (0.29 against 0.10 a minute), and a 0.4.0 beta 3 session with it on had each of its late
 frames inside a burst of the model's moves: why it went off by default (`docs/gpu-memory.md`).

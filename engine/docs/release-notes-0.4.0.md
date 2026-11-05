@@ -1,7 +1,7 @@
 # Hunter's Workshop 0.4.0
 
 What changed since 0.3.0, for the release page. The engine work behind each line is in
-`docs/community-fixes-plan.md`; every fix taken from another project is credited below and in
+`docs/changelog.md`; every fix taken from another project is credited below and in
 `README.md`.
 
 ## Fixes

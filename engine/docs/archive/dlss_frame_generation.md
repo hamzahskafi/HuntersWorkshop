@@ -1,6 +1,6 @@
 # DLSS Frame Generation and the upscaler options (2026-10-22)
 
-**Not offered since 0.4.4 beta 26** (the tester's call in beta 23; `community-fixes-plan.md`, Decisions):
+**Not offered since 0.4.4 beta 26** (the tester's call in beta 23; `plan.md`, Decisions):
 `BbSettings::FrameGenOffered` is false, so `frame_gen` (and `BB_FRAME_GEN`) reads as off with a log line,
 the in-game items and the launcher's rows are left out, and Streamline is never loaded for it. What
 follows describes the code, which stays until frame generation is decided on.

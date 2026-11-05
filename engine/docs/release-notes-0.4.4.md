@@ -1,7 +1,7 @@
 # Hunter's Workshop 0.4.4
 
 What changed since 0.4.3, for the release page. The engine work behind each line is in
-`docs/community-fixes-plan.md` and `docs/gpu-memory.md`.
+`docs/changelog.md` and `docs/gpu-memory.md`.
 
 ## Defaults
 

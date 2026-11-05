@@ -30,7 +30,7 @@ and [shadPS4](https://github.com/shadps4-emu/shadPS4), and added:
   Hunter's Dream.
 
 Hunter's Workshop's own changes since then are recorded in
-[docs/community-fixes-plan.md](docs/community-fixes-plan.md) and the release notes
+[docs/changelog.md](docs/changelog.md) and the release notes
 (`docs/release-notes-*.md`). Among them, the game's per-frame GPU memory (its GX region) is read in
 place by default on Windows since 0.4.4 (`BB_GX_IN_PLACE=0` tracks it as before).
 
