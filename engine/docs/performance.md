@@ -72,13 +72,24 @@ heavier logging than the baseline's standard log). Against the November 3rd hour
 - **Pacing:** stddev 0.11 ms (median of the 5 s windows), p99 17.0 ms. The other frames over 20 ms
   were the windows after loads, with new areas' shaders compiled (712 compiles, 0.66 s in all,
   the DLC's areas not in the pipeline cache yet).
-- **The hitches, all of them shader compiles:** no hitch report was written (the watcher is quiet
-  for 20 s at the start, during loading screens and for 10 s after each); both frames over 40 ms
-  fell there. All 9 windows with a frame over 20 ms are in the first 6.5 minutes, each with
-  pipelines compiled in it (the 69 ms frame: 16 built after a 3.4 s load); none after minute 7.
-  The pipeline cache had been empty since beta 11's first session at 01:34 (its files missing:
-  "Pipeline cache cleared (0 files)"), and the short runs since rebuilt only about 290 pipelines
-  at three spots, so this session built the DLC's: 712 compiles, 438 in the first 3 minutes.
+- **Every late frame, from the frame pacing lines** (the game's flip intervals, what the player
+  sees; the frame statistics' "worst frame" is the GPU thread's and missed most of them): 13
+  frames over 1.5 times the median (a missed 60 Hz refresh, 33 ms on screen) in 430 windows.
+  - 7 in the first 20 s (the start and its first load).
+  - 6 in play, one at a time, each within 90 s after a load into one of the DLC's areas, each
+    while that area's new shaders were translated and its pipelines compiled (6 to 15 in the
+    window; up to 13 shaders translated, 16.6 ms; draws waiting up to 3 ms for a pipeline), two
+    of them also while the area's files streamed in (73 and 167 MB/s).
+  - None in the last 29 minutes.
+  - The pipeline cache was empty (the tester cleared it): 410 shaders translated (341 ms in all,
+    longest 4.3 ms) and 301 pipelines compiled in the session; both are kept for later sessions.
+  - No "Building shaders" note: it shows once a burst of compiles adds up to 30 ms, and counts
+    pipeline compiles, not translation. Each of these stutters was a few milliseconds of both
+    landing in one frame.
+  - No hitch report: the watcher is quiet for 20 s at the start, during loading screens and for
+    10 s after each; the two frames over 40 ms (the start; 69 ms after a 3.4 s load) fell there.
+- **Headroom at 60 FPS:** the GPU thread idle 80% of the time, stage B busy 15% (32% at most), the
+  game waiting 14.8 ms of each 16.7 ms frame for its flip. Loads 1.75–3.43 s.
 - **Caveats:** 35 minutes, not an hour; other areas than the baseline's; more logging on.
 
 ## The VRAM cleanup, in the code
