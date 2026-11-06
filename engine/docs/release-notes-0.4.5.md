@@ -10,10 +10,12 @@ The GPU is the limit at the busiest spots, and not because of pixels: the frame 
 and each costs about 5 µs however little it does (performance.md). 0.4.5 takes out steps that do
 nothing on the PC or that the PC can do another way. The picture is the same.
 
-**Measured** (RTX 3070 Ti, DLAA, Model detail Highest, the tester's lamp spot and a second spot,
-against 0.4.4): **135.0 to 143.5 FPS** (GPU 7.40 to 6.96 ms a frame) and **122.2 to 130.3 FPS**
-(8.18 to 7.67 ms). The gain grows with the lamps casting shadows; one lamp-lit scene the tester
-compared went from 140–145 FPS in 0.4.2 to 210.
+**Measured** (RTX 3070 Ti, DLAA, Model detail Highest; 0.4.4 and beta 12 in the same scenes, one
+after the other, 2026-11-06): the lamp spot **135.0 to 146.4 FPS** (GPU 7.41 to 6.83 ms a frame,
++8.4%), a second spot **122.3 to 131.0 FPS** (8.17 to 7.63 ms, +7.1%), a third with few lamps
+**146.3 to 149.8 FPS** (6.83 to 6.67 ms, +2.4%). Worst frames unchanged (11–15 ms). The gain grows
+with the lamps casting shadows; one lamp-lit scene the tester compared went from 140–145 FPS in
+0.4.2 to 210.
 
 - **Draws that change nothing are left out** (beta 1). The game draws about 12 a frame with the
   toolkit's full-screen rectangle, no pixel shader, no colour target, depth and stencil off, and only
