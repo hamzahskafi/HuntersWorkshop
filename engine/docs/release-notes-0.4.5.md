@@ -55,7 +55,9 @@ compared went from 140–145 FPS in 0.4.2 to 210.
     barrier before each group instead.
   - The tester's three builds in one scene: 6.74 ms a frame without either change, 6.68 with the
     copies held, 6.61 held and merged (about 148 to 151 FPS). Beta 12 lets one dispatch's copies
-    share a command (the game's shader runs them all at once): about 69 commands a frame to 35.
+    share a command (the game's shader runs them all at once): at the lamp spot 57 commands and
+    23 barriers a frame (beta 11: 78 and 44), the lamp spot 6.83 ms a frame against 6.98 before
+    holding (about 143 to 146 FPS).
 
 ## Diagnostics
 
