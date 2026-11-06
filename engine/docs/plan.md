@@ -213,7 +213,11 @@ when the tester says).
 
 - **The cleanup off, one session, before step 3 (in a real play session, later):** an hour at 60
   FPS of normal play with travel (warps, the Dream and back, deaths), as the November 3rd session
-  (`20261103_220626`: the Dream and two areas), with `BB_VRAM_CLEANUP_SECONDS=0` in Extra variables. The launcher's "VRAM cleanup"
+  (`20261103_220626`: the Dream and two areas), with `BB_VRAM_CLEANUP_SECONDS=0` in Extra variables.
+  Log settings as in the November 3rd sessions, which had only the standard log (checked
+  2026-11-06): log level Standard, frame statistics off (on by default in betas), GPU time off,
+  hitch reports off. Its per-minute lines (`Load:`, `VRAM:`, `Memory:`, `Guest memory: cleanup`)
+  are what the 217 minutes were read from. The launcher's "VRAM cleanup"
   row is another cleanup, of textures, and stays on.
 
 ## Next, after the performance work
