@@ -212,7 +212,8 @@ when the tester says).
 ### Waiting on the tester
 
 - **The cleanup off, one session, before step 3 (in a real play session, later):** an hour at 60
-  FPS, ideally a chalice dungeon, with `BB_VRAM_CLEANUP_SECONDS=0` in Extra variables. The launcher's "VRAM cleanup"
+  FPS of normal play with travel (warps, the Dream and back, deaths), as the November 3rd session
+  (`20261103_220626`: the Dream and two areas), with `BB_VRAM_CLEANUP_SECONDS=0` in Extra variables. The launcher's "VRAM cleanup"
   row is another cleanup, of textures, and stays on.
 
 ## Next, after the performance work

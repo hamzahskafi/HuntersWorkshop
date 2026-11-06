@@ -39,7 +39,8 @@ a line says otherwise. Written on 2026-11-04 and 05 from the tester's logs:
 - The log reports the cleanup only at each 256 MiB and at most 20 times, so the minute it is
   charged to is approximate.
 
-**The cleanup churns.** The hour of chalice dungeons (`20261103_220626`):
+**The cleanup churns.** The hour-long session `20261103_220626` (the Hunter's Dream and two areas, game
+maps m26 and m32, m32 loaded 8 times; not chalice dungeons, as this read before):
 
 - 3.6 GB of the game's data left VRAM for being unused 180 s, while VRAM in use stayed at
   2.9–4.2 GB of 7.2.
