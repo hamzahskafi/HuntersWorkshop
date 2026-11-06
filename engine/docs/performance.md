@@ -83,9 +83,11 @@ heavier logging than the baseline's standard log). Against the November 3rd hour
   - None in the last 29 minutes.
   - The pipeline cache was empty (the tester cleared it): 410 shaders translated (341 ms in all,
     longest 4.3 ms) and 301 pipelines compiled in the session; both are kept for later sessions.
-  - No "Building shaders" note: it shows once a burst of compiles adds up to 30 ms, and counts
-    pipeline compiles, not translation. Each of these stutters was a few milliseconds of both
-    landing in one frame.
+  - No "Building shaders" note: it shows once a burst of shader work (gaps under 2 s) adds up to
+    30 ms. It counts translation, pipelines built on the spot and waits for a pipeline
+    (`CompileTimer`, `Pipeline::WaitReady`); background compiles nothing waited for are left out.
+    Each of these stutters was 10 to 17 ms of that in one frame, under the mark; meanwhile
+    bursts of 40 to 60 ms spread over a second or two, with no late frame, did reach it.
   - No hitch report: the watcher is quiet for 20 s at the start, during loading screens and for
     10 s after each; the two frames over 40 ms (the start; 69 ms after a 3.4 s load) fell there.
 - **Headroom at 60 FPS:** the GPU thread idle 80% of the time, stage B busy 15% (32% at most), the
