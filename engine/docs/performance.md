@@ -13,7 +13,8 @@ a line says otherwise. Written on 2026-11-04 and 05 from the tester's logs:
 ## In short
 
 - **Smoothness at 60 FPS.** Almost every long frame left comes from one mechanism: the VRAM
-  cleanup of the game's data unused for 3 minutes. A session with it off is still to come.
+  cleanup of the game's data unused for 3 minutes. With it off (35 minutes, 2026-11-06), no long
+  frame in play and no write faults; see "With the cleanup off".
 - **Frame rate above about 130 FPS.** The GPU is the limit, and not because of the pixels it
   draws.
   - **About 240 small steps a frame:** most of the GPU's frame is a chain of small steps, each
@@ -46,6 +47,32 @@ maps m26 and m32, m32 loaded 8 times; not chalice dungeons, as this read before)
   2.9–4.2 GB of 7.2.
 - The game's data in VRAM never passed 1.5 GB, so most of it left more than once. Each return
   was an upload.
+
+## With the cleanup off
+
+**One session, 35 minutes at 60 FPS** (`20261106_032525`, beta 13, `BB_VRAM_CLEANUP_SECONDS=0`; the
+DLC's areas and the Hunter's Dream, 7 loads; frame statistics, GPU time and hitch reports on, so
+heavier logging than the baseline's standard log). Against the November 3rd hour (`20261103_220626`,
+0.4.4, the cleanup on):
+
+| | Cleanup off (35 min) | Cleanup on (58 min) |
+|---|---|---|
+| Frames over 33 ms | 2 (3.4 an hour) | 9 (9.3 an hour) |
+| Minutes with a frame of 50 ms or more | 1 (69 ms, right after a 3.4 s load: 16 pipelines built, 400 MB of uploads) | 3 (119, 213 and 85 ms) |
+| Long frames in play, away from loads | none | the cleanup's |
+| Write faults a second (median, 90th percentile, most) | 0, 0, 10 | 22.5, 407, 2,913 |
+| VRAM in use, most (of 7,249 MiB) | 3,932 MiB | 4,189 MiB |
+| The game's data in VRAM, most | 1,408 MiB | 1,472 MiB |
+
+- **The game's data stops growing by itself:** it reached 1.4 GB and stayed, about what the
+  baseline peaked at with the cleanup on. Keeping it cost nothing on this card (VRAM 54% of the
+  driver's budget at most).
+- **The write faults were the cleanup's:** blocks freed and loaded back are watched again, so the
+  game's next writes to them fault. With nothing freed there were none.
+- **Pacing:** stddev 0.11 ms (median of the 5 s windows), p99 17.0 ms. The other frames over 20 ms
+  were the windows after loads, with new areas' shaders compiled (712 compiles, 0.66 s in all,
+  the DLC's areas not in the pipeline cache yet).
+- **Caveats:** 35 minutes, not an hour; other areas than the baseline's; more logging on.
 
 ## The VRAM cleanup, in the code
 

@@ -174,6 +174,15 @@ when the tester says).
 
 **Step 3: the memory cleanup, for smoothness at every frame rate.**
 
+- **The tester's session with it off** (2026-11-06, performance.md "With the cleanup off"): no long
+  frame in play, write faults gone (median 22.5 a second to 0), the game's data level at 1.4 GB,
+  VRAM at most 54% of the driver's budget. So on a card with room the cleanup only costs.
+- **Proposed first step:** the age cleanup (unused 180 s) only while VRAM is above a share of the
+  budget, about 70%; below it nothing leaves, as in the session. The levels above 85% (tight: 30 s,
+  full: 10 s) stay as they are. An 8 GB laptop whose VRAM fills still gets the cleanup before it
+  is tight; the tester's card would not run it at all. Counters: the level, and MiB freed by
+  which rule. The points below follow only if logs from smaller cards still show its stutter.
+
 - **Evict by the VRAM budget, not by age alone.** While VRAM is below a share of the driver's budget
   (`VK_EXT_memory_budget`, which `UpdateVramLevel` already reads), nothing leaves; above that share,
   the oldest leaves first. The 8 GB laptops the cleanup was added for stay covered, since their budget
@@ -211,14 +220,7 @@ when the tester says).
 
 ### Waiting on the tester
 
-- **The cleanup off, one session, before step 3 (in a real play session, later):** an hour at 60
-  FPS of normal play with travel (warps, the Dream and back, deaths), as the November 3rd session
-  (`20261103_220626`: the Dream and two areas), with `BB_VRAM_CLEANUP_SECONDS=0` in Extra variables.
-  Log settings as in the November 3rd sessions, which had only the standard log (checked
-  2026-11-06): log level Standard, frame statistics off (on by default in betas), GPU time off,
-  hitch reports off. Its per-minute lines (`Load:`, `VRAM:`, `Memory:`, `Guest memory: cleanup`)
-  are what the 217 minutes were read from. The launcher's "VRAM cleanup"
-  row is another cleanup, of textures, and stays on.
+- **Step 3's first step:** the go-ahead (proposed 2026-11-06, after the session with the cleanup off).
 
 ## Next, after the performance work
 
