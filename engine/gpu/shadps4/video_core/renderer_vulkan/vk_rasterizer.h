@@ -422,15 +422,13 @@ private:
     /// 0.4.5 beta 1: whether the draw being recorded, its targets chosen (PrepareRenderState),
     /// changes nothing: no colour or depth target, no stage writing memory, not measured.
     bool SkipEmptyDraw(const GraphicsPipeline* pipeline);
-    /// 0.4.5 beta 4 (BB_SHADOW_COPY_SKIP): lamp shadow faces drawn into their blur's scratch
+    /// 0.4.5 beta 4: lamp shadow faces drawn into their blur's scratch
     /// image, the game's copy of each face into it left out (ShadowRedirect, vk_rasterizer.cpp).
     bool ShadowRedirectClear(VideoCore::ImageId cube_id, u32 layer, const vk::ClearValue& clear);
     void ShadowRedirectDraw(const GraphicsPipeline* pipeline);
     bool ShadowRedirectDispatch(const Shader::Info& cs, bool indirect);
     void ShadowRedirectFrame();
     void ShadowRedirectPassBegun(const GraphicsPipeline* pipeline, const RenderState& state);
-    /// 0.4.5 beta 8: the targets of the pass just begun, for the copy trace (vk_copy_trace.h).
-    void CopyTraceTargets(const GraphicsPipeline* pipeline);
     void ShadowRedirectRestore(const char* why);
     bool DrawSamples(const GraphicsPipeline* pipeline, VAddr address) const;
     /// bbport: for a pipeline still compiling, records its bind as a command of its own, which a

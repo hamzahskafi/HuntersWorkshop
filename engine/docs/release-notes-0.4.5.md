@@ -32,27 +32,28 @@ with the lamps casting shadows; one lamp-lit scene the tester compared went from
   - The engine learns each lamp's scratch image from the game's own copies first (4 of them). Should
     anything else touch a face or its scratch image in between, it copies the face back where the
     game drew it (counted as `faces put back`; none in any test).
-  - `BB_SHADOW_COPY_SKIP=0` in Extra variables draws, clears and copies as the game does. It stays
-    until 0.4.5 stable, in case a rarer scene shows a shadow problem.
+  - After 64 faces put back in a session the engine stops redirecting for that session. Its
+    switch, `BB_SHADOW_COPY_SKIP`, was removed in beta 13 (settled with the tester).
 - **The lamp shadow faces' clears done as each face's drawing begins** (beta 5). Each face was
   cleared as a step of its own; it is now cleared as the first command of the face's render pass,
   with the same value. A face with nothing to draw is cleared where its copy is left out, and a face
   whose pass is smaller than itself (a smaller depth image; beta 6, from the tester's build review;
   not seen in Bloodborne) before its pass. About 0.12–0.17 ms.
-- **The copy shader's copies done where their render pass ends** (beta 9, in test). The game's
+- **The copy shader's copies done where their render pass ends** (beta 9). The game's
   copy shader (about 53 dispatches a frame) ended the render pass it came in, about 20 times a
   frame in passes that then began again. Beta 8's trace showed that nothing later in the same pass
   reads what it copies, so its copies now wait for the pass's end and run there, in their order.
   - A draw that does touch them first gets them first, the pass ending there as before. Copies
     reading the game's own memory in place are not held.
-  - `BB_COPY_HOLD=0` in Extra variables does them where they come, as before.
+  - `BB_COPY_HOLD=0` in Extra variables does them where they come, as before (kept through the
+    stable release, for graphics cards the tester has not tried).
   - Beta 9's logs: about 95 copy batches a frame held, 12 fewer passes begun again a frame, no draw
     ever touching them; about 0.05 ms.
-- **The copy shader's copies merged** (beta 10, in test). Its copies were about 188 GPU commands
+- **The copy shader's copies merged** (betas 10–12). Its copies were about 188 GPU commands
   a frame. They now run as one command for each place they are done (a pass's end, or the end of a
   copy-shader dispatch outside a pass), split only where one copy needs another's result: one
   shader that reaches every buffer by its GPU address. `BB_COPY_MERGE=0` in Extra variables does
-  them one command each, as before.
+  them one command each, as before (kept through the stable release, as `BB_COPY_HOLD`).
   - Beta 10 gained nothing: it split its groups at every barrier (48 a frame). Beta 11 puts one
     barrier before each group instead.
   - The tester's three builds in one scene: 6.74 ms a frame without either change, 6.68 with the
@@ -71,11 +72,6 @@ with the lamps casting shadows; one lamp-lit scene the tester compared went from
   their clears, and any faces put back; from beta 9 the copy shader's batches held to their pass's
   end, the times they were done, how many of those early, and those not held; from beta 10 the
   batches merged and their dispatches.
-- **A trace of the copy shader** (beta 8), with frame statistics on: twice a session (the 600th and
-  the 6,000th frame of play), one frame's copy-shader dispatches in their passes: for each pass, how
-  many copies came at its start, inside it, and at its end, and of those inside how many could move
-  to its start (no earlier draw or dispatch of the pass touching what they copy), with the reason
-  for the first that couldn't (`Copy trace 1 ...` to `Copy trace 1: end of the frame`).
 
 ## Tried and not kept
 
@@ -84,3 +80,6 @@ with the lamps casting shadows; one lamp-lit scene the tester compared went from
 - Betas 1 to 3 logged the empty draws' depth registers, what is recorded around the shadow copies,
   and one frame's shadow steps. Beta 7 removed them once they had answered their questions, with the
   switches `BB_SKIP_EMPTY_DRAWS` and `BB_SHADOW_CLEAR_FOLD` (settled; the tester, 2026-11-05).
+- Beta 8 traced one frame's copy-shader dispatches in their render passes (where each came, and
+  whether anything in the pass read what it copied). It showed that nothing did, which led to betas
+  9–12; beta 13 removed it, with `BB_SHADOW_COPY_SKIP`.

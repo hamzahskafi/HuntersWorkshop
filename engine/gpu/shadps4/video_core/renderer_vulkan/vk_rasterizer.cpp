@@ -38,7 +38,6 @@
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/pipeline_compile_queue.h"
 #include "video_core/renderer_vulkan/vk_copy_hold.h"
-#include "video_core/renderer_vulkan/vk_copy_trace.h"
 #include "video_core/renderer_vulkan/vk_gpu_savings.h"
 #include "video_core/renderer_vulkan/indirect_dispatch_limits.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
@@ -1986,7 +1985,7 @@ static bool ProxyTraceOn();
 // The toolkit's rectangle copy shader (0.4.4 beta 18: an image load and an image store).
 static constexpr u64 RECT_COPY_SHADER_HASH = 0xa040875f;
 
-// 0.4.5 beta 4 (BB_SHADOW_COPY_SKIP): a lamp shadow face drawn into its blur's scratch image, and
+// 0.4.5 beta 4: a lamp shadow face drawn into its blur's scratch image, and
 // the game's copy of the face into that image left out (Rasterizer::ShadowRedirect*). Beta 3's
 // trace: each face is cleared (the game's compute clear, IsComputeImageClear), drawn into a layer
 // of the light's cube map, copied whole by a040875f into a scratch image of its size, and blurred
@@ -2038,16 +2037,9 @@ constexpr u32 SHADOW_REDIRECT_TRUST = 4;
 constexpr u32 SHADOW_REDIRECT_MAX_RESTORES = 64;
 
 bool ShadowRedirectOn() {
-    static const bool on = [] {
-        const char* env = std::getenv("BB_SHADOW_COPY_SKIP");
-        const bool enabled = !(env && env[0] == '0');
-        std::printf("GPU steps: lamp shadow faces %s\n",
-                    enabled ? "drawn into their blur's scratch image, the game's copy left out "
-                              "(BB_SHADOW_COPY_SKIP=0: as the game does)"
-                            : "drawn and copied as the game does (BB_SHADOW_COPY_SKIP=0)");
-        return enabled;
-    }();
-    return on && !shadow_redirect.disabled;
+    // 0.4.5 beta 13: always (BB_SHADOW_COPY_SKIP removed, settled with the tester); off for the
+    // session only after 64 faces put back (ShadowRedirectRestore).
+    return !shadow_redirect.disabled;
 }
 
 void ShadowRedirectLearn(VAddr cube, VAddr scratch) {
@@ -2412,9 +2404,6 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     MarkPass(pipeline, state);
     scheduler.BeginRendering(state);
     ShadowRedirectPassBegun(pipeline, state); // 0.4.5 beta 5
-    if (CopyTrace::state.wants_targets) {
-        CopyTraceTargets(pipeline); // 0.4.5 beta 8
-    }
 
     const auto& vs_info = pipeline->GetStage(Shader::SwStage::Vertex);
     const auto& fetch_shader = pipeline->GetFetchShader();
@@ -2624,9 +2613,6 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
     MarkPass(pipeline, state);
     scheduler.BeginRendering(state);
     ShadowRedirectPassBegun(pipeline, state); // 0.4.5 beta 5
-    if (CopyTrace::state.wants_targets) {
-        CopyTraceTargets(pipeline); // 0.4.5 beta 8
-    }
 
     ASSERT(stride == (is_indexed ? sizeof(VkDrawIndexedIndirectCommand)
                                  : sizeof(VkDrawIndirectCommand)));
@@ -3304,34 +3290,6 @@ void Rasterizer::ShadowRedirectPassBegun(const GraphicsPipeline* pipeline,
     GpuSavings::Count(GpuSavings::Get().shadow_clears_folded);
 }
 
-// 0.4.5 beta 8: the targets of the pass just begun, for the copy trace.
-void Rasterizer::CopyTraceTargets(const GraphicsPipeline* pipeline) {
-    auto& s = CopyTrace::state;
-    s.wants_targets = false;
-    std::string text;
-    const u32 mrt_mask = pipeline->GetGraphicsKey().mrt_mask;
-    u32 colours = 0;
-    for (s32 cb = 0; cb < std::bit_width(mrt_mask); ++cb) {
-        if (!cb_descs[cb].first) {
-            continue;
-        }
-        if (colours++ == 0) {
-            const auto& info = texture_cache.GetImage(cb_descs[cb].first).info;
-            text = fmt::format("colour @{:x} {}x{} {}", info.guest_address, info.size.width,
-                               info.size.height, vk::to_string(info.pixel_format));
-        }
-    }
-    if (colours > 1) {
-        text += fmt::format(" and {} more", colours - 1);
-    }
-    if (db_desc.first) {
-        const auto& info = texture_cache.GetImage(db_desc.first).info;
-        text += fmt::format("{}depth @{:x} {}x{}", text.empty() ? "" : ", ", info.guest_address,
-                            info.size.width, info.size.height);
-    }
-    s.targets = text.empty() ? "no targets" : text;
-}
-
 void Rasterizer::ShadowRedirectFrame() {
     ShadowRedirectRestore("the frame's end");
     shadow_redirect.observed = false;
@@ -3919,21 +3877,6 @@ void Rasterizer::ResolveIndexBuffer(u32 index_offset) {
 }
 
 void Rasterizer::ResetBindings(bool is_compute) {
-    // 0.4.5 beta 8: the step's buffer ranges, in the frame the copy trace lists.
-    if (CopyTrace::state.active) {
-        CopyTrace::StepBegin();
-        for (const auto& bound : bound_buffers) {
-            CopyTrace::StepAccess(CopyTrace::Key(static_cast<VkBuffer>(bound.buffer->Handle())),
-                                  bound.offset, bound.size, bound.is_written);
-        }
-        for (u32 i = 0; !is_compute && i < vertex_binds.num_buffers; ++i) {
-            const u64 size = vertex_binds.host_sizes[i];
-            CopyTrace::StepAccess(
-                CopyTrace::Key(static_cast<VkBuffer>(vertex_binds.host_buffers[i])),
-                vertex_binds.host_offsets[i],
-                size == 0 || size == VK_WHOLE_SIZE ? (u64{1} << 40) : size, false);
-        }
-    }
     for (auto& image_id : bound_images) {
         texture_cache.GetImage(image_id).binding = {};
     }
@@ -6621,7 +6564,6 @@ void Rasterizer::NoteFrameStart() {
         profiler->BeginFrame();
     }
     ShadowRedirectFrame(); // 0.4.5 beta 4
-    CopyTrace::FrameStart(BbStats::enabled); // 0.4.5 beta 8
     ReportUboStats();
     const u64 frame = BbStats::gpu_frames.fetch_add(1, std::memory_order_relaxed) + 1;
     // BB_BUFFER_STATS=1: how many earlier frames the GPU has not finished when the GPU thread

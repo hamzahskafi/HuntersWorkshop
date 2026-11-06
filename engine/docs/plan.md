@@ -80,13 +80,13 @@ memory cleanup after them. The evidence for each item is in [performance.md](per
   off. Settled switches are removed with the tester's agreement (beta 7: `BB_SKIP_EMPTY_DRAWS`,
   `BB_SHADOW_CLEAR_FOLD`).
 
-**Step 1: fewer GPU steps (done, but for one item).** Each change gives the same picture.
+**Step 1: fewer GPU steps (done, betas 1–12; beta 13 the cleanup).** Each change gives the same picture.
 
 - **Done:**
   - **The empty full-screen draws, 0.1 ms** (beta 1, `Rasterizer::SkipEmptyDraw`): GCN's in-place
     depth expansions, which change nothing on the PC.
   - **Lamp shadow faces drawn into their blur's scratch image, the copy left out, 0.24 ms** (beta 4,
-    `ShadowRedirect`). `BB_SHADOW_COPY_SKIP=0` turns it off until 0.4.5 stable, then it goes.
+    `ShadowRedirect`). Its switch `BB_SHADOW_COPY_SKIP` removed in beta 13 (settled).
   - **Their clears folded into the face's render pass, 0.12–0.17 ms** (beta 5; beta 6 keeps the
     fold inside a pass smaller than the face).
   - **Beta 7, the cleanup:** the copy-neighbour tally (beta 2), the shadow trace (beta 3) and the
@@ -105,7 +105,7 @@ memory cleanup after them. The evidence for each item is in [performance.md](per
     render passes a frame begun again after one of them. Moving a pass's copies ahead of it, in
     fewer dispatches, needs to know that no earlier draw in the pass touches what they copy, and to
     place work ahead of commands already recorded: the riskiest change of step 1. Beta 8 traces one
-    frame's copies in their passes (`vk_copy_trace.h`, no change in behaviour); then the decision.
+    frame's copies in their passes (`vk_copy_trace.h`, removed in beta 13); then the decision.
     Estimate 0.15–0.3 ms, everywhere.
     - **Beta 8's trace (2026-11-05, performance.md):** 53 copy dispatches a frame, 25 inside a pass
       and 28 at its end; every copy inside could move to its pass's start, and **no draw later in
@@ -137,8 +137,30 @@ memory cleanup after them. The evidence for each item is in [performance.md](per
       (b) bbhost's copy versions, no pass end at all (larger: the draws after a copy bind its
       staging copy); (c) bbport's copies that change nothing left out, which first needs a count of
       how many change nothing.
-  - **Smaller items:** `mem-4`; `upscale-2` and `-3` (0.29 ms at Quality, nothing at DLAA); the GPU
-    idle between submissions (about 0.1 ms, 3 a frame).
+  - **Smaller items, moved to "The rest of 0.4.5" below:** `mem-4`; `upscale-2` and `-3` (0.29 ms at
+    Quality, nothing at DLAA); the GPU idle between submissions (about 0.1 ms, 3 a frame).
+- **The result** (0.4.4 against beta 12 in the same scenes, 2026-11-06): the lamp spot 135.0 to
+  146.4 FPS (+8.4%), a second spot 122.3 to 131.0 (+7.1%), the Hunter's Dream (late game, few
+  lamps, ~970 draws) 146.3 to 149.8 (+2.4%). The tester saw GPU use 96 to 98% and power 245 to 258 W
+  at the second spot: less energy a frame (2.00 to 1.97 J), more of the GPU busy at once.
+
+**The rest of 0.4.5, in order** (the tester's choice, 2026-11-06: 0.4.5 goes on as betas; stable
+when the tester says).
+
+1. **Beta 13, the cleanup:** beta 8's copy trace and `BB_SHADOW_COPY_SKIP` removed. `BB_COPY_HOLD`
+   and `BB_COPY_MERGE` stay through the stable release (the merged copies' shader has run on the
+   tester's NVIDIA card only), then go.
+2. **The barriers that remain:** about 23 a frame at the lamp spot. A measurement beta: reads
+   tracked exactly instead of by 4 KiB (`BbToggle::CoarseReadTracking`) behind a switch in Extra
+   variables, with the barrier counts by what they wait for; the same scene with and without. Built
+   into a feature only if the false waits are many and the CPU cost of exact tracking small.
+3. **The GPU idle between submissions:** about 0.12 ms a frame in 3.3 gaps (the Hunter's Dream's
+   profile): why the GPU runs out of work there, and whether the submissions can overlap.
+4. **Step 2, shader code** (below), with the Hunter's Dream as its scene: there DLAA's 0.96 ms, the
+   G-buffer pass's 0.74 ms and the lighting passes are most of the frame.
+5. **Step 3** once the tester's play session with the cleanup off is in (below).
+6. `mem-4` and `upscale-2`/`-3` when one of the above passes near them (0.1 ms at most; the second
+   only at reduced upscaler presets).
 
 **Step 2: shader code.** It acts on the shading, the part of the frame that scales with pixels
 (1.5–2 ms at 1080p).
