@@ -72,6 +72,13 @@ heavier logging than the baseline's standard log). Against the November 3rd hour
 - **Pacing:** stddev 0.11 ms (median of the 5 s windows), p99 17.0 ms. The other frames over 20 ms
   were the windows after loads, with new areas' shaders compiled (712 compiles, 0.66 s in all,
   the DLC's areas not in the pipeline cache yet).
+- **The hitches, all of them shader compiles:** no hitch report was written (the watcher is quiet
+  for 20 s at the start, during loading screens and for 10 s after each); both frames over 40 ms
+  fell there. All 9 windows with a frame over 20 ms are in the first 6.5 minutes, each with
+  pipelines compiled in it (the 69 ms frame: 16 built after a 3.4 s load); none after minute 7.
+  The pipeline cache had been empty since beta 11's first session at 01:34 (its files missing:
+  "Pipeline cache cleared (0 files)"), and the short runs since rebuilt only about 290 pipelines
+  at three spots, so this session built the DLC's: 712 compiles, 438 in the first 3 minutes.
 - **Caveats:** 35 minutes, not an hour; other areas than the baseline's; more logging on.
 
 ## The VRAM cleanup, in the code
