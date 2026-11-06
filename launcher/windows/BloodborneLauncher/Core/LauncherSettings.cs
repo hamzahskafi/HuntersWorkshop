@@ -67,7 +67,9 @@ namespace BloodborneLauncher.Core
             ["app_icon_image"] = "", // custom: the picture chosen (AppIcon.CustomFile holds it as an icon)
             ["ui_window_buttons"] = "windows", // windows | mac
             ["ui_window_buttons_side"] = "usual", // usual (mac left, windows right) | left | right
-            ["exp_vram_cleanup"] = true,
+            // 0.4.5 beta 14: the one VRAM manager starts freeing at 65% of the card instead of 80%
+            // (BB_LESS_VRAM=1); replaces exp_vram_cleanup and exp_vram_budget.
+            ["less_vram"] = false,
             // 0.9.37 beta 4: the dev setup, measured faster (PerfDefaults below switches older files once).
             ["exp_frame_pacing"] = true,
             ["exp_vblank_lock"] = false, // frames locked to the display's refresh (BB_VBLANK_PACING=1)
@@ -88,7 +90,6 @@ namespace BloodborneLauncher.Core
             ["exp_occlusion"] = false,
             ["exp_fast_draws"] = true,
             ["exp_compile_skip"] = true,
-            ["exp_vram_budget"] = true,
             // Still being tested: on in beta builds only.
             ["exp_sharp_ui"] = Updater.CurrentBeta > 0,
             ["audio_priority"] = false,
@@ -118,13 +119,12 @@ namespace BloodborneLauncher.Core
                 {
                     foreach (var (key, value) in saved)
                         _data[key] = value?.DeepClone();
-                    // Beta builds: textures kept up to 80% of the card (the 40% default evicted and
-                    // reloaded hundreds a second on 6-8 GB cards); switched on once for older files.
-                    // The marker is only ever written by a beta, so a player moving from a stable build
-                    // to a beta gets it too (RTX 4060 at 3.4-4.3 GB of 2486 MiB with the 40% marks:
-                    // evictions, re-uploads and tiled write-backs every frame).
-                    if (Updater.CurrentBeta > 0 && !saved.ContainsKey("vram_budget_beta_on"))
-                        _data["exp_vram_budget"] = true;
+                    // 0.4.5 beta 14: one VRAM manager for textures and the game's data; its rows
+                    // (VRAM cleanup, Use more VRAM for textures) and the marker that switched the
+                    // second on once go, so a value saved for them is not passed on unseen.
+                    _data.Remove("exp_vram_cleanup");
+                    _data.Remove("exp_vram_budget");
+                    _data.Remove("vram_budget_beta_on");
                     // 0.9.37 beta 8: beta builds write the frame statistics into the log, switched
                     // on once. Ebrietas' device losses were told apart only in the one log that had
                     // them (the game's GPU range allocator nearly empty); most reports came without.
@@ -154,10 +154,7 @@ namespace BloodborneLauncher.Core
             }
             // Saved with the next change: from then on the player's own choice stays.
             if (Updater.CurrentBeta > 0)
-            {
-                _data["vram_budget_beta_on"] = true;
                 _data["frame_stats_beta_on"] = true;
-            }
             if (Updater.CurrentBeta == 0) _data[BetaTestingOffMarker] = true;
         }
 

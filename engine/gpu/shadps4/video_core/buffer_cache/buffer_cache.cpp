@@ -31,6 +31,7 @@
 #include "video_core/renderer_vulkan/vk_runtime.h"
 #include "video_core/renderer_vulkan/vk_scene_resolution.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
+#include "video_core/vram_policy.h"
 #include "video_core/texture_cache/texture_cache.h"
 
 #include <mutex>
@@ -1571,17 +1572,17 @@ std::pair<vk::DeviceMemory, u64> BufferCache::AllocateResidency(u64 bytes) {
         return memory;
     };
     // bbport: out of VRAM is no longer the end of the game. VRAM while there is room; while it is
-    // tight (vram_level) or once an allocation failed (full for 30 s), system memory. Without
+    // tight (vram_level) or once an allocation failed (full for 30 s: the VRAM manager's
+    // NoteAllocationFailed), system memory where this GPU can bind the game's data to it. Without
     // that, the empty chunks go back to the driver and VRAM is tried once more; only a failure
     // then stops, as before.
     const auto allocate = [this, &try_allocate](u64 size) {
-        const u32 now = BbStats::coarse_second.load(std::memory_order_relaxed);
         const bool tight = vram_level.load(std::memory_order_relaxed) >= 1;
         if (!tight || !system_memory_type_index) {
             if (const auto memory = try_allocate(size, arena_memory_type_index)) {
                 return memory;
             }
-            vram_full_until = now + 30;
+            VramPolicy::NoteAllocationFailed();
             vram_level.store(2, std::memory_order_relaxed);
             std::printf("Guest memory: out of VRAM for %llu MiB of the game's data\n",
                         (unsigned long long)(size >> 20));
@@ -1668,40 +1669,12 @@ std::pair<vk::DeviceMemory, u64> BufferCache::AllocateResidency(u64 bytes) {
     return {residency_memory, offset};
 }
 
-void BufferCache::UpdateVramLevel(u32 now) {
-    static const u64 percent = [] {
-        const char* env = std::getenv("BB_VRAM_PRESSURE_PERCENT");
-        return std::min<u64>(env ? std::strtoull(env, nullptr, 10) : 85, 95);
-    }();
-    int level = 0;
-    u64 used = 0, budget = 0;
-    if (percent != 0 && instance.CanReportMemoryUsage()) {
-        used = instance.GetDeviceMemoryUsage();
-        budget = instance.GetDeviceMemoryBudgetNow();
-        if (budget != 0) {
-            level = used * 100 >= budget * (percent + 5) ? 2 : used * 100 >= budget * percent ? 1 : 0;
-        }
-    }
-    if (now < vram_full_until) {
-        level = 2;
-    }
-    const int was = vram_level.exchange(level, std::memory_order_relaxed);
-    if (level != was && vram_level_reports < 40) {
-        ++vram_level_reports;
-        static constexpr const char* kCopies[] = {
-            "room again: the game's data stays in VRAM",
-            "tight: the game's data unused for 30 s leaves VRAM, new blocks go to system memory",
-            "full: the game's data unused for 10 s leaves VRAM, new blocks go to system memory",
-        };
-        static constexpr const char* kCopiesVram[] = {
-            "room again: the game's data stays in VRAM",
-            "tight: the game's data unused for 30 s leaves VRAM",
-            "full: the game's data unused for 10 s leaves VRAM",
-        };
-        const char* what = system_memory_type_index ? kCopies[level] : kCopiesVram[level];
-        std::printf("Guest memory: VRAM %llu of %llu MiB, %s\n", (unsigned long long)(used >> 20),
-                    (unsigned long long)(budget >> 20), what);
-    }
+void BufferCache::UpdateVramLevel() {
+    // 0.4.5 beta 14: one VRAM manager for this cache and the texture cache (vram_policy.h). Until
+    // beta 13 this cache had marks of its own: tight from 85% (BB_VRAM_PRESSURE_PERCENT), full
+    // from 90%.
+    VramPolicy::Update(instance);
+    vram_level.store(int(VramPolicy::CurrentLevel()), std::memory_order_relaxed);
 }
 
 vk::DeviceMemory BufferCache::TakeSpareResidency() {
@@ -1727,14 +1700,6 @@ void BufferCache::NoteResidencyUnused() {
                        (spare_residency ? 64_MB : 0);
     BbStats::residency_unused_bytes.store(unused, std::memory_order_relaxed);
     BbStats::residency_chunk_count.store(residency_chunks.size(), std::memory_order_relaxed);
-}
-
-u32 BufferCache::VramIdleSeconds() {
-    static const u32 seconds = [] {
-        const char* env = std::getenv("BB_VRAM_IDLE_SECONDS");
-        return env ? u32(std::strtoul(env, nullptr, 10)) : 60u;
-    }();
-    return seconds;
 }
 
 void BufferCache::NoteUse(VAddr address, u64 size) {
@@ -1796,15 +1761,12 @@ void BufferCache::ProcessIdleBlocks() {
         return;
     }
     idle_scan_second = now;
-    UpdateVramLevel(now);
+    UpdateVramLevel();
     // bbport: the game's GX region comes from the engine's hook on its init (engine/gx_region.cpp)
     // when the game makes its graphics device; a minute on without it, the log says so once.
     if (gx_state.load(std::memory_order_relaxed) == u8(GxState::Waiting) && !BbGxRing::Known() &&
         ++gx_ring_looks == 60) {
         BbGxRing::ReportMissing();
-    }
-    if (VramIdleSeconds() == 0) {
-        return;
     }
     EvictIdleCopies(now);
     FreeEmptyChunks(now);
@@ -1812,32 +1774,22 @@ void BufferCache::ProcessIdleBlocks() {
 
 void BufferCache::EvictIdleCopies(u32 now) {
     // bbport: every block of the game's memory the GPU used kept its VRAM copy, and a 4 GB card
-    // ran out (exit 23). While VRAM is tight the copies unused for a while go. Kept: blocks with
-    // data the GPU wrote (only VRAM has it), and all of them while shaders read the game's memory
-    // through the page table (dma_second).
-    const int level = vram_level.load(std::memory_order_relaxed);
+    // ran out (exit 23). Kept: blocks with data the GPU wrote (only VRAM has it), and all of them
+    // while shaders read the game's memory through the page table (dma_second).
+    // 0.4.5 beta 14: only while the VRAM manager says VRAM is tight or full (vram_policy.h), what
+    // has gone unused for its time, the longest unused first, until its bytes for this second are
+    // freed (256 MiB a second at most while tight: each block is a sparse unbind of its own). An
+    // evicted block costs an upload and can show as late geometry when it comes back. Until beta
+    // 13 copies unused for 3 minutes went with room in VRAM too (BB_VRAM_CLEANUP_SECONDS): behind
+    // most long frames at 60 FPS on 8 GB, and write faults as they came back (performance.md).
     if (TwinsEnabled()) {
         return;
     }
-    // Unused for 30 s while tight, 10 s when full: an evicted block costs an upload and can show
-    // as late geometry when it comes back.
-    // bbport: with room in VRAM too, copies unused for BB_VRAM_CLEANUP_SECONDS (default 180; 0:
-    // only while VRAM is tight) go: without it every block the game's GPU work ever touched kept
-    // its copy, and long sessions on 8 GB cards (laptops, RTX 4060) went from 2.6 to 5 GB of VRAM
-    // in 90 minutes until a crash or a lost device. A block is used again within seconds of its
-    // area loading, so three minutes unused is an area left behind.
-    static const u32 cleanup = [] {
-        const char* env = std::getenv("BB_VRAM_CLEANUP_SECONDS");
-        return env && env[0] ? u32(std::strtoul(env, nullptr, 10)) : 180u;
-    }();
-    if (level == 0 && (cleanup == 0 || now - last_cleanup_scan < 10)) {
+    const auto level = VramPolicy::CurrentLevel();
+    if (level == VramPolicy::Level::Room || !VramPolicy::WantBytes()) {
         return;
     }
-    if (level == 0) {
-        last_cleanup_scan = now;
-    }
-    const u32 idle = level == 0 ? std::max(cleanup, VramIdleSeconds())
-                                : std::min(VramIdleSeconds(), level >= 2 ? 10u : 30u);
+    const u32 idle = VramPolicy::MinAgeSeconds();
     const u32 dma = dma_second.load(std::memory_order_relaxed);
     if (dma != 0 && now - dma < idle) {
         if (dma_kept_reports < 10 && now - dma_kept_second >= 60) {
@@ -1848,7 +1800,8 @@ void BufferCache::EvictIdleCopies(u32 now) {
         }
         return;
     }
-    std::vector<u64> blocks;
+    // Candidates with the second each was last used, the longest unused first.
+    std::vector<std::pair<u32, u64>> candidates;
     for (const auto& range : resident_ranges) {
         if (!residency_chunks.contains(static_cast<VkDeviceMemory>(range.memory))) {
             continue;
@@ -1860,12 +1813,25 @@ void BufferCache::EvictIdleCopies(u32 now) {
                 memory_tracker->IsRegionGpuModified(address, block_size)) {
                 continue;
             }
-            blocks.push_back(block);
+            candidates.emplace_back(group_use[group], block);
         }
     }
-    if (blocks.empty()) {
+    if (candidates.empty()) {
         return;
     }
+    std::stable_sort(candidates.begin(), candidates.end(),
+                     [](const auto& a, const auto& b) { return a.first < b.first; });
+    u64 allowance = level == VramPolicy::Level::Tight ? VramPolicy::DataBytesPerSecondTight : ~0ull;
+    std::vector<u64> blocks;
+    for (const auto& [last_use, block] : candidates) {
+        if (allowance < block_size || !VramPolicy::WantBytes()) {
+            break;
+        }
+        allowance -= block_size;
+        blocks.push_back(block);
+        VramPolicy::NoteFreed(false, block_size, idle);
+    }
+    std::sort(blocks.begin(), blocks.end());
     for (const u64 block : blocks) {
         EvictVramBlock(block);
         evicted_blocks.Add({block, block + 1});
@@ -1888,24 +1854,21 @@ void BufferCache::EvictIdleCopies(u32 now) {
     if (evict_reports < 20 && (((before >> 20) == 0 && (evicted_bytes >> 20) != 0) ||
                                (evicted_bytes >> 28) != (before >> 28))) {
         ++evict_reports;
-        std::printf("Guest memory: %s%llu MiB of the game's data unused for %u s left VRAM "
-                    "so far (uploaded again when used)\n",
-                    level == 0 ? "cleanup, " : "VRAM tight, ",
+        std::printf("Guest memory: VRAM %s, %llu MiB of the game's data unused for %u s or more "
+                    "left VRAM so far (uploaded again when used)\n",
+                    level == VramPolicy::Level::Full ? "full" : "tight",
                     (unsigned long long)(evicted_bytes >> 20), idle);
     }
 }
 
 void BufferCache::FreeEmptyChunks(u32 now) {
     // Chunks without blocks for 5 s, the rebinds away from them long done: back to the driver.
-    // bbport: with room in VRAM, BB_VRAM_CHUNK_KEEP_SECONDS (30) instead, and the 64 MiB chunk
-    // emptied last stays: blocks coming back (an area entered again) take its slots instead of
-    // new memory the driver clears first. While VRAM is tight, or with 0: 5 s, none kept.
-    static const u32 keep_seconds = [] {
-        const char* env = std::getenv("BB_VRAM_CHUNK_KEEP_SECONDS");
-        return env && env[0] ? u32(std::strtoul(env, nullptr, 10)) : 30u;
-    }();
-    const bool room = keep_seconds != 0 && vram_level.load(std::memory_order_relaxed) == 0;
-    const u32 wait = room ? std::max(keep_seconds, 5u) : 5u;
+    // bbport: with room in VRAM, 30 s instead, and the 64 MiB chunk emptied last stays: blocks
+    // coming back (an area entered again) take its slots instead of new memory the driver clears
+    // first. While VRAM is tight: 5 s, none kept. (0.4.5 beta 14: BB_VRAM_CHUNK_KEEP_SECONDS
+    // removed, its 30 s kept.)
+    const bool room = vram_level.load(std::memory_order_relaxed) == 0;
+    const u32 wait = room ? 30u : 5u;
     VkDeviceMemory spare = VK_NULL_HANDLE;
     if (room) {
         u32 newest = 0;

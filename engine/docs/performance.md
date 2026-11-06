@@ -73,7 +73,8 @@ heavier logging than the baseline's standard log). Against the November 3rd hour
   were the windows after loads, with new areas' shaders compiled (712 compiles, 0.66 s in all,
   the DLC's areas not in the pipeline cache yet).
 - **Every late frame, from the frame pacing lines** (the game's flip intervals, what the player
-  sees; the frame statistics' "worst frame" is the GPU thread's and missed most of them): 13
+  sees; the frame statistics' "worst frame" is the longest of the same intervals, and agrees in every
+  window; an earlier reading here said it was the GPU thread's, corrected 2026-11-06): 13
   frames over 1.5 times the median (a missed 60 Hz refresh, 33 ms on screen) in 430 windows.
   - 7 in the first 20 s (the start and its first load).
   - 6 in play, one at a time, each within 90 s after a load into one of the DLC's areas, each
@@ -95,6 +96,10 @@ heavier logging than the baseline's standard log). Against the November 3rd hour
 - **Caveats:** 35 minutes, not an hour; other areas than the baseline's; more logging on.
 
 ## The VRAM cleanup, in the code
+
+*Replaced in 0.4.5 beta 14 by one VRAM manager for the texture cache and the buffer cache
+(`vram_policy.h`, plan.md step 3): nothing leaves for its age while VRAM has room. This section is
+how it was until beta 13.*
 
 The cleanup is `EvictIdleCopies` (`buffer_cache.cpp`). It runs from `Maintain` on stage B, every
 10 s while VRAM has room: level 0 of `UpdateVramLevel`, below 85% of the driver's budget.

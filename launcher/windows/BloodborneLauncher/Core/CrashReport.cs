@@ -11,7 +11,7 @@ namespace BloodborneLauncher.Core
     public static class CrashReport
     {
         private static readonly string[] Experimental =
-            { "exp_vram_cleanup", "exp_frame_pacing", "exp_vblank_lock", "exp_particle_cap", "exp_vram_budget", "exp_thread_priority", "exp_sleep_spin", "exp_async_pipelines", "exp_occlusion", "exp_fast_draws", "exp_compile_skip", "exp_fast_loading", "exp_frame_fixes", "exp_hot_pages", "exp_gx_in_place", "exp_sfx_workaround", "exp_sharp_ui" };
+            { "less_vram", "exp_frame_pacing", "exp_vblank_lock", "exp_particle_cap", "exp_thread_priority", "exp_sleep_spin", "exp_async_pipelines", "exp_occlusion", "exp_fast_draws", "exp_compile_skip", "exp_fast_loading", "exp_frame_fixes", "exp_hot_pages", "exp_gx_in_place", "exp_sfx_workaround", "exp_sharp_ui" };
 
         /// <summary>What stopped the game, from the end of the session log (exit code 23 is the
         /// engine stopping itself, for several reasons).</summary>
@@ -96,7 +96,7 @@ namespace BloodborneLauncher.Core
             if (Has("ErrorOutOfDeviceMemory") || Has("ErrorOutOfHostMemory"))
                 return L.T("The graphics card ran out of video memory. A lower output resolution or upscaler preset (Visuals), ") +
                        L.T("fewer texture or model mods, and closing other programs (browsers, recorders) leave it more room; ") +
-                       L.T("keep \"Use more VRAM for textures\" off on cards with 4-6 GB.");
+                       L.T("turning on Engine switches › Use less VRAM helps as well.");
             if (tail.Any(DeviceLost))
                 return L.T("The graphics driver stopped responding: the GPU hung or lost the game's memory.");
             // The engine's own message: "GPU [Debug] <Critical> file:line Function: text", maybe
@@ -198,7 +198,7 @@ namespace BloodborneLauncher.Core
             if (RamTrend() is { } ram) text.AppendLine(ram);
             text.AppendLine(L.F($"Upscaler {ini.Get("upscaler")}, preset {ini.Get("preset")}, output {ini.Get("output_res")}, ") +
                             L.F($"FPS {s.Str("fps_mode")}, live resolution {ini.Get("live_resolution")}, mods {(s.Bool("mods_enabled") ? "on" : "off")}"));
-            text.AppendLine(L.T("Experimental: ") + string.Join(", ", Experimental.Select(k => $"{k[4..].Replace('_', ' ')} {(s.Bool(k) ? "on" : "off")}")));
+            text.AppendLine(L.T("Experimental: ") + string.Join(", ", Experimental.Select(k => $"{(k.StartsWith("exp_") ? k[4..] : k).Replace('_', ' ')} {(s.Bool(k) ? "on" : "off")}")));
             text.AppendLine();
             text.AppendLine(L.F($"Last {logLines} lines of logs\\last_session.log (repeats folded):"));
             text.AppendLine("```");

@@ -156,10 +156,10 @@ draft keeps that voice and fixes what is wrong, cut or out of date, rather than 
 | Engine switches | Changed switches | tooltip dropped (repeated the line) |
 | Engine switches | Extra variables | new line |
 | Engine switches | Legacy shader compiler | new line, tooltip corrected |
-| Engine switches | VRAM cleanup | new line |
+| Engine switches | VRAM cleanup | new line; removed in 0.4.5 beta 14 (one row: Use less VRAM) |
 | Engine switches | Precise frame pacing | new line |
 | Engine switches | Particle work safety cap | new line, tooltip corrected |
-| Engine switches | Use more VRAM for textures | new line |
+| Engine switches | Use more VRAM for textures | new line; removed in 0.4.5 beta 14 (one row: Use less VRAM) |
 | Engine switches | Graphics threads first | new line |
 | Engine switches | Shorter sleep spin | new line |
 | Engine switches | Background shader compiling | new line |

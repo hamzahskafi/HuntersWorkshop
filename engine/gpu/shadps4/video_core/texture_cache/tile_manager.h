@@ -48,7 +48,7 @@ public:
 
     /// Tiles `in_image` into `out_buffer` (its guest surface layout). `extent_only` (Lantern
     /// Engine): only texels inside the image's extent are written; the padding keeps what
-    /// `out_buffer` held (StoreTiledImage fills it with the guest bytes first).
+    /// `out_buffer` held (BeginStore fills it with the guest bytes first).
     void TileImage(Image& in_image, std::span<vk::BufferImageCopy> buffer_copies,
                    const VideoCore::Buffer* out_buffer, u64 out_offset, bool extent_only = false);
 

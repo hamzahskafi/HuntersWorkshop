@@ -168,7 +168,8 @@ namespace BloodborneLauncher.Core
             // Off by default, and passed either way: an engine that has it on unless told 0 gets 0.
             env["BB_VBLANK_PACING"] = s.Bool("exp_vblank_lock") ? "1" : "0";
             env["BB_INDIRECT_CLAMP"] = s.Bool("exp_particle_cap") ? "1" : "0";
-            env["BB_IMAGE_WRITEBACK_GC"] = s.Bool("exp_vram_cleanup") ? "1" : "0";
+            // 0.4.5 beta 14: the one VRAM manager starts freeing at 65% of the card instead of 80%.
+            if (s.Bool("less_vram")) env["BB_LESS_VRAM"] = "1";
             // Gamepads (SDL3 reads its hints from the environment): DualShock 3 through SDL's own
             // driver (with DsHidMini or Sony's sixaxis driver installed), and the community
             // mapping database for third-party pads when the package ships it.
@@ -178,7 +179,6 @@ namespace BloodborneLauncher.Core
             // Off: the engine's earlier behaviour; on: its default (left unset).
             // Switches that stand for several (0.4.4 beta 28: the engine's start programs expand them,
             // bb-start's ExpandSwitchGroups and run.sh).
-            if (!s.Bool("exp_vram_budget")) env["BB_VRAM_BUDGET"] = "0";
             if (!s.Bool("exp_thread_priority")) env["BB_GPU_THREAD_PRIORITY"] = "0";
             if (!s.Bool("exp_sleep_spin")) env["BB_SLEEP_SPIN_US"] = "600";
             if (!s.Bool("exp_async_pipelines")) env["BB_ASYNC_PIPELINES"] = "0";
@@ -235,9 +235,9 @@ namespace BloodborneLauncher.Core
         /// </summary>
         public static readonly IReadOnlyDictionary<string, string> FeatureVariables = new Dictionary<string, string>
         {
-            ["legacy_shaders"] = "BB_NATIVE_SHADERS", ["exp_vram_cleanup"] = "BB_IMAGE_WRITEBACK_GC",
+            ["legacy_shaders"] = "BB_NATIVE_SHADERS", ["less_vram"] = "BB_LESS_VRAM",
             ["exp_frame_pacing"] = "BB_PRECISE_PACING", ["exp_vblank_lock"] = "BB_VBLANK_PACING",
-            ["exp_particle_cap"] = "BB_INDIRECT_CLAMP", ["exp_vram_budget"] = "BB_VRAM_BUDGET",
+            ["exp_particle_cap"] = "BB_INDIRECT_CLAMP",
             ["exp_thread_priority"] = "BB_GPU_THREAD_PRIORITY", ["exp_sleep_spin"] = "BB_SLEEP_SPIN_US",
             ["exp_async_pipelines"] = "BB_ASYNC_PIPELINES", ["exp_occlusion"] = "BB_OCCLUSION",
             ["exp_fast_draws"] = "BB_FAST_DRAWS", ["exp_compile_skip"] = "BB_COMPILE_SKIP",

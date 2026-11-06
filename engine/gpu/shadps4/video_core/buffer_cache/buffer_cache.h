@@ -290,20 +290,19 @@ private:
     /// bbport: idle VRAM blocks (see group_use).
     void NoteUse(VAddr address, u64 size);
     void ProcessIdleBlocks();
-    /// bbport: vram_level from the driver's usage and budget (BB_VRAM_PRESSURE_PERCENT, 85).
-    void UpdateVramLevel(u32 now);
+    /// vram_level from the VRAM manager (vram_policy.h; 0.4.5 beta 14), once a second.
+    void UpdateVramLevel();
     /// A VRAM slot of a block that left it: reused by the next move to VRAM.
     void ReleaseResidencySlot(vk::DeviceMemory memory, u64 offset);
     /// Unbinds a VRAM block of memory the game unmapped (uploaded again if mapped and used).
     void EvictVramBlock(u64 block);
-    /// bbport: while VRAM is tight (vram_level): VRAM copies of the game's data unused for 30 s
-    /// (10 s when full) leave VRAM; their slots take the next blocks instead of new VRAM, and they
-    /// are uploaded again from the game's memory when bound.
+    /// While VRAM is tight or full (the VRAM manager): VRAM copies of the game's data unused for
+    /// the manager's time leave VRAM, the longest unused first; their slots take the next blocks
+    /// instead of new VRAM, and they are uploaded again from the game's memory when bound.
     void EvictIdleCopies(u32 now);
-    u32 last_cleanup_scan = 0; ///< bbport: EvictIdleCopies with room in VRAM, every 10 s
-    /// Residency chunks without blocks for 5 s, the rebinds away from them done: back to the driver.
+    /// Residency chunks without blocks for 30 s (5 s while VRAM is tight), the rebinds away from
+    /// them done: back to the driver.
     void FreeEmptyChunks(u32 now);
-    [[nodiscard]] static u32 VramIdleSeconds();
     void DownloadMemory(const Buffer* arena, VAddr device_addr, u64 size);
 
     bool SynchronizeMemory(const Buffer* arena, VAddr device_addr, u32 size, bool is_written,
@@ -412,7 +411,7 @@ private:
     vk::DeviceMemory TakeSpareResidency();
     /// bbport: VRAM blocks no longer needed. Per 2 MiB of guest addresses, the second
     /// (BbStats::coarse_second) it was last bound: blocks in VRAM unused for a while leave it
-    /// (EvictIdleCopies; BB_VRAM_IDLE_SECONDS 0: never), and residency chunks left without blocks
+    /// (EvictIdleCopies, while VRAM is tight), and residency chunks left without blocks
     /// go back to the driver (ProcessIdleBlocks). Blocks of unmapped memory leave VRAM too.
     static constexpr u64 USE_GROUP_BITS = 21;
     std::vector<u32> group_use;
@@ -426,11 +425,9 @@ private:
     std::unordered_map<VkDeviceMemory, ResidencyChunk> residency_chunks;
     u32 idle_scan_second = 0;
     u32 gx_ring_looks = 0; ///< ProcessIdleBlocks: seconds without the GX range allocator's region
-    /// bbport: how full VRAM is against the driver's budget, once a second (UpdateVramLevel):
-    /// 0 room, 1 tight (idle VRAM copies leave sooner, new blocks go to system memory), 2 full.
+    /// The VRAM manager's level, once a second (UpdateVramLevel): 0 room, 1 tight (unused VRAM
+    /// copies leave, new blocks go to system memory where it can hold them), 2 full.
     std::atomic<int> vram_level{0};
-    u32 vram_full_until = 0; ///< a failed VRAM allocation counts as full until then
-    u32 vram_level_reports = 0;
     /// bbport: the second a shader last read the game's memory through the page table
     /// (SynchronizeDmaBuffers). Those reads do not mark blocks as used, so nothing leaves VRAM
     /// while such shaders run (EvictIdleCopies).

@@ -158,7 +158,10 @@ when the tester says).
    profile): why the GPU runs out of work there, and whether the submissions can overlap.
 4. **Step 2, shader code** (below), with the Hunter's Dream as its scene: there DLAA's 0.96 ms, the
    G-buffer pass's 0.74 ms and the lighting passes are most of the frame.
-5. **Step 3** once the tester's play session with the cleanup off is in (below).
+5. **Step 3, the memory cleanup: beta 14** (below). Its test: a normal session (the minute's
+   `VRAM manager:` line should say nothing was freed) and one with `BB_VRAM_TEST_BUDGET_MB=3500` in
+   Extra variables (a 4 GB card), a long route through several areas. "Use less VRAM"'s 65% is set
+   after that run.
 6. `mem-4` and `upscale-2`/`-3` when one of the above passes near them (0.1 ms at most; the second
    only at reduced upscaler presets).
 
@@ -177,17 +180,17 @@ when the tester says).
 - **The tester's session with it off** (2026-11-06, performance.md "With the cleanup off"): no long
   frame in play, write faults gone (median 22.5 a second to 0), the game's data level at 1.4 GB,
   VRAM at most 54% of the driver's budget. So on a card with room the cleanup only costs.
-- **Proposed first step:** the age cleanup (unused 180 s) only while VRAM is above a share of the
-  budget, about 70%; below it nothing leaves, as in the session. The levels above 85% (tight: 30 s,
-  full: 10 s) stay as they are. An 8 GB laptop whose VRAM fills still gets the cleanup before it
-  is tight; the tester's card would not run it at all. Counters: the level, and MiB freed by
-  which rule. The points below follow only if logs from smaller cards still show its stutter.
+- **Beta 14 (the tester's call, 2026-11-06): one VRAM manager** (`vram_policy.h`) for the texture
+  cache and the buffer cache, in place of the first step proposed (the age cleanup only above 70%).
+  With room in VRAM (below 80% of the driver's budget) nothing leaves for its age, textures (until
+  then 20 s on cards up to about 10 GB) or the game's data (180 s). From 80% the longest unused goes
+  first, both alike, in steps (5 minutes, 2, 1, 30 s) until 75%; from 90% 10 s then 1 s, and
+  textures the GPU drew are stored into the game's memory without the GPU wait. The launcher's two
+  VRAM rows are one, "Use less VRAM" (65%). The points below remain for smaller cards' logs.
 
-- **Evict by the VRAM budget, not by age alone.** While VRAM is below a share of the driver's budget
-  (`VK_EXT_memory_budget`, which `UpdateVramLevel` already reads), nothing leaves; above that share,
-  the oldest leaves first. The 8 GB laptops the cleanup was added for stay covered, since their budget
-  fills.
-- **Paced:** in play, at most a set amount a second; larger batches during loading screens.
+- **Evict by the VRAM budget, not by age alone.** Done in beta 14 (above).
+- **Paced:** in play, at most a set amount a second (beta 14: 256 MiB a second of the game's data
+  while tight); larger batches during loading screens (not done).
 - **The bind waits only for the work that used the evicted blocks.** This needs a last-use tick per
   block; until then, the unbinds go in batches on loading screens.
 - **With it, the counters:** MiB and blocks per cleanup, stage B's time in it, bind waits, and blocks
@@ -220,7 +223,7 @@ when the tester says).
 
 ### Waiting on the tester
 
-- **Step 3's first step:** the go-ahead (proposed 2026-11-06, after the session with the cleanup off).
+- **Beta 14's two runs** (step 3, above).
 
 ## Next, after the performance work
 

@@ -62,11 +62,37 @@ with the lamps casting shadows; one lamp-lit scene the tester compared went from
     23 barriers a frame (beta 11: 78 and 44), the lamp spot 6.83 ms a frame against 6.98 before
     holding (about 143 to 146 FPS).
 
+## VRAM: one manager, nothing freed while there is room
+
+Textures and the game's data each had their own rules for leaving VRAM, and both freed things while
+VRAM was half empty: textures 20 seconds after their last use (on every card up to about 10 GB),
+the game's data after 3 minutes. The tester's session with the game's data kept (2026-11-06, 60
+FPS, RTX 3070 Ti) had frames over 33 ms 3.4 times an hour against 9.3, and no write faults in play
+(performance.md). From beta 14 one manager decides for both:
+
+- **With room in VRAM** (below 80% of what the driver gives the game, which already allows for other
+  programs): nothing leaves for its age.
+- **From 80%:** what has gone unused longest leaves first, textures and the game's data alike,
+  until use is back under 75%. **From 90%** (or after VRAM ran out once) also what was used 10
+  seconds ago, and textures the GPU drew.
+- **Textures the GPU drew** are copied into the game's memory without the CPU waiting for the GPU,
+  which it did for each one before; a game write that meets one while it is copied waits for that
+  copy alone.
+- **One launcher row in place of two:** Engine switches › Performance › **Use less VRAM** (off)
+  starts freeing at 65% instead of 80%, only for games that run out of video memory. VRAM cleanup
+  and Use more VRAM for textures are gone, as are their engine switches; the crash report points to
+  the new row.
+- **The log** says once a minute what was freed for room, and when VRAM gets tight or full.
+- For testing: `BB_VRAM_TEST_BUDGET_MB=N` in Extra variables makes a card behave as one with N MiB.
+
 ## Diagnostics
 
 - **The GPU profile labels indirect dispatches** (`dispatch indirect cs ...`) and **image clears**
   (`image clear WxH`); their time used to go to the label before them. This is how `a954e79d`'s
   0.21 ms turned out to be the game's particle update after it.
+- **The "Building shaders" note** (beta 14) shows when a frame was late while shaders were being
+  prepared, for 2 seconds, rather than once 30 ms of that work had added up: it missed the short
+  stutters on a first visit and showed for longer work that made no frame late.
 - **The frame statistics count** the steps taken out (`GPU steps per second (0.4.5)`): the draws left
   out, the rectangle copies and those left out, the lamp shadow faces drawn into their scratch images,
   their clears, and any faces put back; from beta 9 the copy shader's batches held to their pass's
