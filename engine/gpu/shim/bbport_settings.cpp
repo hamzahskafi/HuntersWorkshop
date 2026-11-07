@@ -464,7 +464,7 @@ void ConfigureUpscalerSupport(bool fsr, bool dlss) {
     v.fsr_supported = fsr;
     v.dlss_supported = dlss;
     const int requested = v.upscaler;
-    // 0.4.4 beta 27: TAA when neither runs (community-fixes-plan.md, Decisions: "When AMD's or NVIDIA's
+    // 0.4.4 beta 27: TAA when neither runs (docs/plan.md, Decisions: "When AMD's or NVIDIA's
     // runtime can't start"); bb-start chose the start's render size for TAA already when AMD's files
     // are missing (start/main.cpp), so TAA runs at the output size.
     if (requested == UpscalerDlss && !dlss) {

@@ -27,6 +27,7 @@
 #include "imgui/renderer/texture_manager.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_optiscaler.h"
+#include "video_core/renderer_vulkan/vk_copy_hold.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "bbport_threads.h"
 
@@ -323,12 +324,17 @@ void Scheduler::EndRendering(GpuSavings::PassBreak why, u32 detail) {
             pass_break_detail = detail;
             ended_after_cut = true;
         }
-        return;
+    } else {
+        pass_break = why;
+        pass_break_detail = detail;
+        is_rendering = false;
+        Record([](vk::CommandBuffer cmdbuf) { cmdbuf.endRendering(); });
     }
-    pass_break = why;
-    pass_break_detail = detail;
-    is_rendering = false;
-    Record([](vk::CommandBuffer cmdbuf) { cmdbuf.endRendering(); });
+    // 0.4.5 beta 9: the copy shader's copies held while the pass was open, recorded here, before
+    // whatever ends it (vk_copy_hold.h).
+    if (CopyHold::Pending(this)) {
+        CopyHold::Flush(this, why);
+    }
 }
 
 void Scheduler::TraceDirectRecording(void* caller) {

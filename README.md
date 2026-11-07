@@ -22,7 +22,7 @@ Vulkan.
 - **The rest of the workshop:** mods and the community's game patches, cheats, trophies, save backups,
   and a launcher in 13 languages with a setup guide that checks your game files.
 
-What changed in the latest version: [release notes 0.4.4](engine/docs/release-notes-0.4.4.md)
+What changed in the latest version: [release notes 0.4.5](engine/docs/release-notes-0.4.5.md)
 (earlier ones are beside it).
 
 ## Install

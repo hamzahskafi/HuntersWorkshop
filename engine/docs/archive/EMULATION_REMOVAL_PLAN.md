@@ -11,7 +11,7 @@ Native draw calls (`BB_NATIVE_CALLS`) are on by default; stage B got a lookahead
 split; descriptors on the GPU, textures as objects and part two of the chunk buffers were not
 built. Current information: [engine-map.md](../engine-map.md), [gpu-memory.md](../gpu-memory.md),
 [parallel-stageb.md](../parallel-stageb.md), [native_shader_compiler.md](../native_shader_compiler.md)
-and [community-fixes-plan.md](../community-fixes-plan.md).
+[performance.md](../performance.md) and [plan.md](../plan.md).
 
 ## Where the API boundary is
 

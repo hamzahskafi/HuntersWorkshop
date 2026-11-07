@@ -118,6 +118,12 @@ public:
     }
 
     /// bbport: queries reset on the CPU (vk_occlusion.h).
+    /// 0.4.5 beta 10: shaders may reach buffers by their GPU addresses (the copy shader's merged
+    /// copies, buffer_address_copy.comp).
+    bool IsBufferDeviceAddressSupported() const {
+        return vk12_features.bufferDeviceAddress;
+    }
+
     bool IsHostQueryResetSupported() const {
         return vk12_features.hostQueryReset;
     }

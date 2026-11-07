@@ -135,6 +135,30 @@ struct Counters {
     std::array<std::atomic<std::uint64_t>, 2> overlap_conversions{};
     // 0.4.4 beta 18: uploads of the game's memory into depth images (Runtime::UploadImage).
     std::atomic<std::uint64_t> depth_uploads{0}, depth_upload_bytes{0};
+    // 0.4.5 beta 1: draws with no target and no memory writes, left out
+    // (Rasterizer::SkipEmptyDraw).
+    std::atomic<std::uint64_t> empty_draws_skipped{0};
+    // 0.4.5 beta 1: the game's rectangle copies (a040875f), all of them; beta 4 leaves the lamp
+    // shadow faces' out (ShadowRedirectDispatch in vk_rasterizer.cpp).
+    std::atomic<std::uint64_t> rect_copies{0};
+    // 0.4.5 beta 4: lamp shadow faces drawn into their blur's scratch image, their copies left
+    // out, and faces put back into the cube's layer before or after the copy (ShadowRedirect).
+    std::atomic<std::uint64_t> shadow_faces_redirected{0}, shadow_copies_skipped{0},
+        shadow_restores_before{0}, shadow_restores_after{0};
+    // 0.4.5 beta 5: their clears done as the face's render pass began, or on their own (nothing
+    // drawn into the face: where the copy was left out; beta 6: before a pass smaller than it).
+    std::atomic<std::uint64_t> shadow_clears_folded{0}, shadow_clears_late{0};
+    // 0.4.5 beta 9: the copy shader's batches held to the end of their render pass, its
+    // dispatches held whole (the pass left open), the times the held copies were recorded, of
+    // those the times a binding touching them sent them early, and batches that came in a pass
+    // and were not held (the game's memory bound in place, or the limit) (vk_copy_hold.h).
+    std::atomic<std::uint64_t> copy_hold_batches{0}, copy_hold_dispatches{0},
+        copy_hold_flushes{0}, copy_hold_conflicts{0}, copy_hold_refused{0};
+    // 0.4.5 beta 10: merged dispatches of the copy shader's batches (buffer_address_copy.comp),
+    // the batches and ranges in them, and batches recorded on their own (no GPU address, or
+    // ranges not whole dwords) (vk_shader_hle.cpp, RecordMerged).
+    std::atomic<std::uint64_t> copy_merge_dispatches{0}, copy_merge_batches{0},
+        copy_merge_ranges{0}, copy_merge_alone{0};
 };
 
 /// Runtime::CopyColorAndDepth's kinds: depth->colour by the shader (0.4.4 beta 17), by a copy;
@@ -263,6 +287,33 @@ inline void Report() {
                 color_refusals[1], color_refusals[2], color_refusals[3], color_refusals[4],
                 color_refusals[5], color_refusals[6], kinds[3], kinds[4], kinds[5], overlaps[0],
                 overlaps[1], depth_uploads, depth_upload_mb);
+    const double empty_draws = take(c.empty_draws_skipped) / s;
+    const double rect_copies = take(c.rect_copies) / s;
+    const double faces = take(c.shadow_faces_redirected) / s;
+    const double copies_left_out = take(c.shadow_copies_skipped) / s;
+    const double restores_before = take(c.shadow_restores_before) / s;
+    const double restores_after = take(c.shadow_restores_after) / s;
+    const double clears_folded = take(c.shadow_clears_folded) / s;
+    const double clears_late = take(c.shadow_clears_late) / s;
+    const double held = take(c.copy_hold_batches) / s;
+    const double held_whole = take(c.copy_hold_dispatches) / s;
+    const double held_flushes = take(c.copy_hold_flushes) / s;
+    const double held_early = take(c.copy_hold_conflicts) / s;
+    const double held_refused = take(c.copy_hold_refused) / s;
+    const double merged = take(c.copy_merge_dispatches) / s;
+    const double merged_batches = take(c.copy_merge_batches) / s;
+    const double merged_ranges = take(c.copy_merge_ranges) / s;
+    const double merged_alone = take(c.copy_merge_alone) / s;
+    std::printf("  GPU steps per second (0.4.5): empty draws skipped %.1f; rectangle copies "
+                "(a040875f) %.1f; lamp shadow faces drawn into the scratch image %.1f, their "
+                "copies left out %.1f, faces put back %.1f before the copy and %.1f after; their "
+                "clears in the face's pass %.1f, on their own %.1f; copy shader batches held to "
+                "their pass's end %.1f (dispatches held whole %.1f), recorded %.1f times, %.1f of "
+                "them early (a binding touched them), not held %.1f; copy shader batches "
+                "merged %.1f in %.1f dispatches (%.0f ranges), on their own %.1f\n",
+                empty_draws, rect_copies, faces, copies_left_out, restores_before,
+                restores_after, clears_folded, clears_late, held, held_whole, held_flushes,
+                held_early, held_refused, merged_batches, merged, merged_ranges, merged_alone);
 }
 
 } // namespace Vulkan::GpuSavings

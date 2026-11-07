@@ -2635,7 +2635,7 @@ bool TemporalUpscaler::RecordFrameUpscaler(vk::CommandBuffer cmdbuf, UpscaleInpu
         next = (next + 1) % kept.size();
     }
     if (!ok && (use_dlss ? dlss->Fatal() : amd_fsr->Fatal())) {
-        // 0.4.4 beta 27: DLSS gives way to AMD FSR, AMD FSR to TAA (community-fixes-plan.md,
+        // 0.4.4 beta 27: DLSS gives way to AMD FSR, AMD FSR to TAA (docs/plan.md,
         // Decisions); FireBurn's FSR 3.1 took over before. In a session started at a reduced render
         // size TAA cannot run (EnsureResources says so): the picture is not upscaled until a restart.
         const bool to_fsr = use_dlss && amd_fsr_available && !amd_fsr->Fatal();

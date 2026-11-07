@@ -1,0 +1,42 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// Hunter's Workshop 0.4.5 beta 10: the copy shader's ranges in one dispatch across any number of
+// buffers, each range by its buffers' GPU addresses (vk_shader_hle.cpp, RecordMerged). One
+// workgroup per range, as buffer_multi_copy.comp; sizes in dwords.
+#version 450
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_buffer_reference_uvec2 : require
+
+layout(local_size_x = 64) in;
+
+layout(buffer_reference, std430, buffer_reference_align = 4) readonly buffer Source {
+    uint words[];
+};
+layout(buffer_reference, std430, buffer_reference_align = 4) writeonly buffer Destination {
+    uint words[];
+};
+
+struct Range {
+    uvec2 src;   // GPU address of the first source dword
+    uvec2 dst;   // GPU address of the first destination dword
+    uint dwords;
+    uint pad0;
+    uint pad1;
+    uint pad2;
+};
+
+layout(std430, binding = 0) readonly buffer Ranges { Range ranges[]; };
+
+layout(push_constant) uniform Push { uint count; } push;
+
+void main() {
+    const uint index = gl_WorkGroupID.x;
+    if (index >= push.count) {
+        return;
+    }
+    const Range range = ranges[index];
+    Source src = Source(range.src);
+    Destination dst = Destination(range.dst);
+    for (uint i = gl_LocalInvocationID.x; i < range.dwords; i += 64) {
+        dst.words[i] = src.words[i];
+    }
+}

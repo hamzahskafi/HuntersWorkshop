@@ -23,9 +23,13 @@ that has been done. Paths are relative to `engine/`; shadPS4's (`video_core/...`
   against beta 4, 60 FPS). At the busiest test spot (the lamps, about 1,765 draws a frame), 0.4.3
   ran 90.9 to 92.5 FPS with 1,340 write faults a second (`20261031_174716`); beta 20 holds 120 FPS
   (the cap) with none. The frame rate there comes mostly from the GPU work of betas 13 to 20
-  (render target copies, object motion, depth copies and more; `docs/community-fixes-plan.md`):
+  (render target copies, object motion, depth copies and more; `docs/changelog.md`):
   beta 12 ran 95.5 FPS at about 1,750 draws, and at the 1,360-draw spot, where the GPU was the
   limit, beta 12 and 0.4.3 ran the same (below).
+- **After 0.4.4 (2026-11-05):** the VRAM cleanup of the game's data unused for 3 minutes
+  (`EvictIdleCopies`, from bbport) is behind almost every long frame left at 60 FPS, and it churns
+  uploads while VRAM has room. The evidence: [performance.md](performance.md); the work:
+  [plan.md](plan.md), step 3 (after the GPU steps, the tester's call).
 - **Not done:** step 1's per-frame figures and light hitch report, step 3.3 (pinning at load, model
   only) and step 3.4 (the full-screen image). Cause 3 (image memory per image) is as it was.
 

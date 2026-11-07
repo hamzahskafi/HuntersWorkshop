@@ -15,6 +15,7 @@
 #include "video_core/renderer_vulkan/image_copy_region.h"
 #include "video_core/texture_cache/overlap_diagnostics.h"
 #include "video_core/renderer_vulkan/vk_gpu_profiler.h"
+#include "video_core/renderer_vulkan/vk_copy_hold.h"
 #include "video_core/renderer_vulkan/vk_gpu_savings.h"
 #include "video_core/renderer_vulkan/vk_scene_resolution.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
@@ -1315,6 +1316,14 @@ void Runtime::SetBackingSamples(VideoCore::Image* image, u32 num_samples, bool c
 
 bool Runtime::IsBufferAccessed(const VideoCore::Buffer* handle, u64 offset, u64 size,
                                bool check_read_access) {
+    // 0.4.5 beta 9: a held copy of the copy shader writes these bytes, or reads them and they are
+    // to be written: the held copies are recorded first (the pass ends), and the check below
+    // then sees them.
+    if (CopyHold::Pending(&scheduler) &&
+        CopyHold::Touches(handle, offset, size, check_read_access)) {
+        GpuSavings::Count(GpuSavings::Get().copy_hold_conflicts);
+        CopyHold::Flush(&scheduler, GpuSavings::PassBreak::CopyShader);
+    }
     if (aliased) {
         return true;
     }
@@ -1426,6 +1435,14 @@ void Runtime::AccessBuffer(const VideoCore::Buffer* handle, u64 offset, u64 size
 }
 
 void Runtime::FlushBarriers() {
+    // 0.4.5 beta 9: a barrier to record ends the pass: the copy shader's held copies go first,
+    // with the barriers they need (this function, again), before the barrier state below is read.
+    if (CopyHold::Pending(&scheduler) &&
+        (memory_barrier.srcStageMask || !image_barriers.empty())) {
+        CopyHold::Flush(&scheduler, image_barriers.empty()
+                                        ? GpuSavings::PassBreak::BufferBarrier
+                                        : GpuSavings::PassBreak::ImageBarrier);
+    }
     // bbport BB_GX_IN_PLACE: an aliased access is done with once this barrier follows it (or
     // after a few barriers without it: a binding taken for residency only is never accessed).
     if (aliased && (aliased->recorded || ++aliased->flushes > 4)) {
