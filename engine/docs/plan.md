@@ -198,6 +198,10 @@ when the tester says).
   (comfortable 70, tight 80, full 90), frees at loading screens and only with slack in play, takes
   garbage first and whole 64 MiB chunks, and logs refaults and what went back to the driver. It also
   listens to the game's GX texture and buffer calls (research, logged only).
+- **Beta 17 (2026-11-07, on beta 16's logs):** loads after the first: 1 of 10 with a frame over 33
+  ms (beta 15: 11 of 20). The session's first load translated about 40 shaders every session (the
+  ordinary permutations motion draws asked for only to look at their buffers): asked with motion
+  first now. Building ahead paced per 16 ms; the game's data in released buffers freed.
 - **Beta 16 (the tester's call, 2026-11-07, on beta 15's logs):** the area tracker removed (it would
   work against the game, which says what it creates and destroys); the texture cache follows the
   game's textures: built during the loading screen that creates them (from the T# its graphics layer

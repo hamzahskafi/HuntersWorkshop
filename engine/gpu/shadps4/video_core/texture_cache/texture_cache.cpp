@@ -1874,20 +1874,23 @@ void TextureCache::BuildAhead() {
     if (ahead_jobs.empty()) {
         return;
     }
-    // When: a loading screen hides the work (up to 400 ms of each second, 2 ms a pass: the collector
-    // runs at each of the game's submissions, about a dozen a frame); in play only while frames are on
-    // time at the cap, 4 ms a second (textures created in play: about 16 a second). Where: below the
-    // comfortable line, since the game creates about twice the textures it draws (2026-11-07: 15,465
-    // of 31,301 created during loading screens were drawn).
+    // When: per 16 ms (a frame at 60 FPS; the collector runs at each of the game's submissions,
+    // about a dozen a frame, so a budget per pass or per second let one frame take 109 ms): 6 ms
+    // while a loading screen hides the work, 2 ms in play while frames are on time at the cap (beta
+    // 16 gave play 4 ms a second, too little for the game's bursts of about 190 textures drawn half
+    // a second after it made them: 47 ms frames). Where: below the comfortable line, since the game
+    // creates about twice the textures it draws (2026-11-07: 15,465 of 31,301 created during loading
+    // screens were drawn).
     using Clock = std::chrono::steady_clock;
     const auto start = Clock::now();
     const bool loading = BbEngine::Loading::ScreenUp();
-    if (gc_second != ahead_second) {
-        ahead_second = gc_second;
+    const s64 start_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(start.time_since_epoch()).count();
+    if (start_ns - ahead_window >= 16'000'000) {
+        ahead_window = start_ns;
         ahead_ns = 0;
     }
-    const s64 second_ns = loading ? 400'000'000 : (VramPolicy::Slack() ? 4'000'000 : 0);
-    const s64 slice_ns = std::min<s64>(loading ? 2'000'000 : 500'000, std::max<s64>(second_ns - ahead_ns, 0));
+    const s64 window_ns = loading ? 6'000'000 : (VramPolicy::Slack() ? 2'000'000 : 0);
+    const s64 slice_ns = std::max<s64>(window_ns - ahead_ns, 0);
     const bool room = VramPolicy::Comfortable();
     const u64 now_ns = u64(std::chrono::duration_cast<std::chrono::nanoseconds>(start.time_since_epoch()).count());
     constexpr u64 MaxWaitNs = 30'000'000'000ull;

@@ -58,19 +58,31 @@ struct Program {
     /// bbport: `info` as translated, for draw-preparation workers (they must not read `info`,
     /// whose user data the GPU thread rewrites every draw). Guarded by programs_mutex.
     std::unique_ptr<Shader::Info> info_template;
+    /// 0.4.5 beta 17: a vertex program with an object-motion permutation (set when one is added;
+    /// read through std::atomic_ref): its draws ask for that permutation first
+    /// (PipelineCache::RefreshGraphicsKey), not for the ordinary one only to look at its buffers.
+    bool has_motion = false;
 
     Program() = default;
     Program(Shader::HwStage stage, Shader::SwStage l_stage, Shader::ShaderParams params)
         : info{stage, l_stage, params} {}
 
     void AddPermut(vk::ShaderModule module, Shader::StageSpecialization&& spec) {
+        NoteMotion(spec);
         modules.emplace_back(module, std::move(spec));
     }
 
     void InsertPermut(vk::ShaderModule module, Shader::StageSpecialization&& spec,
                       size_t perm_idx) {
+        NoteMotion(spec);
         modules.resize(std::max(modules.size(), perm_idx + 1)); // <-- beware of realloc
         modules[perm_idx] = {module, std::move(spec)};
+    }
+
+    void NoteMotion(const Shader::StageSpecialization& spec) {
+        if (spec.runtime_info.hw_stage == Shader::HwStage::Vertex && spec.runtime_info.hw.vs.motion_vectors) {
+            std::atomic_ref<bool>(has_motion).store(true, std::memory_order_relaxed);
+        }
     }
 };
 

@@ -301,6 +301,8 @@ private:
     /// the manager's time leave VRAM, the longest unused first; their slots take the next blocks
     /// instead of new VRAM, and they are uploaded again from the game's memory when bound.
     void EvictIdleCopies(u32 now);
+    /// 0.4.5 beta 17: the game's data of the buffers the game released (gx_released) leaves VRAM.
+    void ReleaseGxBuffers();
     /// Residency chunks without blocks for 30 s (5 s while VRAM is tight), the rebinds away from
     /// them done: back to the driver.
     void FreeEmptyChunks(u32 now);

@@ -1799,7 +1799,8 @@ void BufferCache::ProcessIdleBlocks() {
         }
         VramPolicy::PublishData(in_use, cache, BbStats::residency_unused_bytes.load(std::memory_order_relaxed));
     }
-    // Beta 16 (research): the buffers the game released, against its data in VRAM at their memory.
+    // Beta 16-17: the buffers the game released, against its data in VRAM at their memory; beta 17
+    // frees it (ReleaseGxBuffers).
     if (BbEngine::GxResources::Active()) {
         BbEngine::GxResources::TakeReleased(gx_released);
         for (const auto& released : gx_released) {
@@ -1810,8 +1811,65 @@ void BufferCache::ProcessIdleBlocks() {
             BbEngine::GxResources::NoteReleasedBuffer(
                 std::min<u64>((end - first - gaps) * block_size, Common::AlignUp(bytes, block_size)));
         }
+        if (BbEngine::GxResources::Following()) {
+            ReleaseGxBuffers();
+        }
         gx_released.clear();
     }
+}
+
+void BufferCache::ReleaseGxBuffers() {
+    // 0.4.5 beta 17: the game released these buffers: the blocks wholly inside one leave VRAM, as the
+    // VRAM manager's evictions do (EvictVramBlock: unbound after the work submitted so far, their
+    // page table entries cleared, uploaded again should the memory be used again). Kept: blocks
+    // shared with a neighbour (partly outside the buffer), blocks the GPU wrote (only VRAM has
+    // them), blocks of a 2 MiB group used after the release (the memory reused already), and all
+    // of them while shaders read the game's memory through the page table or twins are on.
+    // On 2026-11-07 the game released 200-1,000 MiB a minute of its data still in VRAM, which until
+    // now left only for its age while VRAM was tight.
+    if (TwinsEnabled()) {
+        return;
+    }
+    const u32 now = BbStats::coarse_second.load(std::memory_order_relaxed);
+    const u32 dma = dma_second.load(std::memory_order_relaxed);
+    if (dma != 0 && now - dma < VramPolicy::CacheSeconds) {
+        return;
+    }
+    std::vector<u64> blocks;
+    for (const auto& released : gx_released) {
+        const u64 first = (released.memory + block_size - 1) >> block_shift;
+        const u64 end = (released.memory + released.bytes) >> block_shift;
+        const u32 second = u32(released.ns / 1'000'000'000ull);
+        for (u64 block = first; block < end; ++block) {
+            const VAddr address = block << block_shift;
+            const u64 group = std::min<u64>(address >> USE_GROUP_BITS, group_use.size() - 1);
+            if (!resident_ranges.Contains(block) || in_place_blocks.Contains(block) || group_use[group] > second ||
+                gpu_modified_ranges.Intersects(address, block_size) ||
+                memory_tracker->IsRegionGpuModified(address, block_size)) {
+                continue;
+            }
+            blocks.push_back(block);
+        }
+    }
+    if (blocks.empty()) {
+        return;
+    }
+    std::sort(blocks.begin(), blocks.end());
+    blocks.erase(std::unique(blocks.begin(), blocks.end()), blocks.end());
+    for (const u64 block : blocks) {
+        EvictVramBlock(block);
+        evicted_blocks.Add({block, block + 1});
+    }
+    for (size_t i = 0; i < blocks.size();) {
+        size_t j = i + 1;
+        while (j < blocks.size() && blocks[j] == blocks[j - 1] + 1) {
+            ++j;
+        }
+        runtime.FillBuffer(bda_pagetable_buffer.get(), blocks[i] * sizeof(vk::DeviceAddress),
+                           (j - i) * sizeof(vk::DeviceAddress), 0u);
+        i = j;
+    }
+    VramPolicy::NoteFreed(VramPolicy::Freed::Released, u64(blocks.size()) * block_size, 0);
 }
 
 void BufferCache::EvictIdleCopies(u32 now) {

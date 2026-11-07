@@ -104,6 +104,12 @@ From beta 16 the engine follows the game's own textures:
   and how many images were freed when the game destroyed their textures.
 - `BB_GX_FOLLOW=0` in Extra variables turns the following off (counted only); `BB_GX_RESOURCES=0`
   stops listening to the game altogether.
+- **Beta 17:** the game's data in buffers the game releases leaves VRAM too; building ahead is
+  paced per frame (6 ms in 16 at loading screens, 2 ms in play when frames are on time), so neither
+  a loading screen frame nor the game's bursts of new textures in play take long.
+- **The first load of each session no longer translates about 40 shaders** (about 36 ms): draws that
+  may get object motion looked at an ordinary version of their shaders first, which the shader cache
+  never kept. They now use the motion version they already have.
 
 ## Diagnostics
 

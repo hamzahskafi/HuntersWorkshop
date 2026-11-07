@@ -85,9 +85,9 @@ inline constexpr s64 PlayNsPerSecond = 12'000'000; ///< play trims: about 0.2 ms
 inline constexpr u32 SlackFlips = 30;            ///< frames on time in a row: the frame has slack
 inline constexpr s64 StepDownBelow = 16ll << 20;
 
-/// What was freed (NoteFreed): garbage, an image of a texture the game destroyed, an idle texture or
-/// the game's data.
-enum class Freed : u8 { Garbage = 0, Texture = 1, Data = 2, Destroyed = 3 };
+/// What was freed (NoteFreed): garbage, an image of a texture the game destroyed, an idle texture,
+/// the game's data idle, or the game's data of a buffer it released (beta 17).
+enum class Freed : u8 { Garbage = 0, Texture = 1, Data = 2, Destroyed = 3, Released = 4 };
 
 struct State {
     std::mutex mutex;
@@ -108,7 +108,7 @@ struct State {
     u64 load_start_used = 0;
     std::atomic<u64> load_freed{0};
     // This minute.
-    std::array<std::atomic<u64>, 4> freed_bytes{};
+    std::array<std::atomic<u64>, 5> freed_bytes{};
     std::atomic<u64> returned_bytes{0}, refault_bytes{0}, loads_trimmed{0}, play_seconds{0};
     std::atomic<u32> tight_seconds{0}, full_seconds{0}, loading_seconds{0};
     // The last 10 minutes: freed and refaulted (for the comfortable line).
@@ -337,7 +337,8 @@ inline void LogMinute() {
     auto mib = [](u64 bytes) { return (unsigned long long)(bytes >> 20); };
     const Config& config = Settings();
     const u64 garbage = state.freed_bytes[0].exchange(0), textures = state.freed_bytes[1].exchange(0),
-              data = state.freed_bytes[2].exchange(0), destroyed = state.freed_bytes[3].exchange(0);
+              data = state.freed_bytes[2].exchange(0), destroyed = state.freed_bytes[3].exchange(0),
+              released = state.freed_bytes[4].exchange(0);
     const u64 returned = state.returned_bytes.exchange(0), refault = state.refault_bytes.exchange(0);
     const u64 loads = state.loads_trimmed.exchange(0), play = state.play_seconds.exchange(0);
     const u32 tight = state.tight_seconds.exchange(0), full = state.full_seconds.exchange(0);
@@ -381,14 +382,15 @@ inline void LogMinute() {
                 mib(state.tex_in_use.load()), mib(state.tex_cache.load()), mib(state.tex_garbage.load()),
                 mib(state.tex_gpu.load()), mib(state.data_in_use.load()), mib(state.data_cache.load()),
                 mib(state.data_empty.load()));
-    if (garbage + textures + data + destroyed == 0 && tight == 0 && full == 0 && loads == 0) {
+    if (garbage + textures + data + destroyed + released == 0 && tight == 0 && full == 0 && loads == 0) {
         std::printf("  this minute: nothing freed\n");
     } else {
-        std::printf("  this minute: freed textures the game destroyed %llu MiB, garbage %llu, idle textures %llu, "
-                    "the game's data %llu; returned to the driver at once %llu; idle data that came back within 5 "
-                    "minutes %llu; %llu loading screen trims, %llu s of play trims; tight %u s, full %u s\n",
-                    mib(destroyed), mib(garbage), mib(textures), mib(data), mib(returned), mib(refault),
-                    (unsigned long long)loads, (unsigned long long)play, tight, full);
+        std::printf("  this minute: freed textures the game destroyed %llu MiB, its data in buffers it released "
+                    "%llu, garbage %llu, idle textures %llu, the game's idle data %llu; returned to the driver at "
+                    "once %llu; idle data that came back within 5 minutes %llu; %llu loading screen trims, %llu s "
+                    "of play trims; tight %u s, full %u s\n",
+                    mib(destroyed), mib(released), mib(garbage), mib(textures), mib(data), mib(returned),
+                    mib(refault), (unsigned long long)loads, (unsigned long long)play, tight, full);
     }
 }
 

@@ -629,9 +629,9 @@ private:
     };
     std::unordered_map<VAddr, AheadBuilt> ahead_at; ///< under `mutex`
     u32 ahead_misses_logged = 0;
-    /// Beta 16: BuildAhead's time this second (ns) and that second.
+    /// Beta 16-17: BuildAhead's time in the current 16 ms window (ns) and when that window began.
     s64 ahead_ns = 0;
-    u64 ahead_second = 0;
+    s64 ahead_window = 0;
     u64 total_used_samplers = 0;
     u64 sampler_generation = 0; ///< bbport: samplers freed so far (SamplerGeneration)
     u64 trigger_gc_samplers = 0;
