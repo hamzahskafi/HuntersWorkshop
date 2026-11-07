@@ -516,6 +516,13 @@ private:
     void BuildAhead();
     /// Beta 15 (once a second, any VRAM level): garbage textures.
     void GarbagePass(u64 second);
+    /// 0.4.6 beta 6: whether a stale image the GPU drew has had the memory under it written since, over
+    /// every mip (the buffer cache's data, or the game's: each mip's memory no longer hashes as it did
+    /// when the image last took it), so its next use would upload over all of it. Hashing takes from
+    /// `budget` (bytes); Later when it would go over it.
+    enum class Overwritten { No, Yes, Later };
+    Overwritten DrawnOverwritten(const Image& image, u64& budget);
+    std::vector<u8> hash_scratch;
     /// Beta 15: what to free and in which order, once a second while the VRAM manager trims.
     void BuildPlan(u64 second);
     /// ... and freed in slices, each pass while the VRAM manager allows it.
@@ -653,7 +660,7 @@ private:
     std::vector<std::pair<ImageId, u64>> ahead_built, ahead_refresh;
     std::vector<std::pair<VAddr, u64>> ahead_watch;
     /// 0.4.6 beta 4: images freed since the last report, by why (the report named the mode only).
-    u64 gc_freed_destroyed = 0, gc_freed_orphans = 0;
+    u64 gc_freed_destroyed = 0, gc_freed_orphans = 0, gc_freed_superseded = 0;
     struct AheadBuilt {
         ImageId image_id;
         u64 image_uid;

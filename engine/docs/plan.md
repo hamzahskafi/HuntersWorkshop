@@ -10,7 +10,8 @@ What comes next, and the rules and decisions it works under. Updated 2026-11-07.
   follows them as they happen, with no time budget: textures built in the game's own create call,
   destroys and releases freed as soon as the GPU is done; beta 5 (engine id 89) is the memory design
   below ("The 0.4.6 memory design"), with the logging that tests it, and the VRAM manager off by
-  default. 0.4.4 was released on 2026-11-03 (`cbec5a2`, engine id 64).
+  default; beta 6 (engine id 90) follows the textures the game makes outside GX (YEBIS, Scaleform)
+  and frees the GPU's stale drawings the game's memory has moved on from. 0.4.4 was released on 2026-11-03 (`cbec5a2`, engine id 64).
 - **Where the work goes:** the branch `claude/awesome-gates-cjba5e`.
 
 The other documents:
@@ -234,6 +235,19 @@ when the tester says).
     memory counters), images draws still make and stale images by the game resource over them (the
     largest five described), Map and view counts, sparse bind calls and their time (minute line,
     hitch reports, `BB_FRAME_STATS`), images in system memory.
+  - **Beta 6 (on beta 5's log, 2026-11-08):** about 1.1 GB of stale images were the GPU's drawings
+    over memory no GX resource held (1920x1080 targets, unused for minutes), and two in-play hitches
+    were bursts of textures there too (186 and 57). bbhost had found why: YEBIS (the post-processing
+    middleware) has its own device, and Scaleform (the UI) its own textures. Beta 6 follows YEBIS's 2D
+    textures and Scaleform's planes with memory of their own as the game's resources (1.09 sites
+    checked), drops resources whose memory the game unmaps, frees a stale image the GPU drew once the
+    memory under it was written over (what its next use would upload over), retires a destroyed
+    texture's image as soon as any new resource overlaps it, and stops following Map (only buffers,
+    always renamed). The minute log describes the largest images draws still make over no resource,
+    with the mapping each lies in.
+  - **The two slow areas of beta 5's run** (53-57 FPS for 10-20 s after arriving in m23 and m24): the
+    GPU busy (idle 1-3 ms a frame against 10-12), not shaders (none compiled); the second came as
+    VRAM reached 91% of the budget. Beta 6's freeing should tell whether VRAM was the cause.
   - **Next (the logs decide):** the game's area prefetch (it was made for a hard disk: its model can
     drive the loads), the shader building and its threads, bbport's no-sparse memory module (the
     Linux phase).
@@ -274,8 +288,8 @@ when the tester says).
 
 ### Waiting on the tester
 
-- **0.4.6 beta 5's runs** (step 3, "The 0.4.6 memory design"): a normal session with loading screens,
-  and the minute lines named there.
+- **0.4.6 beta 6's runs** (step 3, "The 0.4.6 memory design"): a normal session with loading screens,
+  the two areas that ran slowly in beta 5, and the minute lines named there.
 
 ## Next, after the performance work
 

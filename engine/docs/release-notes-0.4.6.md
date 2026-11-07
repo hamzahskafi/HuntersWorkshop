@@ -119,6 +119,26 @@ The tester's call on beta 4's logs: one beta with the whole design and the loggi
   - Maps and views, the time spent binding the game's data in and out of VRAM (also in hitch
     reports), and images in system memory.
 
+## The game's other textures (beta 6)
+
+- **Textures the game makes outside its graphics layer are followed too.** YEBIS, the game's
+  post-processing middleware, makes its own render targets, and Scaleform, its UI, makes some of its
+  own textures. The engine didn't know them: in beta 5's log about 1.1 GB of video memory was
+  post-processing targets drawn minutes earlier and never freed, and two in-play stutters were bursts
+  of textures there. Their creation and destruction are now followed like the game's own textures
+  (as bbhost found them; checked against 1.09).
+- **A drawing the game has written over is freed.** An image the GPU drew is freed once the game's
+  memory under it has been rewritten everywhere it covers, which is when its next use would replace
+  it anyway. Checking that is capped at 32 MB of memory a second.
+- **Memory the game unmaps** no longer counts as holding the textures it held, so their images are
+  judged by what is really there.
+- **An image of a destroyed texture goes as soon as anything new is made over part of it** (beta 5
+  waited until something covered it whole: a 64 MB shadow map stayed).
+- **Map is no longer followed:** beta 5 showed the game maps only buffers, every time into a fresh
+  copy, never a texture.
+- **The log** describes the largest textures draws still make over memory nothing of the game's
+  holds, with where that memory is, and counts YEBIS's and Scaleform's textures.
+
 ## Diagnostics
 
 - **The "Building shaders" note** shows when a frame was late while shaders were being

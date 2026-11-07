@@ -29,6 +29,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -46,6 +47,9 @@
 #else
 #include <pthread.h>
 #endif
+
+extern "C" int runtime_memory_region(std::uintptr_t address, std::uintptr_t* start, std::uintptr_t* end,
+                                     int* mapped);
 
 namespace BbEngine::GxResources {
 namespace {
@@ -72,16 +76,14 @@ constexpr Destructor kDestructors[] = {
     {0x216d350, 0x031f20a0, 0x535f400}, // 3D, in place
 };
 
-// 0.4.6 beta 5 (bbhost's gx_resources.cpp, checked against 1.09): Map 0x2169c30 (ctx, ?, holder,
-// subresource, type, mapped*; 0 on success: a CPU write is coming. Types 0-2 write in place after
-// waiting for the GPU; 3, buffers only, writes into a renamed copy from GX's own pool, kept in its
-// rename table at ctx+0xb6f8 with the holder's memory unchanged; 4 returns the copy in flight, or
-// fails with 4 when there is none), the render-target
-// and depth-stencil view creators 0x21667a0 / 0x2166610 (ctx, view** out, texture holder, D3D11-
-// shaped description: the view keeps the holder at +0x08), and the 1D texture creator 0x2171790
-// (resource* out = the holder's +0x18, ctx, desc, initial data, ...; GX builds the 1D holder inline
-// around it), whose holders' destructors are 0x216d030 / 0x216d070 (vtable 0x535f3c0).
-constexpr std::size_t kMap = 0x2169c30, kCreateRtv = 0x21667a0, kCreateDsv = 0x2166610, kCreate1D = 0x2171790;
+// 0.4.6 beta 5 (bbhost's gx_resources.cpp, checked against 1.09): the render-target and depth-stencil
+// view creators 0x21667a0 / 0x2166610 (ctx, view** out, texture holder, D3D11-shaped description:
+// the view keeps the holder at +0x08), and the 1D texture creator 0x2171790 (resource* out = the
+// holder's +0x18, ctx, desc, initial data, ...; GX builds the 1D holder inline around it), whose
+// holders' destructors are 0x216d030 / 0x216d070 (vtable 0x535f3c0). Beta 5 also followed Map
+// 0x2169c30: its log showed only buffers mapped (2,000-10,000 a second, every one into a renamed
+// copy from GX's own pool) and never a texture, so beta 6 leaves it alone.
+constexpr std::size_t kCreateRtv = 0x21667a0, kCreateDsv = 0x2166610, kCreate1D = 0x2171790;
 // push rbp; mov rbp, rsp; push r15; push r14; push r13; push r12; push rbx; sub rsp, 0x68
 constexpr std::uint8_t kDsvPrologue[] = {0x55, 0x48, 0x89, 0xe5, 0x41, 0x57, 0x41, 0x56, 0x41,
                                          0x55, 0x41, 0x54, 0x53, 0x48, 0x83, 0xec, 0x68};
@@ -96,6 +98,32 @@ constexpr Destructor k1DDestructors[] = {
 // resource after its creator returns).
 constexpr std::uint64_t kMemoryKey = 0x8000000000000000ull;
 
+// 0.4.6 beta 6 (bbhost's gx_resources.cpp, checked against 1.09): the game's textures that are not
+// GX's. YEBIS, the post-processing middleware, has its own D3D11-shaped device: CreateTexture2D
+// 0x11df570 (device, device, initial data, desc, 0, out) makes an object with its memory at +0x98,
+// its kind at +0x80 (3: 2D), its size at +0x150 and its D3D11 description from +0x188 (width,
+// height, mips, array, format, samples, quality, usage, bind: 0x20 render target, 0x40 depth, ...);
+// its 2D texture's deleting destructor is 0x2a4b090 (vtable 0x530bbf0; it runs for far more objects
+// than the creator makes: only those it made count). Scaleform, the UI, initializes a texture at
+// 0x3a1d30 (texture, ...; true when it made the hardware texture: +0x45 planes in an array at +0x60
+// of 0x58-byte records, size at +0, T# at +4, memory at +0x50) and gives the planes' memory back in
+// ReleaseHWTextures 0x3a2160 (texture). Most Scaleform textures wrap one of the game's (no memory of
+// their own): those stay the game texture's. Beta 5's log: draws made 250-600 images a minute over
+// memory no GX resource held, and about 1.1 GB of the GPU's drawings sat there unused for minutes.
+constexpr std::size_t kYebisCreate2D = 0x11df570, kScaleformInit = 0x3a1d30, kScaleformRelease = 0x3a2160;
+// push rbp; mov rbp, rsp; push r15; push r14; push r13; push r12; push rbx; sub rsp, 0x18
+constexpr std::uint8_t kYebisCreatePrologue[] = {0x55, 0x48, 0x89, 0xe5, 0x41, 0x57, 0x41, 0x56, 0x41,
+                                                 0x55, 0x41, 0x54, 0x53, 0x48, 0x83, 0xec, 0x18};
+// push rbp; mov rbp, rsp; push r15; push r14; push r12; push rbx; sub rsp, 0x60
+constexpr std::uint8_t kScaleformReleasePrologue[] = {0x55, 0x48, 0x89, 0xe5, 0x41, 0x57, 0x41, 0x56,
+                                                      0x41, 0x54, 0x53, 0x48, 0x83, 0xec, 0x60};
+constexpr Destructor kYebisDestructor = {0x2a4b090, 0x028c0b50, 0x530bbf0};
+// Their registry keys: the object (YEBIS), the texture and its plane (Scaleform).
+constexpr std::uint64_t kYebisKey = 0x4000000000000000ull, kScaleformKey = 0x2000000000000000ull;
+std::uint64_t ScaleformKey(std::uint64_t texture, unsigned plane) {
+    return kScaleformKey | (texture << 2) | plane;
+}
+
 constexpr std::size_t kTsharpBuild = 0x2ba6af0;
 // push rbp; mov rbp, rsp; push r15; push r14; push r13; push r12; push rbx; and rsp, -32
 constexpr std::uint8_t kTsharpPrologue[] = {0x55, 0x48, 0x89, 0xe5, 0x41, 0x57, 0x41, 0x56, 0x41, 0x55,
@@ -107,7 +135,15 @@ constexpr std::uint8_t kShaderPrologue[2][16] = {
     {0x55, 0x48, 0x89, 0xe5, 0x41, 0x57, 0x41, 0x56, 0x53, 0x48, 0x81, 0xec, 0x28, 0x01, 0x00, 0x00},
 };
 
-enum Kind : std::uint8_t { kBuffer = 0, kTexture = 1, kTexture3D = 2, kTexture1D = 3, kKinds = 4 };
+enum Kind : std::uint8_t {
+    kBuffer = 0,
+    kTexture = 1,
+    kTexture3D = 2,
+    kTexture1D = 3,
+    kYebis = 4,     // 0.4.6 beta 6: a YEBIS 2D texture
+    kScaleform = 5, // a Scaleform texture plane with memory of its own
+    kKinds = 6
+};
 
 struct Entry {
     std::uint64_t memory;
@@ -116,15 +152,15 @@ struct Entry {
     bool loading;
     std::uint64_t ns;
     std::uint8_t type;
-    // 0.4.6 beta 5: whether it was made with its data, has a render-target or depth-stencil view, had
-    // an image prepared (at its first Map), and the T# its creator built (2D textures).
-    bool initial = false, render_target = false, depth_target = false, prepared = false;
+    // 0.4.6 beta 5: whether it was made with its data, has a render-target or depth-stencil view, and
+    // the T# its creator built (2D textures).
+    bool initial = false, render_target = false, depth_target = false;
     bool has_tsharp = false;
     std::array<std::uint32_t, 8> tsharp{};
 };
 
 // What a return through the stub belongs to.
-enum Op : std::uint8_t { kOpCreate, kOpTsharp, kOpMap, kOpView, kOpCreate1D };
+enum Op : std::uint8_t { kOpCreate, kOpTsharp, kOpView, kOpCreate1D, kOpYebis, kOpScaleform };
 
 struct Pending {
     std::uint64_t ret;
@@ -134,7 +170,7 @@ struct Pending {
     bool tsharp = false;  // the T# builder
     std::uint64_t entry_ns = 0;
     Op op = kOpCreate;
-    std::uint64_t holder = 0, type = 0; // Map: the holder and the map type; views: 1 render target, 2 depth
+    std::uint64_t holder = 0, type = 0; // Scaleform: the texture; views (type): 1 render target, 2 depth
 };
 thread_local std::vector<Pending> t_pending;
 // The T# the builder produced on this thread, for its creator's return.
@@ -288,9 +324,16 @@ struct Counts {
         stale_live_bytes{0}, stale_orphan_bytes{0}, orphans_freed{0}, orphans_freed_bytes{0};
     std::atomic<std::uint64_t> build_ns_total{0}, build_images_total{0};
     // 0.4.6 beta 5.
-    std::array<std::array<std::atomic<std::uint64_t>, 5>, kKinds> maps{};
-    std::atomic<std::uint64_t> map_unknown{0}, map_moved{0}, map_prepared{0}, views_rt{0}, views_ds{0},
-        views_unknown{0}, created_dropped{0};
+    std::atomic<std::uint64_t> views_rt{0}, views_ds{0}, views_unknown{0}, created_dropped{0};
+    // 0.4.6 beta 6.
+    std::atomic<std::uint64_t> yebis_rt{0}, yebis_ds{0}, sf_wrapped{0}, unmapped{0}, unmapped_bytes{0},
+        superseded{0}, superseded_bytes{0}, superseded_hashed{0};
+    struct Made {
+        std::uint64_t address, bytes;
+        std::uint32_t width, height, levels, layers, format, tile;
+    };
+    std::array<Made, 5> none_made{}; // the largest images draws made over no game resource this minute
+    std::mutex none_made_mutex;
     std::array<std::atomic<std::uint64_t>, std::size_t(Owner::kCount)> draw_made{}, draw_made_bytes{},
         draw_made_total{};
     std::array<std::atomic<std::uint64_t>, std::size_t(Owner::kCount)> stale_bytes{}, stale_images{};
@@ -311,6 +354,8 @@ template <typename T> T Read(std::uint64_t address) {
     return value;
 }
 
+void Insert(std::uint64_t key, const Entry& e);
+
 // `key`: the holder, or kMemoryKey | memory for a 1D texture (its holder is read for the fields).
 Entry Register(std::uint64_t key, std::uint64_t holder, Kind kind, bool initial) {
     Entry e{Read<std::uint64_t>(holder + 0x20), Read<std::uint32_t>(holder + 0x2c), kind,
@@ -325,6 +370,13 @@ Entry Register(std::uint64_t key, std::uint64_t holder, Kind kind, bool initial)
         e.tsharp[0] = static_cast<std::uint32_t>(base);
         e.tsharp[1] = (e.tsharp[1] & ~0x3fu) | static_cast<std::uint32_t>((base >> 32) & 0x3f);
     }
+    Insert(key, e);
+    return e;
+}
+
+// Counted and indexed (under the lock), and the memory's created event queued.
+void Insert(std::uint64_t key, const Entry& e) {
+    const Kind kind = e.kind;
     g_counts.created[kind].fetch_add(1, std::memory_order_relaxed);
     g_counts.created_bytes[kind].fetch_add(e.bytes, std::memory_order_relaxed);
     if (e.loading) {
@@ -352,15 +404,24 @@ Entry Register(std::uint64_t key, std::uint64_t holder, Kind kind, bool initial)
         }
     }
     g_by_holder[key] = e;
-    return e;
+}
+
+// 0.4.6 beta 6: a texture the game's middleware made (YEBIS, Scaleform), as a resource of the game's.
+void RegisterOther(std::uint64_t key, std::uint64_t memory, std::uint32_t bytes, Kind kind, bool initial,
+                   bool render_target, bool depth_target) {
+    Entry e{memory, bytes, kind, Loading::ScreenUp(), NowNs(), 2};
+    e.initial = initial;
+    e.render_target = render_target;
+    e.depth_target = depth_target;
+    Insert(key, e);
 }
 
 // `memory_now`: where the resource's memory is at its destructor's entry (the holder is still whole).
 void Unregister(std::uint64_t holder, bool texture, std::uint64_t memory_now) {
     // 0.4.6 beta 5: the game's Map does not move a resource's memory (a rename writes into a copy
-    // from GX's own pool, the holder's memory unchanged: NoteMap), so a resource whose memory differs
-    // here is not one this registry knows the history of, and is left alone (that range may be
-    // another's by now).
+    // from GX's own pool, the holder's memory unchanged), so a resource whose memory differs here is
+    // not one this registry knows the history of, and is left alone (that range may be another's by
+    // now). 0.4.6 beta 6: one whose memory the game unmapped has none (MemoryReleased).
     std::uint64_t memory = 0, bytes = 0;
     {
         std::scoped_lock lock{g_mutex};
@@ -420,9 +481,7 @@ void Unregister(std::uint64_t holder, bool texture, std::uint64_t memory_now) {
 // A 2D texture created with its data and its T#: its image prepared now, on this thread (0.4.6 beta
 // 4; the game's main thread hands it to the worker), for the texture cache to register at its next
 // submission.
-// 0.4.6 beta 5: also at the first Map of a texture made without its data (`upload` false: the image
-// is made now, its upload is its first draw's, once the game has written it).
-void HandCreated(const Entry& e, ThreadSlot& slot, bool upload = true) {
+void HandCreated(const Entry& e, ThreadSlot& slot) {
     if (!e.has_tsharp) {
         g_counts.ahead_no_tsharp.fetch_add(1, std::memory_order_relaxed);
         return;
@@ -430,7 +489,7 @@ void HandCreated(const Entry& e, ThreadSlot& slot, bool upload = true) {
     if (e.memory == 0 || (e.type != 2 && e.type != 3)) {
         return;
     }
-    Ahead job{e.tsharp, e.memory, e.bytes, e.ns, e.loading, upload};
+    Ahead job{e.tsharp, e.memory, e.bytes, e.ns, e.loading};
     g_counts.ahead_queued.fetch_add(1, std::memory_order_relaxed);
     const CreatedHook hook = g_created_hook.load(std::memory_order_acquire);
     if (!hook) {
@@ -465,15 +524,8 @@ GUEST_ABI std::int64_t TsharpEntry(std::uint64_t, const std::uint64_t* saved) {
     return 0;
 }
 
-// 0.4.6 beta 5: Map (rdx = holder, r8 = type, r9 = where it writes the mapped address), the view
-// creators (rsi = view**) and the 1D creator (rdi = the resource it fills, rcx = initial data), each
-// read at its return.
-GUEST_ABI std::int64_t MapEntry(std::uint64_t, const std::uint64_t* saved) {
-    t_pending.push_back({saved[6], saved[0], kBuffer, false, false, 0, kOpMap, saved[3], saved[1]});
-    const_cast<std::uint64_t*>(saved)[6] = reinterpret_cast<std::uint64_t>(g_return_stub);
-    return 0;
-}
-
+// 0.4.6 beta 5: the view creators (rsi = view**) and the 1D creator (rdi = the resource it fills,
+// rcx = initial data), each read at its return.
 template <int depth> GUEST_ABI std::int64_t ViewEntry(std::uint64_t, const std::uint64_t* saved) {
     t_pending.push_back({saved[6], saved[4], kTexture, false, false, 0, kOpView, 0, std::uint64_t(depth)});
     const_cast<std::uint64_t*>(saved)[6] = reinterpret_cast<std::uint64_t>(g_return_stub);
@@ -486,37 +538,105 @@ GUEST_ABI std::int64_t Create1DEntry(std::uint64_t, const std::uint64_t* saved) 
     return 0;
 }
 
-// A Map has returned: the resource is about to be written by the CPU, in place or (renamed) into a
-// copy elsewhere, which the game binds in its place until the copy is retired.
-void NoteMap(std::uint64_t holder, std::uint64_t type, std::uint64_t mapped_out, ThreadSlot& slot) {
-    const std::uint64_t mapped = mapped_out ? Read<std::uint64_t>(mapped_out) : 0;
-    Entry prepare{};
-    bool hand = false;
+// 0.4.6 beta 6: YEBIS's 2D creator (r9 = the object's out, rdx = initial data) and Scaleform's texture
+// Initialize (rdi = the texture), read at their return; the destructors that end them.
+GUEST_ABI std::int64_t YebisCreateEntry(std::uint64_t, const std::uint64_t* saved) {
+    t_pending.push_back({saved[6], saved[0], kYebis, saved[3] != 0, false, NowNs(), kOpYebis});
+    const_cast<std::uint64_t*>(saved)[6] = reinterpret_cast<std::uint64_t>(g_return_stub);
+    return 0;
+}
+
+GUEST_ABI std::int64_t ScaleformInitEntry(std::uint64_t, const std::uint64_t* saved) {
+    t_pending.push_back({saved[6], 0, kScaleform, true, false, NowNs(), kOpScaleform, saved[5]});
+    const_cast<std::uint64_t*>(saved)[6] = reinterpret_cast<std::uint64_t>(g_return_stub);
+    return 0;
+}
+
+void NoteYebisCreated(std::uint64_t object, bool initial) {
+    if (!object || Read<std::uint32_t>(object + 0x80) != 3) {
+        return; // not a 2D texture
+    }
+    const std::uint64_t memory = Read<std::uint64_t>(object + 0x98);
+    const std::uint32_t bytes = Read<std::uint32_t>(object + 0x150);
+    const std::uint32_t bind = Read<std::uint32_t>(object + 0x188 + 8 * 4); // D3D11 BindFlags
+    if (!memory || !bytes) {
+        return;
+    }
+    const bool rt = (bind & 0x20) != 0, ds = (bind & 0x40) != 0;
+    if (rt) {
+        g_counts.yebis_rt.fetch_add(1, std::memory_order_relaxed);
+    }
+    if (ds) {
+        g_counts.yebis_ds.fetch_add(1, std::memory_order_relaxed);
+    }
+    RegisterOther(kYebisKey | object, memory, bytes, kYebis, initial, rt, ds);
+}
+
+// Scaleform made a texture's hardware planes: each one with memory of its own is a texture of the
+// game's; one over memory a live resource of the game's holds (a texture it wraps) stays that one's.
+void NoteScaleformTexture(std::uint64_t texture) {
+    const std::uint8_t planes = Read<std::uint8_t>(texture + 0x45);
+    const std::uint64_t array = Read<std::uint64_t>(texture + 0x60);
+    if (!array || planes > 4) {
+        return;
+    }
+    for (unsigned i = 0; i < planes; ++i) {
+        const std::uint64_t record = array + i * 0x58ull;
+        const std::uint32_t bytes = Read<std::uint32_t>(record);
+        const std::uint64_t memory = Read<std::uint64_t>(record + 0x50);
+        if (!memory || memory == ~0ull || !bytes) {
+            continue;
+        }
+        bool wrapped = false;
+        {
+            std::scoped_lock lock{g_mutex};
+            for (const auto* index : {&g_texture_at, &g_buffer_at}) {
+                auto it = index->upper_bound(memory);
+                if (it == index->begin()) {
+                    continue;
+                }
+                --it;
+                if (const auto e = g_by_holder.find(it->second);
+                    e != g_by_holder.end() && it->first + e->second.bytes >= memory + bytes) {
+                    wrapped = true;
+                    break;
+                }
+            }
+        }
+        if (wrapped) {
+            g_counts.sf_wrapped.fetch_add(1, std::memory_order_relaxed);
+            continue;
+        }
+        RegisterOther(ScaleformKey(texture, i), memory, bytes, kScaleform, true, false, false);
+    }
+}
+
+// Unregistered only if registered (YEBIS's destructor runs for far more objects than it made).
+void UnregisterIfKnown(std::uint64_t key) {
+    std::uint64_t memory = 0;
     {
         std::scoped_lock lock{g_mutex};
-        const auto it = g_by_holder.find(holder);
+        const auto it = g_by_holder.find(key);
         if (it == g_by_holder.end()) {
-            g_counts.map_unknown.fetch_add(1, std::memory_order_relaxed);
             return;
         }
-        Entry& e = it->second;
-        g_counts.maps[e.kind][type < 5 ? type : 0].fetch_add(1, std::memory_order_relaxed);
-        if (mapped && (mapped < e.memory || mapped >= e.memory + std::max<std::uint64_t>(e.bytes, 1))) {
-            g_counts.map_moved.fetch_add(1, std::memory_order_relaxed); // a renamed copy
-        }
-        // A texture made without its data, written for the first time: its image is made now,
-        // ahead of its first draw (the draw uploads it, once the game has written it).
-        if (g_follow && e.kind == kTexture && !e.initial && !e.prepared && e.has_tsharp && !e.render_target &&
-            !e.depth_target) {
-            e.prepared = true;
-            prepare = e;
-            hand = true;
-            g_counts.map_prepared.fetch_add(1, std::memory_order_relaxed);
+        memory = it->second.memory;
+    }
+    Unregister(key, true, memory);
+}
+
+GUEST_ABI std::int64_t YebisDestructor(std::uint64_t, const std::uint64_t* saved) {
+    UnregisterIfKnown(kYebisKey | saved[5]);
+    return 0;
+}
+
+GUEST_ABI std::int64_t ScaleformRelease(std::uint64_t, const std::uint64_t* saved) {
+    if (saved[5]) {
+        for (unsigned i = 0; i < 4; ++i) {
+            UnregisterIfKnown(ScaleformKey(saved[5], i));
         }
     }
-    if (hand) {
-        HandCreated(prepare, slot, false);
-    }
+    return 0;
 }
 
 void NoteView(std::uint64_t out, bool depth) {
@@ -557,9 +677,17 @@ GUEST_ABI std::uint64_t CreatorReturn(std::uint64_t result) {
         return p.ret;
     }
     ThreadSlot& slot = CurrentSlot();
-    if (p.op == kOpMap) {
-        if (static_cast<std::uint32_t>(result) == 0 && p.holder) {
-            NoteMap(p.holder, p.type, p.out, slot);
+    if (p.op == kOpYebis) {
+        if (static_cast<std::uint32_t>(result) == 0 && p.out) {
+            NoteYebisCreated(Read<std::uint64_t>(p.out), p.initial);
+        } else if (static_cast<std::uint32_t>(result) != 0) {
+            g_counts.failed.fetch_add(1, std::memory_order_relaxed);
+        }
+        return p.ret;
+    }
+    if (p.op == kOpScaleform) {
+        if ((result & 0xff) != 0 && p.holder) {
+            NoteScaleformTexture(p.holder);
         }
         return p.ret;
     }
@@ -639,7 +767,7 @@ bool Install(std::uint8_t* image, std::size_t size) {
     if (const char* env = std::getenv("BB_GX_FOLLOW"); !(env && env[0] == '0')) {
         g_follow = true;
     }
-    Hook hooks[19];
+    Hook hooks[22];
     bool ok = Prepare(hooks[0], image, size, kCreateBuffer, kCreatorPrologue, &CreatorEntry<kBuffer>) &&
               Prepare(hooks[1], image, size, kCreateTexture, kCreatorPrologue, &CreatorEntry<kTexture>) &&
               Prepare(hooks[2], image, size, kCreateTexture3D, kCreatorPrologue, &CreatorEntry<kTexture3D>) &&
@@ -649,13 +777,19 @@ bool Install(std::uint8_t* image, std::size_t size) {
               Prepare(hooks[10], image, size, kShaderCreators[1], kShaderPrologue[1], &ShaderCreated<1>) &&
               Prepare(hooks[11], image, size, kShaderCreators[2], kShaderPrologue[1], &ShaderCreated<2>) &&
               Prepare(hooks[12], image, size, kShaderCreators[3], kShaderPrologue[1], &ShaderCreated<3>) &&
-              Prepare(hooks[13], image, size, kMap, kCreatorPrologue, &MapEntry) &&
+              Prepare(hooks[13], image, size, kYebisCreate2D, kYebisCreatePrologue, &YebisCreateEntry) &&
+              Prepare(hooks[20], image, size, kScaleformInit, kCreatorPrologue, &ScaleformInitEntry) &&
+              Prepare(hooks[21], image, size, kScaleformRelease, kScaleformReleasePrologue, &ScaleformRelease) &&
               Prepare(hooks[14], image, size, kCreateRtv, kCreatorPrologue, &ViewEntry<1>) &&
               Prepare(hooks[15], image, size, kCreateDsv, kDsvPrologue, &ViewEntry<2>) &&
               Prepare(hooks[16], image, size, kCreate1D, kCreate1DPrologue, &Create1DEntry);
-    for (std::size_t i = 0; ok && i < std::size(kDestructors) + std::size(k1DDestructors); ++i) {
-        const bool one_d = i >= std::size(kDestructors);
-        const Destructor& d = one_d ? k1DDestructors[i - std::size(kDestructors)] : kDestructors[i];
+    // The game's destructors (2D and 3D textures at 4-7, 1D at 17-18) and YEBIS's 2D texture's (19).
+    for (std::size_t i = 0; ok && i < std::size(kDestructors) + std::size(k1DDestructors) + 1; ++i) {
+        const bool one_d = i >= std::size(kDestructors) && i < std::size(kDestructors) + std::size(k1DDestructors);
+        const bool yebis = i == std::size(kDestructors) + std::size(k1DDestructors);
+        const Destructor& d = yebis   ? kYebisDestructor
+                              : one_d ? k1DDestructors[i - std::size(kDestructors)]
+                                      : kDestructors[i];
         std::uint8_t expected[16] = {0x55, 0x48, 0x89, 0xe5, 0x53, 0x50, 0x48, 0x89, 0xfb, 0x48, 0x8d, 0x05};
         std::memcpy(expected + 12, &d.disp, 4);
         // The same, the lea as movabs rax, <the vtable's address in this image>.
@@ -663,8 +797,9 @@ bool Install(std::uint8_t* image, std::size_t size) {
         const std::uint64_t vtable = reinterpret_cast<std::uint64_t>(image) + d.vtable;
         std::memcpy(displaced + 11, &vtable, 8);
         ok = d.site + 16 + d.disp == d.vtable && // the lea's target, from its own bytes
-             PrepareDisplaced(hooks[one_d ? 17 + (i - std::size(kDestructors)) : 4 + i], image, size, d.site,
-                              expected, displaced, one_d ? &Texture1DDestructor : &TextureDestructor);
+             PrepareDisplaced(hooks[yebis ? 19 : one_d ? 17 + (i - std::size(kDestructors)) : 4 + i], image, size,
+                              d.site, expected, displaced,
+                              yebis ? &YebisDestructor : one_d ? &Texture1DDestructor : &TextureDestructor);
     }
     if (!ok) {
         for (auto& hook : hooks) {
@@ -678,13 +813,14 @@ bool Install(std::uint8_t* image, std::size_t size) {
     }
     Commit(hooks);
     g_active = true;
-    host_log(g_follow ? "GX resources: the caches follow the game's resources: a texture created with its data "
-                        "is prepared in the game's create call and registered at the next submission, one made "
-                        "without it at its first Map; an image is freed when the game destroys its texture or "
-                        "makes something newer over its memory; the game's data stays in VRAM, as on the PS4, "
-                        "until the game unmaps its memory (BB_GX_FOLLOW=0: counted only; BB_GX_RESOURCES=0: off)"
-                      : "GX resources: listening to the game's creators, destructors, Maps and views "
-                        "(counted only, BB_GX_FOLLOW=0; BB_GX_RESOURCES=0: off)");
+    host_log(g_follow ? "GX resources: the caches follow the game's resources, YEBIS's and Scaleform's textures "
+                        "among them: a texture created with its data is prepared in the game's create call and "
+                        "registered at the next submission; an image is freed when the game destroys its texture, "
+                        "makes something newer over its memory or unmaps it; the game's data stays in VRAM, as on "
+                        "the PS4, until the game unmaps its memory (BB_GX_FOLLOW=0: counted only; "
+                        "BB_GX_RESOURCES=0: off)"
+                      : "GX resources: listening to the game's creators, destructors and views, YEBIS's and "
+                        "Scaleform's textures among them (counted only, BB_GX_FOLLOW=0; BB_GX_RESOURCES=0: off)");
     return true;
 }
 
@@ -732,7 +868,8 @@ bool CreatedWaiting() {
 const char* OwnerName(Owner owner) {
     static constexpr const char* kNames[] = {"no game resource", "a buffer", "a texture made with its data",
                                              "a texture made without", "a render target", "a depth target",
-                                             "a 3D texture", "a 1D texture"};
+                                             "a 3D texture", "a 1D texture", "a YEBIS texture",
+                                             "a Scaleform texture"};
     return std::size_t(owner) < std::size(kNames) ? kNames[std::size_t(owner)] : "?";
 }
 
@@ -745,6 +882,10 @@ Owner OwnerOf(const Entry& e) {
         return Owner::Texture3D;
     case kTexture1D:
         return Owner::Texture1D;
+    case kYebis:
+        return Owner::Yebis;
+    case kScaleform:
+        return Owner::Scaleform;
     default:
         return e.depth_target ? Owner::DepthTarget
                : e.render_target ? Owner::RenderTarget
@@ -823,6 +964,50 @@ void NoteStaleByOwner(const std::array<std::uint64_t, std::size_t(Owner::kCount)
 void NoteReuseDead(std::uint64_t images, std::uint64_t bytes) {
     g_counts.reuse_dead.fetch_add(images, std::memory_order_relaxed);
     g_counts.reuse_dead_bytes.fetch_add(bytes, std::memory_order_relaxed);
+}
+
+void NoteDrawMadeNone(std::uint64_t address, std::uint64_t bytes, std::uint32_t width, std::uint32_t height,
+                      std::uint32_t levels, std::uint32_t layers, std::uint32_t format, std::uint32_t tile) {
+    std::scoped_lock lock{g_counts.none_made_mutex};
+    auto& list = g_counts.none_made;
+    if (bytes <= list.back().bytes) {
+        return;
+    }
+    list.back() = {address, bytes, width, height, levels, layers, format, tile};
+    std::sort(list.begin(), list.end(), [](const Counts::Made& a, const Counts::Made& b) { return a.bytes > b.bytes; });
+}
+
+void NoteSuperseded(std::uint64_t bytes) {
+    g_counts.superseded.fetch_add(1, std::memory_order_relaxed);
+    g_counts.superseded_bytes.fetch_add(bytes, std::memory_order_relaxed);
+}
+
+void NoteSupersededHashed(std::uint64_t bytes) {
+    g_counts.superseded_hashed.fetch_add(bytes, std::memory_order_relaxed);
+}
+
+void MemoryReleased(std::uint64_t address, std::uint64_t size) {
+    if (!g_active || size == 0) {
+        return;
+    }
+    std::uint64_t n = 0, bytes = 0;
+    std::scoped_lock lock{g_mutex};
+    for (auto* index : {&g_texture_at, &g_buffer_at}) {
+        for (auto it = index->lower_bound(address); it != index->end() && it->first < address + size;) {
+            if (const auto e = g_by_holder.find(it->second); e != g_by_holder.end()) {
+                if (e->second.kind != kBuffer) {
+                    g_live_texture_bytes.fetch_sub(e->second.bytes, std::memory_order_relaxed);
+                }
+                bytes += e->second.bytes;
+                e->second.memory = 0; // its destructor, if it comes, finds nothing to free
+                e->second.bytes = 0;
+            }
+            it = index->erase(it);
+            ++n;
+        }
+    }
+    g_counts.unmapped.fetch_add(n, std::memory_order_relaxed);
+    g_counts.unmapped_bytes.fetch_add(bytes, std::memory_order_relaxed);
 }
 
 void SetCreatedHook(CreatedHook hook) {
@@ -1130,31 +1315,28 @@ void LogMinute() {
     {
         // 0.4.6 beta 5: what the game does with its resources after making them, and what the images
         // made at a draw (not prepared) and the stale ones (written over, unused 10 s) belong to.
-        auto maps = [&](int kind) {
-            char part[160];
-            std::uint64_t m[5];
-            for (int t = 0; t < 5; ++t) {
-                m[t] = take(g_counts.maps[kind][t]);
-            }
-            std::snprintf(part, sizeof(part), "%llu in place, %llu renamed, %llu into the copy in flight",
-                          (unsigned long long)(m[0] + m[1] + m[2]), (unsigned long long)m[3],
-                          (unsigned long long)m[4]);
-            return std::string(part);
-        };
-        const std::string map_buffers = maps(kBuffer), map_textures = maps(kTexture), map_3d = maps(kTexture3D),
-                          map_1d = maps(kTexture1D);
-        host_log("GX memory this minute: 1D textures created %llu (%.0f MiB), destroyed %llu; maps: buffers %s; "
-                 "textures %s; 3D %s; 1D %s; %llu of resources not known, %llu written outside the resource's memory, %llu "
-                 "prepared a texture made without its data; views: %llu render targets, %llu depth targets, %llu "
-                 "of textures not known; images retired because the game made something newer over them %llu "
-                 "(%.0f MiB); %llu created events not queued",
+        host_log("GX memory this minute: 1D textures created %llu (%.0f MiB), destroyed %llu; views: %llu render "
+                 "targets, %llu depth targets, %llu of textures not known; images retired because the game made "
+                 "something newer over them %llu (%.0f MiB); %llu created events not queued",
                  (unsigned long long)created[kTexture1D], Mib(created_bytes[kTexture1D]),
-                 (unsigned long long)destroyed[kTexture1D], map_buffers.c_str(), map_textures.c_str(), map_3d.c_str(),
-                 map_1d.c_str(), (unsigned long long)take(g_counts.map_unknown),
-                 (unsigned long long)take(g_counts.map_moved), (unsigned long long)take(g_counts.map_prepared),
-                 (unsigned long long)take(g_counts.views_rt), (unsigned long long)take(g_counts.views_ds),
-                 (unsigned long long)take(g_counts.views_unknown), (unsigned long long)take(g_counts.reuse_dead),
-                 Mib(take(g_counts.reuse_dead_bytes)), (unsigned long long)take(g_counts.created_dropped));
+                 (unsigned long long)destroyed[kTexture1D], (unsigned long long)take(g_counts.views_rt),
+                 (unsigned long long)take(g_counts.views_ds), (unsigned long long)take(g_counts.views_unknown),
+                 (unsigned long long)take(g_counts.reuse_dead), Mib(take(g_counts.reuse_dead_bytes)),
+                 (unsigned long long)take(g_counts.created_dropped));
+        // 0.4.6 beta 6: the middleware's textures, memory the game unmapped under live resources, and
+        // the GPU's stale drawings the game's memory has moved on from.
+        host_log("GX memory, the middleware this minute: YEBIS 2D textures made %llu (%.0f MiB; %llu render "
+                 "targets, %llu depth), destroyed %llu; Scaleform texture planes with memory of their own %llu "
+                 "(%.0f MiB), released %llu, %llu wrapping a game texture; live resources whose memory the game "
+                 "unmapped %llu (%.0f MiB); stale images the GPU drew whose memory was written since freed %llu "
+                 "(%.0f MiB; %.0f MiB of memory hashed to tell)",
+                 (unsigned long long)created[kYebis], Mib(created_bytes[kYebis]),
+                 (unsigned long long)take(g_counts.yebis_rt), (unsigned long long)take(g_counts.yebis_ds),
+                 (unsigned long long)destroyed[kYebis], (unsigned long long)created[kScaleform],
+                 Mib(created_bytes[kScaleform]), (unsigned long long)destroyed[kScaleform],
+                 (unsigned long long)take(g_counts.sf_wrapped), (unsigned long long)take(g_counts.unmapped),
+                 Mib(take(g_counts.unmapped_bytes)), (unsigned long long)take(g_counts.superseded),
+                 Mib(take(g_counts.superseded_bytes)), Mib(take(g_counts.superseded_hashed)));
         std::string drawn, stale;
         for (std::size_t i = 0; i < std::size_t(Owner::kCount); ++i) {
             const std::uint64_t n = take(g_counts.draw_made[i]), bytes = take(g_counts.draw_made_bytes[i]);
@@ -1183,6 +1365,69 @@ void LogMinute() {
                  drawn.empty() ? "none" : drawn.c_str(), stale.empty() ? "none" : stale.c_str(),
                  Mib(g_counts.stale_gpu_bytes.load(std::memory_order_relaxed)), top.empty() ? "" : "; largest: ",
                  top.c_str());
+        // 0.4.6 beta 6 (research): the largest images draws made over memory no resource of the game's
+        // holds, with the mapping each lies in; and the mappings the game's textures live in.
+        std::array<Counts::Made, 5> none{};
+        {
+            std::scoped_lock lock{g_counts.none_made_mutex};
+            none = g_counts.none_made;
+            g_counts.none_made = {};
+        }
+        std::string described;
+        for (const Counts::Made& m : none) {
+            if (m.bytes == 0) {
+                break;
+            }
+            std::uintptr_t start = 0, end = 0;
+            int mapped = 0;
+            runtime_memory_region(std::uintptr_t(m.address), &start, &end, &mapped);
+            char part[256];
+            std::snprintf(part, sizeof(part),
+                          "%s0x%llx %.1f MiB %ux%u, %u mips, %u layers, format %u, tile %u, in a mapping at 0x%llx of "
+                          "%.0f MiB",
+                          described.empty() ? "" : "; ", (unsigned long long)m.address, double(m.bytes) / 1048576.0,
+                          m.width, m.height, m.levels, m.layers, m.format, m.tile, (unsigned long long)start,
+                          Mib(end - start));
+            described += part;
+        }
+        if (!described.empty()) {
+            std::vector<std::pair<std::uint64_t, std::uint32_t>> textures;
+            {
+                std::scoped_lock lock{g_mutex};
+                textures.reserve(g_texture_at.size());
+                for (const auto& [memory, key] : g_texture_at) {
+                    if (const auto e = g_by_holder.find(key); e != g_by_holder.end()) {
+                        textures.emplace_back(memory, e->second.bytes);
+                    }
+                }
+            }
+            std::map<std::uintptr_t, std::pair<std::uint64_t, std::uint64_t>> regions; // start -> (end, bytes)
+            for (const auto& [memory, bytes] : textures) {
+                std::uintptr_t start = 0, end = 0;
+                int mapped = 0;
+                if (runtime_memory_region(std::uintptr_t(memory), &start, &end, &mapped)) {
+                    auto& r = regions[start];
+                    r.first = end;
+                    r.second += bytes;
+                }
+            }
+            std::vector<std::pair<std::uint64_t, std::uintptr_t>> largest;
+            for (const auto& [start, r] : regions) {
+                largest.emplace_back(r.second, start);
+            }
+            std::sort(largest.rbegin(), largest.rend());
+            std::string homes;
+            for (std::size_t i = 0; i < largest.size() && i < 4; ++i) {
+                char part[128];
+                std::snprintf(part, sizeof(part), "%s0x%llx of %.0f MiB (%.0f MiB of textures)", homes.empty() ? "" : ", ",
+                              (unsigned long long)largest[i].second,
+                              Mib(regions[largest[i].second].first - largest[i].second), Mib(largest[i].first));
+                homes += part;
+            }
+            host_log("GX memory, the largest images draws made over no game resource this minute: %s; the game's live "
+                     "textures lie in the mappings at %s",
+                     described.c_str(), homes.empty() ? "(none)" : homes.c_str());
+        }
     }
     host_log("GX research this minute: buffers released with the game's data in VRAM at their memory %llu of %llu "
              "(%.0f MiB); shaders created: vertex %llu + %llu, pixel %llu, compute %llu (%llu during loading screens)",

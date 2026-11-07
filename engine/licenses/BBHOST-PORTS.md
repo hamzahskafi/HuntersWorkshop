@@ -120,3 +120,11 @@ bbhost's create_ahead (a 2D texture created with initial data, its T# with the b
 creating thread): here the texture cache builds them in its collector pass during loading screens, below the
 VRAM manager's comfortable line, and a destroyed texture's pages are released on the game's thread
 (release_pages) through the texture cache's own untracking.
+
+0.4.6 betas 5-6 take more of the same file's sites and findings: the render-target and depth-stencil view
+creators, the 1D texture creator and its destructors (keyed by memory), the rule that a resource made over an
+older one's memory ends it (gx_resource_newer_overlapping), the release of resources whose memory the game
+unmaps under holders it keeps (gx_resources_memory_released), YEBIS's own 2D texture creator and destructor
+(object memory +0x98, kind +0x80, size +0x150, D3D11 description +0x188) and Scaleform's Texture::Initialize
+and ReleaseHWTextures (planes at +0x45 / +0x60, 0x58-byte records, memory +0x50; a plane over a live game
+resource's memory stays that resource's). Each site's bytes are checked against 1.09.

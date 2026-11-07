@@ -1558,10 +1558,16 @@ void TextureCache::RegisterImage(ImageId image_id) {
     // 0.4.6 beta 5 (research): an image a draw made (not prepared ahead), by the game resource at its
     // memory: what the draws still make in play, and the hitches' images.
     if (!t_building_ahead && BbEngine::GxResources::Active()) {
-        BbEngine::GxResources::NoteDrawMade(
-            BbEngine::GxResources::Classify(image.info.guest_address,
-                                            image.info.guest_address + std::max<u64>(image.info.guest_size, 1)),
-            image.backing ? image.GetHostImageSize() : 0);
+        const auto owner = BbEngine::GxResources::Classify(
+            image.info.guest_address, image.info.guest_address + std::max<u64>(image.info.guest_size, 1));
+        const u64 bytes = image.backing ? image.GetHostImageSize() : 0;
+        BbEngine::GxResources::NoteDrawMade(owner, bytes);
+        if (owner == BbEngine::GxResources::Owner::None) {
+            BbEngine::GxResources::NoteDrawMadeNone(image.info.guest_address, bytes, image.info.size.width,
+                                                    image.info.size.height, image.info.resources.levels,
+                                                    image.info.resources.layers, u32(image.info.pixel_format),
+                                                    u32(image.info.tile_mode));
+        }
     }
     // Beta 15 (research): whether the game made a texture at this address, and how long ago.
     BbEngine::GxResources::NoteImage(BbEngine::GxResources::TextureAt(image.info.guest_address));
@@ -1815,19 +1821,22 @@ void TextureCache::GarbageCollectImages() {
         // 0.4.6 beta 4: by why (until beta 3 all were named after the VRAM manager's mode, "garbage"
         // when it had none: the images of destroyed textures were most of them).
         static constexpr const char* kMode[] = {"none", "loading screen trim", "tight", "full"};
-        const u64 by_manager = gc_evictions - std::min<u64>(gc_evictions, gc_freed_destroyed + gc_freed_orphans);
-        std::printf("Texture cache: %llu images freed (%llu of textures the game destroyed, %llu stale with no "
-                    "game texture there, %llu by the VRAM manager, its mode %s), %llu of them drawn by the GPU "
+        const u64 by_manager = gc_evictions - std::min<u64>(gc_evictions, gc_freed_destroyed + gc_freed_orphans +
+                                                                            gc_freed_superseded);
+        std::printf("Texture cache: %llu images freed (%llu of textures the game destroyed or memory it reused, "
+                    "%llu stale with no game texture there, %llu stale drawn by the GPU and written over since, "
+                    "%llu by the VRAM manager, its mode %s), %llu of them drawn by the GPU "
                     "and stored first (%llu tiled), %llu stores cancelled (used again), %llu in use kept since "
                     "the last report\n",
                     (unsigned long long)gc_evictions, (unsigned long long)gc_freed_destroyed,
-                    (unsigned long long)gc_freed_orphans, (unsigned long long)by_manager, kMode[u32(mode)],
+                    (unsigned long long)gc_freed_orphans, (unsigned long long)gc_freed_superseded,
+                    (unsigned long long)by_manager, kMode[u32(mode)],
                     (unsigned long long)(gc_downloads + gc_tiled_written), (unsigned long long)gc_tiled_written,
                     (unsigned long long)gc_stores_cancelled, (unsigned long long)gc_recent_kept);
         gc_report_time = now;
         gc_evictions = gc_downloads = gc_tiled_written = gc_tiled_kept = gc_recent_kept = 0;
         gc_stores_cancelled = 0;
-        gc_freed_destroyed = gc_freed_orphans = 0;
+        gc_freed_destroyed = gc_freed_orphans = gc_freed_superseded = 0;
     }
 }
 
@@ -1913,10 +1922,13 @@ void TextureCache::ProcessGxCreated() {
         const VAddr made_end = made.memory + std::max<u64>(made.bytes, 1);
         u64 bytes = 0, images = 0;
         ForEachImageInRegion(made.memory, std::max<u64>(made.bytes, 1), [&](ImageId image_id, Image& image) {
+            // 0.4.6 beta 6: one reaching outside it too when its texture was destroyed (beta 5 kept a
+            // 64 MiB shadow map whose memory small textures had taken: only images wholly inside).
+            const bool inside = image.info.guest_address >= made.memory &&
+                                image.info.guest_address + image.info.guest_size <= made_end;
             if (False(image.flags & ImageFlagBits::Registered) || image.registered_ns >= made.ns ||
-                image.dead_by_reuse || image.info.guest_address < made.memory ||
-                image.info.guest_address + image.info.guest_size > made_end) {
-                return; // newer than the resource (its own), already retired, or reaching outside it
+                image.dead_by_reuse || (!inside && image.gx_dead_tick == 0)) {
+                return; // newer than the resource (its own), already retired, or a live one reaching outside it
             }
             image.dead_by_reuse = true;
             image.reuse_tick = before_tick;
@@ -2164,9 +2176,7 @@ void TextureCache::BuildAhead() {
             FreeImage(image_id);
         }
         if (exact) {
-            if (job.upload) {
-                ahead_refresh.emplace_back(exact, slot_images[exact].image_uid);
-            }
+            ahead_refresh.emplace_back(exact, slot_images[exact].image_uid);
             BbEngine::GxResources::NoteAhead(AheadResult::Refreshed, 0);
             continue; // the prepared image goes (its memory back to the allocator)
         }
@@ -2186,11 +2196,7 @@ void TextureCache::BuildAhead() {
                                 image.info.resources.layers,
                                 u32(image.info.pixel_format),
                                 u32(image.info.tile_mode)};
-        // 0.4.6 beta 5: a texture made without its data, prepared at the game's first Map of it: not
-        // watched or uploaded now (the game is writing it), its first draw does both (it stays Dirty).
-        if (job.upload) {
-            ahead_built.emplace_back(image_id, image.image_uid);
-        }
+        ahead_built.emplace_back(image_id, image.image_uid);
         BbEngine::GxResources::NoteAhead(AheadResult::Built, image.GetHostImageSize());
     }
     for (auto& prepared : ahead_wait) {
@@ -2233,6 +2239,39 @@ void TextureCache::BuildAhead() {
     BbEngine::GxResources::NoteAheadWaiting(ahead_jobs.size());
 }
 
+TextureCache::Overwritten TextureCache::DrawnOverwritten(const Image& image, u64& budget) {
+    if (True(image.flags & ImageFlagBits::GpuDirty)) {
+        return Overwritten::Yes; // the GPU wrote the memory as a buffer: the next use uploads that
+    }
+    if (False(image.flags & ImageFlagBits::CpuDirty) || image.hashes_deferred || image.mip_hashes.empty()) {
+        return Overwritten::No;
+    }
+    const u32 levels = std::min<u32>(image.info.resources.levels, u32(image.mip_hashes.size()));
+    u64 bytes = 0;
+    for (u32 m = 0; m < levels; ++m) {
+        bytes += image.info.mips_layout[m].size;
+    }
+    if (bytes > budget) {
+        return Overwritten::Later;
+    }
+    budget -= bytes;
+    BbEngine::GxResources::NoteSupersededHashed(bytes);
+    // Through the backing, as MaybeDirtyHash's first hash is: the GPU's pages may be read-protected.
+    for (u32 m = 0; m < levels; ++m) {
+        const auto [mip_size, mip_pitch, mip_height, mip_offset] = image.info.mips_layout[m];
+        const VAddr address = image.info.guest_address + mip_offset;
+        if (mip_size == 0 || !Core::Memory::Instance()->IsValidMapping(address, mip_size)) {
+            return Overwritten::No;
+        }
+        hash_scratch.resize(mip_size);
+        Core::Memory::Instance()->CopySparseMemory(address, hash_scratch.data(), mip_size);
+        if (GuestMemoryHash(hash_scratch.data(), mip_size) == image.mip_hashes[m]) {
+            return Overwritten::No; // this mip's memory is as the image took it: its drawing is kept
+        }
+    }
+    return Overwritten::Yes;
+}
+
 void TextureCache::GarbagePass(u64 second) {
     // 0.4.6 beta 4: following the game, a stale image (written over, unused 10 s) with no live game
     // texture over it goes too, at any VRAM level and with the manager off: the game has nothing
@@ -2251,6 +2290,9 @@ void TextureCache::GarbagePass(u64 second) {
                    : ~0ull);
     u32 freed = 0, checked = 0;
     size_t kept = 0;
+    // 0.4.6 beta 6: the game's memory hashed this pass to tell whether drawn images were written over
+    // (copied through the backing first: about 2 ms for a 1080p target).
+    u64 hash_budget = 32ull << 20;
     for (size_t i = 0; i < garbage_candidates.size(); ++i) {
         const auto [image_id, uid] = garbage_candidates[i];
         const bool look = (freed < VramPolicy::GarbagePerSecond || !general) && checked < 1024;
@@ -2262,17 +2304,24 @@ void TextureCache::GarbagePass(u64 second) {
             False(image.flags & (ImageFlagBits::CpuDirty | ImageFlagBits::GpuDirty))) {
             continue; // refreshed: not garbage any more
         }
-        bool go = false, orphan = false;
+        bool go = false, orphan = false, superseded = false;
         if (look) {
             ++checked;
             go = !image.store_pending && !UsedSince(image, second, VramPolicy::GarbageSeconds) &&
                  !(recent_tick != 0 && (image.tick_accessed_last >= recent_tick ||
                                         !scheduler.IsFree(image.tick_accessed_last)));
             if (go && !general) {
-                orphan = False(image.flags & ImageFlagBits::GpuModified) && !image.binding.is_target &&
-                         !BbEngine::GxResources::LiveTextureOverlaps(image.info.guest_address,
-                                                                     image.info.guest_address + image.info.guest_size);
-                go = orphan;
+                const bool drawn = True(image.flags & ImageFlagBits::GpuModified) || image.binding.is_target;
+                if (!drawn) {
+                    orphan = !BbEngine::GxResources::LiveTextureOverlaps(
+                        image.info.guest_address, image.info.guest_address + image.info.guest_size);
+                    go = orphan;
+                } else {
+                    // 0.4.6 beta 6: the GPU drew it and the memory under it was written since, over
+                    // every mip: its next use would upload over all of it (DrawnOverwritten).
+                    superseded = DrawnOverwritten(image, hash_budget) == Overwritten::Yes;
+                    go = superseded;
+                }
             }
         }
         if (!go) {
@@ -2284,6 +2333,10 @@ void TextureCache::GarbagePass(u64 second) {
         if (orphan) {
             ++gc_freed_orphans;
             BbEngine::GxResources::NoteOrphanFreed(image.backing ? image.GetHostImageSize() : 0);
+        }
+        if (superseded) {
+            ++gc_freed_superseded;
+            BbEngine::GxResources::NoteSuperseded(image.backing ? image.GetHostImageSize() : 0);
         }
         BbStats::gc_freed_images.fetch_add(1, std::memory_order_relaxed);
         NoteCollected(image, second, VramPolicy::Freed::Garbage);

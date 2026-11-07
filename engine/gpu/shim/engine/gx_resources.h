@@ -23,12 +23,15 @@
 //   0.4.6 beta 5 manages the game's memory as the PS4 does:
 //     create   any resource made (buffers too) is the memory's owner now: images left there from
 //              before are retired (TakeCreated, the texture cache's ProcessGxCreated).
-//     Map      a texture made without its data gets its image at its first Map (registered without
-//              an upload); Maps are counted by kind and type (a rename writes into a copy from GX's
-//              pool: the holder's memory never moves).
 //     views    render-target and depth views mark their textures (Classify, the research lines).
 //     1D       1D textures and their destructors, keyed by memory.
 //     release  frees nothing: the game's data stays in VRAM until the game unmaps the memory.
+//   (Beta 5 also followed Map: only buffers are mapped, each into a renamed copy from GX's pool, never
+//   a texture; beta 6 leaves it alone.)
+//   0.4.6 beta 6 follows the game's textures that are not GX's (as bbhost does): YEBIS's 2D textures
+//   (the post-processing middleware's own device: its targets were ~1.1 GB of beta 5's stale images)
+//   and Scaleform's texture planes with memory of their own; and the game unmapping memory under
+//   resources it keeps (MemoryReleased: they hold none from then on).
 //   Research: the game's shader creators.
 #pragma once
 #include <array>
@@ -70,6 +73,8 @@ enum class Owner : std::uint8_t {
     DepthTarget,   // a texture with a depth-stencil view
     Texture3D,
     Texture1D,
+    Yebis,         // 0.4.6 beta 6: a YEBIS 2D texture (post-processing)
+    Scaleform,     // a Scaleform texture plane (the UI)
     kCount
 };
 const char* OwnerName(Owner owner);
@@ -85,6 +90,17 @@ void NoteStaleByOwner(const std::array<std::uint64_t, std::size_t(Owner::kCount)
                       const char* largest);
 // Images retired because the game made something newer over their memory.
 void NoteReuseDead(std::uint64_t images, std::uint64_t bytes);
+// 0.4.6 beta 6: an image a draw made over memory no resource of the game's holds (the minute's
+// largest are described, with the mapping each lies in).
+void NoteDrawMadeNone(std::uint64_t address, std::uint64_t bytes, std::uint32_t width, std::uint32_t height,
+                      std::uint32_t levels, std::uint32_t layers, std::uint32_t format, std::uint32_t tile);
+// A stale image the GPU drew, freed because the game's memory under it was written since (its bytes),
+// and the memory hashed to tell.
+void NoteSuperseded(std::uint64_t bytes);
+void NoteSupersededHashed(std::uint64_t bytes);
+// The game unmapped [address, address + size): the live resources there hold no memory from now on
+// (the game releases an area's texture memory under holders it keeps, bbhost found). Any thread.
+void MemoryReleased(std::uint64_t address, std::uint64_t size);
 // The buffers released since the last call (the buffer cache; 0.4.6 beta 4: every pass while
 // ReleasedWaiting, which reads no lock).
 void TakeReleased(std::vector<Gone>& out);
@@ -98,9 +114,6 @@ struct Ahead {
     std::uint32_t bytes;
     std::uint64_t ns;
     bool loading;
-    // 0.4.6 beta 5: false for a texture made without its data, prepared at its first Map: registered
-    // without an upload or a watch (its first draw does both, once the game has written it).
-    bool upload = true;
 };
 // 0.4.6 beta 4: called inside the game's create call, on its thread (or the worker's for the game's
 // main thread), for each texture created with its data (Following only).

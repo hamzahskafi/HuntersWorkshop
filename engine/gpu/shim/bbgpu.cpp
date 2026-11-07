@@ -152,7 +152,12 @@ void MemoryManager::SetRasterizer(Vulkan::Rasterizer* rasterizer_) {
             r->RegisterMemory(address, size);
             r->MapMemory(address, size);
         },
-        [](uintptr_t address, uint64_t size) { Memory::Instance()->GetRasterizer()->UnmapMemory(address, size); },
+        [](uintptr_t address, uint64_t size) {
+            // 0.4.6 beta 6: the game's resources there hold no memory from now on (it releases an
+            // area's texture memory under holders it keeps).
+            BbEngine::GxResources::MemoryReleased(address, size);
+            Memory::Instance()->GetRasterizer()->UnmapMemory(address, size);
+        },
         [](uintptr_t address, uint64_t size) {
             Memory::Instance()->GetRasterizer()->InvalidateMemory(address, size);
         });

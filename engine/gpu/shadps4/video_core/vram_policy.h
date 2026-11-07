@@ -35,8 +35,9 @@
 // frees nothing by its own rules: no garbage, no trims at loading screens, while tight or when full.
 // Only the game's own calls decide (beta 3: whatever VRAM's level): textures built when the game
 // creates them, images freed when it destroys their textures or makes something new over their
-// memory (beta 5), stale images with no game texture over them (beta 4); its data in VRAM stays, as
-// on the PS4, until the game unmaps the memory (beta 5). Nothing idle leaves VRAM otherwise: an image
+// memory (beta 5), stale images with no game texture over them (beta 4) and stale images the GPU drew
+// once the game's memory under them was written over (beta 6); its data in VRAM stays, as on the
+// PS4, until the game unmaps the memory (beta 5). Nothing idle leaves VRAM otherwise: an image
 // VRAM has no room for goes to system memory (beta 5, UniqueImage::Create).
 #pragma once
 
