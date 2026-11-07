@@ -165,10 +165,17 @@ public:
     /// bbport: counts accesses that may write the image (Runtime::Transit with a write access,
     /// backing swaps): unchanged, the image holds what it held (BufferCache::tile_memos).
     u64 write_seq = 0;
-    /// Hunter's Workshop (StoreTiledImage): the collector does not try storing this image again
+    /// Hunter's Workshop (BeginStore): the collector does not try storing this image again
     /// before this tick; each failure doubles the wait (store_failures).
     u64 store_retry_tick = 0;
     u8 store_failures = 0;
+    /// Beta 14: a store into the game's memory is under way (TextureCache::BeginStore).
+    bool store_pending = false;
+    /// Beta 16: built ahead of its first draw (TextureCache::BuildAhead): 1 not drawn yet, 2 drawn.
+    u8 ahead = 0;
+    /// Beta 15 (research): the collector pass at which the game destroyed the texture at its address
+    /// (engine/gx_resources.h); 0: none.
+    u64 gx_dead_tick = 0;
     ImageId depth_id{};
     u64 depth_uid{};
     u64 image_uid{};

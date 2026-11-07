@@ -711,7 +711,22 @@ bool PipelineCache::RefreshGraphicsKey(PipelineSelection& sel) {
                           regs.depth_buffer.NumSamples() == 1 && !regs.IsClipDisabled() &&
                           regs.stage_enable.raw == AmdGpu::ShaderStageEnable::VgtStages::Vs;
     }
+    // 0.4.5 beta 17: a vertex program already known with object motion (the warm-up loads only the
+    // permutations its saved pipelines use, so the ordinary one, needed only to look at the
+    // buffers, was translated again in every session: about 40 shaders, 36 ms, after the first
+    // load) is asked for with motion first; the ordinary permutation is built only if this draw
+    // turns out not to get motion.
     sel.motion = false;
+    if (motion_possible) {
+        const auto* pgm = regs.ProgramForStage(static_cast<u32>(HwStage::Vertex));
+        if (pgm && pgm->Address<u32*>()) {
+            const auto params = AmdGpu::GetParams(*pgm);
+            std::shared_lock lk{programs_mutex};
+            if (const auto it = program_cache.find(params.hash); it != program_cache.end()) {
+                sel.motion = std::atomic_ref<bool>(it->second->has_motion).load(std::memory_order_relaxed);
+            }
+        }
+    }
 
     // First pass to fill render target information needed by shader recompiler
     for (s32 cb = 0; cb < AmdGpu::NUM_COLOR_BUFFERS && !skip_cb_binding; ++cb) {
@@ -743,6 +758,8 @@ bool PipelineCache::RefreshGraphicsKey(PipelineSelection& sel) {
         return false;
     }
     if (motion_possible) {
+        const bool asked_motion = sel.motion;
+        bool want = false;
         const auto* vs = sel.infos[static_cast<u32>(Shader::SwStage::Vertex)];
         if (vs) {
             // Shaders with a bone palette (motion_history.h). Small skeletons (weapons,
@@ -753,7 +770,7 @@ bool PipelineCache::RefreshGraphicsKey(PipelineSelection& sel) {
                 const auto buffer = resource.GetSharp(*vs);
                 if (buffer.Valid() && buffer.GetStride() == 16 &&
                     Motion::ClassifyBuffer(buffer.GetSize()) != Motion::BufferRole::Other) {
-                    sel.motion = true;
+                    want = true;
                     break;
                 }
             }
@@ -777,7 +794,7 @@ bool PipelineCache::RefreshGraphicsKey(PipelineSelection& sel) {
             if (logged.insert(vs->pgm_hash ^ std::hash<std::string>{}(sizes)).second) {
                 std::printf("Motion select: vs %016llx %s, buffers (size/stride):%s\n",
                             static_cast<unsigned long long>(vs->pgm_hash),
-                            sel.motion ? "ON " : "off", sizes.c_str());
+                            want ? "ON " : "off", sizes.c_str());
             }
         }
         // Keep the old broad path available for visual A/B tests.
@@ -786,9 +803,11 @@ bool PipelineCache::RefreshGraphicsKey(PipelineSelection& sel) {
             return value && value[0] == '1';
         }();
         if (all_motion) {
-            sel.motion = true;
+            want = true;
         }
-        if (sel.motion && !RefreshGraphicsStages(sel)) {
+        // The stages again only if the choice differs from the permutations asked for.
+        sel.motion = want;
+        if (want != asked_motion && !RefreshGraphicsStages(sel)) {
             return false;
         }
     }
