@@ -307,8 +307,8 @@ int RunProbe(const fs::path& probe, const std::vector<std::wstring>& arguments, 
 // 0.4.4 beta 28: switches that stand for several (the launcher passes one value; the engine's own
 // switches keep their names for tests). Safe mode (BB_SAFE_MODE=1, the run after a crash): every
 // experimental option and the mods off, a crash guard on; it sets its values whatever was set. Fast
-// draws and compile skipping off (BB_FAST_DRAWS=0, BB_COMPILE_SKIP=0) turn off their parts, except a
-// part set on its own (0.4.5 beta 14: BB_VRAM_BUDGET went with the one VRAM manager); BB_SYNC=legacy puts back the synchronisation of
+// draws, compile skipping and the VRAM budget off (BB_FAST_DRAWS=0, BB_COMPILE_SKIP=0, BB_VRAM_BUDGET=0)
+// turn off their parts, except a part set on its own; BB_SYNC=legacy puts back the synchronisation of
 // before the GPU work's fences were honest (every fallback the A/B tests kept, the GX region tracked). The same table is in run.sh (switch groups);
 // tests/test_switch_groups.py checks they agree.
 // switch-groups-begin
@@ -323,10 +323,10 @@ const SwitchGroup kSwitchGroups[] = {
      {
          {"BB_FAST_LOADING", "0"}, {"BB_FRAME_FIXES", "0"}, {"BB_HOT_PAGES", "0"}, {"BB_GX_IN_PLACE", "0"},
          {"BB_NATIVE_CALLS", "0"}, {"BB_PRECISE_PACING", "0"}, {"BB_VBLANK_PACING", "0"},
-         {"BB_INDIRECT_CLAMP", "1"}, {"BB_GPU_THREAD_PRIORITY", "0"},
+         {"BB_INDIRECT_CLAMP", "1"}, {"BB_IMAGE_WRITEBACK_GC", "0"}, {"BB_GPU_THREAD_PRIORITY", "0"},
          {"BB_AUDIO_THREAD_PRIORITY", "0"}, {"BB_NATIVE_SHADERS", "0"}, {"BB_SLEEP_SPIN_US", "600"},
          {"BB_ASYNC_PIPELINES", "0"}, {"BB_OCCLUSION", "0"}, {"BB_MODS_ENABLED", "0"},
-         {"BB_FAST_DRAWS", "0"}, {"BB_COMPILE_SKIP", "0"}}},
+         {"BB_FAST_DRAWS", "0"}, {"BB_COMPILE_SKIP", "0"}, {"BB_VRAM_BUDGET", "0"}}},
     {"BB_FAST_DRAWS", "0", false,
      {
          {"BB_SUBMIT_END_TASKS", "0"}, {"BB_MEMO_REVALIDATE", "0"}, {"BB_SAMPLER_MEMO", "0"},
@@ -334,6 +334,9 @@ const SwitchGroup kSwitchGroups[] = {
     {"BB_COMPILE_SKIP", "0", false,
      {
          {"BB_SKIP_UNCOMPILED", "0"}, {"BB_LATE_PIPELINE_BIND", "0"}, {"BB_PIPELINE_TAKE", "0"}}},
+    {"BB_VRAM_BUDGET", "0", false,
+     {
+         {"BB_GC_PRESSURE_PERCENT", "0"}, {"BB_GC_PRESSURE_SECONDS", "0"}}},
     {"BB_SYNC", "legacy", false,
      {
          {"BB_HONEST_LABELS", "0"}, {"BB_GX_IN_PLACE", "0"}, {"BB_PIPE_SIGNALS", "0"}, {"BB_SUBMIT_LOCK", "gpu"},

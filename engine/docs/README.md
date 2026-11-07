@@ -6,7 +6,7 @@ features are in [archive/](archive/README.md) (was `history/`).
 
 ## For players and testers
 
-- [release-notes-0.4.5.md](release-notes-0.4.5.md) (in beta), [0.4.4](release-notes-0.4.4.md),
+- [release-notes-0.4.5.md](release-notes-0.4.5.md), [0.4.4](release-notes-0.4.4.md),
   [0.4.3](release-notes-0.4.3.md), [0.4.2](release-notes-0.4.2.md), [0.4.0](release-notes-0.4.0.md):
   what changed in each release.
 - [MODS.md](MODS.md): file mods, where they go and how the engine merges them.

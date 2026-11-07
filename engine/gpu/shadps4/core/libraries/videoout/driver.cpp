@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
-#include <array>
 #include <atomic>
 #include <cmath>
 #include <string>
@@ -47,8 +46,6 @@ extern "C" uint64_t runtime_heap_growths(void);
 #include "video_core/amdgpu/liverpool.h"
 #include "video_core/renderer_vulkan/pipeline_compile_queue.h"
 #include "video_core/renderer_vulkan/vk_breadcrumbs.h"
-#include "video_core/vram_policy.h"
-#include "engine/gx_resources.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
@@ -368,7 +365,7 @@ static void PrintMemory() {
     std::printf("Memory: VRAM %llu MiB, GTT %llu MiB, RSS %llu MiB; Vulkan memory %llu MiB "
                 "allocated (VMA blocks %llu MiB, %llu MiB of them used); Vulkan images %llu MiB; "
                 "cached images %llu MiB in %llu; guest blocks in VRAM %llu MiB allocated, "
-                "%llu MiB of it unused (%llu MiB moved back idle, %llu MiB unmapped, %llu MiB freed; %llu chunks, %llu emptied, blocks kept: %llu GPU-written, %llu not direct memory); VRAM manager: usage %llu MiB, tight from %llu MiB; texture collector: %llu images freed, %llu GPU-written kept\n",
+                "%llu MiB of it unused (%llu MiB moved back idle, %llu MiB unmapped, %llu MiB freed; %llu chunks, %llu emptied, blocks kept: %llu GPU-written, %llu not direct memory); texture collector: usage %llu MiB, starts at %llu MiB, %llu images freed, %llu GPU-written kept\n",
                 (unsigned long long)(vram_kib >> 10), (unsigned long long)(gtt_kib >> 10),
                 (unsigned long long)(rss >> 20), (unsigned long long)(device >> 20),
                 (unsigned long long)(vma_blocks >> 20), (unsigned long long)(vma_used >> 20),
@@ -423,10 +420,6 @@ static void LogRam() {
                     mib(BbStats::residency_unused_bytes.load()));
     }
 #endif
-    // 0.4.5 beta 14-16: the VRAM manager's minute (vram_policy.h) and the game's own resource calls the
-    // texture cache follows (engine/gx_resources.h).
-    VideoCore::VramPolicy::LogMinute();
-    BbEngine::GxResources::LogMinute();
     // Where that RAM is: on the first report, then every five minutes. Listing every resident page
     // takes a while, so not on this (the presenting) thread.
     static int reports = 0;
@@ -447,55 +440,6 @@ static void LogRam() {
 /// "Memory:" line, without BB_FRAME_STATS: FPS falling over a session (90 to 50 after a few
 /// deaths, players 2026-10) shows here as one of them climbing with it. `flips` and
 /// `worst_ms`, `slow` (frames over 33 ms) since the last call, `seconds` ago.
-/// 0.4.5 beta 14: the "Building shaders" note (bbport_overlay.cpp) shows for 2 s after a frame that
-/// came late while shaders were being prepared: the time since the previous flip over 1.5 times
-/// the median of the last 64 (a missed refresh), and shader work in it (translation, pipelines
-/// built on the spot, waits for a pipeline: g_bb_compile_ns_total) at least half of how late it
-/// was. Until beta 13 it showed once a burst of that work added up to 30 ms: it missed the
-/// stutters of 10 to 17 ms of it in one frame and showed for longer bursts that made none late.
-std::atomic<s64> g_shader_late_until_ns{0};
-std::atomic<u32> g_shader_late_count{0};
-/// 0.4.5 beta 15: the frame limit's period (0: none), for the VRAM manager's slack.
-static std::atomic<u64> g_cap_period_ns{0};
-
-static void NoteShaderStutter(double flip_ms) {
-    static std::array<double, 64> recent{};
-    static u32 flips = 0;
-    static u64 last_ns = Vulkan::g_bb_compile_ns_total.load(std::memory_order_relaxed);
-    static u32 last_count = Vulkan::g_bb_compiles_total.load(std::memory_order_relaxed);
-    const u64 ns = Vulkan::g_bb_compile_ns_total.load(std::memory_order_relaxed);
-    const u32 count = Vulkan::g_bb_compiles_total.load(std::memory_order_relaxed);
-    const double work_ms = double(ns - last_ns) / 1e6;
-    const u32 items = count - last_count;
-    last_ns = ns;
-    last_count = count;
-    double median = 0.0;
-    if (flips >= 16) {
-        std::array<double, 64> sorted = recent;
-        const size_t n = std::min<size_t>(flips, sorted.size());
-        std::nth_element(sorted.begin(), sorted.begin() + n / 2, sorted.begin() + n);
-        median = sorted[n / 2];
-    }
-    recent[flips++ % recent.size()] = flip_ms;
-    // 0.4.5 beta 15: the VRAM manager's slack (BbStats::flips_on_time): flips in a row that came on
-    // time and at the frame limit (the game waiting for it, so work beside it does not show). No
-    // frame limit, or frames slower than it (the GPU or the CPU the limit): no slack.
-    const double cap_ms = double(g_cap_period_ns.load(std::memory_order_relaxed)) / 1e6;
-    if (median > 0.0 && cap_ms > 0.0 && median <= cap_ms * 1.03 && flip_ms <= 1.5 * median) {
-        BbStats::flips_on_time.fetch_add(1, std::memory_order_relaxed);
-    } else if (median > 0.0) {
-        BbStats::flips_on_time.store(0, std::memory_order_relaxed);
-    }
-    if (median > 0.0 && flip_ms > 1.5 * median && work_ms > 0.0 &&
-        work_ms >= (flip_ms - median) / 2.0) {
-        const s64 now = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                            std::chrono::steady_clock::now().time_since_epoch())
-                            .count();
-        g_shader_late_count.store(std::max(items, 1u), std::memory_order_relaxed);
-        g_shader_late_until_ns.store(now + 2'000'000'000, std::memory_order_relaxed);
-    }
-}
-
 static void LogLoad(double seconds, u64 flips, double worst_ms, u64 slow) {
     struct Snapshot {
         u64 draws, dispatches, cpu_us, faults, tracker_faults, protects, protect_pages;
@@ -592,7 +536,6 @@ void VideoOutDriver::Flip(const Request& req) {
         const double flip_ms =
             std::chrono::duration<double, std::milli>(flip_time - load_last).count();
         load_last = flip_time;
-        NoteShaderStutter(flip_ms);
         ++load_flips;
         load_slow += flip_ms > 33.0;
         load_worst_ms = std::max(load_worst_ms, flip_ms);
@@ -1203,7 +1146,6 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
     }
     auto frame_period = frame_limit ? std::chrono::nanoseconds(1000000000 / frame_limit)
                                     : std::chrono::nanoseconds(0);
-    g_cap_period_ns.store(u64(frame_period.count()), std::memory_order_relaxed);
     auto next_flip = std::chrono::steady_clock::now();
     // A flip waits for its slot, a frame period after the one before: on time (within a quarter of a period)
     // the slots keep their cadence, so a sleep's overshoot never adds up. After a late flip they start again from

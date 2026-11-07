@@ -26,13 +26,6 @@ that has been done. Paths are relative to `engine/`; shadPS4's (`video_core/...`
   (render target copies, object motion, depth copies and more; `docs/changelog.md`):
   beta 12 ran 95.5 FPS at about 1,750 draws, and at the 1,360-draw spot, where the GPU was the
   limit, beta 12 and 0.4.3 ran the same (below).
-- **0.4.5 beta 14:** one VRAM manager for textures and the game's data (`vram_policy.h`; plan.md
-  step 3): nothing leaves VRAM for its age while it has room, and textures the GPU drew are stored
-  without waiting for the GPU. What follows is how it was found.
-- **0.4.5 beta 15-16:** the texture cache follows the game's own textures (`engine/gx_resources.h`):
-  built ahead of their first draw when the game creates them with their data (during loading
-  screens, below the comfortable line), freed when it destroys them. The VRAM manager (three lines,
-  loading screens and frames with slack, whole 64 MiB chunks of the game's data) covers the rest.
 - **After 0.4.4 (2026-11-05):** the VRAM cleanup of the game's data unused for 3 minutes
   (`EvictIdleCopies`, from bbport) is behind almost every long frame left at 60 FPS, and it churns
   uploads while VRAM has room. The evidence: [performance.md](performance.md); the work:
@@ -208,7 +201,7 @@ since 0.4.4 beta 9 ("Its own buffer", below).
 2. **Keep residency chunks longer.** Raise the idle wait for returning empty 64 MiB chunks, or keep
    one or two empty ones beyond the spare, so the next area doesn't allocate again.
    *Done in 0.4.4 beta 1* (`FreeEmptyChunks`): with room in VRAM an empty chunk waits 30 s
-   (`BB_VRAM_CHUNK_KEEP_SECONDS` until 0.4.5 beta 14, fixed since; 0: 5 s as before) and the 64 MiB chunk emptied last stays; while
+   (`BB_VRAM_CHUNK_KEEP_SECONDS`; 0: 5 s as before) and the 64 MiB chunk emptied last stays; while
    VRAM is tight, 5 s and none kept. Not with the PC memory model, whose evacuations start on free
    slots.
 3. **Pin at load (model on).** Import every chunk of the game's direct memory while a loading

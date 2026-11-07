@@ -51,6 +51,9 @@ namespace BloodborneLauncher.Views
             Tracked(SymbolRegular.Code24, L.T("Legacy shader compiler"),
                 L.T("Off by default: the native compiler reads constant data through the GPU's constant cache. On compiles the game's shaders the way earlier versions did: try it if something draws wrong. Switching recompiles every shader once"),
                 "legacy_shaders", exp, line: L.T("Compiles shaders the old way, if something draws wrong"));
+            Tracked(SymbolRegular.Broom24, L.T("VRAM cleanup"),
+                L.T("Frees video memory held by textures the GPU drew, so long sessions don't fill up VRAM and slow down. Recommended: on"),
+                "exp_vram_cleanup", exp, line: L.T("Frees VRAM held by textures the GPU drew"));
             Tracked(SymbolRegular.Timer24, L.T("Precise frame pacing"),
                 L.T("A high-resolution timer and even spacing between frames: steadier frame times and less VRR flicker. Uses a little CPU. On by default"),
                 "exp_frame_pacing", exp, line: L.T("Steadier frame times and less VRR flicker"));
@@ -62,6 +65,9 @@ namespace BloodborneLauncher.Views
             Tracked(SymbolRegular.Shield24, L.T("Particle work safety cap"),
                 L.T("Checks the size of the game's GPU particle work before the graphics card runs it, and caps it to what the card supports. Only if the game crashes with \"device lost\" in effect-heavy scenes. It costs smoothness in busy scenes. Off by default"),
                 "exp_particle_cap", exp, line: L.T("For \"device lost\" crashes in effect-heavy scenes"));
+            Feature(SymbolRegular.Storage24, L.T("Use more VRAM for textures"),
+                L.T("Keeps textures in video memory up to 80% of the card instead of about 40%, so they aren't thrown out and loaded again (the cause of most stutters on 8 GB cards)"),
+                "exp_vram_budget", exp, line: L.T("Up to 80% of VRAM for textures, for less stutter"));
             Tracked(SymbolRegular.TopSpeed24, L.T("Graphics threads first"),
                 L.T("Runs the engine's graphics threads at a higher CPU priority than the game's other threads, so a frame isn't held up behind them. On by default"),
                 "exp_thread_priority", exp, line: L.T("Graphics threads at a higher CPU priority"));
@@ -117,12 +123,6 @@ namespace BloodborneLauncher.Views
             Switch("BB_PIPELINE_THREADS");
             Switch("BB_FILE_PREFETCH");
             Switch("BB_BACKGROUND_FPS");
-            // 0.4.5 beta 14: one VRAM manager for textures and the game's data (the engine's
-            // vram_policy.h); this lowers where it starts freeing. Replaces VRAM cleanup and Use more
-            // VRAM for textures.
-            Tracked(SymbolRegular.Storage24, L.T("Use less VRAM"),
-                L.T("The engine frees the textures and game data that have gone unused longest once the game uses 65% of the graphics card's memory, instead of 80%. Only if the game runs out of video memory: freeing sooner can cost some stutter. Off by default"),
-                "less_vram", line: L.T("Frees textures and game data sooner. Only if the game runs out of video memory"));
 
             Group(L.T(EngineSwitches.Sound));
             TrackedCombo(SymbolRegular.Speaker224, L.T("Sound output"),

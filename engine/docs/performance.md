@@ -13,8 +13,7 @@ a line says otherwise. Written on 2026-11-04 and 05 from the tester's logs:
 ## In short
 
 - **Smoothness at 60 FPS.** Almost every long frame left comes from one mechanism: the VRAM
-  cleanup of the game's data unused for 3 minutes. With it off (35 minutes, 2026-11-06), no long
-  frame in play and no write faults; see "With the cleanup off".
+  cleanup of the game's data unused for 3 minutes. A session with it off is still to come.
 - **Frame rate above about 130 FPS.** The GPU is the limit, and not because of the pixels it
   draws.
   - **About 240 small steps a frame:** most of the GPU's frame is a chain of small steps, each
@@ -40,66 +39,14 @@ a line says otherwise. Written on 2026-11-04 and 05 from the tester's logs:
 - The log reports the cleanup only at each 256 MiB and at most 20 times, so the minute it is
   charged to is approximate.
 
-**The cleanup churns.** The hour-long session `20261103_220626` (the Hunter's Dream and two areas, game
-maps m26 and m32, m32 loaded 8 times; not chalice dungeons, as this read before):
+**The cleanup churns.** The hour of chalice dungeons (`20261103_220626`):
 
 - 3.6 GB of the game's data left VRAM for being unused 180 s, while VRAM in use stayed at
   2.9–4.2 GB of 7.2.
 - The game's data in VRAM never passed 1.5 GB, so most of it left more than once. Each return
   was an upload.
 
-## With the cleanup off
-
-**One session, 35 minutes at 60 FPS** (`20261106_032525`, beta 13, `BB_VRAM_CLEANUP_SECONDS=0`; the
-DLC's areas and the Hunter's Dream, 7 loads; frame statistics, GPU time and hitch reports on, so
-heavier logging than the baseline's standard log). Against the November 3rd hour (`20261103_220626`,
-0.4.4, the cleanup on):
-
-| | Cleanup off (35 min) | Cleanup on (58 min) |
-|---|---|---|
-| Frames over 33 ms | 2 (3.4 an hour) | 9 (9.3 an hour) |
-| Minutes with a frame of 50 ms or more | 1 (69 ms, right after a 3.4 s load: 16 pipelines built, 400 MB of uploads) | 3 (119, 213 and 85 ms) |
-| Long frames in play, away from loads | none | the cleanup's |
-| Write faults a second (median, 90th percentile, most) | 0, 0, 10 | 22.5, 407, 2,913 |
-| VRAM in use, most (of 7,249 MiB) | 3,932 MiB | 4,189 MiB |
-| The game's data in VRAM, most | 1,408 MiB | 1,472 MiB |
-
-- **The game's data stops growing by itself:** it reached 1.4 GB and stayed, about what the
-  baseline peaked at with the cleanup on. Keeping it cost nothing on this card (VRAM 54% of the
-  driver's budget at most).
-- **The write faults were the cleanup's:** blocks freed and loaded back are watched again, so the
-  game's next writes to them fault. With nothing freed there were none.
-- **Pacing:** stddev 0.11 ms (median of the 5 s windows), p99 17.0 ms. The other frames over 20 ms
-  were the windows after loads, with new areas' shaders compiled (712 compiles, 0.66 s in all,
-  the DLC's areas not in the pipeline cache yet).
-- **Every late frame, from the frame pacing lines** (the game's flip intervals, what the player
-  sees; the frame statistics' "worst frame" is the longest of the same intervals, and agrees in every
-  window; an earlier reading here said it was the GPU thread's, corrected 2026-11-06): 13
-  frames over 1.5 times the median (a missed 60 Hz refresh, 33 ms on screen) in 430 windows.
-  - 7 in the first 20 s (the start and its first load).
-  - 6 in play, one at a time, each within 90 s after a load into one of the DLC's areas, each
-    while that area's new shaders were translated and its pipelines compiled (6 to 15 in the
-    window; up to 13 shaders translated, 16.6 ms; draws waiting up to 3 ms for a pipeline), two
-    of them also while the area's files streamed in (73 and 167 MB/s).
-  - None in the last 29 minutes.
-  - The pipeline cache was empty (the tester cleared it): 410 shaders translated (341 ms in all,
-    longest 4.3 ms) and 301 pipelines compiled in the session; both are kept for later sessions.
-  - No "Building shaders" note: it shows once a burst of shader work (gaps under 2 s) adds up to
-    30 ms. It counts translation, pipelines built on the spot and waits for a pipeline
-    (`CompileTimer`, `Pipeline::WaitReady`); background compiles nothing waited for are left out.
-    Each of these stutters was 10 to 17 ms of that in one frame, under the mark; meanwhile
-    bursts of 40 to 60 ms spread over a second or two, with no late frame, did reach it.
-  - No hitch report: the watcher is quiet for 20 s at the start, during loading screens and for
-    10 s after each; the two frames over 40 ms (the start; 69 ms after a 3.4 s load) fell there.
-- **Headroom at 60 FPS:** the GPU thread idle 80% of the time, stage B busy 15% (32% at most), the
-  game waiting 14.8 ms of each 16.7 ms frame for its flip. Loads 1.75–3.43 s.
-- **Caveats:** 35 minutes, not an hour; other areas than the baseline's; more logging on.
-
 ## The VRAM cleanup, in the code
-
-*Replaced in 0.4.5 beta 14 by one VRAM manager for the texture cache and the buffer cache
-(`vram_policy.h`, plan.md step 3): nothing leaves for its age while VRAM has room. This section is
-how it was until beta 13.*
 
 The cleanup is `EvictIdleCopies` (`buffer_cache.cpp`). It runs from `Maintain` on stage B, every
 10 s while VRAM has room: level 0 of `UpdateVramLevel`, below 85% of the driver's budget.

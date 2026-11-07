@@ -128,11 +128,6 @@ public:
     bool InvalidateMemory(VAddr addr, u64 size, bool assume_locks = false);
     /// bbport: data written into GPU memory by a path we hear of (file reads into it): invalidated.
     void NoteAssetWrite(VAddr addr, u64 size);
-    /// 0.4.5 beta 16 (the game's thread): the game destroyed its texture at [addr, addr + size): its
-    /// images stop watching their pages before the game writes the next texture there.
-    void ReleaseDestroyedTexture(VAddr addr, u64 size) {
-        texture_cache.ReleaseDestroyed(addr, size);
-    }
     /// bbport (stage A, BB_CONSTRAM_PIPE, default on): before the command processor writes guest
     /// memory with the CPU (a constant RAM dump), waits until the recording thread has run the
     /// queued packets that read those bytes (their buffer bindings, DMA), not all of them.

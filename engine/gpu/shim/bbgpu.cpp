@@ -13,7 +13,6 @@
 #include "bbport_platform.h"
 #include "bbport_toggles.h"
 #include "engine/engine_hooks.h"
-#include "engine/gx_resources.h"
 #include <algorithm>
 #include <atomic>
 #include <condition_variable>
@@ -160,12 +159,6 @@ void MemoryManager::SetRasterizer(Vulkan::Rasterizer* rasterizer_) {
     // invalidated.
     runtime_memory_set_note_write_hook([](uintptr_t address, uint64_t size) {
         Memory::Instance()->GetRasterizer()->NoteAssetWrite(address, size);
-    });
-    // 0.4.5 beta 16: a texture the game destroyed (engine/gx_resources.h, the game's thread).
-    BbEngine::GxResources::SetDestroyedHook([](std::uint64_t address, std::uint64_t size) {
-        if (auto* rasterizer = Memory::Instance()->GetRasterizer()) {
-            rasterizer->ReleaseDestroyedTexture(address, size);
-        }
     });
 }
 void MemoryManager::InvalidateMemory(VAddr address, u64 size) {

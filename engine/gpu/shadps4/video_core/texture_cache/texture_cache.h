@@ -25,12 +25,8 @@
 #include "video_core/texture_cache/image.h"
 #include "video_core/texture_cache/image_view.h"
 #include "video_core/texture_cache/sampler.h"
-#include "video_core/renderer_vulkan/vk_staging_buffer_pool.h"
 #include "video_core/texture_cache/tile_manager.h"
 #include "video_core/texture_cache/watched_pages.h"
-#include "video_core/vram_policy.h"
-#include "engine/gx_resources.h"
-#include <unordered_map>
 
 namespace AmdGpu {
 struct Liverpool;
@@ -59,6 +55,11 @@ struct InvalidateReason {
 };
 
 class TextureCache {
+    // Default values for garbage collection
+    static constexpr s64 DEFAULT_PRESSURE_GC_MEMORY = 1_GB + 512_MB;
+    static constexpr s64 DEFAULT_CRITICAL_GC_MEMORY = 3_GB;
+    static constexpr s64 TARGET_GC_THRESHOLD = 8_GB;
+
     using ImageIds = boost::container::small_vector<ImageId, 16>;
 
     struct Traits {
@@ -115,8 +116,7 @@ public:
     /// bbport: FindImage's access tick for an image found by a memoized lookup. The LRU touch
     /// FindImage also does happens in UpdateImage (FindTexture), which every binding reaches.
     void MarkFound(ImageId image_id) {
-        Image& image = slot_images[image_id];
-        image.tick_accessed_last = scheduler.CurrentTick();
+        slot_images[image_id].tick_accessed_last = scheduler.CurrentTick();
     }
 
     /// bbport: whether FindImage's result `image_id` for `info` is an exact match: the
@@ -153,11 +153,6 @@ public:
 
     /// Invalidates any image in the logical page range.
     void InvalidateMemory(VAddr addr, size_t size);
-
-    /// Beta 16 (the game's thread, when it destroys a texture: GxResources' hook): the images of
-    /// [addr, addr + size) stop watching their pages and become garbage, so the next texture the game
-    /// makes there writes them without faulting page by page. Neighbours sharing a page keep theirs.
-    void ReleaseDestroyed(VAddr addr, size_t size);
 
     /// bbport: uploads the game's button icons again when what they show changed (keyboard and
     /// mouse prompts, engine/key_prompts.h). Once a frame, without the lock.
@@ -449,66 +444,10 @@ private:
     /// Copies image memory back to CPU.
     void DownloadImageMemory(ImageId image_id, bool sync = false);
 
-    /// Hunter's Workshop 0.4.5 beta 14: an image the GPU drew, stored into the game's memory so
-    /// the collector may free it (VRAM full). The GPU copies it out (a tiled one through the
-    /// tiling shader, in the game's layout) into a staging buffer, and the collector frees it once
-    /// the GPU has done that (CompletePendingStores), without waiting for it here. The image keeps
-    /// watching its pages meanwhile: a game write there waits for this copy alone, lands it, then
-    /// goes on top (LandStore, from InvalidateMemory), the order a synchronous store kept. An image
-    /// whose pages are not all watched is stored synchronously, as before. False when it cannot be
-    /// stored (its layout, other GPU data over it): it stays.
-    bool BeginStore(ImageId image_id);
-
-    /// A store begun by BeginStore: the copy's staging buffer, where it goes, and its submission.
-    struct PendingStore {
-        ImageId image_id;
-        u64 image_uid;
-        Vulkan::StagingBufferRef staging;
-        VAddr address;
-        u64 size;
-        u64 tick;     ///< the submission holding the copy
-        u64 accessed; ///< the image's tick_accessed_last once recorded: changed, it is in use again
-        bool tiled;
-        bool landed = false;   ///< written into the game's memory already (LandStore)
-        bool stored = false;   ///< ... and the game's memory took it
-        bool orphaned = false; ///< the image was freed meanwhile (an unmap): nothing is written
-        /// Other images over its range (id, uid): they read the game's memory again once stored.
-        boost::container::small_vector<std::pair<ImageId, u64>, 4> others;
-    };
-
-    /// Writes a store's copy into the game's memory, waiting for its submission if needed (a game
-    /// write that met the image): the image then no longer holds data only VRAM has. Not when GPU
-    /// work wrote that memory meanwhile (the copy is older): it then stays, as it is.
-    /// `from_collector`: on the collector's thread, where the buffer cache may be asked.
-    bool LandStore(PendingStore& store, bool from_collector);
-
-    /// Frees the images whose stores the GPU has done (each collector pass).
-    void CompletePendingStores();
-
-    /// An image with a store under way is freed (FreeImage): the store writes nothing.
-    void OrphanStore(ImageId image_id);
-
-    /// Beta 15: whether the image was used in the last `seconds` (by the collector's per-second ticks;
-    /// counted as used where no tick of that second is known).
-    bool UsedSince(const Image& image, u64 second, u32 seconds) const;
-    /// Beta 15-16 (once a second): the game's destroyed textures against the images; beta 16 frees
-    /// them (FreeDeadImages) once the GPU is done with them.
-    void ProcessGxDestroyed();
-    void FreeDeadImages(u64 second);
-    /// Beta 16: the textures the game created with their data, built ahead of their first draw
-    /// (BuildAhead: each collector pass, outside the cache's lock, within a time slice).
-    void BuildAhead();
-    /// Beta 15 (once a second, any VRAM level): garbage textures.
-    void GarbagePass(u64 second);
-    /// Beta 15: what to free and in which order, once a second while the VRAM manager trims.
-    void BuildPlan(u64 second);
-    /// ... and freed in slices, each pass while the VRAM manager allows it.
-    void ExecutePlan();
-    /// Beta 15 (once a minute): what the images are, for the VRAM manager's line.
-    void ClassifyForMinute(u64 second);
-    /// Beta 15: an image the collector frees: remembered 5 minutes (refaults); its bytes, and of them
-    /// what goes back to the driver at once (memory of its own).
-    void NoteCollected(const Image& image, u64 second, VramPolicy::Freed kind);
+    /// Hunter's Workshop: stores a GPU-written tiled image into guest memory in its tiled layout,
+    /// synchronously, so the collector may free it. False when this image cannot be stored (its
+    /// layout, other GPU data over it, a mapping lost meanwhile): it then stays resident.
+    bool StoreTiledImage(ImageId image_id);
 
     /// Thread function for copying downloaded images out to CPU memory.
     void DownloadedImagesThread(const std::stop_token& token);
@@ -559,9 +498,6 @@ private:
     void TouchImage(const Image& image);
 
     void FreeImage(ImageId image_id) {
-        if (slot_images[image_id].store_pending) {
-            OrphanStore(image_id);
-        }
         UntrackImage(image_id);
         UnregisterImage(image_id);
         DeleteImage(image_id);
@@ -583,55 +519,23 @@ private:
     Common::SlotVector<ImageView> slot_image_views;
     tsl::robin_map<u64, Sampler> samplers;
     std::unordered_set<ImageId> download_images;
+    u64 total_used_memory = 0;
     u64 gc_evictions = 0, gc_downloads = 0; ///< bbport: pressure report
     /// bbport (image write-back GC): tiled images written back / kept (write-back refused or
     /// failed) since the last pressure report.
     u64 gc_tiled_written = 0, gc_tiled_kept = 0;
     std::chrono::steady_clock::time_point gc_report_time{};
-    /// bbport: gc_tick at each of the last 512 seconds (GarbageCollectImages; ages up to the VRAM
-    /// manager's 5 minutes).
-    std::array<u64, 512> gc_tick_at_second{};
+    /// bbport: gc_tick at each of the last 64 seconds (GarbageCollectImages).
+    std::array<u64, 64> gc_tick_at_second{};
     u64 gc_second = 0;
-    /// Beta 14: stores under way (BeginStore), and those the image's later use cancelled since the
-    /// last pressure report.
-    std::vector<PendingStore> pending_stores;
-    u64 gc_stores_cancelled = 0;
-    /// Beta 15: the scheduler's tick at each of the last 512 seconds (UsedSince).
-    std::array<u64, 512> sched_tick_at_second{};
-    /// Beta 15: images the game or the GPU wrote over (candidates for GarbagePass): id and uid.
-    std::vector<std::pair<ImageId, u64>> garbage_candidates;
-    /// Beta 15: the plan (BuildPlan) and where ExecutePlan is in it.
-    struct PlanItem {
-        ImageId image_id;
-        u64 image_uid;
-        u8 major; ///< 0 garbage, 1 cache, 3 idle while full, 4 drawn by the GPU
-        bool small;
-        u64 bytes;
-    };
-    std::vector<PlanItem> plan;
-    size_t plan_pos = 0;
-    u64 plan_second = 0, plan_sched_tick = 0, plan_gc_tick = 0, minute_second = 0;
-    /// Beta 15: images freed in the last 5 minutes, by address (refaults): size and second.
-    std::unordered_map<VAddr, std::pair<u64, u64>> freed_recent;
-    std::deque<VAddr> freed_order;
-    std::vector<BbEngine::GxResources::Gone> gx_gone;
-    /// Beta 16: images of textures the game destroyed, waiting for the GPU to be done with them.
-    std::vector<std::pair<ImageId, u64>> dead_images;
-    /// Beta 16: textures to build ahead (BuildAhead), and where each was built: its info, for the
-    /// log when a draw makes another image there (a miss).
-    std::deque<BbEngine::GxResources::Ahead> ahead_jobs;
-    std::vector<BbEngine::GxResources::Ahead> ahead_new;
-    struct AheadBuilt {
-        ImageId image_id;
-        u64 image_uid;
-        u32 width, height, levels, layers;
-        u32 format, tile;
-    };
-    std::unordered_map<VAddr, AheadBuilt> ahead_at; ///< under `mutex`
-    u32 ahead_misses_logged = 0;
-    /// Beta 16-17: BuildAhead's time in the current 16 ms window (ns) and when that window began.
-    s64 ahead_ns = 0;
-    s64 ahead_window = 0;
+    u64 trigger_gc_memory = 0;
+    u64 pressure_gc_memory = 0;
+    u64 critical_gc_memory = 0;
+    /// bbport: shadPS4's marks from the startup budget, the floor of the discrete-GPU rule
+    /// (GarbageCollectImages), and the second the driver's budget was last asked for.
+    u64 static_pressure_gc_memory = 0;
+    u64 static_critical_gc_memory = 0;
+    u64 gc_budget_second = ~0ull;
     u64 total_used_samplers = 0;
     u64 sampler_generation = 0; ///< bbport: samplers freed so far (SamplerGeneration)
     u64 trigger_gc_samplers = 0;

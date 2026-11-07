@@ -2,10 +2,11 @@
 
 What comes next, and the rules and decisions it works under. Updated 2026-11-05.
 
-- **Where it stands:** 0.4.4 was released on 2026-11-03 (`cbec5a2`, engine id 64). 0.4.5 is in
-  beta: beta 7 (engine id 71) holds step 1's three changes and the cleanup after them. Step 1 took
-  the lamp spot from 135.0 to 143.5 FPS (GPU 7.40 to 6.96 ms) and the second spot from 122.2 to
-  130.3 (8.18 to 7.67 ms), the picture unchanged (release-notes-0.4.5.md).
+- **Where it stands:** 0.4.5 was released on 2026-11-07 from beta 13 (engine id 84): step 1, the GPU
+  steps, measured against 0.4.4 in the same scenes at +8.4% at the lamp spot, +7.1% at a second spot
+  and +2.4% in the Hunter's Dream (release-notes-0.4.5.md). The VRAM and texture work that followed
+  (0.4.5 betas 14 to 19) goes on as the 0.4.6 betas. 0.4.4 was released on 2026-11-03 (`cbec5a2`,
+  engine id 64).
 - **Where the work goes:** the branch `claude/awesome-gates-cjba5e`, until a beta has its own
   (`claude/0.4.5-beta-N`).
 
@@ -144,12 +145,12 @@ memory cleanup after them. The evidence for each item is in [performance.md](per
   lamps, ~970 draws) 146.3 to 149.8 (+2.4%). The tester saw GPU use 96 to 98% and power 245 to 258 W
   at the second spot: less energy a frame (2.00 to 1.97 J), more of the GPU busy at once.
 
-**The rest of 0.4.5, in order** (the tester's choice, 2026-11-06: 0.4.5 goes on as betas; stable
-when the tester says).
+**What comes after 0.4.5, in order** (the tester's choice, 2026-11-06; 0.4.5 shipped from beta 13 on
+2026-11-07, and what follows goes into the 0.4.6 betas).
 
-1. **Beta 13, the cleanup:** beta 8's copy trace and `BB_SHADOW_COPY_SKIP` removed. `BB_COPY_HOLD`
-   and `BB_COPY_MERGE` stay through the stable release (the merged copies' shader has run on the
-   tester's NVIDIA card only), then go.
+1. **Done in beta 13, the cleanup:** beta 8's copy trace and `BB_SHADOW_COPY_SKIP` removed.
+   `BB_COPY_HOLD` and `BB_COPY_MERGE` stay in 0.4.5 (the merged copies' shader has run on the
+   tester's NVIDIA card only) and go in 0.4.6.
 2. **The barriers that remain:** about 23 a frame at the lamp spot. A measurement beta: reads
    tracked exactly instead of by 4 KiB (`BbToggle::CoarseReadTracking`) behind a switch in Extra
    variables, with the barrier counts by what they wait for; the same scene with and without. Built
@@ -158,14 +159,7 @@ when the tester says).
    profile): why the GPU runs out of work there, and whether the submissions can overlap.
 4. **Step 2, shader code** (below), with the Hunter's Dream as its scene: there DLAA's 0.96 ms, the
    G-buffer pass's 0.74 ms and the lighting passes are most of the frame.
-5. **Step 3, the memory cleanup: beta 16** (below). Its test: a normal session of about 30 minutes
-   with lamp travel, and one with `BB_VRAM_TEST_BUDGET_MB=3500` in Extra variables (a 4 GB card), a
-   long route through several areas. Read: the frames after loading screens (Frame stats' worst
-   frame and the Stall lines' images registered), `GX follow` (built, drawn, misses), the VRAM
-   manager's minute. **Next, by the numbers:** the misses' descriptions if many; the game's data
-   followed the same way (buffers built ahead, freed on release: the `GX research` line says how
-   much of it sits in VRAM); shaders translated when the game creates them, if the shader counts and
-   the post-load shader work say it is worth it.
+5. **Step 3** once the tester's play session with the cleanup off is in (below).
 6. `mem-4` and `upscale-2`/`-3` when one of the above passes near them (0.1 ms at most; the second
    only at reduced upscaler presets).
 
@@ -181,42 +175,15 @@ when the tester says).
 
 **Step 3: the memory cleanup, for smoothness at every frame rate.**
 
-- **The tester's session with it off** (2026-11-06, performance.md "With the cleanup off"): no long
-  frame in play, write faults gone (median 22.5 a second to 0), the game's data level at 1.4 GB,
-  VRAM at most 54% of the driver's budget. So on a card with room the cleanup only costs.
-- **Beta 14 (the tester's call, 2026-11-06): one VRAM manager** (`vram_policy.h`) for the texture
-  cache and the buffer cache, in place of the first step proposed (the age cleanup only above 70%).
-  With room in VRAM (below 80% of the driver's budget) nothing leaves for its age, textures (until
-  then 20 s on cards up to about 10 GB) or the game's data (180 s). From 80% the longest unused goes
-  first, both alike, in steps (5 minutes, 2, 1, 30 s) until 75%; from 90% 10 s then 1 s, and
-  textures the GPU drew are stored into the game's memory without the GPU wait. The launcher's two
-  VRAM rows are one, "Use less VRAM" (65%). The points below remain for smaller cards' logs.
-- **Beta 15 (the tester's call, 2026-11-06, on beta 14's log):** beta 14 overshot (freed memory
-  shows in the driver's count only once whole allocations go back) and its single blocks of the
-  game's data gave nothing back. So the manager learns where the player is (areas from the files
-  the game opens, visits, scores and the likely next areas, nothing hard-coded), keeps three lines
-  (comfortable 70, tight 80, full 90), frees at loading screens and only with slack in play, takes
-  garbage first and whole 64 MiB chunks, and logs refaults and what went back to the driver. It also
-  listens to the game's GX texture and buffer calls (research, logged only).
-- **Beta 17 (2026-11-07, on beta 16's logs):** loads after the first: 1 of 10 with a frame over 33
-  ms (beta 15: 11 of 20). The session's first load translated about 40 shaders every session (the
-  ordinary permutations motion draws asked for only to look at their buffers): asked with motion
-  first now. Building ahead paced per 16 ms; the game's data in released buffers freed.
-- **Beta 16 (the tester's call, 2026-11-07, on beta 15's logs):** the area tracker removed (it would
-  work against the game, which says what it creates and destroys); the texture cache follows the
-  game's textures: built during the loading screen that creates them (from the T# its graphics layer
-  builds, as bbhost does), freed when it destroys them. The VRAM manager stays for what the game does
-  not say and for cards without the room.
-
-- **Evict by the VRAM budget, not by age alone.** Done in beta 14 (above).
-- **Paced:** in play, at most a set amount a second (beta 15: 12 ms a second and one 64 MiB chunk of
-  the game's data, only while frames have slack); loading screens trim down to the comfortable line
-  (beta 15).
+- **Evict by the VRAM budget, not by age alone.** While VRAM is below a share of the driver's budget
+  (`VK_EXT_memory_budget`, which `UpdateVramLevel` already reads), nothing leaves; above that share,
+  the oldest leaves first. The 8 GB laptops the cleanup was added for stay covered, since their budget
+  fills.
+- **Paced:** in play, at most a set amount a second; larger batches during loading screens.
 - **The bind waits only for the work that used the evicted blocks.** This needs a last-use tick per
   block; until then, the unbinds go in batches on loading screens.
 - **With it, the counters:** MiB and blocks per cleanup, stage B's time in it, bind waits, and blocks
-  coming back within 10 minutes (the churn). Beta 15: freed by kind, returned to the driver at once,
-  and what came back within 5 minutes (refaults, which raise the comfortable line).
+  coming back within 10 minutes (the churn).
 - **Expected:** 3 of the 4 long-frame minutes of the 217 gone, with the uploads and write faults of
   the churn.
 - **Later, if the logs still show stutter after loads:** eFMann's ideas
@@ -245,7 +212,9 @@ when the tester says).
 
 ### Waiting on the tester
 
-- **Beta 14's two runs** (step 3, above).
+- **The cleanup off, one session, before step 3 (in a real play session, later):** an hour at 60
+  FPS, ideally a chalice dungeon, with `BB_VRAM_CLEANUP_SECONDS=0` in Extra variables. The launcher's "VRAM cleanup"
+  row is another cleanup, of textures, and stays on.
 
 ## Next, after the performance work
 

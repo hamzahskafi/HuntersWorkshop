@@ -15,6 +15,7 @@ namespace BloodborneLauncher.Core
         {
             ("exp_fast_draws", true),
             ("exp_compile_skip", true),
+            ("exp_vram_budget", true),
         };
 
         public static readonly Choice[] Choices =

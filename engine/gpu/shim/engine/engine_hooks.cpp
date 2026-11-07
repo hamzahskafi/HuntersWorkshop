@@ -114,14 +114,8 @@ std::uint8_t* EmitPrologueStub(std::uint8_t* c, std::uint64_t id, void* host, st
 
 bool Prepare(Hook& hook, std::uint8_t* image, std::size_t size, std::size_t offset,
              std::span<const std::uint8_t> expected, Callback callback) {
-    return PrepareDisplaced(hook, image, size, offset, expected, expected, callback);
-}
-
-bool PrepareDisplaced(Hook& hook, std::uint8_t* image, std::size_t size, std::size_t offset,
-                      std::span<const std::uint8_t> expected, std::span<const std::uint8_t> displaced,
-                      Callback callback) {
-    if (!image || !callback || expected.size() < 14 || expected.size() > 128 || displaced.empty() ||
-        displaced.size() > 128 || offset > size || expected.size() > size - offset ||
+    if (!image || !callback || expected.size() < 14 || expected.size() > 128 ||
+        offset > size || expected.size() > size - offset ||
         std::memcmp(image + offset, expected.data(), expected.size()) != 0) return false;
 #ifdef _WIN32
     auto* page = static_cast<std::uint8_t*>(VirtualAlloc(nullptr, 4096, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
@@ -134,9 +128,9 @@ bool PrepareDisplaced(Hook& hook, std::uint8_t* image, std::size_t size, std::si
     hook = {image + offset, page, expected.size()};
     const std::uint8_t* end = EmitPrologueStub(page, 0, reinterpret_cast<void*>(callback),
         reinterpret_cast<std::uint64_t>(image + offset + expected.size()),
-        displaced.data(), displaced.size(), false);
+        expected.data(), expected.size(), false);
     // The displaced instructions sit before the stub's final jmp [rip+0] and its 8-byte target.
-    hook.original = reinterpret_cast<std::uint64_t>(end - 14 - displaced.size());
+    hook.original = reinterpret_cast<std::uint64_t>(end - 14 - expected.size());
 #ifdef _WIN32
     DWORD previous = 0;
     if (!VirtualProtect(page, 4096, PAGE_EXECUTE_READ, &previous) ||
@@ -210,52 +204,6 @@ bool Divert(Hook& hook, std::uint8_t* image, std::size_t size, std::size_t offse
     __builtin___clear_cache(reinterpret_cast<char*>(page), reinterpret_cast<char*>(page + 4096));
 #endif
     return true;
-}
-
-std::uint8_t* ReturnStub(After after) {
-    if (!after) return nullptr;
-#ifdef _WIN32
-    auto* page = static_cast<std::uint8_t*>(VirtualAlloc(nullptr, 4096, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
-    if (!page) return nullptr;
-#else
-    auto* page = static_cast<std::uint8_t*>(mmap(nullptr, 4096, PROT_READ | PROT_WRITE,
-        MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
-    if (page == MAP_FAILED) return nullptr;
-#endif
-    // Reached by the hooked method's ret, so rsp is 16-byte aligned here: two pushes keep the call
-    // aligned. The method's result (rax, rdx) is kept; `after` returns where the method was called
-    // from, and the stub goes on there.
-    std::uint8_t* c = page;
-    static constexpr std::uint8_t kHead[] = {
-        0x50,              // push rax
-        0x52,              // push rdx
-        0x48, 0x89, 0xc7,  // mov rdi, rax: the result, `after`'s argument
-        0x48, 0xb8,        // movabs rax, after
-    };
-    std::memcpy(c, kHead, sizeof(kHead));
-    c += sizeof(kHead);
-    const auto fn = reinterpret_cast<std::uint64_t>(after);
-    std::memcpy(c, &fn, 8);
-    c += 8;
-    static constexpr std::uint8_t kTail[] = {
-        0xff, 0xd0,        // call rax
-        0x49, 0x89, 0xc3,  // mov r11, rax: the return address
-        0x5a,              // pop rdx
-        0x58,              // pop rax
-        0x41, 0xff, 0xe3,  // jmp r11
-    };
-    std::memcpy(c, kTail, sizeof(kTail));
-#ifdef _WIN32
-    DWORD previous = 0;
-    if (!VirtualProtect(page, 4096, PAGE_EXECUTE_READ, &previous) ||
-        !FlushInstructionCache(GetCurrentProcess(), page, 4096)) {
-        FreeStub(page); return nullptr;
-    }
-#else
-    if (mprotect(page, 4096, PROT_READ | PROT_EXEC)) { FreeStub(page); return nullptr; }
-    __builtin___clear_cache(reinterpret_cast<char*>(page), reinterpret_cast<char*>(page + 4096));
-#endif
-    return page;
 }
 
 void FreeStub(std::uint8_t* stub) {

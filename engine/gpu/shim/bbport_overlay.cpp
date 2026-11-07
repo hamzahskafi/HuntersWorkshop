@@ -79,11 +79,10 @@ extern "C" void runtime_restart(void); // bb-probe (probe.c)
 extern "C" void bbnet_exit_begin(int timeout_ms); // bbnet_glue.cpp: out of a co-op room at exit
 extern "C" void bbnet_exit_wait(void);
 
-namespace Libraries::VideoOut {
-// driver.cpp (NoteShaderStutter): a frame came late while shaders were being prepared.
-extern std::atomic<s64> g_shader_late_until_ns;
-extern std::atomic<u32> g_shader_late_count;
-} // namespace Libraries::VideoOut
+namespace Vulkan {
+extern std::atomic<u64> g_bb_compile_ns_total; // vk_pipeline_cache.cpp
+extern std::atomic<u32> g_bb_compiles_total;
+} // namespace Vulkan
 
 namespace BbOverlay {
 
@@ -1807,27 +1806,51 @@ void Menu() {
 // bbport: the FPS counter's box this frame (the compile note sits next to it); zero: not drawn.
 ImVec2 fps_box_min{}, fps_box_max{};
 
-// bbport: "Building shaders" while shaders are prepared in play (a place seen for the first time):
-// a hitch with the note was shader building, one without it loading (Linux report, 0.9.37 beta 6).
-// 0.4.5 beta 14: for 2 s after a frame that came late while shaders were being prepared, decided
-// at each flip (driver.cpp, NoteShaderStutter); until then once a burst of that work added up to
-// 30 ms, late frame or not.
+// bbport: "Building shaders" while pipelines are built in play (a place seen for the first time):
+// a hitch with the note was shader building, one without it loading (Linux report, 0.9.37 beta
+// 6). A burst of compiles (gaps under 2 s) shows it once it took 30 ms, until 1.5 s after its last.
+std::mutex compile_note_mutex;
+bool compile_note_primed = false;
+u64 compile_note_seen_ns = 0, compile_note_burst_ns = 0;
+u32 compile_note_seen = 0, compile_note_burst = 0;
+std::chrono::steady_clock::time_point compile_note_last{};
+
 bool CompileNoteActive() {
     if (!BbSettings::Get().show_compile_note) {
         return false;
     }
-    const s64 until = Libraries::VideoOut::g_shader_late_until_ns.load(std::memory_order_relaxed);
-    if (until == 0) {
+    const u64 ns = Vulkan::g_bb_compile_ns_total.load(std::memory_order_relaxed);
+    const u32 count = Vulkan::g_bb_compiles_total.load(std::memory_order_relaxed);
+    const auto now = std::chrono::steady_clock::now();
+    std::scoped_lock lock{compile_note_mutex};
+    if (!compile_note_primed) {
+        // The start's warm-up is not a hitch in play.
+        compile_note_primed = true;
+        compile_note_seen_ns = ns;
+        compile_note_seen = count;
         return false;
     }
-    const s64 now = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                        std::chrono::steady_clock::now().time_since_epoch())
-                        .count();
-    return now < until;
+    if (ns != compile_note_seen_ns) {
+        if (now - compile_note_last > std::chrono::seconds(2)) {
+            compile_note_burst_ns = 0;
+            compile_note_burst = 0;
+        }
+        compile_note_burst_ns += ns - compile_note_seen_ns;
+        compile_note_burst += count - compile_note_seen;
+        compile_note_seen_ns = ns;
+        compile_note_seen = count;
+        compile_note_last = now;
+    }
+    return compile_note_burst_ns >= 30'000'000ull &&
+           now - compile_note_last < std::chrono::milliseconds(1500);
 }
 
 void CompileNote() {
-    const u32 burst = Libraries::VideoOut::g_shader_late_count.load(std::memory_order_relaxed);
+    u32 burst;
+    {
+        std::scoped_lock lock{compile_note_mutex};
+        burst = compile_note_burst;
+    }
     // Under the FPS counter (above it at the bottom), else in the top right corner, where the
     // game's HUD has nothing.
     const ImGuiViewport* viewport = ImGui::GetMainViewport();

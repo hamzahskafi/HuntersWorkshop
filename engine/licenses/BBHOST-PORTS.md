@@ -107,16 +107,3 @@ wind sites (b2818b4, 5cee912): the wind's step half the frame's, as a per-frame 
 force weighed by the game's 1/60. gpu/shim/engine/frame_rate.cpp's SelfHit follows
 frame_rate_atk_params_loaded (6f735f4): the Bloodletter's L2 self-hit 0.4 -> 0.6 m, found again every 120
 frames through the param lookup above rather than at bbhost's table-load event.
-
-https://github.com/droogie/bbhost/tree/566184a74f071166299bb656c4af479e5bbe2771
-
-gpu/shim/engine/gx_resources.cpp takes the addresses of the game's GX creators (CreateBuffer, CreateTexture,
-CreateTexture3D), the four texture destructors, the buffer release, the T# builder the 2D creator runs and the
-four shader creators, and the holder's fields (memory at +0x20, size at +0x2c, type at +0x38), from
-src/engine/gx_resources.cpp and src/hle/gx_trace.cpp; bbhost's addresses are its load address 0x400000 above
-these. Each site's bytes are checked against 1.09. The creators return through a stub and the destructors are
-hooked with their rip-relative lea re-encoded, as bbhost does. Textures made ahead of their first draw follow
-bbhost's create_ahead (a 2D texture created with initial data, its T# with the base filled in, made off the
-creating thread): here the texture cache builds them in its collector pass during loading screens, below the
-VRAM manager's comfortable line, and a destroyed texture's pages are released on the game's thread
-(release_pages) through the texture cache's own untracking.

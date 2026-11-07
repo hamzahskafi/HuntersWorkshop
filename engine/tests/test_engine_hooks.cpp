@@ -40,21 +40,6 @@ static std::int64_t __attribute__((sysv_abi)) Instead(std::int64_t a, std::int64
     return 10 * (a + b + c + d + e + f);
 }
 
-// A creator's return through ReturnStub (gx_resources.cpp): the callback keeps the caller's return
-// address and points the method's return at the stub, which hands the result to After and goes on
-// to the address it returns, with the result intact.
-static std::uint8_t* return_stub;
-static std::uint64_t kept_return, seen_result;
-static std::int64_t __attribute__((sysv_abi)) Redirect(std::uint64_t, const std::uint64_t* saved) {
-    kept_return = saved[6];
-    const_cast<std::uint64_t*>(saved)[6] = reinterpret_cast<std::uint64_t>(return_stub);
-    return 0;
-}
-static std::uint64_t __attribute__((sysv_abi)) After(std::uint64_t result) {
-    seen_result = result;
-    return kept_return;
-}
-
 // Writes test code into the image. Commit leaves a page it wrote read and execute only on Linux (WriteCode),
 // as the loader's protections will; the test's own writes open it again first.
 static void Put(std::uint8_t* at, const void* bytes, std::size_t n) {
@@ -161,47 +146,10 @@ int main() {
     assert(BbEngine::Call(reinterpret_cast<std::uint64_t>(image + 0x200), 1,2,3,4,5,6) == 21);
     assert(calls == 1 && arguments == (std::array<std::uint64_t,6>{1,2,3,4,5,6}));
     BbEngine::FreeStub(stub);
-
-    // A method's return through a return stub (the GX creators).
-    Put(image, expected.data(), expected.size());
-    Put(image + 16, sum, sizeof sum);
-    return_stub = BbEngine::ReturnStub(After);
-    assert(return_stub);
-    BbEngine::Hook returned;
-    assert(BbEngine::Prepare(returned, image, 4096, 0, expected, Redirect));
-    BbEngine::Commit(std::span{&returned, 1});
-    assert(BbEngine::Call(reinterpret_cast<std::uint64_t>(image), 1,2,3,4,5,6) == 21 && seen_result == 21);
-    assert(BbEngine::Call(reinterpret_cast<std::uint64_t>(image), 10,2,3,4,5,6) == 30 && seen_result == 30);
-    BbEngine::Discard(returned);
-    BbEngine::FreeStub(return_stub);
-    Put(image, expected.data(), expected.size());
-
-    // A site that starts with a rip-relative lea (the GX texture destructors): the displaced bytes
-    // re-encode it as movabs of the same address, so the stub computes what the site did.
-    // lea rax,[rip+disp] (to image+0x400); 9 nops; mov rax,[rax]; ret
-    std::uint8_t site[20] = {0x48, 0x8d, 0x05};
-    const std::int32_t disp = 0x400 - (0x300 + 7);
-    std::memcpy(site + 3, &disp, 4);
-    std::memset(site + 7, 0x90, 9);
-    site[16] = 0x48; site[17] = 0x8b; site[18] = 0x00; site[19] = 0xc3;
-    Put(image + 0x300, site, sizeof site);
-    const std::uint64_t value = 77;
-    Put(image + 0x400, &value, 8);
-    std::uint8_t moved[19] = {0x48, 0xb8};
-    const auto address = reinterpret_cast<std::uint64_t>(image + 0x400);
-    std::memcpy(moved + 2, &address, 8);
-    std::memset(moved + 10, 0x90, 9);
-    BbEngine::Hook displaced;
-    calls = 0;
-    assert(!BbEngine::PrepareDisplaced(displaced, image, 4096, 0x300, expected, moved, Observe));
-    assert(BbEngine::PrepareDisplaced(displaced, image, 4096, 0x300, std::span{site, 16}, moved, Observe));
-    BbEngine::Commit(std::span{&displaced, 1});
-    assert(BbEngine::Call(reinterpret_cast<std::uint64_t>(image + 0x300), 1,2,3,4,5,6) == 77 && calls == 1);
-    BbEngine::Discard(displaced);
 #ifdef _WIN32
     VirtualFree(image, 0, MEM_RELEASE);
 #else
     munmap(image, 4096);
 #endif
-    std::puts("PASS: guest ABI arguments (seven with a stack argument), XMM preservation, return slot, byte/range guards, staged hook installation, the game's function run from a callback, a replaced function, a cave, a redirected tail call, a return stub and a displaced rip-relative prologue");
+    std::puts("PASS: guest ABI arguments (seven with a stack argument), XMM preservation, return slot, byte/range guards, staged hook installation, the game's function run from a callback, a replaced function, a cave and a redirected tail call");
 }

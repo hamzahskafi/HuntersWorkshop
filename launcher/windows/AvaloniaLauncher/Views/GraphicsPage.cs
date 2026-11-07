@@ -122,6 +122,9 @@ namespace BloodborneLauncher.Views
             SettingToggle(SymbolRegular.Code24, L.T("Legacy shader compiler"),
                 L.T("Off by default: the native compiler reads constant data through the GPU's constant cache. On compiles the game's shaders the way 0.9.33 did: try it if something draws wrong. Switching recompiles every shader once"),
                 "legacy_shaders", exp);
+            SettingToggle(SymbolRegular.Broom24, L.T("VRAM cleanup"),
+                L.T("Frees video memory held by textures the GPU drew, so long sessions don't fill up VRAM and slow down. Recommended: on"),
+                "exp_vram_cleanup", exp);
             SettingToggle(SymbolRegular.Timer24, L.T("Precise frame pacing"),
                 L.T("A high-resolution timer and even spacing between frames: steadier frame times and less VRR flicker. Uses a little CPU. On by default"),
                 "exp_frame_pacing", exp);
@@ -131,11 +134,9 @@ namespace BloodborneLauncher.Views
             SettingToggle(SymbolRegular.Shield24, L.T("Particle work safety cap"),
                 L.T("Checks the size of the game's GPU particle work before the graphics card runs it, and caps it to what the card supports. Only for games that crash with \"device lost\" in effect-heavy scenes. It costs smoothness in busy scenes. Off by default"),
                 "exp_particle_cap", exp);
-            // 0.4.5 beta 14: one VRAM manager (the engine's vram_policy.h); replaces VRAM cleanup and
-            // Use more VRAM for textures, as the Windows launcher.
-            SettingToggle(SymbolRegular.Storage24, L.T("Use less VRAM"),
-                L.T("The engine frees the textures and game data that have gone unused longest once the game uses 65% of the graphics card's memory, instead of 80%. Only if the game runs out of video memory: freeing sooner can cost some stutter. Off by default"),
-                "less_vram", exp);
+            Feature(SymbolRegular.Storage24, L.T("Use more VRAM for textures"),
+                L.T("Keeps textures in video memory up to 80% of the card instead of about 40%, so they aren't thrown out and loaded again (the cause of most stutters on 8 GB cards)"),
+                "exp_vram_budget", exp);
             SettingToggle(SymbolRegular.TopSpeed24, L.T("Graphics threads first"),
                 L.T("Runs the engine's graphics threads at a higher CPU priority than the game's other threads, so a frame isn't held up behind them. On by default"),
                 "exp_thread_priority", exp);
