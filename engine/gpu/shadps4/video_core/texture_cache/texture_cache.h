@@ -495,6 +495,11 @@ private:
     /// them (FreeDeadImages) once the GPU is done with them.
     void ProcessGxDestroyed();
     void FreeDeadImages(u64 second);
+    /// 0.4.6 beta 3: whether an image is of a texture the game destroyed (not used since, and not
+    /// GPU-drawn contents another live texture may share), and if so whether the GPU is done with it.
+    /// Under `mutex`.
+    enum class Dead { No, Busy, Free };
+    Dead DeadImageState(const Image& image);
     /// Beta 16: the textures the game created with their data, built ahead of their first draw
     /// (BuildAhead: each collector pass, outside the cache's lock, within a time slice).
     void BuildAhead();
@@ -621,6 +626,8 @@ private:
     /// log when a draw makes another image there (a miss).
     std::deque<BbEngine::GxResources::Ahead> ahead_jobs;
     std::vector<BbEngine::GxResources::Ahead> ahead_new;
+    /// 0.4.6 beta 3: jobs whose memory holds a destroyed texture's image the GPU still uses.
+    std::vector<BbEngine::GxResources::Ahead> ahead_wait;
     struct AheadBuilt {
         ImageId image_id;
         u64 image_uid;

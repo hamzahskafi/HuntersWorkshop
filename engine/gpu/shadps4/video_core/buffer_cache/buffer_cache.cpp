@@ -1743,11 +1743,11 @@ void BufferCache::ReleaseResidencySlot(vk::DeviceMemory memory, u64 offset) {
     NoteResidencyUnused();
 }
 
-void BufferCache::EvictVramBlock(u64 block) {
+bool BufferCache::EvictVramBlock(u64 block, bool watch) {
     const auto old = resident_ranges.Find(block);
     if (old == resident_ranges.end() || in_place_blocks.Contains(block) ||
         !residency_chunks.contains(static_cast<VkDeviceMemory>(old->memory))) {
-        return;
+        return false;
     }
     const vk::DeviceMemory memory = old->memory;
     const u64 offset = (old->offset + (block - old->start)) << block_shift;
@@ -1763,13 +1763,45 @@ void BufferCache::EvictVramBlock(u64 block) {
         }
     }
     resident_ranges.Subtract(block, block + 1);
-    memory_tracker->UnmarkRegionAsGpuModified(address, block_size);
-    gpu_modified_ranges.Subtract(address, block_size);
-    memory_tracker->MarkRegionAsCpuModified(address, block_size);
+    if (watch) {
+        memory_tracker->UnmarkRegionAsGpuModified(address, block_size);
+        gpu_modified_ranges.Subtract(address, block_size);
+        memory_tracker->MarkRegionAsCpuModified(address, block_size);
+    }
     ReleaseResidencySlot(memory, offset);
     // After the work submitted so far: it may still read the block.
     bind_wait_tick = std::max(bind_wait_tick, scheduler.CurrentTick() - 1);
     BbStats::vram_unmapped_bytes.fetch_add(block_size, std::memory_order_relaxed);
+    return true;
+}
+
+void BufferCache::EvictVramBlocks(std::vector<u64>& blocks) {
+    std::sort(blocks.begin(), blocks.end());
+    blocks.erase(std::unique(blocks.begin(), blocks.end()), blocks.end());
+    size_t kept = 0;
+    for (const u64 block : blocks) {
+        if (EvictVramBlock(block, false)) {
+            blocks[kept++] = block;
+        }
+    }
+    blocks.resize(kept);
+    // Their page table entries are cleared: a shader reading one through it reports a fault and
+    // the block is bound again (ProcessFaultBuffer) instead of the shader reading unbound memory.
+    for (size_t i = 0; i < blocks.size();) {
+        size_t j = i + 1;
+        while (j < blocks.size() && blocks[j] == blocks[j - 1] + 1) {
+            ++j;
+        }
+        const VAddr address = blocks[i] << block_shift;
+        const u64 bytes = u64(j - i) << block_shift;
+        memory_tracker->UnmarkRegionAsGpuModified(address, bytes);
+        gpu_modified_ranges.Subtract(address, bytes);
+        memory_tracker->MarkRegionAsCpuModified(address, bytes);
+        evicted_blocks.Add({blocks[i], blocks[j - 1] + 1});
+        runtime.FillBuffer(bda_pagetable_buffer.get(), blocks[i] * sizeof(vk::DeviceAddress),
+                           (j - i) * sizeof(vk::DeviceAddress), 0u);
+        i = j;
+    }
 }
 
 void BufferCache::ProcessIdleBlocks() {
@@ -1838,26 +1870,32 @@ void BufferCache::ReleaseGxBuffers() {
     // play, the game's threads waiting in their write faults). With room nothing leaves VRAM (beta
     // 14's rule); the released buffers wait here (released_pending, 10 minutes), the first data to
     // go once VRAM is tight.
-    if (TwinsEnabled() || VramPolicy::Off()) {
+    // 0.4.6 beta 3: with the manager off (BB_VRAM_MANAGER=0) the game's releases decide alone: its
+    // data leaves VRAM whatever the room, paced as below (at a loading screen, or in play while
+    // frames have slack), its pages unwatched once per run of blocks (EvictVramBlocks).
+    if (TwinsEnabled()) {
         return;
     }
+    const bool follow = VramPolicy::Off();
     const u32 now = BbStats::coarse_second.load(std::memory_order_relaxed);
     while (!released_pending.empty() &&
            now - u32(released_pending.front().ns / 1'000'000'000ull) > 600) {
         released_pending.pop_front();
     }
     const u32 dma = dma_second.load(std::memory_order_relaxed);
-    if (released_pending.empty() || VramPolicy::Comfortable() || (dma != 0 && now - dma < VramPolicy::CacheSeconds)) {
+    if (released_pending.empty() || (!follow && VramPolicy::Comfortable()) ||
+        (dma != 0 && now - dma < VramPolicy::CacheSeconds)) {
         return;
     }
     // A second's share: 2048 blocks (128 MiB of 64 KiB blocks) at a loading screen or when full, 512
     // while tight (only when frames have slack) or between the comfortable and tight lines.
     using VramPolicy::Mode;
+    const bool loading = BbEngine::Loading::ScreenUp();
     const Mode mode = VramPolicy::CurrentMode();
-    if (mode == Mode::Tight && !VramPolicy::Allowed()) {
+    if (follow ? !loading && !VramPolicy::Slack() : mode == Mode::Tight && !VramPolicy::Allowed()) {
         return;
     }
-    const size_t budget = BbEngine::Loading::ScreenUp() || mode == Mode::Full ? 2048 : 512;
+    const size_t budget = loading || mode == Mode::Full ? 2048 : 512;
     std::vector<u64> blocks;
     while (!released_pending.empty() && blocks.size() < budget) {
         const auto released = released_pending.front();
@@ -1885,21 +1923,7 @@ void BufferCache::ReleaseGxBuffers() {
         return;
     }
     const auto start = std::chrono::steady_clock::now();
-    std::sort(blocks.begin(), blocks.end());
-    blocks.erase(std::unique(blocks.begin(), blocks.end()), blocks.end());
-    for (const u64 block : blocks) {
-        EvictVramBlock(block);
-        evicted_blocks.Add({block, block + 1});
-    }
-    for (size_t i = 0; i < blocks.size();) {
-        size_t j = i + 1;
-        while (j < blocks.size() && blocks[j] == blocks[j - 1] + 1) {
-            ++j;
-        }
-        runtime.FillBuffer(bda_pagetable_buffer.get(), blocks[i] * sizeof(vk::DeviceAddress),
-                           (j - i) * sizeof(vk::DeviceAddress), 0u);
-        i = j;
-    }
+    EvictVramBlocks(blocks);
     VramPolicy::NoteFreed(VramPolicy::Freed::Released, u64(blocks.size()) * block_size, 0);
     VramPolicy::NoteWork(std::chrono::duration_cast<std::chrono::nanoseconds>(
                              std::chrono::steady_clock::now() - start)
@@ -2015,26 +2039,12 @@ void BufferCache::EvictIdleCopies(u32 now) {
     if (blocks.empty()) {
         return;
     }
-    std::sort(blocks.begin(), blocks.end());
-    blocks.erase(std::unique(blocks.begin(), blocks.end()), blocks.end());
+    EvictVramBlocks(blocks);
     for (const u64 block : blocks) {
-        EvictVramBlock(block);
-        evicted_blocks.Add({block, block + 1});
         const u64 group = std::min<u64>((block << block_shift) >> USE_GROUP_BITS, group_use.size() - 1);
         if (evicted_group_second.size() < 65536) {
             evicted_group_second[group] = now;
         }
-    }
-    // Their page table entries are cleared: a shader reading one through it reports a fault and
-    // the block is bound again (ProcessFaultBuffer) instead of the shader reading unbound memory.
-    for (size_t i = 0; i < blocks.size();) {
-        size_t j = i + 1;
-        while (j < blocks.size() && blocks[j] == blocks[j - 1] + 1) {
-            ++j;
-        }
-        runtime.FillBuffer(bda_pagetable_buffer.get(), blocks[i] * sizeof(vk::DeviceAddress),
-                           (j - i) * sizeof(vk::DeviceAddress), 0u);
-        i = j;
     }
     VramPolicy::NoteWork(std::chrono::duration_cast<std::chrono::nanoseconds>(
                              std::chrono::steady_clock::now() - start)

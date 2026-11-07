@@ -9,7 +9,8 @@
 //     create   a texture created with its data: the T# GX built for it (its builder runs inside the
 //              creator) is queued (TakeAhead), and the texture cache builds, uploads and watches the
 //              image during the loading screen (or in play while frames have slack), below the VRAM
-//              manager's comfortable line. A draw then finds it ready.
+//              manager's comfortable line (0.4.6 beta 3, BB_VRAM_MANAGER=0: at any level; an image
+//              of a texture destroyed there goes first). A draw then finds it ready.
 //     destroy  the game is done with the texture: on the game's thread the texture cache stops
 //              watching its pages (DestroyedHook: the next texture made there writes them without a
 //              fault each), and the collector frees its image once the GPU is done with it.

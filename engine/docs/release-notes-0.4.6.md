@@ -48,8 +48,15 @@ The engine follows the game's own textures (tested as 0.4.5 betas 16 to 19):
 - `BB_GX_FOLLOW=0` in Extra variables turns the following off (counted only); `BB_GX_RESOURCES=0`
   stops listening to the game altogether.
 - `BB_VRAM_MANAGER=0` in Extra variables (beta 2, for testing on cards with room) turns the VRAM
-  manager's own freeing off and leaves only the following: textures built ahead and freed when the
-  game destroys them.
+  manager's own freeing off and leaves only the game's own calls to decide, whatever VRAM's level
+  (beta 3): textures built ahead when the game creates them, freed when it destroys them, and its
+  data freed when it releases its buffers.
+- **Following, tightened (beta 3):** the game's destroys are taken before textures are built ahead,
+  so a texture the game makes where it just destroyed one replaces it during the same loading
+  screen (before, it waited for its first draw); an image of a destroyed texture with nothing drawn
+  into it goes once the GPU is done with it, even where the game already made a new texture; and
+  memory of released buffers stops being watched in one call per stretch of memory instead of one
+  per 64 KiB.
 - **The game's released data:** the game's data in buffers the game releases leaves VRAM too, when VRAM is above
   the comfortable line (0.4.5 beta 17 freed it all at once, which stalled loading screens); building ahead is
   paced per frame (6 ms in 16 at loading screens, 2 ms in play when frames are on time), so neither

@@ -296,7 +296,13 @@ private:
     /// A VRAM slot of a block that left it: reused by the next move to VRAM.
     void ReleaseResidencySlot(vk::DeviceMemory memory, u64 offset);
     /// Unbinds a VRAM block of memory the game unmapped (uploaded again if mapped and used).
-    void EvictVramBlock(u64 block);
+    /// `watch`: its pages handed back to the game unwatched now (false: EvictVramBlocks does it per
+    /// run of blocks). Whether it left VRAM.
+    bool EvictVramBlock(u64 block, bool watch = true);
+    /// 0.4.6 beta 3: blocks leaving VRAM together (sorted, deduplicated; on return only those that
+    /// left): their pages unwatched and page table entries cleared once per run of adjacent blocks
+    /// (beta 17-18 made a protection call per 64 KiB block).
+    void EvictVramBlocks(std::vector<u64>& blocks);
     /// While VRAM is tight or full (the VRAM manager): VRAM copies of the game's data unused for
     /// the manager's time leave VRAM, the longest unused first; their slots take the next blocks
     /// instead of new VRAM, and they are uploaded again from the game's memory when bound.
