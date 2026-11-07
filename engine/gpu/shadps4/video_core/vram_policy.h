@@ -30,6 +30,11 @@
 //
 // BB_VRAM_TIGHT_PERCENT=N: tight N% (30 to 90), comfortable N - 10, full N + 10 (at most 95).
 // BB_VRAM_TEST_BUDGET_MB=N: the budget is N MiB (a smaller card on this one).
+// BB_VRAM_MANAGER=0 (0.4.6 beta 2, for testing): the manager measures and logs but frees nothing by
+// its own rules: no garbage, no trims at loading screens, while tight or when full, no released
+// buffers' data. What follows the game (textures built ahead below the comfortable line, images
+// freed when the game destroys their textures) goes on. Nothing idle leaves VRAM otherwise, even when
+// it runs out: only for cards with room.
 #pragma once
 
 #include <algorithm>
@@ -55,6 +60,7 @@ struct Config {
     u64 full_percent;
     u64 test_budget; ///< bytes; 0: the driver's
     bool less;
+    bool off = false; ///< BB_VRAM_MANAGER=0
 };
 
 [[nodiscard]] inline const Config& Settings() {
@@ -67,6 +73,9 @@ struct Config {
             c.tight_percent = std::clamp<u64>(std::strtoull(env, nullptr, 10), 30, 90);
             c.comfort_percent = c.tight_percent - 10;
             c.full_percent = std::min<u64>(c.tight_percent + 10, 95);
+        }
+        if (const char* env = std::getenv("BB_VRAM_MANAGER"); env && env[0] == '0') {
+            c.off = true;
         }
         if (const char* env = std::getenv("BB_VRAM_TEST_BUDGET_MB"); env && env[0]) {
             c.test_budget = std::strtoull(env, nullptr, 10) << 20;
@@ -163,7 +172,11 @@ inline State state;
            state.used.load(std::memory_order_relaxed) < budget / 100 * state.comfort_now.load(std::memory_order_relaxed);
 }
 [[nodiscard]] inline bool GarbageAllowed() {
-    return BbEngine::Loading::ScreenUp() || Slack();
+    return !Settings().off && (BbEngine::Loading::ScreenUp() || Slack());
+}
+/// BB_VRAM_MANAGER=0: nothing freed by the manager's own rules.
+[[nodiscard]] inline bool Off() {
+    return Settings().off;
 }
 /// Time a trim took in play (counted against this second's).
 inline void NoteWork(s64 ns) {
@@ -245,6 +258,10 @@ inline void Decide(u32 now, u64 used, u64 budget) {
                state.loading_seconds.load(std::memory_order_relaxed) >= 2) {
         mode = Mode::Load;
         to_free = s64(used - comfort);
+    }
+    if (config.off) {
+        mode = Mode::None; // measured and logged, nothing freed by these rules (BB_VRAM_MANAGER=0)
+        to_free = 0;
     }
     // While full, one step faster after a second that freed little.
     const s64 freed = state.freed_second.exchange(0, std::memory_order_relaxed);
@@ -376,7 +393,9 @@ inline void LogMinute() {
                 (unsigned long long)std::min<u64>(config.comfort_percent + state.comfort_bonus.load(),
                                                   config.tight_percent - 5),
                 (unsigned long long)config.tight_percent, (unsigned long long)config.full_percent,
-                config.less ? " (Use less VRAM)" : "");
+                config.off    ? " (the manager is off, BB_VRAM_MANAGER=0: nothing idle is freed)"
+                : config.less ? " (Use less VRAM)"
+                              : "");
     std::printf("  textures: in use %llu MiB, cache %llu, garbage %llu, drawn by the GPU %llu; the game's data: "
                 "in use %llu MiB, cache %llu, empty %llu\n",
                 mib(state.tex_in_use.load()), mib(state.tex_cache.load()), mib(state.tex_garbage.load()),

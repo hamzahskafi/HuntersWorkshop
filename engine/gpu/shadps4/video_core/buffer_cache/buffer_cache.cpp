@@ -1838,7 +1838,7 @@ void BufferCache::ReleaseGxBuffers() {
     // play, the game's threads waiting in their write faults). With room nothing leaves VRAM (beta
     // 14's rule); the released buffers wait here (released_pending, 10 minutes), the first data to
     // go once VRAM is tight.
-    if (TwinsEnabled()) {
+    if (TwinsEnabled() || VramPolicy::Off()) {
         return;
     }
     const u32 now = BbStats::coarse_second.load(std::memory_order_relaxed);
