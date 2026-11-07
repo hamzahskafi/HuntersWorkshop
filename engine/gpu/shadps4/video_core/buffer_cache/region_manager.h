@@ -81,7 +81,10 @@ public:
      * @param dirty_addr    Base address to mark or unmark as modified
      * @param size          Size in bytes to mark or unmark as modified
      */
-    template <Type type, bool enable>
+    /// 0.4.6 beta 5: `count` false for the cache's own marking (its VRAM copy left, the pages handed
+    /// back to the game): not a write of the game's, so not counted as its write faults or as a
+    /// rewrite of pre-uploaded data (beta 4 logs: those were most of the "write faults" at loads).
+    template <Type type, bool enable, bool count = true>
     void ChangeRegionState(u64 dirty_addr, u64 size) noexcept(type == Type::GPU) {
         RENDERER_TRACE;
         const size_t offset = dirty_addr - cpu_addr;
@@ -93,7 +96,7 @@ public:
         }
 
         RegionBits& bits = GetRegionBits<type>();
-        if constexpr (type == Type::CPU && enable) {
+        if constexpr (type == Type::CPU && enable && count) {
             CountWriteFaults(start_page, end_page);
             last_cpu_write_frame = BbStats::frame_number.load(std::memory_order_relaxed);
             NotePreuploadChurn();

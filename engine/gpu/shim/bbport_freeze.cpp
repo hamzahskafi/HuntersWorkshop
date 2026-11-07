@@ -16,6 +16,7 @@
 #include <windows.h>
 #include <tlhelp32.h>
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdio>
@@ -36,14 +37,24 @@ std::atomic<long long> last_flip_ms{0};
 // says what of it fell between the last frame and the late one.
 struct OwnWork {
     std::uint64_t build_ns = 0, build_images = 0, registered = 0, create_ns = 0, refresh_ns = 0, upload = 0;
+    // 0.4.6 beta 5: the buffer cache's sparse binds (calls, ranges, ns).
+    std::uint64_t bind_calls = 0, bind_ranges = 0, bind_ns = 0;
+    // 0.4.6 beta 5: images a draw made (not prepared ahead), by the game resource at their memory.
+    std::array<std::uint64_t, std::size_t(BbEngine::GxResources::Owner::kCount)> draw_made{};
 };
 OwnWork CurrentOwnWork() {
     OwnWork w;
     BbEngine::GxResources::BuildPassTotals(w.build_ns, w.build_images);
+    for (std::size_t i = 0; i < w.draw_made.size(); ++i) {
+        w.draw_made[i] = BbEngine::GxResources::DrawMadeTotal(BbEngine::GxResources::Owner(i));
+    }
     w.registered = BbStats::images_registered.load(std::memory_order_relaxed);
     w.create_ns = BbStats::t_image_create.load(std::memory_order_relaxed);
     w.refresh_ns = BbStats::t_refresh.load(std::memory_order_relaxed);
     w.upload = BbStats::image_upload_bytes.load(std::memory_order_relaxed);
+    w.bind_calls = BbStats::sparse_bind_calls.load(std::memory_order_relaxed);
+    w.bind_ranges = BbStats::sparse_bind_ranges.load(std::memory_order_relaxed);
+    w.bind_ns = BbStats::sparse_bind_ns.load(std::memory_order_relaxed);
     return w;
 }
 std::mutex own_work_mutex;
@@ -437,6 +448,24 @@ void HitchWatch() {
                             double(end.upload - hitch_start.upload) / (1024.0 * 1024.0),
                             double(end.create_ns - hitch_start.create_ns) / 1e6,
                             double(end.refresh_ns - hitch_start.refresh_ns) / 1e6);
+                std::string drawn;
+                for (std::size_t i = 0; i < end.draw_made.size(); ++i) {
+                    if (const std::uint64_t n = end.draw_made[i] - hitch_start.draw_made[i]) {
+                        drawn += (drawn.empty() ? "" : ", ") + std::to_string(n) + " " +
+                                 BbEngine::GxResources::OwnerName(BbEngine::GxResources::Owner(i));
+                    }
+                }
+                if (!drawn.empty()) {
+                    std::printf("   images draws made in it, by the game resource at their memory: %s\n",
+                                drawn.c_str());
+                }
+                if (end.bind_calls != hitch_start.bind_calls) {
+                    std::printf("   the game's data in VRAM: %llu sparse bind calls (%llu ranges bound or unbound), "
+                                "%.1f ms in the driver\n",
+                                (unsigned long long)(end.bind_calls - hitch_start.bind_calls),
+                                (unsigned long long)(end.bind_ranges - hitch_start.bind_ranges),
+                                double(end.bind_ns - hitch_start.bind_ns) / 1e6);
+                }
                 std::fflush(stdout);
                 open = false;
             }

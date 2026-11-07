@@ -9,7 +9,7 @@
 //     create   a texture created with its data: the T# GX built for it (its builder runs inside the
 //              creator) goes to the texture cache, which builds, uploads and watches the image ahead
 //              of its first draw, below the VRAM manager's comfortable line (0.4.6 beta 3,
-//              BB_VRAM_MANAGER=0: at any level; an image of a texture destroyed there goes first).
+//              the manager off, beta 5's default: at any level; an image of a texture destroyed there goes first).
 //              A draw then finds it ready.
 //     destroy  the game is done with the texture: on the game's thread the texture cache stops
 //              watching its pages (DestroyedHook: the next texture made there writes them without a
@@ -20,6 +20,15 @@
 //              thread hands that to one worker instead. The GPU thread registers what was prepared
 //              at its next submission and records the upload.
 //     release  the game's data in VRAM leaves with the buffers the game releases (buffer cache).
+//   0.4.6 beta 5 manages the game's memory as the PS4 does:
+//     create   any resource made (buffers too) is the memory's owner now: images left there from
+//              before are retired (TakeCreated, the texture cache's ProcessGxCreated).
+//     Map      a texture made without its data gets its image at its first Map (registered without
+//              an upload); Maps are counted by kind and type (a rename writes into a copy from GX's
+//              pool: the holder's memory never moves).
+//     views    render-target and depth views mark their textures (Classify, the research lines).
+//     1D       1D textures and their destructors, keyed by memory.
+//     release  frees nothing: the game's data stays in VRAM until the game unmaps the memory.
 //   Research: the game's shader creators.
 #pragma once
 #include <array>
@@ -46,6 +55,36 @@ struct Gone {
 // pass while DestroyedWaiting, which reads no lock).
 void TakeDestroyed(std::vector<Gone>& out);
 bool DestroyedWaiting();
+// 0.4.6 beta 5: the resources made since the last call (memory, size, when): that memory is theirs
+// now, so an image left there from before is no one's (the texture cache retires it).
+void TakeCreated(std::vector<Gone>& out);
+bool CreatedWaiting();
+
+// 0.4.6 beta 5: what of the game's owns a range of memory (the live resource over it, textures first).
+enum class Owner : std::uint8_t {
+    None,          // no live resource of the game's
+    Buffer,        // a buffer
+    TextureData,   // a 2D texture made with its data
+    TextureNoData, // a 2D texture made without (filled later, by the CPU or the GPU)
+    RenderTarget,  // a texture with a render-target view
+    DepthTarget,   // a texture with a depth-stencil view
+    Texture3D,
+    Texture1D,
+    kCount
+};
+const char* OwnerName(Owner owner);
+// `at_start`: whether the resource begins where the range does.
+Owner Classify(std::uint64_t begin, std::uint64_t end, bool* at_start = nullptr);
+// An image made at a draw (not prepared ahead), by its owner; running totals for the hitch reports.
+void NoteDrawMade(Owner owner, std::uint64_t bytes);
+std::uint64_t DrawMadeTotal(Owner owner);
+// Once a minute: the stale images (written over, unused 10 s) by owner, of them drawn by the GPU, and
+// the largest few described.
+void NoteStaleByOwner(const std::array<std::uint64_t, std::size_t(Owner::kCount)>& bytes,
+                      const std::array<std::uint64_t, std::size_t(Owner::kCount)>& images, std::uint64_t gpu_bytes,
+                      const char* largest);
+// Images retired because the game made something newer over their memory.
+void NoteReuseDead(std::uint64_t images, std::uint64_t bytes);
 // The buffers released since the last call (the buffer cache; 0.4.6 beta 4: every pass while
 // ReleasedWaiting, which reads no lock).
 void TakeReleased(std::vector<Gone>& out);
@@ -59,6 +98,9 @@ struct Ahead {
     std::uint32_t bytes;
     std::uint64_t ns;
     bool loading;
+    // 0.4.6 beta 5: false for a texture made without its data, prepared at its first Map: registered
+    // without an upload or a watch (its first draw does both, once the game has written it).
+    bool upload = true;
 };
 // 0.4.6 beta 4: called inside the game's create call, on its thread (or the worker's for the game's
 // main thread), for each texture created with its data (Following only).
@@ -69,8 +111,6 @@ bool StillLive(std::uint64_t memory, std::uint64_t ns);
 // Whether any live texture of the game's overlaps [begin, end) (beta 19); one starting at `skip_at`
 // (non-zero) is left out (0.4.6 beta 4: the texture being built there).
 bool LiveTextureOverlaps(std::uint64_t begin, std::uint64_t end, std::uint64_t skip_at = 0);
-// 0.4.6 beta 4: the game's live textures and buffers overlapping [begin, end), as [start, end) ranges.
-void LiveResourcesIn(std::uint64_t begin, std::uint64_t end, std::vector<std::pair<std::uint64_t, std::uint64_t>>& out);
 
 // Called on the game's thread when it destroys a texture (Following only).
 using DestroyedHook = void (*)(std::uint64_t memory, std::uint64_t bytes);

@@ -50,7 +50,8 @@ struct UniqueImage {
         : device{other.device}, allocator{std::exchange(other.allocator, VK_NULL_HANDLE)},
           allocation{std::exchange(other.allocation, VK_NULL_HANDLE)},
           image{std::exchange(other.image, VK_NULL_HANDLE)}, image_ci{std::move(other.image_ci)},
-          size_bytes{std::exchange(other.size_bytes, 0)} {}
+          size_bytes{std::exchange(other.size_bytes, 0)},
+          in_system_memory{std::exchange(other.in_system_memory, false)} {}
     UniqueImage& operator=(UniqueImage&& other) {
         if (this == &other) return *this;
         Destroy();
@@ -60,6 +61,7 @@ struct UniqueImage {
         allocation = std::exchange(other.allocation, VK_NULL_HANDLE);
         image_ci = std::move(other.image_ci);
         size_bytes = std::exchange(other.size_bytes, 0);
+        in_system_memory = std::exchange(other.in_system_memory, false);
         return *this;
     }
 
@@ -84,6 +86,8 @@ public:
     vk::Image image{};
     vk::ImageCreateInfo image_ci{};
     vk::DeviceSize size_bytes{};
+    /// 0.4.6 beta 5: its memory is system memory, not VRAM (BbStats::system_images).
+    bool in_system_memory = false;
 };
 
 struct Image {
@@ -199,6 +203,13 @@ public:
     /// Beta 15 (research): the collector pass at which the game destroyed the texture at its address
     /// (engine/gx_resources.h); 0: none.
     u64 gx_dead_tick = 0;
+    /// 0.4.6 beta 5: when it was registered (steady clock, ns); whether the game has made a resource
+    /// in its memory since (TextureCache::ProcessGxCreated: its contents are no one's now), and the
+    /// scheduler's tick at the collector pass before that resource was made (an image the GPU drew
+    /// and used from then on may hold the new resource's contents).
+    u64 registered_ns = 0;
+    u64 reuse_tick = 0;
+    bool dead_by_reuse = false;
     ImageId depth_id{};
     u64 depth_uid{};
     u64 image_uid{};

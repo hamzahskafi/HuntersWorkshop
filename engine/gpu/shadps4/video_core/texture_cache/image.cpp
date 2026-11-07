@@ -113,15 +113,17 @@ static vk::FormatFeatureFlags2 FormatFeatureFlags(const vk::ImageUsageFlags usag
 }
 
 UniqueImage::~UniqueImage() {
-    if (image) {
-        BbStats::vk_image_bytes.fetch_sub(size_bytes, std::memory_order_relaxed);
-        vmaDestroyImage(allocator, image, allocation);
-    }
+    Destroy();
 }
 
 void UniqueImage::Destroy() {
     if (image) {
         BbStats::vk_image_bytes.fetch_sub(size_bytes, std::memory_order_relaxed);
+        if (in_system_memory) {
+            BbStats::system_images.fetch_sub(1, std::memory_order_relaxed);
+            BbStats::system_image_bytes.fetch_sub(size_bytes, std::memory_order_relaxed);
+            in_system_memory = false;
+        }
         vmaDestroyImage(allocator, image, allocation);
         image = vk::Image{};
         allocation = {};
@@ -164,11 +166,33 @@ bool UniqueImage::Create(const vk::ImageCreateInfo& image_ci, bool may_fail) {
         allocation = {};
         return false;
     }
+    if (result != VK_SUCCESS) {
+        // 0.4.6 beta 5 (bbhost's host-memory fallback): every memory type within its budget refused
+        // it (VRAM full, the rest of the budget too): system memory first, over its budget, which
+        // the GPU reads over the bus, rather than stopping the game here. Counted (the VRAM line).
+        VmaAllocationCreateInfo over_ci = alloc_ci;
+        over_ci.flags = dedicated;
+        over_ci.usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST;
+        allocation = {};
+        result = vmaCreateImage(allocator, &image_ci_unsafe, &over_ci, &unsafe_image, &allocation, &alloc_info);
+        if (result == VK_SUCCESS) {
+            BbStats::image_over_budget.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
     ASSERT_MSG(result == VK_SUCCESS, "Failed allocating image with error {}",
                vk::to_string(vk::Result{result}));
     image = vk::Image{unsafe_image};
     size_bytes = alloc_info.size;
     BbStats::vk_image_bytes.fetch_add(size_bytes, std::memory_order_relaxed);
+    // Where VMA put it: VRAM normally; system memory when VRAM had no room within its budget (VMA
+    // tries the other types an image may use) or by the fallback above.
+    VkMemoryPropertyFlags memory_flags = 0;
+    vmaGetMemoryTypeProperties(allocator, alloc_info.memoryType, &memory_flags);
+    in_system_memory = (memory_flags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) == 0;
+    if (in_system_memory) {
+        BbStats::system_images.fetch_add(1, std::memory_order_relaxed);
+        BbStats::system_image_bytes.fetch_add(size_bytes, std::memory_order_relaxed);
+    }
     BbStats::image_allocs.fetch_add(1, std::memory_order_relaxed);
     return true;
 }

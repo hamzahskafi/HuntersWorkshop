@@ -499,9 +499,14 @@ private:
     /// Beta 15-16 (once a second): the game's destroyed textures against the images; beta 16 frees
     /// them (FreeDeadImages) once the GPU is done with them.
     void ProcessGxDestroyed();
+    /// 0.4.6 beta 5 (each pass the game made something): the game's new resources (any kind) against
+    /// the images. An image wholly inside one's memory, registered before it was made, holds what
+    /// the memory held before: the game has moved on, as the PS4's memory does (dead_by_reuse).
+    void ProcessGxCreated();
     void FreeDeadImages(u64 second);
     /// 0.4.6 beta 3: whether an image is of a texture the game destroyed (not used since, and not
     /// GPU-drawn contents another live texture may share), and if so whether the GPU is done with it.
+    /// 0.4.6 beta 5: or of memory the game made a new resource in (the live one there is that one).
     /// Under `mutex`. `skip_at`: a live texture there that does not count (beta 4: the one being built).
     enum class Dead { No, Busy, Free };
     Dead DeadImageState(const Image& image, VAddr skip_at = 0);
@@ -627,7 +632,7 @@ private:
     /// Beta 15: images freed in the last 5 minutes, by address (refaults): size and second.
     std::unordered_map<VAddr, std::pair<u64, u64>> freed_recent;
     std::deque<VAddr> freed_order;
-    std::vector<BbEngine::GxResources::Gone> gx_gone;
+    std::vector<BbEngine::GxResources::Gone> gx_gone, gx_created;
     /// Beta 16: images of textures the game destroyed, waiting for the GPU to be done with them.
     std::vector<std::pair<ImageId, u64>> dead_images;
     /// Beta 16: textures to build ahead (BuildAhead), and where each was built: its info, for the
@@ -666,6 +671,8 @@ private:
     /// bbport (GPU hang guard): scheduler.CurrentTick() at each of the last 64 collector passes
     /// (one a frame, indexed by gc_tick), for "used in the last N frames" in submission ticks.
     std::array<u64, 64> sched_tick_at_gc{};
+    /// 0.4.6 beta 5: and the steady clock (ns) at each, to find the pass before a resource was made.
+    std::array<u64, 64> ns_at_gc{};
     /// bbport (GPU hang guard): unregistered images whose Vulkan objects are kept for a few more
     /// frames (DeleteImage): the gc_tick they were deleted at. Slots are not reused meanwhile.
     struct GraveImage {

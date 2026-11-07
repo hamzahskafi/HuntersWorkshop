@@ -308,7 +308,8 @@ int RunProbe(const fs::path& probe, const std::vector<std::wstring>& arguments, 
 // switches keep their names for tests). Safe mode (BB_SAFE_MODE=1, the run after a crash): every
 // experimental option and the mods off, a crash guard on; it sets its values whatever was set. Fast
 // draws and compile skipping off (BB_FAST_DRAWS=0, BB_COMPILE_SKIP=0) turn off their parts, except a
-// part set on its own (0.4.5 beta 14: BB_VRAM_BUDGET went with the one VRAM manager); BB_SYNC=legacy puts back the synchronisation of
+// part set on its own (0.4.5 beta 14: BB_VRAM_BUDGET went with the one VRAM manager); 0.4.6 beta 5: safe mode turns
+// the VRAM manager on (off by default while the game's own calls are tested alone); BB_SYNC=legacy puts back the synchronisation of
 // before the GPU work's fences were honest (every fallback the A/B tests kept, the GX region tracked). The same table is in run.sh (switch groups);
 // tests/test_switch_groups.py checks they agree.
 // switch-groups-begin
@@ -326,7 +327,7 @@ const SwitchGroup kSwitchGroups[] = {
          {"BB_INDIRECT_CLAMP", "1"}, {"BB_GPU_THREAD_PRIORITY", "0"},
          {"BB_AUDIO_THREAD_PRIORITY", "0"}, {"BB_NATIVE_SHADERS", "0"}, {"BB_SLEEP_SPIN_US", "600"},
          {"BB_ASYNC_PIPELINES", "0"}, {"BB_OCCLUSION", "0"}, {"BB_MODS_ENABLED", "0"},
-         {"BB_FAST_DRAWS", "0"}, {"BB_COMPILE_SKIP", "0"}}},
+         {"BB_FAST_DRAWS", "0"}, {"BB_COMPILE_SKIP", "0"}, {"BB_VRAM_MANAGER", "1"}}},
     {"BB_FAST_DRAWS", "0", false,
      {
          {"BB_SUBMIT_END_TASKS", "0"}, {"BB_MEMO_REVALIDATE", "0"}, {"BB_SAMPLER_MEMO", "0"},

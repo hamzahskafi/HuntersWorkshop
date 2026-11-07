@@ -1,6 +1,6 @@
 # Hunter's Workshop: the plan
 
-What comes next, and the rules and decisions it works under. Updated 2026-11-05.
+What comes next, and the rules and decisions it works under. Updated 2026-11-07.
 
 - **Where it stands:** 0.4.5 was released on 2026-11-07 from beta 13 (`a6b34b8`, engine id 84):
   step 1, the GPU steps, +8.4% at the lamp spot against 0.4.4 (release-notes-0.4.5.md). 0.4.6 is in
@@ -8,7 +8,9 @@ What comes next, and the rules and decisions it works under. Updated 2026-11-05.
   (step 3 below; release-notes-0.4.6.md); beta 3 (engine id 87) makes `BB_VRAM_MANAGER=0` a test of
   the game's own creates, destroys and releases alone, at any VRAM level; beta 4 (engine id 88)
   follows them as they happen, with no time budget: textures built in the game's own create call,
-  destroys and releases freed as soon as the GPU is done. 0.4.4 was released on 2026-11-03 (`cbec5a2`, engine id 64).
+  destroys and releases freed as soon as the GPU is done; beta 5 (engine id 89) is the memory design
+  below ("The 0.4.6 memory design"), with the logging that tests it, and the VRAM manager off by
+  default. 0.4.4 was released on 2026-11-03 (`cbec5a2`, engine id 64).
 - **Where the work goes:** the branch `claude/awesome-gates-cjba5e`.
 
 The other documents:
@@ -210,6 +212,31 @@ when the tester says).
   builds, as bbhost does), freed when it destroys them. The VRAM manager stays for what the game does
   not say and for cards without the room.
 
+- **The 0.4.6 memory design (beta 5, the tester's call on beta 4's logs, 2026-11-07: "all in one
+  beta, and the findings will inform us").** The game's memory is managed as the PS4 manages it, the
+  engine's caches following the game's own calls rather than guarding against them:
+  - **The game's resources are known whole** (`gx_resources.cpp`): creators, destructors, Map (types
+    0-2 in place, 3 a renamed copy of a buffer from GX's pool, 4 that copy again, read in 1.09), the
+    render-target and depth views, and the 1D textures with their destructors.
+  - **Memory belongs to the newest resource in it:** an image wholly inside the memory of a resource
+    the game made after it is no one's and goes once the GPU is done (`ProcessGxCreated`,
+    `dead_by_reuse`); one the GPU drew and used from the pass before is kept.
+  - **A release frees nothing** (beta 4's eviction on release gave 82-201 ms frames at loading
+    screens); the game's data stays in VRAM until the game unmaps its memory, and the unbinds then go
+    one per run of blocks, not per 64 KiB block; the cache's own marking is no longer counted as the
+    game's write faults.
+  - **Textures made without their data** get their image at their first Map, registered without an
+    upload (the first draw uploads it); every new image's first upload takes no hashes.
+  - **VRAM full:** an image goes to system memory (over the budget if it must) instead of stopping.
+  - **The VRAM manager is off by default** (the tester's call); `BB_VRAM_MANAGER=1`, Use less VRAM or
+    safe mode turn it on, its rules unchanged.
+  - **The logging that tests it:** who holds the card when the budget moves (Windows' per-process GPU
+    memory counters), images draws still make and stale images by the game resource over them (the
+    largest five described), Map and view counts, sparse bind calls and their time (minute line,
+    hitch reports, `BB_FRAME_STATS`), images in system memory.
+  - **Next (the logs decide):** the game's area prefetch (it was made for a hard disk: its model can
+    drive the loads), the shader building and its threads, bbport's no-sparse memory module (the
+    Linux phase).
 - **Evict by the VRAM budget, not by age alone.** Done in beta 14 (above).
 - **Paced:** in play, at most a set amount a second (beta 15: 12 ms a second and one 64 MiB chunk of
   the game's data, only while frames have slack); loading screens trim down to the comfortable line
@@ -247,7 +274,8 @@ when the tester says).
 
 ### Waiting on the tester
 
-- **Beta 14's two runs** (step 3, above).
+- **0.4.6 beta 5's runs** (step 3, "The 0.4.6 memory design"): a normal session with loading screens,
+  and the minute lines named there.
 
 ## Next, after the performance work
 

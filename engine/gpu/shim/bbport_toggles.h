@@ -156,6 +156,11 @@ inline std::atomic<std::uint64_t> t_resident{0}, t_protect{0}, t_image_create{0}
 /// Image(), and RefreshImage's hashes, source buffer and detiling.
 inline std::atomic<std::uint64_t> t_image_query{0}, t_image_alloc{0}, t_refresh_hash{0},
     t_refresh_obtain{0}, t_refresh_detile{0};
+/// 0.4.6 beta 5: the buffer cache's sparse binds (BufferCache::SubmitPendingArenaBinds): calls,
+/// ranges bound or unbound, and the time in the driver's call (ns, the longest one too). Counted
+/// always (hitch reports, BB_FRAME_STATS).
+inline std::atomic<std::uint64_t> sparse_bind_calls{0}, sparse_bind_ranges{0}, sparse_bind_ns{0},
+    sparse_bind_max_ns{0};
 /// Images given memory (UniqueImage::Create) and images whose guest data was checked for changes
 /// (RefreshImage). Counted always (long frames).
 inline std::atomic<std::uint64_t> image_allocs{0}, image_checks{0};
@@ -203,6 +208,9 @@ inline std::atomic<std::uint64_t> device_alloc_bytes{0}, device_free_bytes{0};
 inline std::atomic<std::uint64_t> live_image_bytes{0}, live_images{0};
 /// Every Vulkan image we allocated (their memory as allocated: host sizes, mips, scene targets).
 inline std::atomic<std::uint64_t> vk_image_bytes{0};
+/// 0.4.6 beta 5: of them, those in system memory (not the GPU's: VRAM had no room), how many and
+/// their bytes now, and how many were placed there over its budget when VRAM refused them.
+inline std::atomic<std::uint64_t> system_images{0}, system_image_bytes{0}, image_over_budget{0};
 inline std::atomic<std::uint64_t> residency_alloc_bytes{0}, residency_unused_bytes{0};
 /// The texture cache collector: the usage it compares, the mark it starts at, images it freed.
 inline std::atomic<std::uint64_t> gc_used_bytes{0}, gc_trigger_bytes{0}, gc_freed_images{0};

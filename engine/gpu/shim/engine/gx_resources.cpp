@@ -72,6 +72,30 @@ constexpr Destructor kDestructors[] = {
     {0x216d350, 0x031f20a0, 0x535f400}, // 3D, in place
 };
 
+// 0.4.6 beta 5 (bbhost's gx_resources.cpp, checked against 1.09): Map 0x2169c30 (ctx, ?, holder,
+// subresource, type, mapped*; 0 on success: a CPU write is coming. Types 0-2 write in place after
+// waiting for the GPU; 3, buffers only, writes into a renamed copy from GX's own pool, kept in its
+// rename table at ctx+0xb6f8 with the holder's memory unchanged; 4 returns the copy in flight, or
+// fails with 4 when there is none), the render-target
+// and depth-stencil view creators 0x21667a0 / 0x2166610 (ctx, view** out, texture holder, D3D11-
+// shaped description: the view keeps the holder at +0x08), and the 1D texture creator 0x2171790
+// (resource* out = the holder's +0x18, ctx, desc, initial data, ...; GX builds the 1D holder inline
+// around it), whose holders' destructors are 0x216d030 / 0x216d070 (vtable 0x535f3c0).
+constexpr std::size_t kMap = 0x2169c30, kCreateRtv = 0x21667a0, kCreateDsv = 0x2166610, kCreate1D = 0x2171790;
+// push rbp; mov rbp, rsp; push r15; push r14; push r13; push r12; push rbx; sub rsp, 0x68
+constexpr std::uint8_t kDsvPrologue[] = {0x55, 0x48, 0x89, 0xe5, 0x41, 0x57, 0x41, 0x56, 0x41,
+                                         0x55, 0x41, 0x54, 0x53, 0x48, 0x83, 0xec, 0x68};
+// ... sub rsp, 0xc8
+constexpr std::uint8_t kCreate1DPrologue[] = {0x55, 0x48, 0x89, 0xe5, 0x41, 0x57, 0x41, 0x56, 0x41, 0x55,
+                                              0x41, 0x54, 0x53, 0x48, 0x81, 0xec, 0xc8, 0x00, 0x00, 0x00};
+constexpr Destructor k1DDestructors[] = {
+    {0x216d030, 0x031f2380, 0x535f3c0}, // 1D, deleting
+    {0x216d070, 0x031f2340, 0x535f3c0}, // 1D, in place
+};
+// A 1D texture's registry key: its memory, as bbhost keys it (the holder is built around the
+// resource after its creator returns).
+constexpr std::uint64_t kMemoryKey = 0x8000000000000000ull;
+
 constexpr std::size_t kTsharpBuild = 0x2ba6af0;
 // push rbp; mov rbp, rsp; push r15; push r14; push r13; push r12; push rbx; and rsp, -32
 constexpr std::uint8_t kTsharpPrologue[] = {0x55, 0x48, 0x89, 0xe5, 0x41, 0x57, 0x41, 0x56, 0x41, 0x55,
@@ -83,7 +107,7 @@ constexpr std::uint8_t kShaderPrologue[2][16] = {
     {0x55, 0x48, 0x89, 0xe5, 0x41, 0x57, 0x41, 0x56, 0x53, 0x48, 0x81, 0xec, 0x28, 0x01, 0x00, 0x00},
 };
 
-enum Kind : std::uint8_t { kBuffer = 0, kTexture = 1, kTexture3D = 2, kKinds = 3 };
+enum Kind : std::uint8_t { kBuffer = 0, kTexture = 1, kTexture3D = 2, kTexture1D = 3, kKinds = 4 };
 
 struct Entry {
     std::uint64_t memory;
@@ -92,15 +116,25 @@ struct Entry {
     bool loading;
     std::uint64_t ns;
     std::uint8_t type;
+    // 0.4.6 beta 5: whether it was made with its data, has a render-target or depth-stencil view, had
+    // an image prepared (at its first Map), and the T# its creator built (2D textures).
+    bool initial = false, render_target = false, depth_target = false, prepared = false;
+    bool has_tsharp = false;
+    std::array<std::uint32_t, 8> tsharp{};
 };
+
+// What a return through the stub belongs to.
+enum Op : std::uint8_t { kOpCreate, kOpTsharp, kOpMap, kOpView, kOpCreate1D };
 
 struct Pending {
     std::uint64_t ret;
-    std::uint64_t out; // creators: holder**; the T# builder: the T# out
+    std::uint64_t out; // creators: holder**; the T# builder: the T# out; views: view**; 1D: the resource
     Kind kind;
     bool initial = false; // creators: initial data given
     bool tsharp = false;  // the T# builder
     std::uint64_t entry_ns = 0;
+    Op op = kOpCreate;
+    std::uint64_t holder = 0, type = 0; // Map: the holder and the map type; views: 1 render target, 2 depth
 };
 thread_local std::vector<Pending> t_pending;
 // The T# the builder produced on this thread, for its creator's return.
@@ -111,7 +145,7 @@ std::mutex g_mutex;
 std::unordered_map<std::uint64_t, Entry> g_by_holder;
 // memory -> holder (live textures), ordered: LiveTextureOverlaps asks by range (beta 19).
 std::map<std::uint64_t, std::uint64_t> g_texture_at;
-// memory -> holder (live buffers; 0.4.6 beta 4: LiveResourcesIn, for released buffers' blocks).
+// memory -> holder (live buffers; 0.4.6 beta 5: Classify).
 std::map<std::uint64_t, std::uint64_t> g_buffer_at;
 std::vector<Gone> g_gone, g_released;
 std::uint8_t* g_return_stub = nullptr;
@@ -119,7 +153,10 @@ bool g_active = false, g_follow = false;
 std::atomic<DestroyedHook> g_destroyed_hook{nullptr};
 std::atomic<CreatedHook> g_created_hook{nullptr};
 std::atomic<std::uint64_t> g_live_texture_bytes{0};
-std::atomic<bool> g_gone_waiting{false}, g_released_waiting{false};
+std::atomic<bool> g_gone_waiting{false}, g_released_waiting{false}, g_created_waiting{false};
+// 0.4.6 beta 5: resources made since the texture cache last asked (any kind with memory): their
+// memory is theirs now, so images left there from before belong to nothing (TakeCreated).
+std::vector<Gone> g_created;
 constexpr std::size_t kQueueCap = 65536, kAheadCap = 16384;
 
 std::uint64_t NowNs() {
@@ -250,6 +287,16 @@ struct Counts {
         occupant_used{0}, occupant_gpu{0}, build_passes{0}, build_ns{0}, build_images{0}, build_max_ns{0},
         stale_live_bytes{0}, stale_orphan_bytes{0}, orphans_freed{0}, orphans_freed_bytes{0};
     std::atomic<std::uint64_t> build_ns_total{0}, build_images_total{0};
+    // 0.4.6 beta 5.
+    std::array<std::array<std::atomic<std::uint64_t>, 5>, kKinds> maps{};
+    std::atomic<std::uint64_t> map_unknown{0}, map_moved{0}, map_prepared{0}, views_rt{0}, views_ds{0},
+        views_unknown{0}, created_dropped{0};
+    std::array<std::atomic<std::uint64_t>, std::size_t(Owner::kCount)> draw_made{}, draw_made_bytes{},
+        draw_made_total{};
+    std::array<std::atomic<std::uint64_t>, std::size_t(Owner::kCount)> stale_bytes{}, stale_images{};
+    std::atomic<std::uint64_t> stale_gpu_bytes{0}, reuse_dead{0}, reuse_dead_bytes{0};
+    std::array<char, 1024> stale_top{};
+    std::mutex stale_top_mutex;
     std::atomic<std::uint64_t> dead_freed{0}, dead_freed_bytes{0};
     // Research (beta 16).
     std::atomic<std::uint64_t> released_checked{0}, released_resident{0}, released_resident_bytes{0};
@@ -264,35 +311,56 @@ template <typename T> T Read(std::uint64_t address) {
     return value;
 }
 
-Entry Register(std::uint64_t holder, Kind kind) {
+// `key`: the holder, or kMemoryKey | memory for a 1D texture (its holder is read for the fields).
+Entry Register(std::uint64_t key, std::uint64_t holder, Kind kind, bool initial) {
     Entry e{Read<std::uint64_t>(holder + 0x20), Read<std::uint32_t>(holder + 0x2c), kind,
             Loading::ScreenUp(), NowNs(), Read<std::uint8_t>(holder + 0x38)};
+    e.initial = initial;
+    if (kind == kTexture && t_tsharp_valid) {
+        // The builder runs before the memory is allocated: the base (address >> 8, 38 bits over the
+        // first word and the low 6 bits of the second) is filled in here.
+        e.has_tsharp = true;
+        e.tsharp = t_tsharp;
+        const std::uint64_t base = e.memory >> 8;
+        e.tsharp[0] = static_cast<std::uint32_t>(base);
+        e.tsharp[1] = (e.tsharp[1] & ~0x3fu) | static_cast<std::uint32_t>((base >> 32) & 0x3f);
+    }
     g_counts.created[kind].fetch_add(1, std::memory_order_relaxed);
     g_counts.created_bytes[kind].fetch_add(e.bytes, std::memory_order_relaxed);
     if (e.loading) {
         g_counts.created_loading[kind].fetch_add(1, std::memory_order_relaxed);
     }
     std::scoped_lock lock{g_mutex};
-    if (const auto old = g_by_holder.find(holder); old != g_by_holder.end() && old->second.kind != kBuffer) {
+    if (const auto old = g_by_holder.find(key); old != g_by_holder.end() && old->second.kind != kBuffer) {
         g_live_texture_bytes.fetch_sub(old->second.bytes, std::memory_order_relaxed); // reused unseen
     }
     if (kind != kBuffer) {
         g_live_texture_bytes.fetch_add(e.bytes, std::memory_order_relaxed);
         if (e.memory) {
-            g_texture_at[e.memory] = holder;
+            g_texture_at[e.memory] = key;
         }
     } else if (e.memory) {
-        g_buffer_at[e.memory] = holder;
+        g_buffer_at[e.memory] = key;
     }
-    g_by_holder[holder] = e;
+    // 0.4.6 beta 5: the memory is this resource's now (the texture cache retires images left there).
+    if (g_follow && e.memory && e.bytes) {
+        if (g_created.size() < kQueueCap) {
+            g_created.push_back({e.memory, e.bytes, e.ns});
+            g_created_waiting.store(true, std::memory_order_release);
+        } else {
+            g_counts.created_dropped.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
+    g_by_holder[key] = e;
     return e;
 }
 
-void Unregister(std::uint64_t holder, bool texture) {
-    // The holder is still whole at its destructor's entry: where its memory is now. The game's Map
-    // can move a resource's memory (bbhost: types 3 and 4 rename it), which beta 16-18 did not
-    // follow; a resource whose memory moved is left alone (that range may be another's by now).
-    const std::uint64_t memory_now = Read<std::uint64_t>(holder + 0x20);
+// `memory_now`: where the resource's memory is at its destructor's entry (the holder is still whole).
+void Unregister(std::uint64_t holder, bool texture, std::uint64_t memory_now) {
+    // 0.4.6 beta 5: the game's Map does not move a resource's memory (a rename writes into a copy
+    // from GX's own pool, the holder's memory unchanged: NoteMap), so a resource whose memory differs
+    // here is not one this registry knows the history of, and is left alone (that range may be
+    // another's by now).
     std::uint64_t memory = 0, bytes = 0;
     {
         std::scoped_lock lock{g_mutex};
@@ -352,20 +420,17 @@ void Unregister(std::uint64_t holder, bool texture) {
 // A 2D texture created with its data and its T#: its image prepared now, on this thread (0.4.6 beta
 // 4; the game's main thread hands it to the worker), for the texture cache to register at its next
 // submission.
-void HandCreated(const Entry& e, ThreadSlot& slot) {
-    if (!t_tsharp_valid) {
+// 0.4.6 beta 5: also at the first Map of a texture made without its data (`upload` false: the image
+// is made now, its upload is its first draw's, once the game has written it).
+void HandCreated(const Entry& e, ThreadSlot& slot, bool upload = true) {
+    if (!e.has_tsharp) {
         g_counts.ahead_no_tsharp.fetch_add(1, std::memory_order_relaxed);
         return;
     }
     if (e.memory == 0 || (e.type != 2 && e.type != 3)) {
         return;
     }
-    Ahead job{t_tsharp, e.memory, e.bytes, e.ns, e.loading};
-    // The builder runs before the memory is allocated: the base (address >> 8, 38 bits over the first
-    // word and the low 6 bits of the second) is filled in here.
-    const std::uint64_t base = e.memory >> 8;
-    job.tsharp[0] = static_cast<std::uint32_t>(base);
-    job.tsharp[1] = (job.tsharp[1] & ~0x3fu) | static_cast<std::uint32_t>((base >> 32) & 0x3f);
+    Ahead job{e.tsharp, e.memory, e.bytes, e.ns, e.loading, upload};
     g_counts.ahead_queued.fetch_add(1, std::memory_order_relaxed);
     const CreatedHook hook = g_created_hook.load(std::memory_order_acquire);
     if (!hook) {
@@ -386,7 +451,7 @@ void HandCreated(const Entry& e, ThreadSlot& slot) {
 
 // The creators' entry: keep the return address and the out pointer (rsi), return through the stub.
 template <Kind kind> GUEST_ABI std::int64_t CreatorEntry(std::uint64_t, const std::uint64_t* saved) {
-    t_pending.push_back({saved[6], saved[4], kind, saved[2] != 0, false, NowNs()});
+    t_pending.push_back({saved[6], saved[4], kind, saved[2] != 0, false, NowNs(), kOpCreate});
     const_cast<std::uint64_t*>(saved)[6] = reinterpret_cast<std::uint64_t>(g_return_stub);
     return 0;
 }
@@ -394,10 +459,77 @@ template <Kind kind> GUEST_ABI std::int64_t CreatorEntry(std::uint64_t, const st
 // The T# builder: inside the 2D creator only (rsi = the T# out), read at its return.
 GUEST_ABI std::int64_t TsharpEntry(std::uint64_t, const std::uint64_t* saved) {
     if (!t_pending.empty() && !t_pending.back().tsharp && t_pending.back().kind == kTexture) {
-        t_pending.push_back({saved[6], saved[4], kTexture, false, true, 0});
+        t_pending.push_back({saved[6], saved[4], kTexture, false, true, 0, kOpTsharp});
         const_cast<std::uint64_t*>(saved)[6] = reinterpret_cast<std::uint64_t>(g_return_stub);
     }
     return 0;
+}
+
+// 0.4.6 beta 5: Map (rdx = holder, r8 = type, r9 = where it writes the mapped address), the view
+// creators (rsi = view**) and the 1D creator (rdi = the resource it fills, rcx = initial data), each
+// read at its return.
+GUEST_ABI std::int64_t MapEntry(std::uint64_t, const std::uint64_t* saved) {
+    t_pending.push_back({saved[6], saved[0], kBuffer, false, false, 0, kOpMap, saved[3], saved[1]});
+    const_cast<std::uint64_t*>(saved)[6] = reinterpret_cast<std::uint64_t>(g_return_stub);
+    return 0;
+}
+
+template <int depth> GUEST_ABI std::int64_t ViewEntry(std::uint64_t, const std::uint64_t* saved) {
+    t_pending.push_back({saved[6], saved[4], kTexture, false, false, 0, kOpView, 0, std::uint64_t(depth)});
+    const_cast<std::uint64_t*>(saved)[6] = reinterpret_cast<std::uint64_t>(g_return_stub);
+    return 0;
+}
+
+GUEST_ABI std::int64_t Create1DEntry(std::uint64_t, const std::uint64_t* saved) {
+    t_pending.push_back({saved[6], saved[5], kTexture1D, saved[2] != 0, false, NowNs(), kOpCreate1D});
+    const_cast<std::uint64_t*>(saved)[6] = reinterpret_cast<std::uint64_t>(g_return_stub);
+    return 0;
+}
+
+// A Map has returned: the resource is about to be written by the CPU, in place or (renamed) into a
+// copy elsewhere, which the game binds in its place until the copy is retired.
+void NoteMap(std::uint64_t holder, std::uint64_t type, std::uint64_t mapped_out, ThreadSlot& slot) {
+    const std::uint64_t mapped = mapped_out ? Read<std::uint64_t>(mapped_out) : 0;
+    Entry prepare{};
+    bool hand = false;
+    {
+        std::scoped_lock lock{g_mutex};
+        const auto it = g_by_holder.find(holder);
+        if (it == g_by_holder.end()) {
+            g_counts.map_unknown.fetch_add(1, std::memory_order_relaxed);
+            return;
+        }
+        Entry& e = it->second;
+        g_counts.maps[e.kind][type < 5 ? type : 0].fetch_add(1, std::memory_order_relaxed);
+        if (mapped && (mapped < e.memory || mapped >= e.memory + std::max<std::uint64_t>(e.bytes, 1))) {
+            g_counts.map_moved.fetch_add(1, std::memory_order_relaxed); // a renamed copy
+        }
+        // A texture made without its data, written for the first time: its image is made now,
+        // ahead of its first draw (the draw uploads it, once the game has written it).
+        if (g_follow && e.kind == kTexture && !e.initial && !e.prepared && e.has_tsharp && !e.render_target &&
+            !e.depth_target) {
+            e.prepared = true;
+            prepare = e;
+            hand = true;
+            g_counts.map_prepared.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
+    if (hand) {
+        HandCreated(prepare, slot, false);
+    }
+}
+
+void NoteView(std::uint64_t out, bool depth) {
+    const std::uint64_t view = out ? Read<std::uint64_t>(out) : 0;
+    const std::uint64_t holder = view ? Read<std::uint64_t>(view + 0x08) : 0;
+    std::scoped_lock lock{g_mutex};
+    const auto it = holder ? g_by_holder.find(holder) : g_by_holder.end();
+    if (it == g_by_holder.end()) {
+        g_counts.views_unknown.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
+    (depth ? it->second.depth_target : it->second.render_target) = true;
+    (depth ? g_counts.views_ds : g_counts.views_rt).fetch_add(1, std::memory_order_relaxed);
 }
 
 template <int stage> GUEST_ABI std::int64_t ShaderCreated(std::uint64_t, const std::uint64_t*) {
@@ -417,7 +549,7 @@ GUEST_ABI std::uint64_t CreatorReturn(std::uint64_t result) {
     }
     const Pending p = t_pending.back();
     t_pending.pop_back();
-    if (p.tsharp) {
+    if (p.op == kOpTsharp) {
         t_tsharp_valid = p.out != 0;
         if (t_tsharp_valid) {
             t_tsharp = Read<std::array<std::uint32_t, 8>>(p.out);
@@ -425,6 +557,33 @@ GUEST_ABI std::uint64_t CreatorReturn(std::uint64_t result) {
         return p.ret;
     }
     ThreadSlot& slot = CurrentSlot();
+    if (p.op == kOpMap) {
+        if (static_cast<std::uint32_t>(result) == 0 && p.holder) {
+            NoteMap(p.holder, p.type, p.out, slot);
+        }
+        return p.ret;
+    }
+    if (p.op == kOpView) {
+        if (static_cast<std::uint32_t>(result) == 0) {
+            NoteView(p.out, p.type == 2);
+        }
+        return p.ret;
+    }
+    if (p.op == kOpCreate1D) {
+        slot.textures.fetch_add(1, std::memory_order_relaxed);
+        slot.creator_ns.fetch_add(NowNs() - p.entry_ns, std::memory_order_relaxed);
+        // The resource it filled sits at a holder's +0x18 (type at +0x20 there: 2 is a texture).
+        if (static_cast<std::uint32_t>(result) == 0 && p.out && Read<std::uint8_t>(p.out + 0x20) == 2) {
+            const std::uint64_t holder = p.out - 0x18;
+            const std::uint64_t memory = Read<std::uint64_t>(holder + 0x20);
+            if (memory) {
+                Register(kMemoryKey | memory, holder, kTexture1D, p.initial);
+            }
+        } else if (static_cast<std::uint32_t>(result) != 0) {
+            g_counts.failed.fetch_add(1, std::memory_order_relaxed);
+        }
+        return p.ret;
+    }
     if (p.kind == kBuffer) {
         slot.buffers.fetch_add(1, std::memory_order_relaxed);
     } else {
@@ -435,7 +594,7 @@ GUEST_ABI std::uint64_t CreatorReturn(std::uint64_t result) {
         g_counts.failed.fetch_add(1, std::memory_order_relaxed);
     } else if (p.out) {
         if (const auto holder = Read<std::uint64_t>(p.out)) {
-            const Entry e = Register(holder, p.kind);
+            const Entry e = Register(holder, holder, p.kind, p.initial);
             if (g_follow && p.kind == kTexture && p.initial) {
                 HandCreated(e, slot);
             }
@@ -446,12 +605,21 @@ GUEST_ABI std::uint64_t CreatorReturn(std::uint64_t result) {
 }
 
 GUEST_ABI std::int64_t TextureDestructor(std::uint64_t, const std::uint64_t* saved) {
-    Unregister(saved[5], true);
+    Unregister(saved[5], true, Read<std::uint64_t>(saved[5] + 0x20));
+    return 0;
+}
+
+// 0.4.6 beta 5: a 1D texture's holder, found by its memory.
+GUEST_ABI std::int64_t Texture1DDestructor(std::uint64_t, const std::uint64_t* saved) {
+    const std::uint64_t memory = Read<std::uint64_t>(saved[5] + 0x20);
+    if (memory) {
+        Unregister(kMemoryKey | memory, true, memory);
+    }
     return 0;
 }
 
 GUEST_ABI std::int64_t BufferRelease(std::uint64_t, const std::uint64_t* saved) {
-    Unregister(saved[5] - 0x18, false);
+    Unregister(saved[5] - 0x18, false, Read<std::uint64_t>(saved[5] - 0x18 + 0x20));
     return 0;
 }
 
@@ -471,7 +639,7 @@ bool Install(std::uint8_t* image, std::size_t size) {
     if (const char* env = std::getenv("BB_GX_FOLLOW"); !(env && env[0] == '0')) {
         g_follow = true;
     }
-    Hook hooks[13];
+    Hook hooks[19];
     bool ok = Prepare(hooks[0], image, size, kCreateBuffer, kCreatorPrologue, &CreatorEntry<kBuffer>) &&
               Prepare(hooks[1], image, size, kCreateTexture, kCreatorPrologue, &CreatorEntry<kTexture>) &&
               Prepare(hooks[2], image, size, kCreateTexture3D, kCreatorPrologue, &CreatorEntry<kTexture3D>) &&
@@ -480,9 +648,14 @@ bool Install(std::uint8_t* image, std::size_t size) {
               Prepare(hooks[9], image, size, kShaderCreators[0], kShaderPrologue[0], &ShaderCreated<0>) &&
               Prepare(hooks[10], image, size, kShaderCreators[1], kShaderPrologue[1], &ShaderCreated<1>) &&
               Prepare(hooks[11], image, size, kShaderCreators[2], kShaderPrologue[1], &ShaderCreated<2>) &&
-              Prepare(hooks[12], image, size, kShaderCreators[3], kShaderPrologue[1], &ShaderCreated<3>);
-    for (std::size_t i = 0; ok && i < std::size(kDestructors); ++i) {
-        const Destructor& d = kDestructors[i];
+              Prepare(hooks[12], image, size, kShaderCreators[3], kShaderPrologue[1], &ShaderCreated<3>) &&
+              Prepare(hooks[13], image, size, kMap, kCreatorPrologue, &MapEntry) &&
+              Prepare(hooks[14], image, size, kCreateRtv, kCreatorPrologue, &ViewEntry<1>) &&
+              Prepare(hooks[15], image, size, kCreateDsv, kDsvPrologue, &ViewEntry<2>) &&
+              Prepare(hooks[16], image, size, kCreate1D, kCreate1DPrologue, &Create1DEntry);
+    for (std::size_t i = 0; ok && i < std::size(kDestructors) + std::size(k1DDestructors); ++i) {
+        const bool one_d = i >= std::size(kDestructors);
+        const Destructor& d = one_d ? k1DDestructors[i - std::size(kDestructors)] : kDestructors[i];
         std::uint8_t expected[16] = {0x55, 0x48, 0x89, 0xe5, 0x53, 0x50, 0x48, 0x89, 0xfb, 0x48, 0x8d, 0x05};
         std::memcpy(expected + 12, &d.disp, 4);
         // The same, the lea as movabs rax, <the vtable's address in this image>.
@@ -490,7 +663,8 @@ bool Install(std::uint8_t* image, std::size_t size) {
         const std::uint64_t vtable = reinterpret_cast<std::uint64_t>(image) + d.vtable;
         std::memcpy(displaced + 11, &vtable, 8);
         ok = d.site + 16 + d.disp == d.vtable && // the lea's target, from its own bytes
-             PrepareDisplaced(hooks[4 + i], image, size, d.site, expected, displaced, &TextureDestructor);
+             PrepareDisplaced(hooks[one_d ? 17 + (i - std::size(kDestructors)) : 4 + i], image, size, d.site,
+                              expected, displaced, one_d ? &Texture1DDestructor : &TextureDestructor);
     }
     if (!ok) {
         for (auto& hook : hooks) {
@@ -505,10 +679,11 @@ bool Install(std::uint8_t* image, std::size_t size) {
     Commit(hooks);
     g_active = true;
     host_log(g_follow ? "GX resources: the caches follow the game's resources: a texture created with its data "
-                        "is prepared in the game's create call and registered at the next submission, freed "
-                        "when the game destroys it; the game's data in VRAM leaves with the buffers it "
-                        "releases (BB_GX_FOLLOW=0: counted only; BB_GX_RESOURCES=0: off)"
-                      : "GX resources: listening to the game's texture and buffer creators and destructors "
+                        "is prepared in the game's create call and registered at the next submission, one made "
+                        "without it at its first Map; an image is freed when the game destroys its texture or "
+                        "makes something newer over its memory; the game's data stays in VRAM, as on the PS4, "
+                        "until the game unmaps its memory (BB_GX_FOLLOW=0: counted only; BB_GX_RESOURCES=0: off)"
+                      : "GX resources: listening to the game's creators, destructors, Maps and views "
                         "(counted only, BB_GX_FOLLOW=0; BB_GX_RESOURCES=0: off)");
     return true;
 }
@@ -541,6 +716,113 @@ void TakeReleased(std::vector<Gone>& out) {
 
 bool ReleasedWaiting() {
     return g_released_waiting.load(std::memory_order_acquire);
+}
+
+void TakeCreated(std::vector<Gone>& out) {
+    std::scoped_lock lock{g_mutex};
+    out.swap(g_created);
+    g_created.clear();
+    g_created_waiting.store(false, std::memory_order_relaxed);
+}
+
+bool CreatedWaiting() {
+    return g_created_waiting.load(std::memory_order_acquire);
+}
+
+const char* OwnerName(Owner owner) {
+    static constexpr const char* kNames[] = {"no game resource", "a buffer", "a texture made with its data",
+                                             "a texture made without", "a render target", "a depth target",
+                                             "a 3D texture", "a 1D texture"};
+    return std::size_t(owner) < std::size(kNames) ? kNames[std::size_t(owner)] : "?";
+}
+
+namespace {
+Owner OwnerOf(const Entry& e) {
+    switch (e.kind) {
+    case kBuffer:
+        return Owner::Buffer;
+    case kTexture3D:
+        return Owner::Texture3D;
+    case kTexture1D:
+        return Owner::Texture1D;
+    default:
+        return e.depth_target ? Owner::DepthTarget
+               : e.render_target ? Owner::RenderTarget
+               : e.initial       ? Owner::TextureData
+                                 : Owner::TextureNoData;
+    }
+}
+
+// The live resource in `index` over [begin, end), or null. Under g_mutex.
+const Entry* Covering(const std::map<std::uint64_t, std::uint64_t>& index, std::uint64_t begin, std::uint64_t end,
+                      bool* at_start) {
+    auto it = index.upper_bound(begin);
+    if (it != index.begin()) {
+        const auto before = std::prev(it);
+        if (const auto e = g_by_holder.find(before->second);
+            e != g_by_holder.end() && before->first + std::max<std::uint64_t>(e->second.bytes, 1) > begin) {
+            if (at_start) {
+                *at_start = before->first == begin;
+            }
+            return &e->second;
+        }
+    }
+    if (it != index.end() && it->first < end) {
+        if (const auto e = g_by_holder.find(it->second); e != g_by_holder.end()) {
+            if (at_start) {
+                *at_start = false;
+            }
+            return &e->second;
+        }
+    }
+    return nullptr;
+}
+} // namespace
+
+Owner Classify(std::uint64_t begin, std::uint64_t end, bool* at_start) {
+    if (at_start) {
+        *at_start = false;
+    }
+    if (!g_active || begin >= end) {
+        return Owner::None;
+    }
+    std::scoped_lock lock{g_mutex};
+    if (const Entry* e = Covering(g_texture_at, begin, end, at_start)) {
+        return OwnerOf(*e);
+    }
+    if (const Entry* e = Covering(g_buffer_at, begin, end, at_start)) {
+        return OwnerOf(*e);
+    }
+    return Owner::None;
+}
+
+void NoteDrawMade(Owner owner, std::uint64_t bytes) {
+    const std::size_t i = std::min<std::size_t>(std::size_t(owner), std::size_t(Owner::kCount) - 1);
+    g_counts.draw_made[i].fetch_add(1, std::memory_order_relaxed);
+    g_counts.draw_made_bytes[i].fetch_add(bytes, std::memory_order_relaxed);
+    g_counts.draw_made_total[i].fetch_add(1, std::memory_order_relaxed);
+}
+
+std::uint64_t DrawMadeTotal(Owner owner) {
+    return g_counts.draw_made_total[std::min<std::size_t>(std::size_t(owner), std::size_t(Owner::kCount) - 1)].load(
+        std::memory_order_relaxed);
+}
+
+void NoteStaleByOwner(const std::array<std::uint64_t, std::size_t(Owner::kCount)>& bytes,
+                      const std::array<std::uint64_t, std::size_t(Owner::kCount)>& images, std::uint64_t gpu_bytes,
+                      const char* largest) {
+    for (std::size_t i = 0; i < bytes.size(); ++i) {
+        g_counts.stale_bytes[i].store(bytes[i], std::memory_order_relaxed);
+        g_counts.stale_images[i].store(images[i], std::memory_order_relaxed);
+    }
+    g_counts.stale_gpu_bytes.store(gpu_bytes, std::memory_order_relaxed);
+    std::scoped_lock lock{g_counts.stale_top_mutex};
+    std::snprintf(g_counts.stale_top.data(), g_counts.stale_top.size(), "%s", largest ? largest : "");
+}
+
+void NoteReuseDead(std::uint64_t images, std::uint64_t bytes) {
+    g_counts.reuse_dead.fetch_add(images, std::memory_order_relaxed);
+    g_counts.reuse_dead_bytes.fetch_add(bytes, std::memory_order_relaxed);
 }
 
 void SetCreatedHook(CreatedHook hook) {
@@ -577,29 +859,6 @@ bool LiveTextureOverlaps(std::uint64_t begin, std::uint64_t end, std::uint64_t s
         }
     }
     return false;
-}
-
-void LiveResourcesIn(std::uint64_t begin, std::uint64_t end,
-                     std::vector<std::pair<std::uint64_t, std::uint64_t>>& out) {
-    out.clear();
-    if (!g_active || begin >= end) {
-        return;
-    }
-    std::scoped_lock lock{g_mutex};
-    for (const auto* index : {&g_texture_at, &g_buffer_at}) {
-        auto it = index->upper_bound(begin);
-        if (it != index->begin()) {
-            --it; // the one starting before `begin` may reach into it
-        }
-        for (; it != index->end() && it->first < end; ++it) {
-            if (const auto e = g_by_holder.find(it->second); e != g_by_holder.end()) {
-                const std::uint64_t stop = it->first + std::max<std::uint64_t>(e->second.bytes, 1);
-                if (stop > begin) {
-                    out.emplace_back(it->first, stop);
-                }
-            }
-        }
-    }
 }
 
 void SetDestroyedHook(DestroyedHook hook) {
@@ -867,6 +1126,63 @@ void LogMinute() {
         if (!line.empty()) {
             host_log("GX creates this minute by thread: %s", line.c_str());
         }
+    }
+    {
+        // 0.4.6 beta 5: what the game does with its resources after making them, and what the images
+        // made at a draw (not prepared) and the stale ones (written over, unused 10 s) belong to.
+        auto maps = [&](int kind) {
+            char part[160];
+            std::uint64_t m[5];
+            for (int t = 0; t < 5; ++t) {
+                m[t] = take(g_counts.maps[kind][t]);
+            }
+            std::snprintf(part, sizeof(part), "%llu in place, %llu renamed, %llu into the copy in flight",
+                          (unsigned long long)(m[0] + m[1] + m[2]), (unsigned long long)m[3],
+                          (unsigned long long)m[4]);
+            return std::string(part);
+        };
+        const std::string map_buffers = maps(kBuffer), map_textures = maps(kTexture), map_3d = maps(kTexture3D),
+                          map_1d = maps(kTexture1D);
+        host_log("GX memory this minute: 1D textures created %llu (%.0f MiB), destroyed %llu; maps: buffers %s; "
+                 "textures %s; 3D %s; 1D %s; %llu of resources not known, %llu written outside the resource's memory, %llu "
+                 "prepared a texture made without its data; views: %llu render targets, %llu depth targets, %llu "
+                 "of textures not known; images retired because the game made something newer over them %llu "
+                 "(%.0f MiB); %llu created events not queued",
+                 (unsigned long long)created[kTexture1D], Mib(created_bytes[kTexture1D]),
+                 (unsigned long long)destroyed[kTexture1D], map_buffers.c_str(), map_textures.c_str(), map_3d.c_str(),
+                 map_1d.c_str(), (unsigned long long)take(g_counts.map_unknown),
+                 (unsigned long long)take(g_counts.map_moved), (unsigned long long)take(g_counts.map_prepared),
+                 (unsigned long long)take(g_counts.views_rt), (unsigned long long)take(g_counts.views_ds),
+                 (unsigned long long)take(g_counts.views_unknown), (unsigned long long)take(g_counts.reuse_dead),
+                 Mib(take(g_counts.reuse_dead_bytes)), (unsigned long long)take(g_counts.created_dropped));
+        std::string drawn, stale;
+        for (std::size_t i = 0; i < std::size_t(Owner::kCount); ++i) {
+            const std::uint64_t n = take(g_counts.draw_made[i]), bytes = take(g_counts.draw_made_bytes[i]);
+            if (n != 0) {
+                char part[128];
+                std::snprintf(part, sizeof(part), "%s%s %llu (%.0f MiB)", drawn.empty() ? "" : ", ",
+                              OwnerName(Owner(i)), (unsigned long long)n, Mib(bytes));
+                drawn += part;
+            }
+            const std::uint64_t sn = g_counts.stale_images[i].load(std::memory_order_relaxed),
+                                sb = g_counts.stale_bytes[i].load(std::memory_order_relaxed);
+            if (sn != 0) {
+                char part[128];
+                std::snprintf(part, sizeof(part), "%s%s %llu (%.0f MiB)", stale.empty() ? "" : ", ",
+                              OwnerName(Owner(i)), (unsigned long long)sn, Mib(sb));
+                stale += part;
+            }
+        }
+        std::string top;
+        {
+            std::scoped_lock lock{g_counts.stale_top_mutex};
+            top = g_counts.stale_top.data();
+        }
+        host_log("GX memory, images by the game resource at their memory: made at a draw this minute: %s; stale "
+                 "now: %s (%.0f MiB of them drawn by the GPU)%s%s",
+                 drawn.empty() ? "none" : drawn.c_str(), stale.empty() ? "none" : stale.c_str(),
+                 Mib(g_counts.stale_gpu_bytes.load(std::memory_order_relaxed)), top.empty() ? "" : "; largest: ",
+                 top.c_str());
     }
     host_log("GX research this minute: buffers released with the game's data in VRAM at their memory %llu of %llu "
              "(%.0f MiB); shaders created: vertex %llu + %llu, pixel %llu, compute %llu (%llu during loading screens)",

@@ -298,13 +298,16 @@ private:
     void UpdateVramLevel();
     /// A VRAM slot of a block that left it: reused by the next move to VRAM.
     void ReleaseResidencySlot(vk::DeviceMemory memory, u64 offset);
+    /// 0.4.6 beta 5: one sparse unbind of [address, address + bytes) in each arena it lies in.
+    void UnbindRange(VAddr address, u64 bytes);
     /// Unbinds a VRAM block of memory the game unmapped (uploaded again if mapped and used).
-    /// `watch`: its pages handed back to the game unwatched now (false: EvictVramBlocks does it per
-    /// run of blocks). Whether it left VRAM.
-    bool EvictVramBlock(u64 block, bool watch = true);
+    /// `watch`: its pages handed back to the game unwatched now; `unbind`: its sparse unbind queued
+    /// now (false for both: EvictVramBlocks does them per run of blocks). Whether it left VRAM.
+    bool EvictVramBlock(u64 block, bool watch = true, bool unbind = true);
     /// 0.4.6 beta 3: blocks leaving VRAM together (sorted, deduplicated; on return only those that
     /// left): their pages unwatched and page table entries cleared once per run of adjacent blocks
-    /// (beta 17-18 made a protection call per 64 KiB block).
+    /// (beta 17-18 made a protection call per 64 KiB block). 0.4.6 beta 5: and one sparse unbind
+    /// per run (beta 4: one per block, ~12,000 in a loading screen's bind call).
     void EvictVramBlocks(std::vector<u64>& blocks);
     /// While VRAM is tight or full (the VRAM manager): VRAM copies of the game's data unused for
     /// the manager's time leave VRAM, the longest unused first; their slots take the next blocks
@@ -433,17 +436,7 @@ private:
     /// Beta 16 (research): the buffers the game released (engine/gx_resources.h).
     std::vector<BbEngine::GxResources::Gone> gx_released;
     /// Beta 18: released buffers waiting for VRAM to be tight (ReleaseGxBuffers), oldest first.
-    /// 0.4.6 beta 4: with the scheduler's tick when it was taken (FollowGxReleases): a use of its
-    /// memory recorded after that tick is the memory in use again.
-    struct PendingRelease {
-        BbEngine::GxResources::Gone gone;
-        u64 tick;
-    };
-    std::deque<PendingRelease> released_pending, released_waiting;
-    std::vector<std::pair<u64, u64>> released_live;
-    /// 0.4.6 beta 4: the scheduler's tick at the last use of each group (NoteUse), for freeing the
-    /// game's released data as soon as the GPU is done with it.
-    std::vector<u64> group_use_tick;
+    std::deque<BbEngine::GxResources::Gone> released_pending;
     struct ResidencyChunk {
         u64 size;
         u64 used;         ///< bytes handed out and not returned

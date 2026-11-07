@@ -1545,8 +1545,24 @@ void TextureCache::RegisterImage(ImageId image_id) {
     image.lru_id = lru_cache.Insert(image_id, gc_tick);
     image.lru_touched_tick = gc_tick;
     image.gx_dead_tick = 0;
+    // 0.4.6 beta 5: when (ProcessGxCreated), and every new image's first upload takes no hashes (beta
+    // 4: the images built ahead only): they are only compared once the GPU has drawn into it, and
+    // until then the image holds uploaded data only (Image::ResolveDeferredHashes).
+    image.registered_ns = u64(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                  std::chrono::steady_clock::now().time_since_epoch())
+                                  .count());
+    image.dead_by_reuse = false;
+    image.skip_hashes_once = true;
     ForEachPage(image.info.guest_address, image.info.guest_size,
                 [this, image_id](u64 page) { page_table[page].push_back(image_id); });
+    // 0.4.6 beta 5 (research): an image a draw made (not prepared ahead), by the game resource at its
+    // memory: what the draws still make in play, and the hitches' images.
+    if (!t_building_ahead && BbEngine::GxResources::Active()) {
+        BbEngine::GxResources::NoteDrawMade(
+            BbEngine::GxResources::Classify(image.info.guest_address,
+                                            image.info.guest_address + std::max<u64>(image.info.guest_size, 1)),
+            image.backing ? image.GetHostImageSize() : 0);
+    }
     // Beta 15 (research): whether the game made a texture at this address, and how long ago.
     BbEngine::GxResources::NoteImage(BbEngine::GxResources::TextureAt(image.info.guest_address));
     // Beta 16: a draw made an image where one was built ahead: the two differ (a miss).
@@ -1751,7 +1767,8 @@ void TextureCache::GarbageCollectImages() {
     // 0.4.6 beta 4: the game's destroys are taken, and their images freed once the GPU is done with
     // them, at every pass (beta 16-3: once a second, a second or more after the game let them go).
     const bool dead_work = BbEngine::GxResources::Following() &&
-                           (!dead_images.empty() || BbEngine::GxResources::DestroyedWaiting());
+                           (!dead_images.empty() || BbEngine::GxResources::DestroyedWaiting() ||
+                            BbEngine::GxResources::CreatedWaiting());
     // Nothing to do (no trim, no store under way, not a new second): no lock taken (one pass per
     // guest submission). pending_stores changes size on this thread only.
     const VramPolicy::Mode mode = VramPolicy::CurrentMode();
@@ -1764,6 +1781,7 @@ void TextureCache::GarbageCollectImages() {
     CompletePendingStores();
     if (new_second || dead_work) {
         ProcessGxDestroyed();
+        ProcessGxCreated();
         FreeDeadImages(gc_second);
     }
     if (new_second) {
@@ -1876,6 +1894,47 @@ void TextureCache::ProcessGxDestroyed() {
     gx_gone.clear();
 }
 
+void TextureCache::ProcessGxCreated() {
+    if (!BbEngine::GxResources::Following() || !BbEngine::GxResources::CreatedWaiting()) {
+        return;
+    }
+    BbEngine::GxResources::TakeCreated(gx_created);
+    for (const auto& made : gx_created) {
+        // The scheduler's tick at the newest collector pass before the resource was made: an image
+        // used from then on may have been used for it (unknown when older than the passes kept).
+        u64 before_tick = 0;
+        for (u64 back = 0; back < ns_at_gc.size() && back <= gc_tick; ++back) {
+            const size_t at = (gc_tick - back) % ns_at_gc.size();
+            if (ns_at_gc[at] != 0 && ns_at_gc[at] <= made.ns) {
+                before_tick = sched_tick_at_gc[at];
+                break;
+            }
+        }
+        const VAddr made_end = made.memory + std::max<u64>(made.bytes, 1);
+        u64 bytes = 0, images = 0;
+        ForEachImageInRegion(made.memory, std::max<u64>(made.bytes, 1), [&](ImageId image_id, Image& image) {
+            if (False(image.flags & ImageFlagBits::Registered) || image.registered_ns >= made.ns ||
+                image.dead_by_reuse || image.info.guest_address < made.memory ||
+                image.info.guest_address + image.info.guest_size > made_end) {
+                return; // newer than the resource (its own), already retired, or reaching outside it
+            }
+            image.dead_by_reuse = true;
+            image.reuse_tick = before_tick;
+            image.gx_dead_tick = gc_tick;
+            ++images;
+            bytes += image.backing ? image.GetHostImageSize() : 0;
+            if (dead_images.size() < 65536) {
+                dead_images.emplace_back(image_id, image.image_uid);
+            }
+        });
+        if (images != 0) {
+            ahead_at.erase(made.memory);
+            BbEngine::GxResources::NoteReuseDead(images, bytes);
+        }
+    }
+    gx_created.clear();
+}
+
 void TextureCache::FreeDeadImages(u64 second) {
     if (dead_images.empty()) {
         return;
@@ -1889,6 +1948,7 @@ void TextureCache::FreeDeadImages(u64 second) {
         Image& image = slot_images[image_id];
         switch (DeadImageState(image)) {
         case Dead::No:
+            image.dead_by_reuse = false; // in use: the next resource made over it is checked again
             continue; // used since, or kept for a live texture (DeadImageState)
         case Dead::Busy:
             dead_images[kept++] = dead_images[i]; // the GPU is still at it: a later pass
@@ -1916,11 +1976,18 @@ TextureCache::Dead TextureCache::DeadImageState(const Image& image, VAddr skip_a
     // (its contents may be that texture's, ReleaseDestroyed). 0.4.6 beta 3: an image of the game's
     // uploaded data is dead even where the game made a new texture in its memory (not used since, it
     // is no one's: the new texture's draw makes its own from memory), which beta 19 kept.
+    // 0.4.6 beta 5: of memory the game made a new resource in since (dead_by_reuse), the live
+    // resource there is that one, not a sharer of this image's contents; one the GPU drew is kept
+    // only when used from the pass before that resource was made (perhaps drawn for it).
     if (image.gx_dead_tick == 0 || False(image.flags & ImageFlagBits::Registered) ||
-        (image.lru_touched_tick != ~0ULL && image.lru_touched_tick > image.gx_dead_tick) ||
-        ((True(image.flags & ImageFlagBits::GpuModified) || image.binding.is_target) &&
-         BbEngine::GxResources::LiveTextureOverlaps(image.info.guest_address,
-                                                    image.info.guest_address + image.info.guest_size, skip_at))) {
+        (image.lru_touched_tick != ~0ULL && image.lru_touched_tick > image.gx_dead_tick)) {
+        return Dead::No;
+    }
+    const bool drawn = True(image.flags & ImageFlagBits::GpuModified) || image.binding.is_target;
+    if (image.dead_by_reuse ? drawn && image.tick_accessed_last >= image.reuse_tick
+                            : drawn && BbEngine::GxResources::LiveTextureOverlaps(
+                                           image.info.guest_address,
+                                           image.info.guest_address + image.info.guest_size, skip_at)) {
         return Dead::No;
     }
     // bbport (GPU hang guard): as the collector's, the GPU's work with it done first.
@@ -2017,6 +2084,7 @@ void TextureCache::BuildAhead() {
     {
         std::scoped_lock lock{mutex};
         ProcessGxDestroyed();
+        ProcessGxCreated();
     }
     const u64 now_ns = u64(std::chrono::duration_cast<std::chrono::nanoseconds>(start.time_since_epoch()).count());
     constexpr u64 MaxWaitNs = 30'000'000'000ull;
@@ -2096,7 +2164,9 @@ void TextureCache::BuildAhead() {
             FreeImage(image_id);
         }
         if (exact) {
-            ahead_refresh.emplace_back(exact, slot_images[exact].image_uid);
+            if (job.upload) {
+                ahead_refresh.emplace_back(exact, slot_images[exact].image_uid);
+            }
             BbEngine::GxResources::NoteAhead(AheadResult::Refreshed, 0);
             continue; // the prepared image goes (its memory back to the allocator)
         }
@@ -2108,7 +2178,6 @@ void TextureCache::BuildAhead() {
         image.tick_accessed_last = scheduler.CurrentTick();
         TouchImage(image);
         image.ahead = 1;
-        image.skip_hashes_once = true;
         ahead_at[job.memory] = {image_id,
                                 image.image_uid,
                                 image.info.size.width,
@@ -2117,7 +2186,11 @@ void TextureCache::BuildAhead() {
                                 image.info.resources.layers,
                                 u32(image.info.pixel_format),
                                 u32(image.info.tile_mode)};
-        ahead_built.emplace_back(image_id, image.image_uid);
+        // 0.4.6 beta 5: a texture made without its data, prepared at the game's first Map of it: not
+        // watched or uploaded now (the game is writing it), its first draw does both (it stays Dirty).
+        if (job.upload) {
+            ahead_built.emplace_back(image_id, image.image_uid);
+        }
         BbEngine::GxResources::NoteAhead(AheadResult::Built, image.GetHostImageSize());
     }
     for (auto& prepared : ahead_wait) {
@@ -2332,6 +2405,17 @@ void TextureCache::ExecutePlan() {
 void TextureCache::ClassifyForMinute(u64 second) {
     u64 in_use = 0, cache = 0, garbage = 0, gpu = 0, dead = 0, dead_bytes = 0;
     u64 stale_live = 0, stale_orphan = 0; // 0.4.6 beta 4: garbage by whether a game texture is over it
+    // 0.4.6 beta 5 (research): the stale images by the game resource over them, and the largest few.
+    using BbEngine::GxResources::Owner;
+    std::array<u64, size_t(Owner::kCount)> stale_bytes{}, stale_images{};
+    u64 stale_gpu = 0;
+    struct Largest {
+        u64 bytes;
+        ImageId image_id;
+        Owner owner;
+        bool at_start;
+    };
+    std::array<Largest, 5> largest{};
     lru_cache.ForEachItemBelow(gc_tick, [&](ImageId image_id) {
         const Image& image = slot_images[image_id];
         const u64 bytes = image.backing ? image.GetHostImageSize() : 0;
@@ -2345,6 +2429,20 @@ void TextureCache::ClassifyForMinute(u64 second) {
                                                         image.info.guest_address + image.info.guest_size)
                  ? stale_live
                  : stale_orphan) += bytes;
+            bool at_start = false;
+            const Owner owner = BbEngine::GxResources::Classify(
+                image.info.guest_address, image.info.guest_address + std::max<u64>(image.info.guest_size, 1),
+                &at_start);
+            stale_bytes[size_t(owner)] += bytes;
+            ++stale_images[size_t(owner)];
+            if (True(image.flags & ImageFlagBits::GpuModified)) {
+                stale_gpu += bytes;
+            }
+            if (bytes > largest.back().bytes) {
+                largest.back() = {bytes, image_id, owner, at_start};
+                std::sort(largest.begin(), largest.end(),
+                          [](const Largest& a, const Largest& b) { return a.bytes > b.bytes; });
+            }
         } else {
             cache += bytes;
         }
@@ -2358,6 +2456,30 @@ void TextureCache::ClassifyForMinute(u64 second) {
     });
     VramPolicy::PublishTextures(in_use, cache, garbage, gpu);
     BbEngine::GxResources::NoteStale(stale_live, stale_orphan);
+    std::string described;
+    const u64 now_ns = u64(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                               std::chrono::steady_clock::now().time_since_epoch())
+                               .count());
+    for (const Largest& l : largest) {
+        if (l.bytes == 0) {
+            break;
+        }
+        const Image& image = slot_images[l.image_id];
+        char part[256];
+        std::snprintf(part, sizeof(part),
+                      "%s0x%llx %.0f MiB %ux%u, %u mips, %u layers, format %u, tile %u, %s%s, made %llu s ago%s%s",
+                      described.empty() ? "" : "; ", (unsigned long long)image.info.guest_address,
+                      double(l.bytes) / double(1ull << 20), image.info.size.width, image.info.size.height,
+                      image.info.resources.levels, image.info.resources.layers, u32(image.info.pixel_format),
+                      u32(image.info.tile_mode), BbEngine::GxResources::OwnerName(l.owner),
+                      l.owner == Owner::None ? "" : (l.at_start ? " at its start" : " inside it"),
+                      (unsigned long long)(now_ns > image.registered_ns ? (now_ns - image.registered_ns) / 1'000'000'000ull
+                                                                        : 0),
+                      True(image.flags & ImageFlagBits::GpuModified) ? ", drawn by the GPU" : "",
+                      image.gx_dead_tick != 0 ? ", its texture destroyed" : "");
+        described += part;
+    }
+    BbEngine::GxResources::NoteStaleByOwner(stale_bytes, stale_images, stale_gpu, described.c_str());
     BbEngine::GxResources::NoteDeadInVram(dead, dead_bytes);
 }
 
@@ -2409,6 +2531,9 @@ void TextureCache::RunGarbageCollector() {
     // bbport (GPU hang guard): this frame's submission tick (GcRecentFrames), and the images
     // deleted long enough ago (ImageFreeDelayFrames).
     sched_tick_at_gc[gc_tick % sched_tick_at_gc.size()] = scheduler.CurrentTick();
+    ns_at_gc[gc_tick % ns_at_gc.size()] = u64(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                                  std::chrono::steady_clock::now().time_since_epoch())
+                                                  .count());
     FlushImageGraveyard();
 
     GarbageCollectImages();

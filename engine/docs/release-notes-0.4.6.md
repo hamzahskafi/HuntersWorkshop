@@ -90,6 +90,35 @@ The engine follows the game's own textures (tested as 0.4.5 betas 16 to 19):
   may get object motion looked at an ordinary version of their shaders first, which the shader cache
   never kept. They now use the motion version they already have.
 
+## The game's memory, managed as the PS4 does (beta 5)
+
+The tester's call on beta 4's logs: one beta with the whole design and the logging that tests it.
+
+- **The VRAM manager is off by default.** Only the game's own calls decide, as on the PS4.
+  `BB_VRAM_MANAGER=1` in Extra variables, or Engine switches › Performance › Use less VRAM, turns it
+  back on (rules unchanged); so does safe mode, the run after a crash. `BB_VRAM_MANAGER=0` is no
+  longer needed.
+- **A released buffer frees nothing.** Beta 4 unbound the game's data as the game released its
+  buffers, which made 82-201 ms frames at loading screens. Now the data stays in VRAM, reused in
+  place by whatever the game puts there next, and leaves when the game unmaps the memory. Those
+  unbinds go in one call per stretch of memory, not one per 64 KiB, and the engine no longer counts
+  its own bookkeeping as the game's write faults.
+- **Memory belongs to the newest thing in it.** When the game makes a texture or buffer in memory
+  that still holds an older image, that image goes once the GPU is done with it. An image the GPU
+  drew and was still using is kept.
+- **More of the game's calls are followed:** Map (when the game is about to write a resource), the
+  render-target and depth views, and 1D textures. A texture made without its data gets its image the
+  first time the game writes it; its first draw uploads it.
+- **No hashing on any new image's first upload**, not only for textures built ahead.
+- **When VRAM is full**, an image goes to system memory instead of stopping the game.
+- **The log** (research for the next step):
+  - Which programs hold the graphics card's memory when the game's budget moves by 256 MiB or more,
+    and once a minute (Windows' counters, as Task Manager shows them).
+  - Images draws still make, and stale images, by what the game has at their memory, with the
+    largest five described.
+  - Maps and views, the time spent binding the game's data in and out of VRAM (also in hitch
+    reports), and images in system memory.
+
 ## Diagnostics
 
 - **The "Building shaders" note** shows when a frame was late while shaders were being

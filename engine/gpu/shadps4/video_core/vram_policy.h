@@ -30,13 +30,14 @@
 //
 // BB_VRAM_TIGHT_PERCENT=N: tight N% (30 to 90), comfortable N - 10, full N + 10 (at most 95).
 // BB_VRAM_TEST_BUDGET_MB=N: the budget is N MiB (a smaller card on this one).
-// BB_VRAM_MANAGER=0 (0.4.6 beta 2-4, for testing): the manager measures and logs but frees nothing by
-// its own rules: no garbage, no trims at loading screens, while tight or when full. Only the game's
-// own calls decide (beta 3: whatever VRAM's level): textures built when the game creates them, images
-// freed when it destroys their textures (beta 4: once the GPU is done, each pass; stale images with
-// no game texture over them too), its data in VRAM freed when it releases its buffers (beta 4: once
-// the GPU is done with it). Nothing idle leaves VRAM otherwise, even when it runs out: only for cards
-// with room.
+// BB_VRAM_MANAGER=0 (0.4.6 beta 2-4, for testing; 0.4.6 beta 5: the default, on with
+// BB_VRAM_MANAGER=1, Use less VRAM (BB_LESS_VRAM=1) or safe mode): the manager measures and logs but
+// frees nothing by its own rules: no garbage, no trims at loading screens, while tight or when full.
+// Only the game's own calls decide (beta 3: whatever VRAM's level): textures built when the game
+// creates them, images freed when it destroys their textures or makes something new over their
+// memory (beta 5), stale images with no game texture over them (beta 4); its data in VRAM stays, as
+// on the PS4, until the game unmaps the memory (beta 5). Nothing idle leaves VRAM otherwise: an image
+// VRAM has no room for goes to system memory (beta 5, UniqueImage::Create).
 #pragma once
 
 #include <algorithm>
@@ -48,6 +49,7 @@
 #include <mutex>
 
 #include "bbport_toggles.h"
+#include "bbport_usage.h"
 #include "common/types.h"
 #include "engine/loading.h"
 
@@ -62,7 +64,7 @@ struct Config {
     u64 full_percent;
     u64 test_budget; ///< bytes; 0: the driver's
     bool less;
-    bool off = false; ///< BB_VRAM_MANAGER=0
+    bool off = true; ///< 0.4.6 beta 5: off unless BB_VRAM_MANAGER=1 or BB_LESS_VRAM=1
 };
 
 [[nodiscard]] inline const Config& Settings() {
@@ -70,14 +72,15 @@ struct Config {
         Config c{70, 80, 90, 0, false};
         if (const char* env = std::getenv("BB_LESS_VRAM"); env && env[0] == '1') {
             c = {55, 65, 75, 0, true};
+            c.off = false; // asking for less VRAM asks for the manager
         }
         if (const char* env = std::getenv("BB_VRAM_TIGHT_PERCENT"); env && env[0]) {
             c.tight_percent = std::clamp<u64>(std::strtoull(env, nullptr, 10), 30, 90);
             c.comfort_percent = c.tight_percent - 10;
             c.full_percent = std::min<u64>(c.tight_percent + 10, 95);
         }
-        if (const char* env = std::getenv("BB_VRAM_MANAGER"); env && env[0] == '0') {
-            c.off = true;
+        if (const char* env = std::getenv("BB_VRAM_MANAGER"); env && env[0]) {
+            c.off = env[0] == '0';
         }
         if (const char* env = std::getenv("BB_VRAM_TEST_BUDGET_MB"); env && env[0]) {
             c.test_budget = std::strtoull(env, nullptr, 10) << 20;
@@ -262,7 +265,7 @@ inline void Decide(u32 now, u64 used, u64 budget) {
         to_free = s64(used - comfort);
     }
     if (config.off) {
-        mode = Mode::None; // measured and logged, nothing freed by these rules (BB_VRAM_MANAGER=0)
+        mode = Mode::None; // measured and logged, nothing freed by these rules (the default; BB_VRAM_MANAGER=1: on)
         to_free = 0;
     }
     // While full, one step faster after a second that freed little.
@@ -331,6 +334,8 @@ inline void Update(const InstanceT& instance) {
     if (instance.CanReportMemoryUsage()) {
         used = instance.GetDeviceMemoryUsage();
         budget = instance.GetDeviceMemoryBudgetNow();
+        // 0.4.6 beta 5 (research): who holds the card when the budget moves (Windows' counters).
+        BbUsage::NoteVramBudget(budget, used);
     } else {
         used = BbStats::device_alloc_bytes.load(std::memory_order_relaxed) -
                BbStats::device_free_bytes.load(std::memory_order_relaxed);
@@ -395,7 +400,8 @@ inline void LogMinute() {
                 (unsigned long long)std::min<u64>(config.comfort_percent + state.comfort_bonus.load(),
                                                   config.tight_percent - 5),
                 (unsigned long long)config.tight_percent, (unsigned long long)config.full_percent,
-                config.off    ? " (the manager is off, BB_VRAM_MANAGER=0: nothing idle is freed)"
+                config.off    ? " (the manager is off, the default: nothing idle is freed; BB_VRAM_MANAGER=1 or Use "
+                                "less VRAM turns it on)"
                 : config.less ? " (Use less VRAM)"
                               : "");
     std::printf("  textures: in use %llu MiB, cache %llu, garbage %llu, drawn by the GPU %llu; the game's data: "

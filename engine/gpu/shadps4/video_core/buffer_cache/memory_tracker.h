@@ -106,6 +106,17 @@ public:
                             });
     }
 
+    /// 0.4.6 beta 5: as MarkRegionAsCpuModified, for the cache's own reasons (a VRAM copy leaving):
+    /// not counted as the game's writes (RegionManager::ChangeRegionState).
+    void MarkRegionAsCpuModifiedQuiet(VAddr dirty_cpu_addr, u64 query_size) {
+        IteratePages<false>(dirty_cpu_addr, query_size,
+                            [](RegionManager* manager, u64 offset, size_t size) {
+                                std::scoped_lock lk{manager->lock};
+                                manager->template ChangeRegionState<Type::CPU, true, false>(
+                                    manager->GetCpuAddr() + offset, size);
+                            });
+    }
+
     /// bbport: see RegionManager::ExtendWriteFault.
     void ExtendWriteFault(VAddr window_addr, u64 size) {
         IteratePages<false>(window_addr, size,

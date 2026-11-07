@@ -414,15 +414,33 @@ static void LogRam() {
     Vulkan::VmaDeviceUsage(vma_blocks, vma_used);
     if (vram_budget != 0) {
         std::printf("VRAM: %llu of %llu MiB in use (the driver's count); Vulkan memory %llu MiB: VMA "
-                    "blocks %llu MiB (%llu MiB of them used), images %llu MiB, the game's data %llu MiB "
-                    "(%llu MiB of it unused)\n",
+                    "blocks %llu MiB (%llu MiB of them used), images %llu MiB (%llu in system memory, "
+                    "%llu MiB; %llu placed over the budget so far), the game's data %llu MiB (%llu MiB of "
+                    "it unused)\n",
                     mib(vram_used), mib(vram_budget),
                     mib(BbStats::device_alloc_bytes.load() - BbStats::device_free_bytes.load()),
                     mib(vma_blocks), mib(vma_used), mib(BbStats::vk_image_bytes.load()),
+                    (unsigned long long)BbStats::system_images.load(), mib(BbStats::system_image_bytes.load()),
+                    (unsigned long long)BbStats::image_over_budget.load(),
                     mib(BbStats::residency_alloc_bytes.load()),
                     mib(BbStats::residency_unused_bytes.load()));
     }
 #endif
+    // 0.4.6 beta 5: the buffer cache's sparse binds this minute (the game's data in and out of VRAM).
+    {
+        static u64 last_calls = 0, last_ranges = 0, last_ns = 0;
+        const u64 calls = BbStats::sparse_bind_calls.load(), ranges = BbStats::sparse_bind_ranges.load(),
+                  ns = BbStats::sparse_bind_ns.load(), longest = BbStats::sparse_bind_max_ns.exchange(0);
+        if (calls != last_calls) {
+            std::printf("Game data in VRAM this minute: %llu sparse bind calls, %llu ranges bound or unbound, "
+                        "%.1f ms in the driver (longest call %.1f ms)\n",
+                        (unsigned long long)(calls - last_calls), (unsigned long long)(ranges - last_ranges),
+                        double(ns - last_ns) / 1e6, double(longest) / 1e6);
+        }
+        last_calls = calls;
+        last_ranges = ranges;
+        last_ns = ns;
+    }
     // 0.4.5 beta 14-16: the VRAM manager's minute (vram_policy.h) and the game's own resource calls the
     // texture cache follows (engine/gx_resources.h).
     VideoCore::VramPolicy::LogMinute();
@@ -691,7 +709,8 @@ void VideoOutDriver::Flip(const Request& req) {
         // bbport: the parts of image create and refresh (texture loading), and how many images
         // were given memory or had their guest data checked. Taken every frame: a long frame's
         // figures are its own, not everything since the last.
-        static u64 last_parts[5], last_allocs, last_checks;
+        static u64 last_parts[5], last_allocs, last_checks, last_bind_calls, last_bind_ns;
+        const u64 bind_calls = BbStats::sparse_bind_calls.load(), bind_ns = BbStats::sparse_bind_ns.load();
         const u64 parts[5] = {BbStats::t_image_query.load(), BbStats::t_image_alloc.load(),
                               BbStats::t_refresh_hash.load(), BbStats::t_refresh_obtain.load(),
                               BbStats::t_refresh_detile.load()};
@@ -718,10 +737,15 @@ void VideoOutDriver::Flip(const Request& req) {
                         static_cast<unsigned long long>(pp - last_pp),
                         static_cast<unsigned long long>(rc - last_rc),
                         static_cast<unsigned long long>(rp - last_rp));
+            std::printf("       sparse binds (the game's data in and out of VRAM): %llu calls, %.1f ms\n",
+                        static_cast<unsigned long long>(bind_calls - last_bind_calls),
+                        (bind_ns - last_bind_ns) / 1e6);
         }
         std::copy(std::begin(parts), std::end(parts), std::begin(last_parts));
         last_allocs = allocs;
         last_checks = checks;
+        last_bind_calls = bind_calls;
+        last_bind_ns = bind_ns;
         last_pc = pc;
         last_pp = pp;
         last_rc = rc;
