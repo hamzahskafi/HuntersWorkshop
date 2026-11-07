@@ -511,12 +511,11 @@ void TextureCache::CompletePendingStores() {
                 // Used again since: it stays (drawn into again, the copy is out of date).
                 ++gc_stores_cancelled;
             } else if (LandStore(store, true)) {
-                const u64 bytes = image.backing ? image.GetHostImageSize() : 0;
                 ++(store.tiled ? gc_tiled_written : gc_downloads);
                 ++gc_evictions;
                 BbStats::gc_freed_images.fetch_add(1, std::memory_order_relaxed);
+                NoteCollected(image, gc_second, VramPolicy::Freed::Texture);
                 FreeImage(store.image_id);
-                VramPolicy::NoteFreed(true, bytes, store.age);
             } else {
                 // The game's memory did not take it (a mapping lost meanwhile): it stays, tried
                 // again later, twice as late after each further failure (up to 1920 passes).
@@ -652,6 +651,10 @@ void TextureCache::InvalidateMemory(VAddr addr, size_t size) {
             // Modified region overlaps image, so the image was definitely accessed by this fault.
             // Untrack the image, so that the range is unprotected and the guest can write freely.
             RefreshTrace::Mark(image, "CPU dirty", addr, size);
+            // Beta 15: written over by the game; garbage once it has gone unused (GarbagePass).
+            if (False(image.flags & ImageFlagBits::CpuDirty) && garbage_candidates.size() < 16384) {
+                garbage_candidates.emplace_back(image_id, image.image_uid);
+            }
             image.flags |= ImageFlagBits::CpuDirty;
             PageManager::NoteImageFault(image.info.guest_address, image.info.guest_size,
                                         image.info.size.width, image.info.size.height,
@@ -730,6 +733,9 @@ void TextureCache::InvalidateMemoryFromGPU(VAddr address, size_t max_size) {
         }
         // Ensure image is reuploaded when accessed again.
         RefreshTrace::Mark(image, "GPU dirty", address, max_size);
+        if (False(image.flags & ImageFlagBits::GpuDirty) && garbage_candidates.size() < 16384) {
+            garbage_candidates.emplace_back(image_id, image.image_uid);
+        }
         image.flags |= ImageFlagBits::GpuDirty;
     });
 }
@@ -1461,8 +1467,19 @@ void TextureCache::RegisterImage(ImageId image_id) {
     BbStats::live_images.fetch_add(1, std::memory_order_relaxed);
     image.lru_id = lru_cache.Insert(image_id, gc_tick);
     image.lru_touched_tick = gc_tick;
+    image.visit = BbEngine::Areas::CurrentVisit();
+    image.gx_dead_tick = 0;
     ForEachPage(image.info.guest_address, image.info.guest_size,
                 [this, image_id](u64 page) { page_table[page].push_back(image_id); });
+    // Beta 15 (research): whether the game made a texture at this address, and how long ago.
+    BbEngine::GxResources::NoteImage(BbEngine::GxResources::TextureAt(image.info.guest_address));
+    // Beta 15: freed by the collector in the last 5 minutes and needed again (a refault).
+    if (const auto it = freed_recent.find(image.info.guest_address); it != freed_recent.end()) {
+        if (it->second.first == image.info.guest_size && gc_second - it->second.second <= 300) {
+            VramPolicy::NoteRefault(image.backing ? image.GetHostImageSize() : image.info.guest_size);
+        }
+        freed_recent.erase(it);
+    }
 }
 
 void TextureCache::UnregisterImage(ImageId image_id) {
@@ -1616,135 +1633,309 @@ void TextureCache::GarbageCollectImages() {
     const u64 second = u64(std::chrono::duration_cast<std::chrono::seconds>(
                                std::chrono::steady_clock::now().time_since_epoch())
                                .count());
-    // Hunter's Workshop 0.4.5 beta 14: whether images go, and how long one must have gone unused,
-    // is the VRAM manager's call, for this cache and the buffer cache alike (vram_policy.h). With
-    // room in VRAM nothing goes for its age: until beta 13 an image loaded from the game's memory
-    // went 20 s after its last use at any VRAM use on cards up to about 10 GB (shadPS4's start
-    // mark was 0 there), and any image 1 s after from 80% (BB_GC_PRESSURE_PERCENT).
+    // Hunter's Workshop 0.4.5 beta 14-15: what goes, when and in which order is the VRAM manager's
+    // call, for this cache and the buffer cache alike (vram_policy.h): garbage at any level while
+    // frames have slack, trims at loading screens, while tight and when full. Until beta 13 an image
+    // loaded from the game's memory went 20 s after its last use at any VRAM use on cards up to about
+    // 10 GB, and any image 1 s after from 80% (BB_GC_PRESSURE_PERCENT).
     VramPolicy::Update(instance);
-    // bbport: gc_tick (one per guest submission, hundreds a second) at each of the last 512
-    // seconds, for ages in seconds.
-    if (second != gc_second) {
+    // bbport: gc_tick (one per guest submission, hundreds a second) and the scheduler's tick at each
+    // of the last 512 seconds, for ages in seconds (UsedSince).
+    const bool new_second = second != gc_second;
+    if (new_second) {
         gc_second = second;
         BbStats::coarse_second.store(u32(second), std::memory_order_relaxed);
         gc_tick_at_second[second % gc_tick_at_second.size()] = gc_tick;
+        sched_tick_at_second[second % sched_tick_at_second.size()] = scheduler.CurrentTick();
     }
-    // Nothing to do with room in VRAM and no store under way: no lock taken (one pass per guest
-    // submission). pending_stores changes size on this thread only.
-    const VramPolicy::Level level = VramPolicy::CurrentLevel();
-    const bool collect = !BbToggle::Disabled(BbToggle::TextureCollector) &&
-                         level != VramPolicy::Level::Room && VramPolicy::WantBytes();
-    if (!collect && pending_stores.empty()) {
+    // Nothing to do (no trim, no store under way, not a new second): no lock taken (one pass per
+    // guest submission). pending_stores changes size on this thread only.
+    const VramPolicy::Mode mode = VramPolicy::CurrentMode();
+    const bool trim = mode != VramPolicy::Mode::None && !BbToggle::Disabled(BbToggle::TextureCollector);
+    if (!trim && !new_second && pending_stores.empty()) {
         return;
     }
     std::scoped_lock lock{mutex};
     // Stores begun in earlier passes: their images go once the GPU has copied them out.
     CompletePendingStores();
-    if (!collect) {
+    if (new_second) {
+        ProcessGxDestroyed();
+        if (second - minute_second >= 60) {
+            minute_second = second;
+            ClassifyForMinute(second);
+        }
+        if (!BbToggle::Disabled(BbToggle::TextureCollector)) {
+            GarbagePass(second);
+        }
+        // The plan is made only when it may run (while tight, frames with slack): a pass over every
+        // image, counted against the second's time in play.
+        if (trim && VramPolicy::Allowed()) {
+            const auto start = std::chrono::steady_clock::now();
+            BuildPlan(second);
+            VramPolicy::NoteWork(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                     std::chrono::steady_clock::now() - start)
+                                     .count());
+        } else {
+            plan.clear();
+            plan_pos = 0;
+        }
+    }
+    if (trim) {
+        ExecutePlan();
+    }
+    // bbport: what was freed for room, at most every 5 s.
+    const auto now = std::chrono::steady_clock::now();
+    if (now - gc_report_time >= std::chrono::seconds(5) &&
+        (gc_evictions != 0 || gc_stores_cancelled != 0 || gc_tiled_written + gc_downloads != 0)) {
+        static constexpr const char* kMode[] = {"garbage", "loading screen trim", "tight", "full"};
+        std::printf("Texture cache: %s: %llu images freed, %llu of them drawn by the GPU and stored first "
+                    "(%llu tiled), %llu stores cancelled (used again), %llu in use kept since the last report\n",
+                    kMode[u32(mode)], (unsigned long long)gc_evictions,
+                    (unsigned long long)(gc_downloads + gc_tiled_written), (unsigned long long)gc_tiled_written,
+                    (unsigned long long)gc_stores_cancelled, (unsigned long long)gc_recent_kept);
+        gc_report_time = now;
+        gc_evictions = gc_downloads = gc_tiled_written = gc_tiled_kept = gc_recent_kept = 0;
+        gc_stores_cancelled = 0;
+    }
+}
+
+bool TextureCache::UsedSince(const Image& image, u64 second, u32 seconds) const {
+    seconds = std::min<u32>(seconds, u32(gc_tick_at_second.size() - 1));
+    const size_t at = (second - seconds) % gc_tick_at_second.size();
+    const u64 gc = gc_tick_at_second[at], sched = sched_tick_at_second[at];
+    if (gc == 0 && sched == 0) {
+        return true; // the session's first seconds: no tick to compare with
+    }
+    return image.tick_accessed_last >= sched ||
+           (image.lru_touched_tick != ~0ULL && image.lru_touched_tick >= gc);
+}
+
+void TextureCache::NoteCollected(const Image& image, u64 second, VramPolicy::Freed kind) {
+    static const u64 dedicated = [] {
+        const char* env = std::getenv("BB_VMA_DEDICATED_MB"); // image.cpp: memory of its own from this size
+        return (env && env[0] ? std::strtoull(env, nullptr, 10) : 4) << 20;
+    }();
+    const u64 bytes = image.backing ? image.GetHostImageSize() : 0;
+    VramPolicy::NoteFreed(kind, bytes, dedicated != 0 && bytes >= dedicated ? bytes : 0);
+    const VAddr address = image.info.guest_address;
+    if (address == 0) {
         return;
     }
-    const bool full = level == VramPolicy::Level::Full;
-    const u32 age = VramPolicy::MinAgeSeconds();
-    if (age >= gc_tick_at_second.size()) {
+    if (freed_recent.size() >= 8192 && !freed_order.empty()) {
+        freed_recent.erase(freed_order.front());
+        freed_order.pop_front();
+    }
+    if (freed_recent.insert_or_assign(address, std::pair{image.info.guest_size, second}).second) {
+        freed_order.push_back(address);
+    }
+}
+
+void TextureCache::ProcessGxDestroyed() {
+    if (!BbEngine::GxResources::Active()) {
         return;
     }
-    // The tick at the start of that second (an older one where no submission came then; none
-    // before the session's first seconds), and at least 80 submissions back (160 when full).
-    const u64 idle_tick = gc_tick_at_second[(second - age) % gc_tick_at_second.size()];
-    const u64 below_tick = std::min(gc_tick - std::min<u64>(full ? 160 : 80, gc_tick), idle_tick);
-    size_t num_deletions = full ? 40 : 20;
-    u32 visited = 0;
-    // Each image the GPU drew is a copy into the game's memory (BeginStore): at most this many
-    // begun a pass.
-    static constexpr size_t MaxStoresPerPass = 4;
-    size_t stores = 0;
-    // bbport (GPU hang guard): the submission tick GcRecentFrames() frames ago; images accessed
-    // at or after it are in use. 0: the guard is off. Until that many frames have passed, every
-    // image counts as recent.
+    BbEngine::GxResources::TakeDestroyed(gx_gone);
+    for (const auto& gone : gx_gone) {
+        bool had = false;
+        u64 bytes = 0;
+        ForEachImageInRegion(gone.memory, std::max<u64>(gone.bytes, 1), [&](ImageId, Image& image) {
+            if (image.info.guest_address == gone.memory) {
+                image.gx_dead_tick = gc_tick;
+                had = true;
+                bytes += image.backing ? image.GetHostImageSize() : 0;
+            }
+        });
+        BbEngine::GxResources::NoteDestroyedImage(had, bytes);
+    }
+    gx_gone.clear();
+}
+
+void TextureCache::GarbagePass(u64 second) {
+    if (garbage_candidates.empty() || !VramPolicy::GarbageAllowed()) {
+        return;
+    }
+    const auto view = BbEngine::Areas::Snapshot();
     const u64 recent_frames = GcRecentFrames();
     const u64 recent_tick =
         recent_frames == 0
             ? 0
             : (gc_tick >= recent_frames
-                   ? std::max<u64>(sched_tick_at_gc[(gc_tick - recent_frames) %
-                                                    sched_tick_at_gc.size()],
-                                   1)
+                   ? std::max<u64>(sched_tick_at_gc[(gc_tick - recent_frames) % sched_tick_at_gc.size()], 1)
                    : ~0ull);
-
-    const auto clean_up = [&](ImageId image_id) {
-        if (num_deletions == 0 || ++visited > 256 || !VramPolicy::WantBytes()) {
-            return true;
+    u32 freed = 0, checked = 0;
+    size_t kept = 0;
+    for (size_t i = 0; i < garbage_candidates.size(); ++i) {
+        const auto [image_id, uid] = garbage_candidates[i];
+        const bool look = freed < VramPolicy::GarbagePerSecond && checked < 1024;
+        if (!slot_images.is_allocated(image_id) || slot_images[image_id].image_uid != uid) {
+            continue; // gone already
         }
-        auto& image = slot_images[image_id];
-        // bbport: images that cannot go now neither use up the deletions nor stay first in line.
-        // The oldest ten being render targets that could not go stopped the collector for good,
-        // and VRAM grew with every area visited (~10 GB on 16 GB).
-        const auto keep = [&] {
-            lru_cache.Touch(image.lru_id, gc_tick);
-            BbStats::gc_kept_images.fetch_add(1, std::memory_order_relaxed);
-            return false;
-        };
-        if (image.store_pending) {
-            return keep();
+        Image& image = slot_images[image_id];
+        if (False(image.flags & ImageFlagBits::Registered) ||
+            False(image.flags & (ImageFlagBits::CpuDirty | ImageFlagBits::GpuDirty))) {
+            continue; // refreshed: not garbage any more
         }
-        // bbport (GPU hang guard): in use in the last frames (see GcRecentFrames), or by GPU
-        // work not finished yet: kept, whatever its LRU age says.
-        if (recent_tick != 0 && (image.tick_accessed_last >= recent_tick ||
-                                 !scheduler.IsFree(image.tick_accessed_last))) {
-            ++gc_recent_kept;
-            return keep();
+        bool go = false;
+        if (look) {
+            ++checked;
+            go = !image.store_pending && !UsedSince(image, second, VramPolicy::GarbageSeconds) &&
+                 !view.Protected(image.visit) &&
+                 !(recent_tick != 0 && (image.tick_accessed_last >= recent_tick ||
+                                        !scheduler.IsFree(image.tick_accessed_last)));
         }
-        if (image.SafeToDownload()) {
-            // The GPU drew it: only VRAM has what it holds. Stored into the game's memory and
-            // freed only while VRAM is full, without waiting for the GPU (BeginStore).
-            if (!full || gc_tick < image.store_retry_tick) {
-                ++gc_tiled_kept;
-                return keep();
-            }
-            if (stores >= MaxStoresPerPass) {
-                return false; // the next pass, still first in line
-            }
-            if (!BeginStore(image_id)) {
-                image.store_retry_tick =
-                    gc_tick + (u64{60} << std::min<u8>(image.store_failures, 5));
-                image.store_failures = static_cast<u8>(std::min(image.store_failures + 1, 255));
-                ++gc_tiled_kept;
-                return keep();
-            }
-            ++stores;
-            --num_deletions;
-            pending_stores.back().age = age;
-            return false; // freed once the GPU has copied it out (CompletePendingStores)
+        if (!go) {
+            garbage_candidates[kept++] = garbage_candidates[i];
+            continue;
         }
-        --num_deletions;
-        const u64 bytes = image.backing ? image.GetHostImageSize() : 0;
+        ++freed;
         ++gc_evictions;
         BbStats::gc_freed_images.fetch_add(1, std::memory_order_relaxed);
+        NoteCollected(image, second, VramPolicy::Freed::Garbage);
         FreeImage(image_id);
-        VramPolicy::NoteFreed(true, bytes, age);
+    }
+    garbage_candidates.resize(kept);
+}
+
+void TextureCache::BuildPlan(u64 second) {
+    using VramPolicy::Mode;
+    const Mode mode = VramPolicy::CurrentMode();
+    const auto view = BbEngine::Areas::Snapshot();
+    static const u64 dedicated = [] {
+        const char* env = std::getenv("BB_VMA_DEDICATED_MB");
+        return (env && env[0] ? std::strtoull(env, nullptr, 10) : 4) << 20;
+    }();
+    const u32 full_age = VramPolicy::FullAgeSeconds();
+    // bbport (GPU hang guard): the submission tick GcRecentFrames() collector passes ago; images
+    // accessed at or after it are in use, whatever else says.
+    const u64 recent_frames = GcRecentFrames();
+    const u64 recent_tick =
+        recent_frames == 0
+            ? 0
+            : (gc_tick >= recent_frames
+                   ? std::max<u64>(sched_tick_at_gc[(gc_tick - recent_frames) % sched_tick_at_gc.size()], 1)
+                   : ~0ull);
+    plan.clear();
+    plan_pos = 0;
+    plan_second = second;
+    plan_sched_tick = scheduler.CurrentTick();
+    plan_gc_tick = gc_tick;
+    lru_cache.ForEachItemBelow(gc_tick, [&](ImageId image_id) {
+        const Image& image = slot_images[image_id];
+        if (image.store_pending ||
+            (recent_tick != 0 && (image.tick_accessed_last >= recent_tick ||
+                                  !scheduler.IsFree(image.tick_accessed_last)))) {
+            ++gc_recent_kept;
+            return false;
+        }
+        const bool dirty = True(image.flags & (ImageFlagBits::CpuDirty | ImageFlagBits::GpuDirty));
+        const bool guarded = view.Protected(image.visit);
+        u8 major = 0xff;
+        if (image.SafeToDownload()) {
+            // Drawn by the GPU: only VRAM has it. Stored first, only when full.
+            if (mode == Mode::Full && !UsedSince(image, second, full_age)) {
+                major = 4;
+            }
+        } else if (dirty && (!guarded || mode == Mode::Full) &&
+                   !UsedSince(image, second, VramPolicy::GarbageSeconds)) {
+            major = 0;
+        } else if (!guarded && !UsedSince(image, second, VramPolicy::CacheSeconds)) {
+            major = 1;
+        } else if (guarded && mode != Mode::Full && !UsedSince(image, second, VramPolicy::ProtectedIdleSeconds)) {
+            major = 2;
+        } else if (mode == Mode::Full && !UsedSince(image, second, full_age)) {
+            major = 3;
+        }
+        if (major != 0xff) {
+            const u64 bytes = image.backing ? image.GetHostImageSize() : 0;
+            plan.push_back({image_id, image.image_uid, major, bytes < dedicated, view.Keep(image.visit), bytes});
+        }
         return false;
-    };
-    lru_cache.ForEachItemBelow(below_tick, clean_up);
+    });
+    // Garbage first; then what the player is least likely to come back to; within that, what gives
+    // memory back to the driver at once (memory of its own) and the biggest.
+    std::sort(plan.begin(), plan.end(), [](const PlanItem& a, const PlanItem& b) {
+        if (a.major != b.major) return a.major < b.major;
+        if (a.keep != b.keep) return a.keep < b.keep;
+        if (a.small != b.small) return !a.small;
+        return a.bytes > b.bytes;
+    });
+}
+
+void TextureCache::ExecutePlan() {
+    if (plan_pos >= plan.size() || !VramPolicy::WantBytes() || !VramPolicy::Allowed()) {
+        return;
+    }
+    using VramPolicy::Mode;
+    const auto start = std::chrono::steady_clock::now();
+    const auto limit = std::chrono::microseconds(VramPolicy::CurrentMode() == Mode::Tight ? 1000 : 2000);
+    // Each image the GPU drew is a copy into the game's memory (BeginStore): at most this many a pass.
+    static constexpr size_t MaxStoresPerPass = 4;
+    size_t stores = 0, frees = 0;
+    while (plan_pos < plan.size() && frees < 40 && VramPolicy::WantBytes() &&
+           std::chrono::steady_clock::now() - start < limit) {
+        const PlanItem item = plan[plan_pos++];
+        if (!slot_images.is_allocated(item.image_id)) {
+            continue;
+        }
+        Image& image = slot_images[item.image_id];
+        // Gone, replaced, or used since the plan was made: it stays.
+        if (image.image_uid != item.image_uid || False(image.flags & ImageFlagBits::Registered) ||
+            image.store_pending || image.tick_accessed_last >= plan_sched_tick ||
+            (image.lru_touched_tick != ~0ULL && image.lru_touched_tick >= plan_gc_tick)) {
+            continue;
+        }
+        if (item.major == 4) {
+            if (stores >= MaxStoresPerPass || gc_tick < image.store_retry_tick) {
+                continue;
+            }
+            if (!BeginStore(item.image_id)) {
+                image.store_retry_tick = gc_tick + (u64{60} << std::min<u8>(image.store_failures, 5));
+                image.store_failures = static_cast<u8>(std::min(image.store_failures + 1, 255));
+                ++gc_tiled_kept;
+                continue;
+            }
+            ++stores;
+            continue; // freed once the GPU has copied it out (CompletePendingStores)
+        }
+        ++frees;
+        ++gc_evictions;
+        BbStats::gc_freed_images.fetch_add(1, std::memory_order_relaxed);
+        NoteCollected(image, gc_second, item.major == 0 ? VramPolicy::Freed::Garbage : VramPolicy::Freed::Texture);
+        FreeImage(item.image_id);
+    }
     if (stores != 0) {
         // The copies go to the GPU now: a game write that meets one waits for it alone (LandStore).
         scheduler.Flush();
     }
-    // bbport: what was freed for room, at most every 5 s.
-    const auto now = std::chrono::steady_clock::now();
-    if (now - gc_report_time >= std::chrono::seconds(5) &&
-        (gc_evictions != 0 || gc_tiled_kept != 0 || gc_stores_cancelled != 0)) {
-        std::printf("Texture cache: VRAM %s (unused for %u s or more): %llu images freed, %llu of "
-                    "them drawn by the GPU and stored first (%llu tiled), %llu stores cancelled "
-                    "(used again), %llu drawn by the GPU kept, %llu in use kept since the last "
-                    "report\n",
-                    full ? "full" : "tight", age, (unsigned long long)gc_evictions,
-                    (unsigned long long)(gc_downloads + gc_tiled_written),
-                    (unsigned long long)gc_tiled_written, (unsigned long long)gc_stores_cancelled,
-                    (unsigned long long)gc_tiled_kept, (unsigned long long)gc_recent_kept);
-        gc_report_time = now;
-        gc_evictions = gc_downloads = gc_tiled_written = gc_tiled_kept = gc_recent_kept = 0;
-        gc_stores_cancelled = 0;
-    }
+    VramPolicy::NoteWork(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                             std::chrono::steady_clock::now() - start)
+                             .count());
+}
+
+void TextureCache::ClassifyForMinute(u64 second) {
+    u64 in_use = 0, cache = 0, garbage = 0, gpu = 0, dead = 0, dead_bytes = 0;
+    lru_cache.ForEachItemBelow(gc_tick, [&](ImageId image_id) {
+        const Image& image = slot_images[image_id];
+        const u64 bytes = image.backing ? image.GetHostImageSize() : 0;
+        if (UsedSince(image, second, 10)) {
+            in_use += bytes;
+        } else if (image.SafeToDownload()) {
+            gpu += bytes;
+        } else if (True(image.flags & (ImageFlagBits::CpuDirty | ImageFlagBits::GpuDirty))) {
+            garbage += bytes;
+        } else {
+            cache += bytes;
+        }
+        // The game destroyed its texture and the image has not been used since (research).
+        if (image.gx_dead_tick != 0 &&
+            !(image.lru_touched_tick != ~0ULL && image.lru_touched_tick > image.gx_dead_tick)) {
+            ++dead;
+            dead_bytes += bytes;
+        }
+        return false;
+    });
+    VramPolicy::PublishTextures(in_use, cache, garbage, gpu);
+    BbEngine::GxResources::NoteDeadInVram(dead, dead_bytes);
 }
 
 void TextureCache::GarbageCollectSamplers() {
@@ -1806,6 +1997,7 @@ void TextureCache::TouchImage(const Image& image) {
         return;
     }
     image.lru_touched_tick = gc_tick;
+    image.visit = BbEngine::Areas::CurrentVisit();
     lru_cache.Touch(image.lru_id, gc_tick);
 }
 

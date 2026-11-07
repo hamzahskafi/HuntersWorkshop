@@ -15,6 +15,8 @@
 #include "render_guard.h"
 #include "game_fixes.h"
 #include "gx_region.h"
+#include "gx_resources.h"
+#include "areas.h"
 #include "effect_timing.h"
 #include "frame_rate.h"
 #include "online_fixes.h"
@@ -255,10 +257,14 @@ void Install(std::uint8_t* image, std::size_t size) {
     const bool guard=RenderGuard::Install(image,size);
     const bool fixes=GameFixes::Install(image,size);
     const bool region=GxRegion::Install(image,size);
+    // 0.4.5 beta 15: the game's own resource calls (research, counted), and where the player is (the
+    // VRAM manager's areas).
+    const bool resources=GxResources::Install(image,size);
+    Areas::Install();
     const bool timing=EffectTiming::Install(image,size);
     const bool frames=FrameRate::Install(image,size);
     if (!g_frame_on && !camera && !rebirth && !menus && !graphics && !wide && !input && !cheats && !online && !guard && !fixes &&
-        !region && !timing && !frames) {
+        !region && !resources && !timing && !frames) {
         for (auto& hook : hooks) Discard(hook);
         Log("engine enhancements disabled: no compatible feature could be prepared"); return;
     }

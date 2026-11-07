@@ -28,6 +28,10 @@
 #include "video_core/renderer_vulkan/vk_staging_buffer_pool.h"
 #include "video_core/texture_cache/tile_manager.h"
 #include "video_core/texture_cache/watched_pages.h"
+#include "video_core/vram_policy.h"
+#include "engine/areas.h"
+#include "engine/gx_resources.h"
+#include <unordered_map>
 
 namespace AmdGpu {
 struct Liverpool;
@@ -112,7 +116,9 @@ public:
     /// bbport: FindImage's access tick for an image found by a memoized lookup. The LRU touch
     /// FindImage also does happens in UpdateImage (FindTexture), which every binding reaches.
     void MarkFound(ImageId image_id) {
-        slot_images[image_id].tick_accessed_last = scheduler.CurrentTick();
+        Image& image = slot_images[image_id];
+        image.tick_accessed_last = scheduler.CurrentTick();
+        image.visit = BbEngine::Areas::CurrentVisit();
     }
 
     /// bbport: whether FindImage's result `image_id` for `info` is an exact match: the
@@ -459,7 +465,6 @@ private:
         u64 size;
         u64 tick;     ///< the submission holding the copy
         u64 accessed; ///< the image's tick_accessed_last once recorded: changed, it is in use again
-        u32 age;      ///< the collector's age for it (VramPolicy::NoteFreed)
         bool tiled;
         bool landed = false;   ///< written into the game's memory already (LandStore)
         bool stored = false;   ///< ... and the game's memory took it
@@ -479,6 +484,23 @@ private:
 
     /// An image with a store under way is freed (FreeImage): the store writes nothing.
     void OrphanStore(ImageId image_id);
+
+    /// Beta 15: whether the image was used in the last `seconds` (by the collector's per-second ticks;
+    /// counted as used where no tick of that second is known).
+    bool UsedSince(const Image& image, u64 second, u32 seconds) const;
+    /// Beta 15 (once a second): the game's destroyed textures against the images (research).
+    void ProcessGxDestroyed();
+    /// Beta 15 (once a second, any VRAM level): garbage textures outside protected visits.
+    void GarbagePass(u64 second);
+    /// Beta 15: what to free and in which order, once a second while the VRAM manager trims.
+    void BuildPlan(u64 second);
+    /// ... and freed in slices, each pass while the VRAM manager allows it.
+    void ExecutePlan();
+    /// Beta 15 (once a minute): what the images are, for the VRAM manager's line.
+    void ClassifyForMinute(u64 second);
+    /// Beta 15: an image the collector frees: remembered 5 minutes (refaults); its bytes, and of them
+    /// what goes back to the driver at once (memory of its own).
+    void NoteCollected(const Image& image, u64 second, VramPolicy::Freed kind);
 
     /// Thread function for copying downloaded images out to CPU memory.
     void DownloadedImagesThread(const std::stop_token& token);
@@ -566,6 +588,26 @@ private:
     /// last pressure report.
     std::vector<PendingStore> pending_stores;
     u64 gc_stores_cancelled = 0;
+    /// Beta 15: the scheduler's tick at each of the last 512 seconds (UsedSince).
+    std::array<u64, 512> sched_tick_at_second{};
+    /// Beta 15: images the game or the GPU wrote over (candidates for GarbagePass): id and uid.
+    std::vector<std::pair<ImageId, u64>> garbage_candidates;
+    /// Beta 15: the plan (BuildPlan) and where ExecutePlan is in it.
+    struct PlanItem {
+        ImageId image_id;
+        u64 image_uid;
+        u8 major; ///< 0 garbage, 1 cache, 2 protected and long idle, 3 idle while full, 4 drawn by the GPU
+        bool small;
+        float keep;
+        u64 bytes;
+    };
+    std::vector<PlanItem> plan;
+    size_t plan_pos = 0;
+    u64 plan_second = 0, plan_sched_tick = 0, plan_gc_tick = 0, minute_second = 0;
+    /// Beta 15: images freed in the last 5 minutes, by address (refaults): size and second.
+    std::unordered_map<VAddr, std::pair<u64, u64>> freed_recent;
+    std::deque<VAddr> freed_order;
+    std::vector<BbEngine::GxResources::Gone> gx_gone;
     u64 total_used_samplers = 0;
     u64 sampler_generation = 0; ///< bbport: samplers freed so far (SamplerGeneration)
     u64 trigger_gc_samplers = 0;

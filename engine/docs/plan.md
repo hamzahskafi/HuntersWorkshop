@@ -158,10 +158,13 @@ when the tester says).
    profile): why the GPU runs out of work there, and whether the submissions can overlap.
 4. **Step 2, shader code** (below), with the Hunter's Dream as its scene: there DLAA's 0.96 ms, the
    G-buffer pass's 0.74 ms and the lighting passes are most of the frame.
-5. **Step 3, the memory cleanup: beta 14** (below). Its test: a normal session (the minute's
-   `VRAM manager:` line should say nothing was freed) and one with `BB_VRAM_TEST_BUDGET_MB=3500` in
-   Extra variables (a 4 GB card), a long route through several areas. "Use less VRAM"'s 65% is set
-   after that run.
+5. **Step 3, the memory cleanup: beta 15** (below). Its test: a normal session of about 30 minutes
+   with lamp travel (the minute's `VRAM manager:` block should show garbage only, and loading screen
+   trims if VRAM passes the comfortable line) and one with `BB_VRAM_TEST_BUDGET_MB=3500` in Extra
+   variables (a 4 GB card), a long route through several areas. "Use less VRAM"'s lines are set after
+   that run. **Beta 16 next:** the game's GX events drive the cache (beta 15's research lines decide
+   which): textures freed when the game destroys them, images made and uploaded during the loading
+   screen that created their textures, and chunks of the game's data compacted.
 6. `mem-4` and `upscale-2`/`-3` when one of the above passes near them (0.1 ms at most; the second
    only at reduced upscaler presets).
 
@@ -187,14 +190,23 @@ when the tester says).
   first, both alike, in steps (5 minutes, 2, 1, 30 s) until 75%; from 90% 10 s then 1 s, and
   textures the GPU drew are stored into the game's memory without the GPU wait. The launcher's two
   VRAM rows are one, "Use less VRAM" (65%). The points below remain for smaller cards' logs.
+- **Beta 15 (the tester's call, 2026-11-06, on beta 14's log):** beta 14 overshot (freed memory
+  shows in the driver's count only once whole allocations go back) and its single blocks of the
+  game's data gave nothing back. So the manager learns where the player is (areas from the files
+  the game opens, visits, scores and the likely next areas, nothing hard-coded), keeps three lines
+  (comfortable 70, tight 80, full 90), frees at loading screens and only with slack in play, takes
+  garbage first and whole 64 MiB chunks, and logs refaults and what went back to the driver. It also
+  listens to the game's GX texture and buffer calls (research, logged only).
 
 - **Evict by the VRAM budget, not by age alone.** Done in beta 14 (above).
-- **Paced:** in play, at most a set amount a second (beta 14: 256 MiB a second of the game's data
-  while tight); larger batches during loading screens (not done).
+- **Paced:** in play, at most a set amount a second (beta 15: 12 ms a second and one 64 MiB chunk of
+  the game's data, only while frames have slack); loading screens trim down to the comfortable line
+  (beta 15).
 - **The bind waits only for the work that used the evicted blocks.** This needs a last-use tick per
   block; until then, the unbinds go in batches on loading screens.
 - **With it, the counters:** MiB and blocks per cleanup, stage B's time in it, bind waits, and blocks
-  coming back within 10 minutes (the churn).
+  coming back within 10 minutes (the churn). Beta 15: freed by kind, returned to the driver at once,
+  and what came back within 5 minutes (refaults, which raise the comfortable line).
 - **Expected:** 3 of the 4 long-frame minutes of the 217 gone, with the uploads and write faults of
   the churn.
 - **Later, if the logs still show stutter after loads:** eFMann's ideas

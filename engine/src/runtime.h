@@ -109,6 +109,8 @@ void runtime_file_report(void);
 void runtime_file_stream_report(void);
 void runtime_file_configure(const char *app0, const char *user);
 int runtime_file_mount(const char *guest, const char *host);
+/* 0.4.5 beta 15: `fn` is called with the area number of every map file the game opens (map/mAA...). */
+void runtime_area_hook(void (*fn)(int area));
 void runtime_file_unmount(const char *guest);
 int runtime_file_translate(const char *guest, char *out, size_t size);
 int64_t runtime_file_open(const char *path, int flags, int mode);

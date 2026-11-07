@@ -48,6 +48,7 @@ extern "C" uint64_t runtime_heap_growths(void);
 #include "video_core/renderer_vulkan/pipeline_compile_queue.h"
 #include "video_core/renderer_vulkan/vk_breadcrumbs.h"
 #include "video_core/vram_policy.h"
+#include "engine/gx_resources.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
@@ -422,24 +423,10 @@ static void LogRam() {
                     mib(BbStats::residency_unused_bytes.load()));
     }
 #endif
-    // 0.4.5 beta 14: what the one VRAM manager freed for room this minute (vram_policy.h).
-    {
-        const auto minute = VideoCore::VramPolicy::TakeMinute();
-        const auto& config = VideoCore::VramPolicy::Settings();
-        if (minute.texture_bytes == 0 && minute.data_bytes == 0 && minute.tight_seconds == 0 &&
-            minute.full_seconds == 0) {
-            std::printf("VRAM manager: room all minute, nothing freed (tight from %llu%%%s)\n",
-                        (unsigned long long)config.tight_percent,
-                        config.less ? ", Use less VRAM" : "");
-        } else {
-            std::printf("VRAM manager: tight %u s, full %u s this minute; freed textures %llu MiB, "
-                        "the game's data %llu MiB, unused for %u s or more (tight from %llu%%%s)\n",
-                        minute.tight_seconds, minute.full_seconds, mib(minute.texture_bytes),
-                        mib(minute.data_bytes), minute.youngest == ~0u ? 0u : minute.youngest,
-                        (unsigned long long)config.tight_percent,
-                        config.less ? ", Use less VRAM" : "");
-        }
-    }
+    // 0.4.5 beta 14-15: the VRAM manager's minute (vram_policy.h), where the player is (engine/areas.h)
+    // and the game's own resource calls against the texture cache (engine/gx_resources.h, research).
+    VideoCore::VramPolicy::LogMinute();
+    BbEngine::GxResources::LogMinute();
     // Where that RAM is: on the first report, then every five minutes. Listing every resident page
     // takes a while, so not on this (the presenting) thread.
     static int reports = 0;
@@ -468,6 +455,8 @@ static void LogRam() {
 /// stutters of 10 to 17 ms of it in one frame and showed for longer bursts that made none late.
 std::atomic<s64> g_shader_late_until_ns{0};
 std::atomic<u32> g_shader_late_count{0};
+/// 0.4.5 beta 15: the frame limit's period (0: none), for the VRAM manager's slack.
+static std::atomic<u64> g_cap_period_ns{0};
 
 static void NoteShaderStutter(double flip_ms) {
     static std::array<double, 64> recent{};
@@ -488,6 +477,15 @@ static void NoteShaderStutter(double flip_ms) {
         median = sorted[n / 2];
     }
     recent[flips++ % recent.size()] = flip_ms;
+    // 0.4.5 beta 15: the VRAM manager's slack (BbStats::flips_on_time): flips in a row that came on
+    // time and at the frame limit (the game waiting for it, so work beside it does not show). No
+    // frame limit, or frames slower than it (the GPU or the CPU the limit): no slack.
+    const double cap_ms = double(g_cap_period_ns.load(std::memory_order_relaxed)) / 1e6;
+    if (median > 0.0 && cap_ms > 0.0 && median <= cap_ms * 1.03 && flip_ms <= 1.5 * median) {
+        BbStats::flips_on_time.fetch_add(1, std::memory_order_relaxed);
+    } else if (median > 0.0) {
+        BbStats::flips_on_time.store(0, std::memory_order_relaxed);
+    }
     if (median > 0.0 && flip_ms > 1.5 * median && work_ms > 0.0 &&
         work_ms >= (flip_ms - median) / 2.0) {
         const s64 now = std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -1205,6 +1203,7 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
     }
     auto frame_period = frame_limit ? std::chrono::nanoseconds(1000000000 / frame_limit)
                                     : std::chrono::nanoseconds(0);
+    g_cap_period_ns.store(u64(frame_period.count()), std::memory_order_relaxed);
     auto next_flip = std::chrono::steady_clock::now();
     // A flip waits for its slot, a frame period after the one before: on time (within a quarter of a period)
     // the slots keep their cadence, so a sleep's overshoot never adds up. After a late flip they start again from

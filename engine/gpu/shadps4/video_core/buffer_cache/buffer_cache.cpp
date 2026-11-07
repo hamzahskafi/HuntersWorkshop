@@ -463,6 +463,7 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
     }
     blocks_per_arena_page_shift = ARENA_PAGE_BITS - block_shift;
     group_use.assign(u64{1} << (ADDRESS_SPACE_BITS - USE_GROUP_BITS), 0);
+    group_visit.assign(u64{1} << (ADDRESS_SPACE_BITS - USE_GROUP_BITS), 0);
     arena_memory_type_index =
         FindMemoryType(instance.GetMemoryProperties(), vk::MemoryPropertyFlagBits::eDeviceLocal,
                        reqs.memoryTypeBits)
@@ -1389,6 +1390,23 @@ void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_
         });
         if (!restored.Empty()) {
             evicted_blocks.Subtract(from, to);
+            // Beta 15: freed less than 5 minutes ago and needed again (a refault).
+            const u32 now = BbStats::coarse_second.load(std::memory_order_relaxed);
+            for (u64 group = from >> group_shift; group < (to >> group_shift); ++group) {
+                if (const auto it = evicted_group_second.find(group); it != evicted_group_second.end()) {
+                    if (now - it->second <= 300) {
+                        u64 bytes = 0;
+                        restored.ForEachInRange(group << group_shift, (group + 1) << group_shift,
+                                                [&](const Interval& r) {
+                                                    const u64 a = std::max(r.start, group << group_shift);
+                                                    const u64 b = std::min(r.end, (group + 1) << group_shift);
+                                                    bytes += (b - a) * block_size;
+                                                });
+                        VramPolicy::NoteRefault(bytes);
+                    }
+                    evicted_group_second.erase(it);
+                }
+            }
         }
     }
     if (bind_ranges.Empty()) {
@@ -1705,9 +1723,13 @@ void BufferCache::NoteResidencyUnused() {
 void BufferCache::NoteUse(VAddr address, u64 size) {
     const u32 now = BbStats::coarse_second.load(std::memory_order_relaxed);
     const u64 last = std::min<u64>((address + size - 1) >> USE_GROUP_BITS, group_use.size() - 1);
+    const u32 visit = BbEngine::Areas::CurrentVisit();
     for (u64 group = address >> USE_GROUP_BITS; group <= last; ++group) {
         if (group_use[group] != now) {
             group_use[group] = now;
+        }
+        if (group_visit[group] != visit) {
+            group_visit[group] = visit;
         }
     }
 }
@@ -1770,28 +1792,40 @@ void BufferCache::ProcessIdleBlocks() {
     }
     EvictIdleCopies(now);
     FreeEmptyChunks(now);
+    // Beta 15: what the game's data in VRAM is, once a minute (the VRAM manager's line).
+    if (now - minute_second >= 60) {
+        minute_second = now;
+        u64 in_use = 0, cache = 0;
+        for (const auto& range : resident_ranges) {
+            for (u64 block = range.start; block < range.end; ++block) {
+                const u64 group = std::min<u64>((block << block_shift) >> USE_GROUP_BITS, group_use.size() - 1);
+                (now - group_use[group] <= 10 ? in_use : cache) += block_size;
+            }
+        }
+        VramPolicy::PublishData(in_use, cache, BbStats::residency_unused_bytes.load(std::memory_order_relaxed));
+    }
 }
 
 void BufferCache::EvictIdleCopies(u32 now) {
     // bbport: every block of the game's memory the GPU used kept its VRAM copy, and a 4 GB card
     // ran out (exit 23). Kept: blocks with data the GPU wrote (only VRAM has it), and all of them
     // while shaders read the game's memory through the page table (dma_second).
-    // 0.4.5 beta 14: only while the VRAM manager says VRAM is tight or full (vram_policy.h), what
-    // has gone unused for its time, the longest unused first, until its bytes for this second are
-    // freed (256 MiB a second at most while tight: each block is a sparse unbind of its own). An
-    // evicted block costs an upload and can show as late geometry when it comes back. Until beta
-    // 13 copies unused for 3 minutes went with room in VRAM too (BB_VRAM_CLEANUP_SECONDS): behind
-    // most long frames at 60 FPS on 8 GB, and write faults as they came back (performance.md).
+    // 0.4.5 beta 14-15: only when the VRAM manager trims (vram_policy.h): at a loading screen over the
+    // comfortable line, while tight (with slack, one chunk a second) or when full. Until beta 13 copies
+    // unused for 3 minutes went with room in VRAM too (BB_VRAM_CLEANUP_SECONDS): behind most long
+    // frames at 60 FPS on 8 GB, and write faults as they came back (performance.md). Beta 14 freed
+    // single blocks: their memory stayed in partly used 64 MiB chunks, so nothing went back to the
+    // driver (its first tight minute: 417 MiB freed, the chunks' 1,472 MiB unchanged).
     if (TwinsEnabled()) {
         return;
     }
-    const auto level = VramPolicy::CurrentLevel();
-    if (level == VramPolicy::Level::Room || !VramPolicy::WantBytes()) {
+    using VramPolicy::Mode;
+    const Mode mode = VramPolicy::CurrentMode();
+    if (mode == Mode::None || !VramPolicy::WantBytes() || !VramPolicy::Allowed()) {
         return;
     }
-    const u32 idle = VramPolicy::MinAgeSeconds();
     const u32 dma = dma_second.load(std::memory_order_relaxed);
-    if (dma != 0 && now - dma < idle) {
+    if (dma != 0 && now - dma < VramPolicy::CacheSeconds) {
         if (dma_kept_reports < 10 && now - dma_kept_second >= 60) {
             ++dma_kept_reports;
             dma_kept_second = now;
@@ -1800,41 +1834,107 @@ void BufferCache::EvictIdleCopies(u32 now) {
         }
         return;
     }
-    // Candidates with the second each was last used, the longest unused first.
-    std::vector<std::pair<u32, u64>> candidates;
+    const auto start = std::chrono::steady_clock::now();
+    const auto view = BbEngine::Areas::Snapshot();
+    const u32 full_age = VramPolicy::FullAgeSeconds();
+    // Per 64 MiB chunk: its blocks, its newest use, whether any of them is GPU-written or of a
+    // protected visit, and the learned score of the best-kept visit among them.
+    struct Chunk {
+        std::vector<u64> blocks;
+        u32 newest = 0;
+        float keep = 0.0f;
+        bool guarded = false, gpu = false;
+    };
+    std::unordered_map<VkDeviceMemory, Chunk> chunks;
     for (const auto& range : resident_ranges) {
-        if (!residency_chunks.contains(static_cast<VkDeviceMemory>(range.memory))) {
+        const auto memory = static_cast<VkDeviceMemory>(range.memory);
+        if (!residency_chunks.contains(memory)) {
             continue;
         }
+        Chunk& chunk = chunks[memory];
         for (u64 block = range.start; block < range.end; ++block) {
             const VAddr address = block << block_shift;
             const u64 group = std::min<u64>(address >> USE_GROUP_BITS, group_use.size() - 1);
-            if (now - group_use[group] < idle || gpu_modified_ranges.Intersects(address, block_size) ||
-                memory_tracker->IsRegionGpuModified(address, block_size)) {
-                continue;
-            }
-            candidates.emplace_back(group_use[group], block);
+            chunk.blocks.push_back(block);
+            chunk.newest = std::max(chunk.newest, group_use[group]);
+            chunk.guarded |= view.Protected(group_visit[group]);
+            chunk.keep = std::max(chunk.keep, view.Keep(group_visit[group]));
+            chunk.gpu = chunk.gpu || gpu_modified_ranges.Intersects(address, block_size) ||
+                        memory_tracker->IsRegionGpuModified(address, block_size);
         }
     }
-    if (candidates.empty()) {
-        return;
+    // Whole chunks, so their memory goes back to the driver: unprotected ones unused for 30 s, in the
+    // order the player is least likely to come back to; protected ones unused for 5 minutes (not
+    // when full: then any unused for the full step's time).
+    std::vector<std::pair<VkDeviceMemory, Chunk*>> order;
+    for (auto& [memory, chunk] : chunks) {
+        if (chunk.gpu || chunk.blocks.empty() || memory == static_cast<VkDeviceMemory>(residency_memory)) {
+            continue;
+        }
+        const u32 idle = now - chunk.newest;
+        const bool ok = mode == Mode::Full ? idle >= full_age
+                        : chunk.guarded    ? idle >= VramPolicy::ProtectedIdleSeconds
+                                           : idle >= VramPolicy::CacheSeconds;
+        if (ok) {
+            order.emplace_back(memory, &chunk);
+        }
     }
-    std::stable_sort(candidates.begin(), candidates.end(),
-                     [](const auto& a, const auto& b) { return a.first < b.first; });
-    u64 allowance = level == VramPolicy::Level::Tight ? VramPolicy::DataBytesPerSecondTight : ~0ull;
+    std::sort(order.begin(), order.end(), [](const auto& a, const auto& b) {
+        if (a.second->guarded != b.second->guarded) return !a.second->guarded;
+        if (a.second->keep != b.second->keep) return a.second->keep < b.second->keep;
+        return a.second->newest < b.second->newest;
+    });
     std::vector<u64> blocks;
-    for (const auto& [last_use, block] : candidates) {
-        if (allowance < block_size || !VramPolicy::WantBytes()) {
+    u32 taken = 0;
+    for (const auto& [memory, chunk] : order) {
+        if (!VramPolicy::WantBytes() || (mode == Mode::Tight && taken >= 1)) {
             break;
         }
-        allowance -= block_size;
-        blocks.push_back(block);
-        VramPolicy::NoteFreed(false, block_size, idle);
+        ++taken;
+        blocks.insert(blocks.end(), chunk->blocks.begin(), chunk->blocks.end());
+        // The chunk goes back to the driver once its blocks are unbound (FreeEmptyChunks).
+        VramPolicy::NoteFreed(VramPolicy::Freed::Data, u64(chunk->blocks.size()) * block_size,
+                              residency_chunks[memory].size);
+    }
+    // Full: single blocks too, oldest first, where whole chunks were not enough.
+    if (mode == Mode::Full && VramPolicy::WantBytes()) {
+        std::vector<std::pair<u32, u64>> singles;
+        for (const auto& entry : chunks) {
+            for (const u64 block : entry.second.blocks) {
+                const VAddr address = block << block_shift;
+                const u64 group = std::min<u64>(address >> USE_GROUP_BITS, group_use.size() - 1);
+                if (now - group_use[group] < full_age || gpu_modified_ranges.Intersects(address, block_size) ||
+                    memory_tracker->IsRegionGpuModified(address, block_size)) {
+                    continue;
+                }
+                singles.emplace_back(group_use[group], block);
+            }
+        }
+        std::sort(singles.begin(), singles.end());
+        std::sort(blocks.begin(), blocks.end());
+        for (const auto& [last_use, block] : singles) {
+            if (!VramPolicy::WantBytes()) {
+                break;
+            }
+            if (std::binary_search(blocks.begin(), blocks.end(), block)) {
+                continue;
+            }
+            blocks.push_back(block);
+            VramPolicy::NoteFreed(VramPolicy::Freed::Data, block_size, 0);
+        }
+    }
+    if (blocks.empty()) {
+        return;
     }
     std::sort(blocks.begin(), blocks.end());
+    blocks.erase(std::unique(blocks.begin(), blocks.end()), blocks.end());
     for (const u64 block : blocks) {
         EvictVramBlock(block);
         evicted_blocks.Add({block, block + 1});
+        const u64 group = std::min<u64>((block << block_shift) >> USE_GROUP_BITS, group_use.size() - 1);
+        if (evicted_group_second.size() < 65536) {
+            evicted_group_second[group] = now;
+        }
     }
     // Their page table entries are cleared: a shader reading one through it reports a fault and
     // the block is bound again (ProcessFaultBuffer) instead of the shader reading unbound memory.
@@ -1847,6 +1947,9 @@ void BufferCache::EvictIdleCopies(u32 now) {
                            (j - i) * sizeof(vk::DeviceAddress), 0u);
         i = j;
     }
+    VramPolicy::NoteWork(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                             std::chrono::steady_clock::now() - start)
+                             .count());
     const u64 bytes = u64(blocks.size()) * block_size;
     evicted_bytes += bytes;
     // Once the first whole MiB is out, then at each 256 MiB (a first block under a MiB said "0 MiB").
@@ -1854,10 +1957,10 @@ void BufferCache::EvictIdleCopies(u32 now) {
     if (evict_reports < 20 && (((before >> 20) == 0 && (evicted_bytes >> 20) != 0) ||
                                (evicted_bytes >> 28) != (before >> 28))) {
         ++evict_reports;
-        std::printf("Guest memory: VRAM %s, %llu MiB of the game's data unused for %u s or more "
-                    "left VRAM so far (uploaded again when used)\n",
-                    level == VramPolicy::Level::Full ? "full" : "tight",
-                    (unsigned long long)(evicted_bytes >> 20), idle);
+        static constexpr const char* kMode[] = {"", "loading screen trim", "tight", "full"};
+        std::printf("Guest memory: %s, %llu MiB of the game's data left VRAM so far (%u whole chunks this "
+                    "time; uploaded again when used)\n",
+                    kMode[u32(mode)], (unsigned long long)(evicted_bytes >> 20), taken);
     }
 }
 
@@ -1867,8 +1970,10 @@ void BufferCache::FreeEmptyChunks(u32 now) {
     // coming back (an area entered again) take its slots instead of new memory the driver clears
     // first. While VRAM is tight: 5 s, none kept. (0.4.5 beta 14: BB_VRAM_CHUNK_KEEP_SECONDS
     // removed, its 30 s kept.)
-    const bool room = vram_level.load(std::memory_order_relaxed) == 0;
-    const u32 wait = room ? 30u : 5u;
+    // Beta 15: at a loading screen trim, at once (the chunks were emptied to go back now).
+    const bool load = VramPolicy::CurrentMode() == VramPolicy::Mode::Load;
+    const bool room = !load && vram_level.load(std::memory_order_relaxed) == 0;
+    const u32 wait = load ? 0u : room ? 30u : 5u;
     VkDeviceMemory spare = VK_NULL_HANDLE;
     if (room) {
         u32 newest = 0;

@@ -415,6 +415,11 @@ private:
     /// go back to the driver (ProcessIdleBlocks). Blocks of unmapped memory leave VRAM too.
     static constexpr u64 USE_GROUP_BITS = 21;
     std::vector<u32> group_use;
+    /// Beta 15: per 2 MiB group, the area visit it was last used in (engine/areas.h).
+    std::vector<u32> group_visit;
+    /// Beta 15: groups EvictIdleCopies took out of VRAM, and when (refaults: back within 5 minutes).
+    std::unordered_map<u64, u32> evicted_group_second;
+    u32 minute_second = 0;
     struct ResidencyChunk {
         u64 size;
         u64 used;         ///< bytes handed out and not returned

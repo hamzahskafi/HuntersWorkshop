@@ -312,6 +312,20 @@ static int game_path(const char *p) {
  *   read is in flight, so the game's reads go first.
  * Frame stats (BB_FRAME_STATS): the "Streaming:" line, every window with loader file activity. */
 static int stream_hdd=-1; /* the game's disk: 1 seek penalty (hard disk), 0 none, -1 unknown */
+/* Hunter's Workshop 0.4.5 beta 15: every map file the game opens names its area (map/mAA...,
+ * map/mapstudio/mAA...): the engine's area tracker (gpu/shim/engine/areas.h) learns where the player
+ * is from it, for the VRAM manager. Whether or not Area prefetch is on. */
+static void (*area_hook)(int);
+void runtime_area_hook(void (*fn)(int)) { __atomic_store_n(&area_hook,fn,__ATOMIC_RELEASE); }
+static void area_note(const char *guest) {
+    void (*fn)(int)=__atomic_load_n(&area_hook,__ATOMIC_ACQUIRE);
+    if (!fn) return;
+    const char *m=strstr(guest,"/map/");
+    if (!m) return;
+    m+=5;
+    if (!strncmp(m,"mapstudio/",10)) m+=10;
+    if (m[0]=='m' && m[1]>='0' && m[1]<='9' && m[2]>='0' && m[2]<='9') fn((m[1]-'0')*10+(m[2]-'0'));
+}
 static int stream_sequential, stream_prefetch;
 static uint64_t st_reads, st_bytes, st_read_ns, st_read_max_ns, st_fast_reads, st_opens, st_open_ns,
                 st_requests, st_request_ns, st_request_max_ns, st_other_bytes, st_inflight,
@@ -545,6 +559,7 @@ static int64_t do_open(const char *guest,int flags,int mode) {
         __atomic_add_fetch(&st_open_ns,host_monotonic_ns()-open_start,__ATOMIC_RELAXED);
         if (stream_prefetch) prefetch_note(guest,path);
     }
+    if (!dir) area_note(guest);
     host_lock(&lock);
     int fd=-1;
     for (int i=3;i<MAX_FILES;++i) if (!files[i].used) { fd=i; break; }
