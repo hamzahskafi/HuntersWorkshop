@@ -1812,6 +1812,12 @@ void BufferCache::ProcessIdleBlocks() {
                 std::min<u64>((end - first - gaps) * block_size, Common::AlignUp(bytes, block_size)));
         }
         if (BbEngine::GxResources::Following()) {
+            for (const auto& released : gx_released) {
+                if (released_pending.size() >= 65536) {
+                    released_pending.pop_front();
+                }
+                released_pending.push_back(released);
+            }
             ReleaseGxBuffers();
         }
         gx_released.clear();
@@ -1819,24 +1825,43 @@ void BufferCache::ProcessIdleBlocks() {
 }
 
 void BufferCache::ReleaseGxBuffers() {
-    // 0.4.5 beta 17: the game released these buffers: the blocks wholly inside one leave VRAM, as the
-    // VRAM manager's evictions do (EvictVramBlock: unbound after the work submitted so far, their
-    // page table entries cleared, uploaded again should the memory be used again). Kept: blocks
-    // shared with a neighbour (partly outside the buffer), blocks the GPU wrote (only VRAM has
-    // them), blocks of a 2 MiB group used after the release (the memory reused already), and all
-    // of them while shaders read the game's memory through the page table or twins are on.
-    // On 2026-11-07 the game released 200-1,000 MiB a minute of its data still in VRAM, which until
-    // now left only for its age while VRAM was tight.
+    // 0.4.5 beta 17-18: the game released these buffers: the blocks wholly inside one leave VRAM, as
+    // the VRAM manager's evictions do (EvictVramBlock: unbound after the work submitted so far, the
+    // page table entries cleared, the pages handed back to the game unwatched; uploaded again
+    // should the memory be used). Kept: blocks shared with a neighbour (partly outside the buffer),
+    // blocks the GPU wrote (only VRAM has them), blocks of a 2 MiB group used after the release
+    // (the memory reused already), and all of them while shaders read the game's memory through
+    // the page table or twins are on.
+    // Beta 18: only above the VRAM manager's comfortable line, and paced. Beta 17 freed all of them
+    // at once whatever the room: a loading screen releases up to 1 GB, and unwatching its pages
+    // took 2,200-6,700 protection calls in one go (55-195 ms frames on loading screens; 138 ms in
+    // play, the game's threads waiting in their write faults). With room nothing leaves VRAM (beta
+    // 14's rule); the released buffers wait here (released_pending, 10 minutes), the first data to
+    // go once VRAM is tight.
     if (TwinsEnabled()) {
         return;
     }
     const u32 now = BbStats::coarse_second.load(std::memory_order_relaxed);
+    while (!released_pending.empty() &&
+           now - u32(released_pending.front().ns / 1'000'000'000ull) > 600) {
+        released_pending.pop_front();
+    }
     const u32 dma = dma_second.load(std::memory_order_relaxed);
-    if (dma != 0 && now - dma < VramPolicy::CacheSeconds) {
+    if (released_pending.empty() || VramPolicy::Comfortable() || (dma != 0 && now - dma < VramPolicy::CacheSeconds)) {
         return;
     }
+    // A second's share: 2048 blocks (128 MiB of 64 KiB blocks) at a loading screen or when full, 512
+    // while tight (only when frames have slack) or between the comfortable and tight lines.
+    using VramPolicy::Mode;
+    const Mode mode = VramPolicy::CurrentMode();
+    if (mode == Mode::Tight && !VramPolicy::Allowed()) {
+        return;
+    }
+    const size_t budget = BbEngine::Loading::ScreenUp() || mode == Mode::Full ? 2048 : 512;
     std::vector<u64> blocks;
-    for (const auto& released : gx_released) {
+    while (!released_pending.empty() && blocks.size() < budget) {
+        const auto released = released_pending.front();
+        released_pending.pop_front();
         const u64 first = (released.memory + block_size - 1) >> block_shift;
         const u64 end = (released.memory + released.bytes) >> block_shift;
         const u32 second = u32(released.ns / 1'000'000'000ull);
@@ -1854,6 +1879,7 @@ void BufferCache::ReleaseGxBuffers() {
     if (blocks.empty()) {
         return;
     }
+    const auto start = std::chrono::steady_clock::now();
     std::sort(blocks.begin(), blocks.end());
     blocks.erase(std::unique(blocks.begin(), blocks.end()), blocks.end());
     for (const u64 block : blocks) {
@@ -1870,6 +1896,9 @@ void BufferCache::ReleaseGxBuffers() {
         i = j;
     }
     VramPolicy::NoteFreed(VramPolicy::Freed::Released, u64(blocks.size()) * block_size, 0);
+    VramPolicy::NoteWork(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                             std::chrono::steady_clock::now() - start)
+                             .count());
 }
 
 void BufferCache::EvictIdleCopies(u32 now) {

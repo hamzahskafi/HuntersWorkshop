@@ -423,6 +423,8 @@ private:
     u32 minute_second = 0;
     /// Beta 16 (research): the buffers the game released (engine/gx_resources.h).
     std::vector<BbEngine::GxResources::Gone> gx_released;
+    /// Beta 18: released buffers waiting for VRAM to be tight (ReleaseGxBuffers), oldest first.
+    std::deque<BbEngine::GxResources::Gone> released_pending;
     struct ResidencyChunk {
         u64 size;
         u64 used;         ///< bytes handed out and not returned
