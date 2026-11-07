@@ -688,8 +688,18 @@ void TextureCache::ReleaseDestroyed(VAddr addr, size_t size) {
     const VideoCore::InvalidateReason reason{"the game destroyed its texture"};
     std::scoped_lock lock{mutex};
     ForEachImageInRegion(addr, size, [&](ImageId image_id, Image& image) {
-        if (image.info.guest_address < addr || image.info.guest_address + image.info.guest_size > addr + size) {
+        const VAddr begin = image.info.guest_address, end = begin + image.info.guest_size;
+        if (begin < addr || end > addr + size) {
             return; // a neighbour sharing a page: its watch stays
+        }
+        // Beta 19: only an image that is the destroyed texture's alone. One the GPU drew (or draws
+        // into) keeps its contents, and one another live texture of the game's covers (the game
+        // places textures in the same memory) is that texture's: dirtying either brought stale
+        // memory back over it at its next draw (beta 17-18: a broken surface in the Hunter's Dream,
+        // a white streak at an inside/outside boundary).
+        if (True(image.flags & ImageFlagBits::GpuModified) || image.binding.is_target ||
+            BbEngine::GxResources::LiveTextureOverlaps(begin, end)) {
+            return;
         }
         if (image.store_pending) {
             for (PendingStore& store : pending_stores) {
@@ -1837,8 +1847,11 @@ void TextureCache::FreeDeadImages(u64 second) {
         }
         // Used since the game destroyed its texture, or a texture of the game's lives there again (a
         // draw or a build ahead may use the image for it): not dead.
+        // Beta 19: nor one the GPU drew, or one another live texture covers (ReleaseDestroyed).
         if ((image.lru_touched_tick != ~0ULL && image.lru_touched_tick > image.gx_dead_tick) ||
-            BbEngine::GxResources::TextureAt(image.info.guest_address).found) {
+            True(image.flags & ImageFlagBits::GpuModified) || image.binding.is_target ||
+            BbEngine::GxResources::LiveTextureOverlaps(image.info.guest_address,
+                                                       image.info.guest_address + image.info.guest_size)) {
             continue;
         }
         if (image.store_pending || (recent_tick != 0 && (image.tick_accessed_last >= recent_tick ||
@@ -1922,6 +1935,22 @@ void TextureCache::BuildAhead() {
         ImageDesc desc{sharp, Shader::ImageResource{}};
         if (desc.info.guest_size == 0) {
             BbEngine::GxResources::NoteAhead(AheadResult::Invalid, 0);
+            continue;
+        }
+        // Beta 19: only into memory no image holds. Asking for it where one does (a render target, a
+        // texture in the same memory) made the cache resolve the overlap now, expanding, copying or
+        // retiring images the game was still using, at the game's creation instead of its first draw
+        // (beta 17-18: 0-815 a minute, a broken surface and a white streak). Those are left to their
+        // first draw, as before beta 16.
+        bool occupied = false;
+        {
+            std::scoped_lock lock{mutex};
+            ForEachImageInRegion(job.memory, desc.info.guest_size, [&](ImageId, Image& image) {
+                occupied |= True(image.flags & ImageFlagBits::Registered);
+            });
+        }
+        if (occupied) {
+            BbEngine::GxResources::NoteAhead(AheadResult::Existed, 0);
             continue;
         }
         const u64 registered = BbStats::images_registered.load(std::memory_order_relaxed);

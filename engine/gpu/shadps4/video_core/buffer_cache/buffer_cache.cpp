@@ -1861,6 +1861,11 @@ void BufferCache::ReleaseGxBuffers() {
     std::vector<u64> blocks;
     while (!released_pending.empty() && blocks.size() < budget) {
         const auto released = released_pending.front();
+        // Beta 19: released at least 2 s ago, so a reuse of the memory in the release's own second
+        // shows in its group's last use (seconds) before the block goes.
+        if (now - u32(released.ns / 1'000'000'000ull) < 2) {
+            break;
+        }
         released_pending.pop_front();
         const u64 first = (released.memory + block_size - 1) >> block_shift;
         const u64 end = (released.memory + released.bytes) >> block_shift;
@@ -1868,7 +1873,7 @@ void BufferCache::ReleaseGxBuffers() {
         for (u64 block = first; block < end; ++block) {
             const VAddr address = block << block_shift;
             const u64 group = std::min<u64>(address >> USE_GROUP_BITS, group_use.size() - 1);
-            if (!resident_ranges.Contains(block) || in_place_blocks.Contains(block) || group_use[group] > second ||
+            if (!resident_ranges.Contains(block) || in_place_blocks.Contains(block) || group_use[group] >= second ||
                 gpu_modified_ranges.Intersects(address, block_size) ||
                 memory_tracker->IsRegionGpuModified(address, block_size)) {
                 continue;

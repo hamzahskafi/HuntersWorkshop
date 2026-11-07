@@ -52,6 +52,8 @@ struct Ahead {
 void TakeAhead(std::vector<Ahead>& out);
 // Whether the texture created at `memory` at `ns` is still the live one there.
 bool StillLive(std::uint64_t memory, std::uint64_t ns);
+// Whether any live texture of the game's overlaps [begin, end) (beta 19).
+bool LiveTextureOverlaps(std::uint64_t begin, std::uint64_t end);
 
 // Called on the game's thread when it destroys a texture (Following only).
 using DestroyedHook = void (*)(std::uint64_t memory, std::uint64_t bytes);

@@ -30,6 +30,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
+#include <map>
 #include <mutex>
 #include <unordered_map>
 
@@ -94,7 +95,8 @@ thread_local bool t_tsharp_valid = false;
 
 std::mutex g_mutex;
 std::unordered_map<std::uint64_t, Entry> g_by_holder;
-std::unordered_map<std::uint64_t, std::uint64_t> g_texture_at; // memory -> holder (live textures)
+// memory -> holder (live textures), ordered: LiveTextureOverlaps asks by range (beta 19).
+std::map<std::uint64_t, std::uint64_t> g_texture_at;
 std::vector<Gone> g_gone, g_released;
 std::vector<Ahead> g_ahead;
 std::uint8_t* g_return_stub = nullptr;
@@ -106,7 +108,7 @@ constexpr std::size_t kQueueCap = 65536, kAheadCap = 16384;
 struct Counts {
     std::array<std::atomic<std::uint64_t>, kKinds> created{}, created_bytes{}, created_loading{}, destroyed{},
         destroyed_bytes{};
-    std::atomic<std::uint64_t> destroyed_unknown{0}, failed{0}, gone_dropped{0};
+    std::atomic<std::uint64_t> destroyed_unknown{0}, failed{0}, gone_dropped{0}, moved{0};
     // The texture cache's side.
     std::atomic<std::uint64_t> images_matched{0}, images_unmatched{0}, matched_fast{0}, matched_mid{0},
         matched_slow{0}, matched_loading{0};
@@ -159,6 +161,10 @@ Entry Register(std::uint64_t holder, Kind kind) {
 }
 
 void Unregister(std::uint64_t holder, bool texture) {
+    // The holder is still whole at its destructor's entry: where its memory is now. The game's Map
+    // can move a resource's memory (bbhost: types 3 and 4 rename it), which beta 16-18 did not
+    // follow; a resource whose memory moved is left alone (that range may be another's by now).
+    const std::uint64_t memory_now = Read<std::uint64_t>(holder + 0x20);
     std::uint64_t memory = 0, bytes = 0;
     {
         std::scoped_lock lock{g_mutex};
@@ -174,7 +180,14 @@ void Unregister(std::uint64_t holder, bool texture) {
         if (e.kind != kBuffer) {
             g_live_texture_bytes.fetch_sub(e.bytes, std::memory_order_relaxed);
         }
+        if (const auto at = g_texture_at.find(e.memory); at != g_texture_at.end() && at->second == holder) {
+            g_texture_at.erase(at);
+        }
         if (!e.memory) {
+            return;
+        }
+        if (memory_now != e.memory) {
+            g_counts.moved.fetch_add(1, std::memory_order_relaxed);
             return;
         }
         if (!texture || e.kind == kBuffer) {
@@ -183,9 +196,6 @@ void Unregister(std::uint64_t holder, bool texture) {
                 g_released.push_back({e.memory, e.bytes, NowNs()});
             }
             return;
-        }
-        if (const auto at = g_texture_at.find(e.memory); at != g_texture_at.end() && at->second == holder) {
-            g_texture_at.erase(at);
         }
         // For the texture cache's collector; bounded should it not run (no renderer yet).
         if (g_gone.size() < kQueueCap) {
@@ -388,6 +398,22 @@ bool StillLive(std::uint64_t memory, std::uint64_t ns) {
     return it != g_by_holder.end() && it->second.ns == ns;
 }
 
+bool LiveTextureOverlaps(std::uint64_t begin, std::uint64_t end) {
+    if (!g_active || begin >= end) {
+        return false;
+    }
+    std::scoped_lock lock{g_mutex};
+    auto it = g_texture_at.upper_bound(begin);
+    if (it != g_texture_at.begin()) {
+        const auto before = std::prev(it);
+        if (const auto e = g_by_holder.find(before->second);
+            e != g_by_holder.end() && before->first + std::max<std::uint64_t>(e->second.bytes, 1) > begin) {
+            return true;
+        }
+    }
+    return it != g_texture_at.end() && it->first < end;
+}
+
 void SetDestroyedHook(DestroyedHook hook) {
     g_destroyed_hook.store(hook, std::memory_order_release);
 }
@@ -519,14 +545,16 @@ void LogMinute() {
                         image_bytes = take(g_counts.destroyed_image_bytes);
     host_log("GX resources this minute: textures created %llu (%.0f MiB, %llu during loading screens), 3D %llu, "
              "destroyed %llu (%.0f MiB) + 3D %llu; buffers created %llu (%.0f MiB, %llu during loading screens), "
-             "released %llu (%.0f MiB); %llu failed, %llu destroyed unknown; live %zu (%zu textures, %.0f MiB)",
+             "released %llu (%.0f MiB); %llu failed, %llu destroyed unknown, %llu with their memory moved; live %zu "
+             "(%zu textures, %.0f MiB)",
              (unsigned long long)created[kTexture], Mib(created_bytes[kTexture]),
              (unsigned long long)loading[kTexture], (unsigned long long)created[kTexture3D],
              (unsigned long long)destroyed[kTexture], Mib(destroyed_bytes[kTexture]),
              (unsigned long long)destroyed[kTexture3D], (unsigned long long)created[kBuffer],
              Mib(created_bytes[kBuffer]), (unsigned long long)loading[kBuffer],
              (unsigned long long)destroyed[kBuffer], Mib(destroyed_bytes[kBuffer]),
-             (unsigned long long)take(g_counts.failed), (unsigned long long)take(g_counts.destroyed_unknown), live,
+             (unsigned long long)take(g_counts.failed), (unsigned long long)take(g_counts.destroyed_unknown),
+             (unsigned long long)take(g_counts.moved), live,
              live_textures, Mib(g_live_texture_bytes.load(std::memory_order_relaxed)));
     host_log("GX resources against the texture cache: images made %llu, %llu of them at a live game texture "
              "(%llu under 0.5 s after the game made it, %llu under 2 s, %llu later; %llu made during a loading "
@@ -540,7 +568,7 @@ void LogMinute() {
              g_counts.gone_dropped.load(std::memory_order_relaxed) ? " (some destroyed textures not checked)" : "");
     if (g_follow) {
         host_log("GX follow this minute: %llu textures queued to build ahead (%llu without a T#, %llu over the "
-                 "queue), %llu built (%.0f MiB), %llu already there, %llu destroyed first, %llu too old, %llu not "
+                 "queue), %llu built (%.0f MiB), %llu left to their draw (an image there), %llu destroyed first, %llu too old, %llu not "
                  "buildable, %llu waiting; drawn %llu, a draw made another image %llu times, freed unused %llu "
                  "(%.0f MiB); images freed when the game destroyed their texture %llu (%.0f MiB)",
                  (unsigned long long)take(g_counts.ahead_queued), (unsigned long long)take(g_counts.ahead_no_tsharp),

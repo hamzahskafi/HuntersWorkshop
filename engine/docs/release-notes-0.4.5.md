@@ -108,6 +108,10 @@ From beta 16 the engine follows the game's own textures:
   the comfortable line (beta 18: beta 17 freed it all at once, which stalled loading screens); building ahead is
   paced per frame (6 ms in 16 at loading screens, 2 ms in play when frames are on time), so neither
   a loading screen frame nor the game's bursts of new textures in play take long.
+- **Beta 19:** following the game no longer touches images other things still use: a texture is
+  built ahead only where no image is yet, an image the GPU drew or another texture still covers
+  is left alone when the game destroys a texture, and a resource whose memory the game moved is
+  not followed. Betas 17 and 18 could show a broken surface or a light streak because of these.
 - **The first load of each session no longer translates about 40 shaders** (about 36 ms): draws that
   may get object motion looked at an ordinary version of their shaders first, which the shader cache
   never kept. They now use the motion version they already have.
