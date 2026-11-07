@@ -463,7 +463,6 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
     }
     blocks_per_arena_page_shift = ARENA_PAGE_BITS - block_shift;
     group_use.assign(u64{1} << (ADDRESS_SPACE_BITS - USE_GROUP_BITS), 0);
-    group_visit.assign(u64{1} << (ADDRESS_SPACE_BITS - USE_GROUP_BITS), 0);
     arena_memory_type_index =
         FindMemoryType(instance.GetMemoryProperties(), vk::MemoryPropertyFlagBits::eDeviceLocal,
                        reqs.memoryTypeBits)
@@ -1723,13 +1722,9 @@ void BufferCache::NoteResidencyUnused() {
 void BufferCache::NoteUse(VAddr address, u64 size) {
     const u32 now = BbStats::coarse_second.load(std::memory_order_relaxed);
     const u64 last = std::min<u64>((address + size - 1) >> USE_GROUP_BITS, group_use.size() - 1);
-    const u32 visit = BbEngine::Areas::CurrentVisit();
     for (u64 group = address >> USE_GROUP_BITS; group <= last; ++group) {
         if (group_use[group] != now) {
             group_use[group] = now;
-        }
-        if (group_visit[group] != visit) {
-            group_visit[group] = visit;
         }
     }
 }
@@ -1804,6 +1799,19 @@ void BufferCache::ProcessIdleBlocks() {
         }
         VramPolicy::PublishData(in_use, cache, BbStats::residency_unused_bytes.load(std::memory_order_relaxed));
     }
+    // Beta 16 (research): the buffers the game released, against its data in VRAM at their memory.
+    if (BbEngine::GxResources::Active()) {
+        BbEngine::GxResources::TakeReleased(gx_released);
+        for (const auto& released : gx_released) {
+            const u64 bytes = std::max<u64>(released.bytes, 1);
+            const u64 first = released.memory >> block_shift, end = ((released.memory + bytes - 1) >> block_shift) + 1;
+            u64 gaps = 0;
+            resident_ranges.ForEachGap(first, end, [&](u64 a, u64 b) { gaps += b - a; });
+            BbEngine::GxResources::NoteReleasedBuffer(
+                std::min<u64>((end - first - gaps) * block_size, Common::AlignUp(bytes, block_size)));
+        }
+        gx_released.clear();
+    }
 }
 
 void BufferCache::EvictIdleCopies(u32 now) {
@@ -1835,15 +1843,12 @@ void BufferCache::EvictIdleCopies(u32 now) {
         return;
     }
     const auto start = std::chrono::steady_clock::now();
-    const auto view = BbEngine::Areas::Snapshot();
     const u32 full_age = VramPolicy::FullAgeSeconds();
-    // Per 64 MiB chunk: its blocks, its newest use, whether any of them is GPU-written or of a
-    // protected visit, and the learned score of the best-kept visit among them.
+    // Per 64 MiB chunk: its blocks, its newest use, and whether any of them is GPU-written.
     struct Chunk {
         std::vector<u64> blocks;
         u32 newest = 0;
-        float keep = 0.0f;
-        bool guarded = false, gpu = false;
+        bool gpu = false;
     };
     std::unordered_map<VkDeviceMemory, Chunk> chunks;
     for (const auto& range : resident_ranges) {
@@ -1857,33 +1862,25 @@ void BufferCache::EvictIdleCopies(u32 now) {
             const u64 group = std::min<u64>(address >> USE_GROUP_BITS, group_use.size() - 1);
             chunk.blocks.push_back(block);
             chunk.newest = std::max(chunk.newest, group_use[group]);
-            chunk.guarded |= view.Protected(group_visit[group]);
-            chunk.keep = std::max(chunk.keep, view.Keep(group_visit[group]));
             chunk.gpu = chunk.gpu || gpu_modified_ranges.Intersects(address, block_size) ||
                         memory_tracker->IsRegionGpuModified(address, block_size);
         }
     }
-    // Whole chunks, so their memory goes back to the driver: unprotected ones unused for 30 s, in the
-    // order the player is least likely to come back to; protected ones unused for 5 minutes (not
-    // when full: then any unused for the full step's time).
+    // Whole chunks, so their memory goes back to the driver: unused for 30 s, the longest unused first
+    // (when full: unused for the full step's time).
     std::vector<std::pair<VkDeviceMemory, Chunk*>> order;
     for (auto& [memory, chunk] : chunks) {
         if (chunk.gpu || chunk.blocks.empty() || memory == static_cast<VkDeviceMemory>(residency_memory)) {
             continue;
         }
         const u32 idle = now - chunk.newest;
-        const bool ok = mode == Mode::Full ? idle >= full_age
-                        : chunk.guarded    ? idle >= VramPolicy::ProtectedIdleSeconds
-                                           : idle >= VramPolicy::CacheSeconds;
+        const bool ok = mode == Mode::Full ? idle >= full_age : idle >= VramPolicy::CacheSeconds;
         if (ok) {
             order.emplace_back(memory, &chunk);
         }
     }
-    std::sort(order.begin(), order.end(), [](const auto& a, const auto& b) {
-        if (a.second->guarded != b.second->guarded) return !a.second->guarded;
-        if (a.second->keep != b.second->keep) return a.second->keep < b.second->keep;
-        return a.second->newest < b.second->newest;
-    });
+    std::sort(order.begin(), order.end(),
+              [](const auto& a, const auto& b) { return a.second->newest < b.second->newest; });
     std::vector<u64> blocks;
     u32 taken = 0;
     for (const auto& [memory, chunk] : order) {

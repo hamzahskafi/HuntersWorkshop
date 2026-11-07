@@ -29,7 +29,6 @@
 #include "video_core/texture_cache/tile_manager.h"
 #include "video_core/texture_cache/watched_pages.h"
 #include "video_core/vram_policy.h"
-#include "engine/areas.h"
 #include "engine/gx_resources.h"
 #include <unordered_map>
 
@@ -118,7 +117,6 @@ public:
     void MarkFound(ImageId image_id) {
         Image& image = slot_images[image_id];
         image.tick_accessed_last = scheduler.CurrentTick();
-        image.visit = BbEngine::Areas::CurrentVisit();
     }
 
     /// bbport: whether FindImage's result `image_id` for `info` is an exact match: the
@@ -155,6 +153,11 @@ public:
 
     /// Invalidates any image in the logical page range.
     void InvalidateMemory(VAddr addr, size_t size);
+
+    /// Beta 16 (the game's thread, when it destroys a texture: GxResources' hook): the images of
+    /// [addr, addr + size) stop watching their pages and become garbage, so the next texture the game
+    /// makes there writes them without faulting page by page. Neighbours sharing a page keep theirs.
+    void ReleaseDestroyed(VAddr addr, size_t size);
 
     /// bbport: uploads the game's button icons again when what they show changed (keyboard and
     /// mouse prompts, engine/key_prompts.h). Once a frame, without the lock.
@@ -488,9 +491,14 @@ private:
     /// Beta 15: whether the image was used in the last `seconds` (by the collector's per-second ticks;
     /// counted as used where no tick of that second is known).
     bool UsedSince(const Image& image, u64 second, u32 seconds) const;
-    /// Beta 15 (once a second): the game's destroyed textures against the images (research).
+    /// Beta 15-16 (once a second): the game's destroyed textures against the images; beta 16 frees
+    /// them (FreeDeadImages) once the GPU is done with them.
     void ProcessGxDestroyed();
-    /// Beta 15 (once a second, any VRAM level): garbage textures outside protected visits.
+    void FreeDeadImages(u64 second);
+    /// Beta 16: the textures the game created with their data, built ahead of their first draw
+    /// (BuildAhead: each collector pass, outside the cache's lock, within a time slice).
+    void BuildAhead();
+    /// Beta 15 (once a second, any VRAM level): garbage textures.
     void GarbagePass(u64 second);
     /// Beta 15: what to free and in which order, once a second while the VRAM manager trims.
     void BuildPlan(u64 second);
@@ -596,9 +604,8 @@ private:
     struct PlanItem {
         ImageId image_id;
         u64 image_uid;
-        u8 major; ///< 0 garbage, 1 cache, 2 protected and long idle, 3 idle while full, 4 drawn by the GPU
+        u8 major; ///< 0 garbage, 1 cache, 3 idle while full, 4 drawn by the GPU
         bool small;
-        float keep;
         u64 bytes;
     };
     std::vector<PlanItem> plan;
@@ -608,6 +615,23 @@ private:
     std::unordered_map<VAddr, std::pair<u64, u64>> freed_recent;
     std::deque<VAddr> freed_order;
     std::vector<BbEngine::GxResources::Gone> gx_gone;
+    /// Beta 16: images of textures the game destroyed, waiting for the GPU to be done with them.
+    std::vector<std::pair<ImageId, u64>> dead_images;
+    /// Beta 16: textures to build ahead (BuildAhead), and where each was built: its info, for the
+    /// log when a draw makes another image there (a miss).
+    std::deque<BbEngine::GxResources::Ahead> ahead_jobs;
+    std::vector<BbEngine::GxResources::Ahead> ahead_new;
+    struct AheadBuilt {
+        ImageId image_id;
+        u64 image_uid;
+        u32 width, height, levels, layers;
+        u32 format, tile;
+    };
+    std::unordered_map<VAddr, AheadBuilt> ahead_at; ///< under `mutex`
+    u32 ahead_misses_logged = 0;
+    /// Beta 16: BuildAhead's time this second (ns) and that second.
+    s64 ahead_ns = 0;
+    u64 ahead_second = 0;
     u64 total_used_samplers = 0;
     u64 sampler_generation = 0; ///< bbport: samplers freed so far (SamplerGeneration)
     u64 trigger_gc_samplers = 0;

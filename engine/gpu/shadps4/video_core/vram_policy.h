@@ -1,35 +1,35 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Hunter's Workshop 0.4.5 beta 14-15: one VRAM manager for the texture cache and the buffer cache.
+// Hunter's Workshop 0.4.5 beta 14-16: one VRAM manager for the texture cache and the buffer cache.
 //
 // Both caches read the same number, the game's VRAM use against the driver's current budget (which
-// shrinks when other programs take VRAM). Beta 15 adds where the player is (engine/areas.h) and when
-// work is free:
+// shrinks when other programs take VRAM). Beta 15 adds when work is free; beta 16 follows the game's
+// own textures (engine/gx_resources.h: built ahead when it creates them, freed when it destroys them)
+// and keeps the rules below for what the game does not say, and for cards without the room:
 //
 //   Lines (of the budget): comfortable 70%, tight 80%, full 90% (BB_LESS_VRAM=1, the launcher's
 //   "Use less VRAM": 55/65/75). The comfortable line rises 5 points while freed data keeps coming
 //   back soon after (refaults over a quarter of what was freed in the last 10 minutes).
 //
-//   What each cache holds is in use (the last second), garbage (the game wrote over its memory, or GPU
+//   What each cache holds is in use (the last 10 s), garbage (the game wrote over its memory, or GPU
 //   work through a buffer did, and it has gone 10 s unused), only in VRAM (drawn by the GPU), or
-//   cache: a valid copy, idle. Each is tagged with the area visit it was last used in. Protected:
-//   the visits of the current areas, the loading screen's destination and the likely next areas.
+//   cache: a valid copy, idle. Images of textures the game destroyed go at once (beta 16), whatever
+//   the level.
 //
 //   When (Mode):
 //     garbage    any level, once a second, up to 64 textures, while frames have slack or a loading
-//                screen is up (GarbageAllowed), outside protected visits;
-//     Load       a loading screen is up and its destination known, VRAM over the comfortable line:
-//                trim to it (the screen hides the work);
+//                screen is up (GarbageAllowed);
+//     Load       a loading screen is up (a second on), VRAM over the comfortable line: trim to it (the
+//                screen hides the work);
 //     Tight      in play from the tight line until back under it by 5 points: the same order, only
 //                while frames have slack, at most 12 ms a second and one game-data chunk a second;
-//     Full       from the full line, or for 30 s after an allocation failed: at once, protected idle
-//                data too (unused 10 s, then 1 s) and textures the GPU drew.
-//   Order: garbage, then cache of unprotected visits by their areas' learned score (lowest first),
-//   what returns memory to the driver first (textures with memory of their own, whole game-data
-//   chunks), small textures last; protected data unused for 5 minutes only while tight or at a load.
+//     Full       from the full line, or for 30 s after an allocation failed: at once, anything idle
+//                (unused 10 s, then 1 s) and textures the GPU drew.
+//   Order: garbage, then cache unused 30 s, what returns memory to the driver first (textures with
+//   memory of their own, whole game-data chunks), the biggest first.
+//   Textures are built ahead of their first draw only below the comfortable line (Comfortable).
 //
 // BB_VRAM_TIGHT_PERCENT=N: tight N% (30 to 90), comfortable N - 10, full N + 10 (at most 95).
-// BB_VRAM_TEST_BUDGET_MB=N: the budget is N MiB (a smaller card on this one). BB_VRAM_AREAS=0: no
-// areas (every visit the same: ages only).
+// BB_VRAM_TEST_BUDGET_MB=N: the budget is N MiB (a smaller card on this one).
 #pragma once
 
 #include <algorithm>
@@ -42,7 +42,6 @@
 
 #include "bbport_toggles.h"
 #include "common/types.h"
-#include "engine/areas.h"
 #include "engine/loading.h"
 
 namespace VideoCore::VramPolicy {
@@ -80,15 +79,15 @@ struct Config {
 /// While full: unused for at least 10 s, then 1 s.
 inline constexpr u32 FullSeconds[] = {10, 1};
 inline constexpr u32 GarbageSeconds = 10;        ///< unused this long, garbage goes
-inline constexpr u32 CacheSeconds = 30;          ///< unprotected cache unused this long may go
-inline constexpr u32 ProtectedIdleSeconds = 300; ///< protected data unused this long, while tight
+inline constexpr u32 CacheSeconds = 30;          ///< cache unused this long may go
 inline constexpr u32 GarbagePerSecond = 64;      ///< textures, while frames have slack
 inline constexpr s64 PlayNsPerSecond = 12'000'000; ///< play trims: about 0.2 ms a frame at 60 FPS
 inline constexpr u32 SlackFlips = 30;            ///< frames on time in a row: the frame has slack
 inline constexpr s64 StepDownBelow = 16ll << 20;
 
-/// What was freed (NoteFreed).
-enum class Freed : u8 { Garbage = 0, Texture = 1, Data = 2 };
+/// What was freed (NoteFreed): garbage, an image of a texture the game destroyed, an idle texture or
+/// the game's data.
+enum class Freed : u8 { Garbage = 0, Texture = 1, Data = 2, Destroyed = 3 };
 
 struct State {
     std::mutex mutex;
@@ -101,6 +100,7 @@ struct State {
     std::atomic<s64> play_ns{0};
     std::atomic<u64> used{0}, budget{0};
     std::atomic<u32> comfort_bonus{0}; ///< points over the comfortable line (refaults)
+    std::atomic<u32> comfort_now{70};  ///< the comfortable line now, percent
     u32 full_until = 0;
     u32 reports = 0;
     // A loading-screen trim under way: VRAM when it began, and what it freed.
@@ -108,9 +108,9 @@ struct State {
     u64 load_start_used = 0;
     std::atomic<u64> load_freed{0};
     // This minute.
-    std::array<std::atomic<u64>, 3> freed_bytes{};
+    std::array<std::atomic<u64>, 4> freed_bytes{};
     std::atomic<u64> returned_bytes{0}, refault_bytes{0}, loads_trimmed{0}, play_seconds{0};
-    std::atomic<u32> tight_seconds{0}, full_seconds{0};
+    std::atomic<u32> tight_seconds{0}, full_seconds{0}, loading_seconds{0};
     // The last 10 minutes: freed and refaulted (for the comfortable line).
     std::array<u64, 10> history_freed{}, history_refault{};
     u32 history_at = 0;
@@ -156,6 +156,12 @@ inline State state;
         return false;
     }
 }
+/// Below the comfortable line: textures may be built ahead of their first draw.
+[[nodiscard]] inline bool Comfortable() {
+    const u64 budget = state.budget.load(std::memory_order_relaxed);
+    return budget != 0 && CurrentLevel() == Level::Room &&
+           state.used.load(std::memory_order_relaxed) < budget / 100 * state.comfort_now.load(std::memory_order_relaxed);
+}
 [[nodiscard]] inline bool GarbageAllowed() {
     return BbEngine::Loading::ScreenUp() || Slack();
 }
@@ -198,13 +204,13 @@ inline void PublishData(u64 in_use, u64 cache, u64 empty) {
 
 /// The level and mode from this second's measurement (one caller a second).
 inline void Decide(u32 now, u64 used, u64 budget) {
-    BbEngine::Areas::Tick();
     std::scoped_lock lock{state.mutex};
     const Config& config = Settings();
     const Level was = state.level.load(std::memory_order_relaxed);
     const u64 comfort_percent =
         std::min<u64>(config.comfort_percent + state.comfort_bonus.load(std::memory_order_relaxed),
                       config.tight_percent - 5);
+    state.comfort_now.store(u32(comfort_percent), std::memory_order_relaxed);
     Level next = Level::Room;
     u64 low = 0, comfort = 0;
     if (budget != 0) {
@@ -221,6 +227,9 @@ inline void Decide(u32 now, u64 used, u64 budget) {
         next = Level::Full;
     }
     const bool loading = BbEngine::Loading::ScreenUp();
+    // A loading screen's first second: the game destroys the place before and creates the next.
+    state.loading_seconds.store(loading ? state.loading_seconds.load(std::memory_order_relaxed) + 1 : 0,
+                                std::memory_order_relaxed);
     Mode mode = Mode::None;
     s64 to_free = 0;
     if (next == Level::Full) {
@@ -232,7 +241,8 @@ inline void Decide(u32 now, u64 used, u64 budget) {
     } else if (next == Level::Tight) {
         mode = loading ? Mode::Load : Mode::Tight;
         to_free = s64(used - std::min(used, loading ? std::min(low, comfort) : low));
-    } else if (loading && budget != 0 && used > comfort && BbEngine::Areas::DestinationKnown()) {
+    } else if (loading && budget != 0 && used > comfort &&
+               state.loading_seconds.load(std::memory_order_relaxed) >= 2) {
         mode = Mode::Load;
         to_free = s64(used - comfort);
     }
@@ -277,8 +287,8 @@ inline void Decide(u32 now, u64 used, u64 budget) {
         ++state.reports;
         static constexpr const char* kWhat[] = {
             "room again: only garbage is freed (and trims at loading screens over the comfortable line)",
-            "tight: idle data of areas the player is not in is freed while frames have slack",
-            "full: idle data of any area is freed at once, textures the GPU drew included",
+            "tight: idle data is freed while frames have slack",
+            "full: idle data is freed at once, textures the GPU drew included",
         };
         std::printf("VRAM manager: %llu of %llu MiB (comfortable %llu%%, tight %llu%%%s), %s\n",
                     (unsigned long long)(used >> 20), (unsigned long long)(budget >> 20),
@@ -327,7 +337,7 @@ inline void LogMinute() {
     auto mib = [](u64 bytes) { return (unsigned long long)(bytes >> 20); };
     const Config& config = Settings();
     const u64 garbage = state.freed_bytes[0].exchange(0), textures = state.freed_bytes[1].exchange(0),
-              data = state.freed_bytes[2].exchange(0);
+              data = state.freed_bytes[2].exchange(0), destroyed = state.freed_bytes[3].exchange(0);
     const u64 returned = state.returned_bytes.exchange(0), refault = state.refault_bytes.exchange(0);
     const u64 loads = state.loads_trimmed.exchange(0), play = state.play_seconds.exchange(0);
     const u32 tight = state.tight_seconds.exchange(0), full = state.full_seconds.exchange(0);
@@ -335,7 +345,9 @@ inline void LogMinute() {
     u64 freed10 = 0, refault10 = 0;
     {
         std::scoped_lock lock{state.mutex};
-        state.history_freed[state.history_at % 10] = garbage + textures + data;
+        // Only idle copies count: garbage and destroyed textures' images come back only as new
+        // contents at the same memory (beta 15's session: 3.5 of 8.2 GB of garbage), not as mistakes.
+        state.history_freed[state.history_at % 10] = textures + data;
         state.history_refault[state.history_at % 10] = refault;
         ++state.history_at;
         for (u32 i = 0; i < 10; ++i) {
@@ -369,16 +381,15 @@ inline void LogMinute() {
                 mib(state.tex_in_use.load()), mib(state.tex_cache.load()), mib(state.tex_garbage.load()),
                 mib(state.tex_gpu.load()), mib(state.data_in_use.load()), mib(state.data_cache.load()),
                 mib(state.data_empty.load()));
-    if (garbage + textures + data == 0 && tight == 0 && full == 0 && loads == 0) {
+    if (garbage + textures + data + destroyed == 0 && tight == 0 && full == 0 && loads == 0) {
         std::printf("  this minute: nothing freed\n");
     } else {
-        std::printf("  this minute: freed garbage %llu MiB, textures %llu, the game's data %llu; returned to the "
-                    "driver at once %llu; came back within 5 minutes %llu; %llu loading screen trims, %llu s of "
-                    "play trims; tight %u s, full %u s\n",
-                    mib(garbage), mib(textures), mib(data), mib(returned), mib(refault),
+        std::printf("  this minute: freed textures the game destroyed %llu MiB, garbage %llu, idle textures %llu, "
+                    "the game's data %llu; returned to the driver at once %llu; idle data that came back within 5 "
+                    "minutes %llu; %llu loading screen trims, %llu s of play trims; tight %u s, full %u s\n",
+                    mib(destroyed), mib(garbage), mib(textures), mib(data), mib(returned), mib(refault),
                     (unsigned long long)loads, (unsigned long long)play, tight, full);
     }
-    BbEngine::Areas::LogMinute();
 }
 
 } // namespace VideoCore::VramPolicy

@@ -423,8 +423,8 @@ static void LogRam() {
                     mib(BbStats::residency_unused_bytes.load()));
     }
 #endif
-    // 0.4.5 beta 14-15: the VRAM manager's minute (vram_policy.h), where the player is (engine/areas.h)
-    // and the game's own resource calls against the texture cache (engine/gx_resources.h, research).
+    // 0.4.5 beta 14-16: the VRAM manager's minute (vram_policy.h) and the game's own resource calls the
+    // texture cache follows (engine/gx_resources.h).
     VideoCore::VramPolicy::LogMinute();
     BbEngine::GxResources::LogMinute();
     // Where that RAM is: on the first report, then every five minutes. Listing every resident page

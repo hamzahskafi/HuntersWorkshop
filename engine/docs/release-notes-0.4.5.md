@@ -85,27 +85,25 @@ FPS, RTX 3070 Ti) had frames over 33 ms 3.4 times an hour against 9.3, and no wr
 - **The log** says once a minute what was freed for room, and when VRAM gets tight or full.
 - For testing: `BB_VRAM_TEST_BUDGET_MB=N` in Extra variables makes a card behave as one with N MiB.
 
-From beta 15 the manager knows where the player is and when work is free:
+From beta 16 the engine follows the game's own textures:
 
-- **Areas, learned:** the engine sees which area's files the game opens, so it knows the area the
-  player is in and, during a loading screen, the one they are going to. Each area gains a score per
-  visit that halves every 10 minutes, and the engine learns where the player tends to go next from
-  each area. Nothing is hard-coded: the Hunter's Dream rises by itself because the player keeps
-  coming back. The current areas, the destination and the likely next areas are protected.
-- **Three lines** of what the driver gives the game: comfortable 70%, tight 80%, full 90% (Use less
-  VRAM: 55, 65, 75).
-- **Freed when it does not show:** at loading screens, down to the comfortable line; in play while
-  tight, only when frames are on time at the frame cap, a little each second; when full, at once.
-  Textures whose memory the game has written over are freed whenever frames have time to spare.
-- **What goes first:** what the game wrote over, then what belongs to the areas the player is least
-  likely to return to, and what gives memory back to the driver straight away (the game's data in
-  whole 64 MiB chunks, where beta 14's single blocks gave nothing back).
-- **It corrects itself:** when freed data keeps being needed again within 5 minutes, it keeps more.
-- **The log** says once a minute what VRAM holds by kind, what was freed, what went back to the
-  driver and what came back; each loading screen's trim; and the areas visited.
-- **Research:** the engine also listens to the game creating and destroying its textures and buffers
-  (found with bbhost's addresses) and logs how that lines up with what the texture cache sees. Nothing
-  acts on it yet; beta 16 will, with the numbers from the logs. Off with `BB_GX_RESOURCES=0`.
+- **What the game creates during a loading screen is ready when it ends.** The game makes every
+  texture through its graphics layer, with the texture's description and data. The engine now builds
+  and uploads those textures while the loading screen is still up, instead of in the first frame
+  after it, which is where nearly every stutter after a load came from (40-73 ms frames building
+  300-800 textures at once). In play it does the same only while frames are on time, and only while
+  VRAM is below the comfortable line.
+- **What the game destroys is freed.** When the game is done with a texture, the engine stops
+  watching its memory at once (the next texture there no longer faults page by page) and frees it
+  once the GPU is done with it, whatever VRAM's level.
+- **Three lines** of what the driver gives the game still decide the rest: comfortable 70%, tight
+  80%, full 90% (Use less VRAM: 55, 65, 75). Loading screens trim to the comfortable line; while
+  tight, idle data goes only when frames have time to spare; when full, at once. The game's data
+  goes in whole 64 MiB chunks, so its memory goes back to the driver.
+- **The log** says once a minute how many textures were built ahead, how many of them were drawn,
+  and how many images were freed when the game destroyed their textures.
+- `BB_GX_FOLLOW=0` in Extra variables turns the following off (counted only); `BB_GX_RESOURCES=0`
+  stops listening to the game altogether.
 
 ## Diagnostics
 

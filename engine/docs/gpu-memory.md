@@ -29,10 +29,10 @@ that has been done. Paths are relative to `engine/`; shadPS4's (`video_core/...`
 - **0.4.5 beta 14:** one VRAM manager for textures and the game's data (`vram_policy.h`; plan.md
   step 3): nothing leaves VRAM for its age while it has room, and textures the GPU drew are stored
   without waiting for the GPU. What follows is how it was found.
-- **0.4.5 beta 15:** the manager knows where the player is (`engine/areas.h`: visits, learned area
-  scores, the likely next areas) and frees at loading screens and when frames have slack; the game's
-  data goes in whole 64 MiB chunks, so its memory goes back to the driver. The game's own GX resource
-  calls are logged against the texture cache (`engine/gx_resources.h`, research for beta 16).
+- **0.4.5 beta 15-16:** the texture cache follows the game's own textures (`engine/gx_resources.h`):
+  built ahead of their first draw when the game creates them with their data (during loading
+  screens, below the comfortable line), freed when it destroys them. The VRAM manager (three lines,
+  loading screens and frames with slack, whole 64 MiB chunks of the game's data) covers the rest.
 - **After 0.4.4 (2026-11-05):** the VRAM cleanup of the game's data unused for 3 minutes
   (`EvictIdleCopies`, from bbport) is behind almost every long frame left at 60 FPS, and it churns
   uploads while VRAM has room. The evidence: [performance.md](performance.md); the work:

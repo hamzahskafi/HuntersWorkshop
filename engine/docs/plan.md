@@ -158,13 +158,14 @@ when the tester says).
    profile): why the GPU runs out of work there, and whether the submissions can overlap.
 4. **Step 2, shader code** (below), with the Hunter's Dream as its scene: there DLAA's 0.96 ms, the
    G-buffer pass's 0.74 ms and the lighting passes are most of the frame.
-5. **Step 3, the memory cleanup: beta 15** (below). Its test: a normal session of about 30 minutes
-   with lamp travel (the minute's `VRAM manager:` block should show garbage only, and loading screen
-   trims if VRAM passes the comfortable line) and one with `BB_VRAM_TEST_BUDGET_MB=3500` in Extra
-   variables (a 4 GB card), a long route through several areas. "Use less VRAM"'s lines are set after
-   that run. **Beta 16 next:** the game's GX events drive the cache (beta 15's research lines decide
-   which): textures freed when the game destroys them, images made and uploaded during the loading
-   screen that created their textures, and chunks of the game's data compacted.
+5. **Step 3, the memory cleanup: beta 16** (below). Its test: a normal session of about 30 minutes
+   with lamp travel, and one with `BB_VRAM_TEST_BUDGET_MB=3500` in Extra variables (a 4 GB card), a
+   long route through several areas. Read: the frames after loading screens (Frame stats' worst
+   frame and the Stall lines' images registered), `GX follow` (built, drawn, misses), the VRAM
+   manager's minute. **Next, by the numbers:** the misses' descriptions if many; the game's data
+   followed the same way (buffers built ahead, freed on release: the `GX research` line says how
+   much of it sits in VRAM); shaders translated when the game creates them, if the shader counts and
+   the post-load shader work say it is worth it.
 6. `mem-4` and `upscale-2`/`-3` when one of the above passes near them (0.1 ms at most; the second
    only at reduced upscaler presets).
 
@@ -197,6 +198,11 @@ when the tester says).
   (comfortable 70, tight 80, full 90), frees at loading screens and only with slack in play, takes
   garbage first and whole 64 MiB chunks, and logs refaults and what went back to the driver. It also
   listens to the game's GX texture and buffer calls (research, logged only).
+- **Beta 16 (the tester's call, 2026-11-07, on beta 15's logs):** the area tracker removed (it would
+  work against the game, which says what it creates and destroys); the texture cache follows the
+  game's textures: built during the loading screen that creates them (from the T# its graphics layer
+  builds, as bbhost does), freed when it destroys them. The VRAM manager stays for what the game does
+  not say and for cards without the room.
 
 - **Evict by the VRAM budget, not by age alone.** Done in beta 14 (above).
 - **Paced:** in play, at most a set amount a second (beta 15: 12 ms a second and one 64 MiB chunk of

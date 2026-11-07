@@ -171,8 +171,8 @@ public:
     u8 store_failures = 0;
     /// Beta 14: a store into the game's memory is under way (TextureCache::BeginStore).
     bool store_pending = false;
-    /// Beta 15: the area visit it was last used in (engine/areas.h), for the VRAM manager's order.
-    mutable u32 visit = 0;
+    /// Beta 16: built ahead of its first draw (TextureCache::BuildAhead): 1 not drawn yet, 2 drawn.
+    u8 ahead = 0;
     /// Beta 15 (research): the collector pass at which the game destroyed the texture at its address
     /// (engine/gx_resources.h); 0: none.
     u64 gx_dead_tick = 0;
