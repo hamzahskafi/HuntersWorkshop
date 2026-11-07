@@ -11,7 +11,9 @@ What comes next, and the rules and decisions it works under. Updated 2026-11-07.
   destroys and releases freed as soon as the GPU is done; beta 5 (engine id 89) is the memory design
   below ("The 0.4.6 memory design"), with the logging that tests it, and the VRAM manager off by
   default; beta 6 (engine id 90) follows the textures the game makes outside GX (YEBIS, Scaleform)
-  and frees the GPU's stale drawings the game's memory has moved on from. 0.4.4 was released on 2026-11-03 (`cbec5a2`, engine id 64).
+  and frees the GPU's stale drawings the game's memory has moved on from; beta 7 (engine id 91) keeps
+  YEBIS's target images across its rebuilds and prepares sampled textures made without data at
+  creation. 0.4.4 was released on 2026-11-03 (`cbec5a2`, engine id 64).
 - **Where the work goes:** the branch `claude/awesome-gates-cjba5e`.
 
 The other documents:
@@ -248,6 +250,15 @@ when the tester says).
   - **The two slow areas of beta 5's run** (53-57 FPS for 10-20 s after arriving in m23 and m24): the
     GPU busy (idle 1-3 ms a frame against 10-12), not shaders (none compiled); the second came as
     VRAM reached 91% of the budget. Beta 6's freeing should tell whether VRAM was the cause.
+  - **Beta 7 (on beta 6's log, 2026-11-08: the two slow areas at 60 FPS with the GPU idle 10-11 ms a
+    frame, stale images under 1 MiB, images 0.9-1.4 GB against 2-2.5, VRAM at most 72% of the budget;
+    the budget steps between 7,249 and 5,859 MiB as the game's own use crosses about 3.9 GB, nothing
+    else moving):** both hitches left were YEBIS rebuilding its targets (158 and 175 images made at a
+    draw, 183 and 261 MiB uploaded; the second came with a controller connecting). YEBIS's re-created
+    target now keeps the image of the one it replaces when memory and shape match (a destroyed YEBIS
+    texture's images wait 3 s for it), and a GX texture made without its data that is sampled only
+    (bind flags +0x3b: 0x8 without 0x20, 0x40 or 0x80) gets its image at creation, registered without
+    an upload (after some loads draws made about 1,000 of these a minute).
   - **Next (the logs decide):** the game's area prefetch (it was made for a hard disk: its model can
     drive the loads), the shader building and its threads, bbport's no-sparse memory module (the
     Linux phase).
@@ -288,8 +299,8 @@ when the tester says).
 
 ### Waiting on the tester
 
-- **0.4.6 beta 6's runs** (step 3, "The 0.4.6 memory design"): a normal session with loading screens,
-  the two areas that ran slowly in beta 5, and the minute lines named there.
+- **0.4.6 beta 7's runs** (step 3, "The 0.4.6 memory design"): a normal session with loading screens,
+  and the minute lines named there.
 
 ## Next, after the performance work
 

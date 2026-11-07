@@ -593,6 +593,13 @@ void TextureCache::DumpImagesAt(VAddr address, const char* dir) {
 /// hashed on the copy threads and then their hashes: a 1080p R32F image the game refreshes every
 /// frame (its own compute copy of the depth buffer) cost ~1 ms of hashing on the draw recording
 /// thread. Only compared with hashes made here.
+/// 0.4.6 beta 7: the steady clock in ns (the registry's clock: engine/gx_resources.cpp NowNs).
+static u64 NowSteadyNs() {
+    return u64(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                   std::chrono::steady_clock::now().time_since_epoch())
+                   .count());
+}
+
 static u64 GuestMemoryHash(const void* data, u64 size) {
     constexpr u64 Chunk = 256 * 1024;
     if (size < 4 * Chunk || !BbCopy::Enabled()) {
@@ -1552,6 +1559,7 @@ void TextureCache::RegisterImage(ImageId image_id) {
                                   std::chrono::steady_clock::now().time_since_epoch())
                                   .count());
     image.dead_by_reuse = false;
+    image.dead_grace_ns = 0;
     image.skip_hashes_once = true;
     ForEachPage(image.info.guest_address, image.info.guest_size,
                 [this, image_id](u64 page) { page_table[page].push_back(image_id); });
@@ -1888,6 +1896,9 @@ void TextureCache::ProcessGxDestroyed() {
             if (image.info.guest_address >= gone.memory &&
                 image.info.guest_address + image.info.guest_size <= gone_end) {
                 image.gx_dead_tick = gc_tick;
+                // 0.4.6 beta 7: YEBIS destroys and re-creates its targets together (300-750 at a
+                // load, beta 6's log): a few seconds for the new one to take this image.
+                image.dead_grace_ns = gone.grace ? NowSteadyNs() + 3'000'000'000ull : 0;
                 had = true;
                 bytes += image.backing ? image.GetHostImageSize() : 0;
                 // Beta 16: freed once the GPU is done with it (FreeDeadImages).
@@ -1920,8 +1931,23 @@ void TextureCache::ProcessGxCreated() {
             }
         }
         const VAddr made_end = made.memory + std::max<u64>(made.bytes, 1);
-        u64 bytes = 0, images = 0;
+        u64 bytes = 0, images = 0, kept = 0, kept_bytes = 0;
         ForEachImageInRegion(made.memory, std::max<u64>(made.bytes, 1), [&](ImageId image_id, Image& image) {
+            // 0.4.6 beta 7: YEBIS re-created a target over the same memory, made without data: the image
+            // of the target it replaced, of the same shape, is this one's (bbhost keeps them too). It is
+            // drawn into again; nothing of the old target's is read.
+            if (made.hand_over && True(image.flags & ImageFlagBits::Registered) &&
+                image.registered_ns < made.ns && image.info.guest_address == made.memory &&
+                image.info.size.width == made.width && image.info.size.height == made.height &&
+                (made.levels == 0 || image.info.resources.levels == made.levels) &&
+                (made.layers == 0 || image.info.resources.layers == made.layers)) {
+                image.gx_dead_tick = 0;
+                image.dead_by_reuse = false;
+                image.dead_grace_ns = 0;
+                ++kept;
+                kept_bytes += image.backing ? image.GetHostImageSize() : 0;
+                return;
+            }
             // 0.4.6 beta 6: one reaching outside it too when its texture was destroyed (beta 5 kept a
             // 64 MiB shadow map whose memory small textures had taken: only images wholly inside).
             const bool inside = image.info.guest_address >= made.memory &&
@@ -1942,6 +1968,9 @@ void TextureCache::ProcessGxCreated() {
         if (images != 0) {
             ahead_at.erase(made.memory);
             BbEngine::GxResources::NoteReuseDead(images, bytes);
+        }
+        if (kept != 0) {
+            BbEngine::GxResources::NoteHandedOver(kept, kept_bytes);
         }
     }
     gx_created.clear();
@@ -2001,6 +2030,10 @@ TextureCache::Dead TextureCache::DeadImageState(const Image& image, VAddr skip_a
                                            image.info.guest_address,
                                            image.info.guest_address + image.info.guest_size, skip_at)) {
         return Dead::No;
+    }
+    // 0.4.6 beta 7: a YEBIS texture's image waits for the target YEBIS re-creates over it.
+    if (image.dead_grace_ns != 0 && NowSteadyNs() < image.dead_grace_ns) {
+        return Dead::Busy;
     }
     // bbport (GPU hang guard): as the collector's, the GPU's work with it done first.
     const u64 recent_frames = GcRecentFrames();
@@ -2176,7 +2209,9 @@ void TextureCache::BuildAhead() {
             FreeImage(image_id);
         }
         if (exact) {
-            ahead_refresh.emplace_back(exact, slot_images[exact].image_uid);
+            if (job.upload) {
+                ahead_refresh.emplace_back(exact, slot_images[exact].image_uid);
+            }
             BbEngine::GxResources::NoteAhead(AheadResult::Refreshed, 0);
             continue; // the prepared image goes (its memory back to the allocator)
         }
@@ -2196,7 +2231,11 @@ void TextureCache::BuildAhead() {
                                 image.info.resources.layers,
                                 u32(image.info.pixel_format),
                                 u32(image.info.tile_mode)};
-        ahead_built.emplace_back(image_id, image.image_uid);
+        // 0.4.6 beta 7: a texture made without its data (sampled only): not watched or uploaded now
+        // (the game has not written it yet); its first draw does both (it stays Dirty).
+        if (job.upload) {
+            ahead_built.emplace_back(image_id, image.image_uid);
+        }
         BbEngine::GxResources::NoteAhead(AheadResult::Built, image.GetHostImageSize());
     }
     for (auto& prepared : ahead_wait) {

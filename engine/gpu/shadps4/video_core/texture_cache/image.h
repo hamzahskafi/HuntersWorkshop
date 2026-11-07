@@ -210,6 +210,9 @@ public:
     u64 registered_ns = 0;
     u64 reuse_tick = 0;
     bool dead_by_reuse = false;
+    /// 0.4.6 beta 7: the image of a YEBIS texture YEBIS destroyed waits until then (steady clock, ns)
+    /// for the target it re-creates over the same memory (ProcessGxCreated hands it over).
+    u64 dead_grace_ns = 0;
     ImageId depth_id{};
     u64 depth_uid{};
     u64 image_uid{};

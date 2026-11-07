@@ -32,6 +32,9 @@
 //   (the post-processing middleware's own device: its targets were ~1.1 GB of beta 5's stale images)
 //   and Scaleform's texture planes with memory of their own; and the game unmapping memory under
 //   resources it keeps (MemoryReleased: they hold none from then on).
+//   0.4.6 beta 7: YEBIS's re-created targets keep the images of the ones they replace (same memory and
+//   shape; bbhost's), and GX textures made without their data that are sampled only get their image
+//   at creation too (its upload is the first draw's).
 //   Research: the game's shader creators.
 #pragma once
 #include <array>
@@ -53,6 +56,12 @@ struct Gone {
     std::uint64_t memory;
     std::uint32_t bytes;
     std::uint64_t ns;
+    // 0.4.6 beta 7: a YEBIS target made without its data (`hand_over`, created events): an image of the
+    // same shape at the same memory, left by the target it replaces, becomes this one's. A YEBIS
+    // texture destroyed (`grace`, destroyed events): its images wait a few seconds for that.
+    std::uint32_t width = 0, height = 0;
+    std::uint16_t levels = 0, layers = 0;
+    bool hand_over = false, grace = false;
 };
 // The textures destroyed since the last call (the texture cache's collector; 0.4.6 beta 4: every
 // pass while DestroyedWaiting, which reads no lock).
@@ -98,6 +107,8 @@ void NoteDrawMadeNone(std::uint64_t address, std::uint64_t bytes, std::uint32_t 
 // and the memory hashed to tell.
 void NoteSuperseded(std::uint64_t bytes);
 void NoteSupersededHashed(std::uint64_t bytes);
+// 0.4.6 beta 7: YEBIS's re-created targets that kept the images of the ones they replaced.
+void NoteHandedOver(std::uint64_t images, std::uint64_t bytes);
 // The game unmapped [address, address + size): the live resources there hold no memory from now on
 // (the game releases an area's texture memory under holders it keeps, bbhost found). Any thread.
 void MemoryReleased(std::uint64_t address, std::uint64_t size);
@@ -114,6 +125,9 @@ struct Ahead {
     std::uint32_t bytes;
     std::uint64_t ns;
     bool loading;
+    // 0.4.6 beta 7: false for a texture made without its data (sampled only: no render-target,
+    // depth or shader-write binding): registered without an upload or a watch, its first draw does both.
+    bool upload = true;
 };
 // 0.4.6 beta 4: called inside the game's create call, on its thread (or the worker's for the game's
 // main thread), for each texture created with its data (Following only).

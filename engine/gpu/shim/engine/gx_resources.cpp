@@ -155,6 +155,11 @@ struct Entry {
     // 0.4.6 beta 5: whether it was made with its data, has a render-target or depth-stencil view, and
     // the T# its creator built (2D textures).
     bool initial = false, render_target = false, depth_target = false;
+    // 0.4.6 beta 7: D3D11's bind flags as GX stored them (+0x3b: 0x8 sampled, 0x20 render target, 0x40
+    // depth, 0x80 shader writes; YEBIS's from its description), and a YEBIS texture's shape.
+    std::uint8_t bind = 0;
+    std::uint32_t width = 0, height = 0;
+    std::uint16_t levels = 0, layers = 0;
     bool has_tsharp = false;
     std::array<std::uint32_t, 8> tsharp{};
 };
@@ -328,6 +333,10 @@ struct Counts {
     // 0.4.6 beta 6.
     std::atomic<std::uint64_t> yebis_rt{0}, yebis_ds{0}, sf_wrapped{0}, unmapped{0}, unmapped_bytes{0},
         superseded{0}, superseded_bytes{0}, superseded_hashed{0};
+    // 0.4.6 beta 7: GX textures made without their data by binding (sampled only, render target, depth,
+    // shader writes, other), and YEBIS's re-created targets that kept their old images.
+    std::array<std::atomic<std::uint64_t>, 5> no_data{};
+    std::atomic<std::uint64_t> handed_over{0}, handed_over_bytes{0};
     struct Made {
         std::uint64_t address, bytes;
         std::uint32_t width, height, levels, layers, format, tile;
@@ -361,6 +370,7 @@ Entry Register(std::uint64_t key, std::uint64_t holder, Kind kind, bool initial)
     Entry e{Read<std::uint64_t>(holder + 0x20), Read<std::uint32_t>(holder + 0x2c), kind,
             Loading::ScreenUp(), NowNs(), Read<std::uint8_t>(holder + 0x38)};
     e.initial = initial;
+    e.bind = Read<std::uint8_t>(holder + 0x3b);
     if (kind == kTexture && t_tsharp_valid) {
         // The builder runs before the memory is allocated: the base (address >> 8, 38 bits over the
         // first word and the low 6 bits of the second) is filled in here.
@@ -397,7 +407,15 @@ void Insert(std::uint64_t key, const Entry& e) {
     // 0.4.6 beta 5: the memory is this resource's now (the texture cache retires images left there).
     if (g_follow && e.memory && e.bytes) {
         if (g_created.size() < kQueueCap) {
-            g_created.push_back({e.memory, e.bytes, e.ns});
+            Gone made{e.memory, e.bytes, e.ns};
+            if (kind == kYebis && !e.initial) {
+                made.width = e.width;
+                made.height = e.height;
+                made.levels = e.levels;
+                made.layers = e.layers;
+                made.hand_over = e.width != 0 && e.height != 0;
+            }
+            g_created.push_back(made);
             g_created_waiting.store(true, std::memory_order_release);
         } else {
             g_counts.created_dropped.fetch_add(1, std::memory_order_relaxed);
@@ -408,11 +426,16 @@ void Insert(std::uint64_t key, const Entry& e) {
 
 // 0.4.6 beta 6: a texture the game's middleware made (YEBIS, Scaleform), as a resource of the game's.
 void RegisterOther(std::uint64_t key, std::uint64_t memory, std::uint32_t bytes, Kind kind, bool initial,
-                   bool render_target, bool depth_target) {
+                   bool render_target, bool depth_target, std::uint32_t width = 0, std::uint32_t height = 0,
+                   std::uint16_t levels = 0, std::uint16_t layers = 0) {
     Entry e{memory, bytes, kind, Loading::ScreenUp(), NowNs(), 2};
     e.initial = initial;
     e.render_target = render_target;
     e.depth_target = depth_target;
+    e.width = width;
+    e.height = height;
+    e.levels = levels;
+    e.layers = layers;
     Insert(key, e);
 }
 
@@ -460,7 +483,9 @@ void Unregister(std::uint64_t holder, bool texture, std::uint64_t memory_now) {
         }
         // For the texture cache's collector; bounded should it not run (no renderer yet).
         if (g_gone.size() < kQueueCap) {
-            g_gone.push_back({e.memory, e.bytes, NowNs()});
+            Gone gone{e.memory, e.bytes, NowNs()};
+            gone.grace = e.kind == kYebis; // a rebuild may take its images (beta 7)
+            g_gone.push_back(gone);
             g_gone_waiting.store(true, std::memory_order_release);
         } else {
             g_counts.gone_dropped.fetch_add(1, std::memory_order_relaxed);
@@ -481,7 +506,7 @@ void Unregister(std::uint64_t holder, bool texture, std::uint64_t memory_now) {
 // A 2D texture created with its data and its T#: its image prepared now, on this thread (0.4.6 beta
 // 4; the game's main thread hands it to the worker), for the texture cache to register at its next
 // submission.
-void HandCreated(const Entry& e, ThreadSlot& slot) {
+void HandCreated(const Entry& e, ThreadSlot& slot, bool upload = true) {
     if (!e.has_tsharp) {
         g_counts.ahead_no_tsharp.fetch_add(1, std::memory_order_relaxed);
         return;
@@ -489,7 +514,7 @@ void HandCreated(const Entry& e, ThreadSlot& slot) {
     if (e.memory == 0 || (e.type != 2 && e.type != 3)) {
         return;
     }
-    Ahead job{e.tsharp, e.memory, e.bytes, e.ns, e.loading};
+    Ahead job{e.tsharp, e.memory, e.bytes, e.ns, e.loading, upload};
     g_counts.ahead_queued.fetch_add(1, std::memory_order_relaxed);
     const CreatedHook hook = g_created_hook.load(std::memory_order_acquire);
     if (!hook) {
@@ -559,6 +584,8 @@ void NoteYebisCreated(std::uint64_t object, bool initial) {
     const std::uint64_t memory = Read<std::uint64_t>(object + 0x98);
     const std::uint32_t bytes = Read<std::uint32_t>(object + 0x150);
     const std::uint32_t bind = Read<std::uint32_t>(object + 0x188 + 8 * 4); // D3D11 BindFlags
+    // Width, height, mip levels and array size, the description's first four words.
+    const auto shape = Read<std::array<std::uint32_t, 4>>(object + 0x188);
     if (!memory || !bytes) {
         return;
     }
@@ -569,7 +596,9 @@ void NoteYebisCreated(std::uint64_t object, bool initial) {
     if (ds) {
         g_counts.yebis_ds.fetch_add(1, std::memory_order_relaxed);
     }
-    RegisterOther(kYebisKey | object, memory, bytes, kYebis, initial, rt, ds);
+    RegisterOther(kYebisKey | object, memory, bytes, kYebis, initial, rt, ds, shape[0], shape[1],
+                  std::uint16_t(std::min<std::uint32_t>(shape[2], 0xffff)),
+                  std::uint16_t(std::min<std::uint32_t>(shape[3], 0xffff)));
 }
 
 // Scaleform made a texture's hardware planes: each one with memory of its own is a texture of the
@@ -725,6 +754,17 @@ GUEST_ABI std::uint64_t CreatorReturn(std::uint64_t result) {
             const Entry e = Register(holder, holder, p.kind, p.initial);
             if (g_follow && p.kind == kTexture && p.initial) {
                 HandCreated(e, slot);
+            } else if (p.kind == kTexture && !p.initial) {
+                // 0.4.6 beta 7: made without its data. Sampled only (no render-target, depth or
+                // shader-write binding: those images take their shape from the draw that writes
+                // them), its image is made now as one made with data is, and registered without an
+                // upload: its first draw uploads what the game has put there by then.
+                const bool sampled_only = (e.bind & 0x08) != 0 && (e.bind & 0xe0) == 0;
+                const int cls = sampled_only ? 0 : (e.bind & 0x20) ? 1 : (e.bind & 0x40) ? 2 : (e.bind & 0x80) ? 3 : 4;
+                g_counts.no_data[cls].fetch_add(1, std::memory_order_relaxed);
+                if (g_follow && sampled_only) {
+                    HandCreated(e, slot, false);
+                }
             }
         }
     }
@@ -975,6 +1015,11 @@ void NoteDrawMadeNone(std::uint64_t address, std::uint64_t bytes, std::uint32_t 
     }
     list.back() = {address, bytes, width, height, levels, layers, format, tile};
     std::sort(list.begin(), list.end(), [](const Counts::Made& a, const Counts::Made& b) { return a.bytes > b.bytes; });
+}
+
+void NoteHandedOver(std::uint64_t images, std::uint64_t bytes) {
+    g_counts.handed_over.fetch_add(images, std::memory_order_relaxed);
+    g_counts.handed_over_bytes.fetch_add(bytes, std::memory_order_relaxed);
 }
 
 void NoteSuperseded(std::uint64_t bytes) {
@@ -1244,7 +1289,8 @@ void LogMinute() {
              Mib(g_counts.dead_bytes.load(std::memory_order_relaxed)),
              g_counts.gone_dropped.load(std::memory_order_relaxed) ? " (some destroyed textures not checked)" : "");
     if (g_follow) {
-        host_log("GX follow this minute: %llu textures created with their data (%llu without a T#, %llu with no "
+        host_log("GX follow this minute: %llu textures prepared at creation (made with their data, or sampled only "
+                 "without it: beta 7) (%llu without a T#, %llu with no "
                  "renderer yet, %llu over the worker's queue), %llu built (%.0f MiB), %llu refreshed in place (the "
                  "same texture again), %llu left to their draw (an image there: %llu of a texture not destroyed, "
                  "%llu used since its texture was destroyed, %llu drawn by the GPU under a live texture), %llu "
@@ -1315,14 +1361,20 @@ void LogMinute() {
     {
         // 0.4.6 beta 5: what the game does with its resources after making them, and what the images
         // made at a draw (not prepared) and the stale ones (written over, unused 10 s) belong to.
-        host_log("GX memory this minute: 1D textures created %llu (%.0f MiB), destroyed %llu; views: %llu render "
-                 "targets, %llu depth targets, %llu of textures not known; images retired because the game made "
-                 "something newer over them %llu (%.0f MiB); %llu created events not queued",
+        host_log("GX memory this minute: 1D textures created %llu (%.0f MiB), destroyed %llu; textures made without "
+                 "their data: %llu sampled only (prepared at creation), %llu render targets, %llu depth, %llu "
+                 "written by shaders, %llu other; views: %llu render targets, %llu depth targets, %llu of textures "
+                 "not known; images retired because the game made something newer over them %llu (%.0f MiB); "
+                 "YEBIS's re-created targets that kept the old ones' images %llu (%.0f MiB); %llu created events "
+                 "not queued",
                  (unsigned long long)created[kTexture1D], Mib(created_bytes[kTexture1D]),
-                 (unsigned long long)destroyed[kTexture1D], (unsigned long long)take(g_counts.views_rt),
-                 (unsigned long long)take(g_counts.views_ds), (unsigned long long)take(g_counts.views_unknown),
-                 (unsigned long long)take(g_counts.reuse_dead), Mib(take(g_counts.reuse_dead_bytes)),
-                 (unsigned long long)take(g_counts.created_dropped));
+                 (unsigned long long)destroyed[kTexture1D], (unsigned long long)take(g_counts.no_data[0]),
+                 (unsigned long long)take(g_counts.no_data[1]), (unsigned long long)take(g_counts.no_data[2]),
+                 (unsigned long long)take(g_counts.no_data[3]), (unsigned long long)take(g_counts.no_data[4]),
+                 (unsigned long long)take(g_counts.views_rt), (unsigned long long)take(g_counts.views_ds),
+                 (unsigned long long)take(g_counts.views_unknown), (unsigned long long)take(g_counts.reuse_dead),
+                 Mib(take(g_counts.reuse_dead_bytes)), (unsigned long long)take(g_counts.handed_over),
+                 Mib(take(g_counts.handed_over_bytes)), (unsigned long long)take(g_counts.created_dropped));
         // 0.4.6 beta 6: the middleware's textures, memory the game unmapped under live resources, and
         // the GPU's stale drawings the game's memory has moved on from.
         host_log("GX memory, the middleware this minute: YEBIS 2D textures made %llu (%.0f MiB; %llu render "

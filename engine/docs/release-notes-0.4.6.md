@@ -139,6 +139,19 @@ The tester's call on beta 4's logs: one beta with the whole design and the loggi
 - **The log** describes the largest textures draws still make over memory nothing of the game's
   holds, with where that memory is, and counts YEBIS's and Scaleform's textures.
 
+## Fewer images made at the first frame (beta 7)
+
+- **Post-processing rebuilds keep their images.** YEBIS throws away and rebuilds hundreds of its
+  render targets at every loading screen (and when a controller connects). Each rebuilt target now
+  keeps the image of the one it replaces when it is the same size at the same memory, instead of the
+  first frame making and uploading them all again (beta 6's two remaining hitches: 158 and 175 of
+  them, 183 and 261 MB uploaded).
+- **Textures the game makes empty and fills later** (only sampled, never drawn into) get their image
+  when the game creates them, as textures made with their data do; their first draw uploads what the
+  game has put there. After some loads the first frames made about 1,000 of these a minute.
+- **The log** counts the textures made without their data by what they are bound as, and the
+  rebuilt targets that kept their images.
+
 ## Diagnostics
 
 - **The "Building shaders" note** shows when a frame was late while shaders were being
