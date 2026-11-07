@@ -463,6 +463,7 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
     }
     blocks_per_arena_page_shift = ARENA_PAGE_BITS - block_shift;
     group_use.assign(u64{1} << (ADDRESS_SPACE_BITS - USE_GROUP_BITS), 0);
+    group_use_tick.assign(group_use.size(), 0);
     arena_memory_type_index =
         FindMemoryType(instance.GetMemoryProperties(), vk::MemoryPropertyFlagBits::eDeviceLocal,
                        reqs.memoryTypeBits)
@@ -1721,10 +1722,14 @@ void BufferCache::NoteResidencyUnused() {
 
 void BufferCache::NoteUse(VAddr address, u64 size) {
     const u32 now = BbStats::coarse_second.load(std::memory_order_relaxed);
+    const u64 tick = scheduler.CurrentTick();
     const u64 last = std::min<u64>((address + size - 1) >> USE_GROUP_BITS, group_use.size() - 1);
     for (u64 group = address >> USE_GROUP_BITS; group <= last; ++group) {
         if (group_use[group] != now) {
             group_use[group] = now;
+        }
+        if (group_use_tick[group] != tick) {
+            group_use_tick[group] = tick;
         }
     }
 }
@@ -1831,10 +1836,22 @@ void BufferCache::ProcessIdleBlocks() {
         }
         VramPolicy::PublishData(in_use, cache, BbStats::residency_unused_bytes.load(std::memory_order_relaxed));
     }
-    // Beta 16-17: the buffers the game released, against its data in VRAM at their memory; beta 17
-    // frees it (ReleaseGxBuffers).
-    if (BbEngine::GxResources::Active()) {
+    // Beta 17-19: the game's data of the buffers the game released leaves VRAM by the VRAM manager's
+    // rules, once a second (0.4.6 beta 4: taken at every Maintain, FollowGxReleases; with the manager
+    // off, freed there).
+    if (BbEngine::GxResources::Following() && !VramPolicy::Off()) {
+        ReleaseGxBuffers();
+    }
+}
+
+void BufferCache::FollowGxReleases() {
+    if (!BbEngine::GxResources::Active()) {
+        return;
+    }
+    if (BbEngine::GxResources::ReleasedWaiting()) {
+        // Beta 16-17: the buffers the game released, against its data in VRAM at their memory.
         BbEngine::GxResources::TakeReleased(gx_released);
+        const u64 tick = scheduler.CurrentTick();
         for (const auto& released : gx_released) {
             const u64 bytes = std::max<u64>(released.bytes, 1);
             const u64 first = released.memory >> block_shift, end = ((released.memory + bytes - 1) >> block_shift) + 1;
@@ -1842,17 +1859,17 @@ void BufferCache::ProcessIdleBlocks() {
             resident_ranges.ForEachGap(first, end, [&](u64 a, u64 b) { gaps += b - a; });
             BbEngine::GxResources::NoteReleasedBuffer(
                 std::min<u64>((end - first - gaps) * block_size, Common::AlignUp(bytes, block_size)));
-        }
-        if (BbEngine::GxResources::Following()) {
-            for (const auto& released : gx_released) {
+            if (BbEngine::GxResources::Following()) {
                 if (released_pending.size() >= 65536) {
                     released_pending.pop_front();
                 }
-                released_pending.push_back(released);
+                released_pending.push_back({released, tick});
             }
-            ReleaseGxBuffers();
         }
         gx_released.clear();
+    }
+    if (VramPolicy::Off() && !released_pending.empty()) {
+        ReleaseGxBuffers();
     }
 }
 
@@ -1870,16 +1887,18 @@ void BufferCache::ReleaseGxBuffers() {
     // play, the game's threads waiting in their write faults). With room nothing leaves VRAM (beta
     // 14's rule); the released buffers wait here (released_pending, 10 minutes), the first data to
     // go once VRAM is tight.
-    // 0.4.6 beta 3: with the manager off (BB_VRAM_MANAGER=0) the game's releases decide alone: its
-    // data leaves VRAM whatever the room, paced as below (at a loading screen, or in play while
-    // frames have slack), its pages unwatched once per run of blocks (EvictVramBlocks).
+    // 0.4.6 beta 3: with the manager off (BB_VRAM_MANAGER=0) the game's releases decide alone, its
+    // pages unwatched once per run of blocks (EvictVramBlocks). 0.4.6 beta 4: as the game releases
+    // them (each Maintain), no pacing and no 2 s wait: a block goes once the GPU has done the last
+    // work recorded with it (its group's use tick), unless its memory was used again after the
+    // release or a live resource of the game's is over it again. Until then the release waits.
     if (TwinsEnabled()) {
         return;
     }
     const bool follow = VramPolicy::Off();
     const u32 now = BbStats::coarse_second.load(std::memory_order_relaxed);
     while (!released_pending.empty() &&
-           now - u32(released_pending.front().ns / 1'000'000'000ull) > 600) {
+           now - u32(released_pending.front().gone.ns / 1'000'000'000ull) > 600) {
         released_pending.pop_front();
     }
     const u32 dma = dma_second.load(std::memory_order_relaxed);
@@ -1887,18 +1906,61 @@ void BufferCache::ReleaseGxBuffers() {
         (dma != 0 && now - dma < VramPolicy::CacheSeconds)) {
         return;
     }
+    std::vector<u64> blocks;
+    if (follow) {
+        released_waiting.clear();
+        for (const PendingRelease& pending : released_pending) {
+            const auto& released = pending.gone;
+            const u64 first = (released.memory + block_size - 1) >> block_shift;
+            const u64 end = (released.memory + released.bytes) >> block_shift;
+            if (first >= end) {
+                continue;
+            }
+            BbEngine::GxResources::LiveResourcesIn(first << block_shift, end << block_shift, released_live);
+            const size_t before = blocks.size();
+            bool wait = false;
+            for (u64 block = first; block < end; ++block) {
+                const VAddr address = block << block_shift;
+                const u64 group = std::min<u64>(address >> USE_GROUP_BITS, group_use.size() - 1);
+                if (!resident_ranges.Contains(block) || in_place_blocks.Contains(block) ||
+                    gpu_modified_ranges.Intersects(address, block_size) ||
+                    memory_tracker->IsRegionGpuModified(address, block_size)) {
+                    continue;
+                }
+                const u64 used = group_use_tick[group];
+                if (used > pending.tick) {
+                    continue; // used again after the release: its memory is in use
+                }
+                if (!scheduler.IsFree(used)) {
+                    wait = true; // work recorded with it is not done yet: a later pass
+                    break;
+                }
+                const bool live = std::any_of(released_live.begin(), released_live.end(), [&](const auto& r) {
+                    return r.first < address + block_size && address < r.second;
+                });
+                if (!live) {
+                    blocks.push_back(block);
+                }
+            }
+            if (wait) {
+                blocks.resize(before);
+                released_waiting.push_back(pending);
+            }
+        }
+        released_pending.swap(released_waiting);
+        released_waiting.clear();
+    }
     // A second's share: 2048 blocks (128 MiB of 64 KiB blocks) at a loading screen or when full, 512
     // while tight (only when frames have slack) or between the comfortable and tight lines.
     using VramPolicy::Mode;
     const bool loading = BbEngine::Loading::ScreenUp();
     const Mode mode = VramPolicy::CurrentMode();
-    if (follow ? !loading && !VramPolicy::Slack() : mode == Mode::Tight && !VramPolicy::Allowed()) {
+    if (!follow && mode == Mode::Tight && !VramPolicy::Allowed()) {
         return;
     }
-    const size_t budget = loading || mode == Mode::Full ? 2048 : 512;
-    std::vector<u64> blocks;
-    while (!released_pending.empty() && blocks.size() < budget) {
-        const auto released = released_pending.front();
+    const size_t budget = follow ? 0 : (loading || mode == Mode::Full ? 2048 : 512);
+    while (!follow && !released_pending.empty() && blocks.size() < budget) {
+        const auto released = released_pending.front().gone;
         // Beta 19: released at least 2 s ago, so a reuse of the memory in the release's own second
         // shows in its group's last use (seconds) before the block goes.
         if (now - u32(released.ns / 1'000'000'000ull) < 2) {
@@ -2203,6 +2265,7 @@ void BufferCache::Maintain() {
         PollGxRegion(0, 0);
     }
     ProcessPendingUnmaps();
+    FollowGxReleases();
     ProcessIdleBlocks();
 }
 

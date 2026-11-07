@@ -590,6 +590,7 @@ bool SceneTargets::CopyProxy(VideoCore::ImageId src_id, VideoCore::ImageId dst_i
     to->state.ProxyWrite(); // the native destination resolves on its first native access
     to->depth_values = depth_to_color || from.depth_values;
     // As Runtime::CopyImage: the GPU's data, nothing to upload; other contents (tile memo).
+    dst.ResolveDeferredHashes(); // 0.4.6 beta 4: before the GPU draws into it
     dst.flags |= VideoCore::ImageFlagBits::GpuModified;
     dst.flags &= ~VideoCore::ImageFlagBits::Dirty;
     ++dst.write_seq;

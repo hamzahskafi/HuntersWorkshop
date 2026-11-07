@@ -495,6 +495,72 @@ struct PageManager::Impl {
         release_pending();
     }
 
+    /// 0.4.6 beta 4: one write watcher more on each page of every range (sorted by address), with
+    /// one protection change per run of pages that become watched: UpdatePageWatchers made one per
+    /// range, and the textures the game makes in a burst lie side by side. Ranges whose pages touch
+    /// or are shared are taken together, under their pages' locks, as one.
+    void WatchRanges(std::span<const std::pair<VAddr, u64>> ranges) {
+        RENDERER_TRACE;
+        std::vector<u16> cover;
+        size_t i = 0;
+        while (i < ranges.size()) {
+            const u64 first_page = ranges[i].first >> PM_PAGE_BITS;
+            u64 end_page = Common::DivCeil(ranges[i].first + ranges[i].second, PM_PAGE_SIZE);
+            size_t j = i + 1;
+            while (j < ranges.size() && (ranges[j].first >> PM_PAGE_BITS) <= end_page) {
+                end_page = std::max<u64>(end_page, Common::DivCeil(ranges[j].first + ranges[j].second,
+                                                                   PM_PAGE_SIZE));
+                ++j;
+            }
+            // How many of the group's ranges hold each of its pages (a watcher each).
+            cover.assign(end_page - first_page, 0);
+            for (size_t k = i; k < j; ++k) {
+                const u64 a = ranges[k].first >> PM_PAGE_BITS;
+                const u64 b = Common::DivCeil(ranges[k].first + ranges[k].second, PM_PAGE_SIZE);
+                for (u64 page = a; page < b; ++page) {
+                    ++cover[page - first_page];
+                }
+            }
+            const size_t first_lock = first_page / PAGES_PER_LOCK;
+            const size_t last_lock = Common::DivCeil(end_page, PAGES_PER_LOCK);
+            Common::RangeLockGuard lk(locks.begin() + first_lock, locks.begin() + last_lock);
+            // As UpdatePageWatchers<true, false>, with each page's count raised by its cover.
+            auto perms = cached_pages[first_page].Perms();
+            u64 range_begin = 0;
+            u64 range_bytes = 0;
+            u64 potential_range_bytes = 0;
+            const auto release_pending = [&] {
+                if (range_bytes > 0) {
+                    ApplyProtect(range_begin << PM_PAGE_BITS, range_bytes, perms);
+                    range_bytes = 0;
+                    potential_range_bytes = 0;
+                }
+            };
+            for (u64 page = first_page; page != end_page; ++page) {
+                PageState& state = cached_pages[page];
+                bool became_watched = false;
+                for (u16 k = cover[page - first_page]; k != 0; --k) {
+                    became_watched |= state.AddDelta<1, false>(page) == 1;
+                }
+                if (auto new_perms = state.Perms(); new_perms != perms) [[unlikely]] {
+                    release_pending();
+                    perms = new_perms;
+                } else if (range_bytes != 0) {
+                    potential_range_bytes += PM_PAGE_SIZE;
+                }
+                if (became_watched) {
+                    if (range_bytes == 0) {
+                        range_begin = page;
+                        potential_range_bytes = PM_PAGE_SIZE;
+                    }
+                    range_bytes = potential_range_bytes;
+                }
+            }
+            release_pending();
+            i = j;
+        }
+    }
+
     template <bool track, bool is_read>
     void UpdatePageWatchersForRegion(VAddr base_addr, RegionBits& mask) {
         RENDERER_TRACE;
@@ -620,6 +686,11 @@ template <bool track>
 void PageManager::UpdatePageWatchers(VAddr addr, u64 size) const {
     ProtectKindScope kind{BbStats::ProtectTexture};
     impl->UpdatePageWatchers<track, false>(addr, size);
+}
+
+void PageManager::WatchRanges(std::span<const std::pair<VAddr, u64>> ranges) const {
+    ProtectKindScope kind{BbStats::ProtectTexture};
+    impl->WatchRanges(ranges);
 }
 
 template <bool track, bool is_read>

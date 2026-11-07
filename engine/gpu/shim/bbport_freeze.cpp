@@ -9,6 +9,7 @@
 #include "bbport_freeze.h"
 #include "bbport_platform.h"
 #include "bbport_toggles.h"
+#include "engine/gx_resources.h"
 #include "engine/loading.h"
 
 #ifdef _WIN32
@@ -30,6 +31,23 @@ extern "C" void runtime_blocked_report(const char* prefix);
 namespace BbFreeze {
 namespace {
 std::atomic<long long> last_flip_ms{0};
+
+// 0.4.6 beta 4: the engine's own texture work, as running totals at each flip, so a hitch report
+// says what of it fell between the last frame and the late one.
+struct OwnWork {
+    std::uint64_t build_ns = 0, build_images = 0, registered = 0, create_ns = 0, refresh_ns = 0, upload = 0;
+};
+OwnWork CurrentOwnWork() {
+    OwnWork w;
+    BbEngine::GxResources::BuildPassTotals(w.build_ns, w.build_images);
+    w.registered = BbStats::images_registered.load(std::memory_order_relaxed);
+    w.create_ns = BbStats::t_image_create.load(std::memory_order_relaxed);
+    w.refresh_ns = BbStats::t_refresh.load(std::memory_order_relaxed);
+    w.upload = BbStats::image_upload_bytes.load(std::memory_order_relaxed);
+    return w;
+}
+std::mutex own_work_mutex;
+OwnWork own_work_at_flip;
 std::once_flag started;
 std::mutex reporter_mutex;
 std::function<void()> state_reporter;
@@ -392,6 +410,7 @@ void HitchWatch() {
         SetThreadDescription(GetCurrentThread(), L"bb:HitchWatch");
         int reports = 0;
         long long reported_flip = -1, last_report = -kHitchGapMs, quiet_until = NowMs() + kHitchQuietStartMs;
+        OwnWork hitch_start;
         bool open = false;
         for (;;) {
             std::this_thread::sleep_for(std::chrono::milliseconds(2));
@@ -400,8 +419,24 @@ void HitchWatch() {
                 quiet_until = std::max(quiet_until, now + kHitchQuietAfterLoadMs);
             }
             if (open && flip != reported_flip) {
-                std::printf("== Hitch %d: the next frame came %lld ms after the last one\n", reports,
-                            flip - reported_flip);
+                // Up to the late frame's flip (taken there, NoteFlip).
+                OwnWork end;
+                {
+                    std::scoped_lock lock{own_work_mutex};
+                    end = own_work_at_flip;
+                }
+                std::printf("== Hitch %d: the next frame came %lld ms after the last one (the report itself "
+                            "stopped the threads for part of it); meanwhile the texture cache registered %llu "
+                            "images, %llu of them prepared when the game created them (%.1f ms on the GPU "
+                            "thread), and uploaded %.1f MiB; image creation %.1f ms, refreshes %.1f ms "
+                            "(timed with BB_FRAME_STATS=1)\n",
+                            reports, flip - reported_flip,
+                            (unsigned long long)(end.registered - hitch_start.registered),
+                            (unsigned long long)(end.build_images - hitch_start.build_images),
+                            double(end.build_ns - hitch_start.build_ns) / 1e6,
+                            double(end.upload - hitch_start.upload) / (1024.0 * 1024.0),
+                            double(end.create_ns - hitch_start.create_ns) / 1e6,
+                            double(end.refresh_ns - hitch_start.refresh_ns) / 1e6);
                 std::fflush(stdout);
                 open = false;
             }
@@ -412,6 +447,10 @@ void HitchWatch() {
             reported_flip = flip;
             last_report = now;
             open = true;
+            {
+                std::scoped_lock lock{own_work_mutex};
+                hitch_start = own_work_at_flip; // at the last frame before the hitch
+            }
             HitchReport(++reports, now - flip, limit_ms);
         }
     }).detach();
@@ -443,6 +482,11 @@ void Watch() {
 } // namespace
 
 void NoteFlip() {
+    {
+        const OwnWork work = CurrentOwnWork();
+        std::scoped_lock lock{own_work_mutex};
+        own_work_at_flip = work;
+    }
     last_flip_ms.store(NowMs(), std::memory_order_relaxed);
     std::call_once(started, [] {
         Watch();

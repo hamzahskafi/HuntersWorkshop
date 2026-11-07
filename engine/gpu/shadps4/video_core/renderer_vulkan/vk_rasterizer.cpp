@@ -3276,6 +3276,7 @@ void Rasterizer::ShadowRedirectPassBegun(const GraphicsPipeline* pipeline,
     const u32 clear_width = std::min<u32>(info.size.width, state.width);
     const u32 clear_height = std::min<u32>(info.size.height, state.height);
     r.clear_pending = false;
+    image.ResolveDeferredHashes(); // 0.4.6 beta 4: before the GPU draws into it
     image.flags |= VideoCore::ImageFlagBits::GpuModified; // as ClearImage marks it
     image.flags &= ~VideoCore::ImageFlagBits::Dirty;
     const vk::ClearAttachment attachment{.aspectMask = vk::ImageAspectFlagBits::eColor,
@@ -3369,6 +3370,7 @@ void Rasterizer::ShadowRedirectRestore(const char* why) {
         cmdbuf.copyImage(src, vk::ImageLayout::eTransferSrcOptimal, dst,
                          vk::ImageLayout::eTransferDstOptimal, region);
     });
+    cube.ResolveDeferredHashes(); // 0.4.6 beta 4: before the GPU draws into it
     cube.flags |= VideoCore::ImageFlagBits::GpuModified;
     auto& savings = GpuSavings::Get();
     GpuSavings::Count(after_copy ? savings.shadow_restores_after : savings.shadow_restores_before);

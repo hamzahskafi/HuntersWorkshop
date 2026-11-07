@@ -167,6 +167,14 @@ void MemoryManager::SetRasterizer(Vulkan::Rasterizer* rasterizer_) {
             rasterizer->ReleaseDestroyedTexture(address, size);
         }
     });
+    // 0.4.6 beta 4: a texture the game created with its data (the game's thread, inside its create).
+    BbEngine::GxResources::SetCreatedHook([](const BbEngine::GxResources::Ahead& job) {
+        if (auto* rasterizer = Memory::Instance()->GetRasterizer()) {
+            rasterizer->PrepareCreatedTexture(job);
+        } else {
+            BbEngine::GxResources::NoteAhead(BbEngine::GxResources::AheadResult::NoRenderer, 0);
+        }
+    });
 }
 void MemoryManager::InvalidateMemory(VAddr address, u64 size) {
     if (rasterizer) rasterizer->InvalidateMemory(address, size);

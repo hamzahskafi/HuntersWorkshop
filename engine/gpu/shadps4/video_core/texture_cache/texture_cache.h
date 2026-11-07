@@ -9,6 +9,7 @@
 #include "bbport_toggles.h"
 
 #include <condition_variable>
+#include <memory>
 #include <mutex>
 #include <thread>
 #include <unordered_set>
@@ -158,6 +159,10 @@ public:
     /// [addr, addr + size) stop watching their pages and become garbage, so the next texture the game
     /// makes there writes them without faulting page by page. Neighbours sharing a page keep theirs.
     void ReleaseDestroyed(VAddr addr, size_t size);
+    /// 0.4.6 beta 4: a texture the game created with its data, on the game's creating thread (or the
+    /// worker the game's main thread hands it to): its image (Vulkan image and memory) is made now,
+    /// and registered and uploaded by the GPU thread at its next submission (BuildAhead).
+    void PrepareCreated(const BbEngine::GxResources::Ahead& job);
 
     /// bbport: uploads the game's button icons again when what they show changed (keyboard and
     /// mouse prompts, engine/key_prompts.h). Once a frame, without the lock.
@@ -497,11 +502,12 @@ private:
     void FreeDeadImages(u64 second);
     /// 0.4.6 beta 3: whether an image is of a texture the game destroyed (not used since, and not
     /// GPU-drawn contents another live texture may share), and if so whether the GPU is done with it.
-    /// Under `mutex`.
+    /// Under `mutex`. `skip_at`: a live texture there that does not count (beta 4: the one being built).
     enum class Dead { No, Busy, Free };
-    Dead DeadImageState(const Image& image);
-    /// Beta 16: the textures the game created with their data, built ahead of their first draw
-    /// (BuildAhead: each collector pass, outside the cache's lock, within a time slice).
+    Dead DeadImageState(const Image& image, VAddr skip_at = 0);
+    /// Beta 16: the textures the game created with their data, built ahead of their first draw. 0.4.6
+    /// beta 4: their images come prepared from the game's threads (PrepareCreated); each collector
+    /// pass registers all of them, no time budget.
     void BuildAhead();
     /// Beta 15 (once a second, any VRAM level): garbage textures.
     void GarbagePass(u64 second);
@@ -540,6 +546,8 @@ private:
     /// bbport: the page manager's write watchers of an image's pages, and watched_pages with
     /// them: counted before the pages are protected, uncounted after they are unprotected.
     void WatchPages(VAddr addr, u64 size);
+    /// 0.4.6 beta 4: WatchPages for several ranges (sorted here), one protection change per run.
+    void WatchPagesBatch(std::vector<std::pair<VAddr, u64>>& ranges);
     void UnwatchPages(VAddr addr, u64 size);
 
     void MarkAsMaybeDirty(ImageId image_id, Image& image);
@@ -623,11 +631,24 @@ private:
     /// Beta 16: images of textures the game destroyed, waiting for the GPU to be done with them.
     std::vector<std::pair<ImageId, u64>> dead_images;
     /// Beta 16: textures to build ahead (BuildAhead), and where each was built: its info, for the
-    /// log when a draw makes another image there (a miss).
-    std::deque<BbEngine::GxResources::Ahead> ahead_jobs;
-    std::vector<BbEngine::GxResources::Ahead> ahead_new;
+    /// log when a draw makes another image there (a miss). 0.4.6 beta 4: with their images, made on
+    /// the game's threads (prepared_in, under prepared_mutex).
+    struct Prepared {
+        BbEngine::GxResources::Ahead job;
+        std::unique_ptr<Image> image;
+    };
+    std::mutex prepared_mutex;
+    std::vector<Prepared> prepared_in;
+    std::vector<Prepared> ahead_take;
+    std::deque<Prepared> ahead_jobs;
     /// 0.4.6 beta 3: jobs whose memory holds a destroyed texture's image the GPU still uses.
-    std::vector<BbEngine::GxResources::Ahead> ahead_wait;
+    std::vector<Prepared> ahead_wait;
+    /// 0.4.6 beta 4: BuildAhead's pass: the images registered (id, uid), the same texture again over
+    /// its live image (refreshed), and the ranges watched at once.
+    std::vector<std::pair<ImageId, u64>> ahead_built, ahead_refresh;
+    std::vector<std::pair<VAddr, u64>> ahead_watch;
+    /// 0.4.6 beta 4: images freed since the last report, by why (the report named the mode only).
+    u64 gc_freed_destroyed = 0, gc_freed_orphans = 0;
     struct AheadBuilt {
         ImageId image_id;
         u64 image_uid;
@@ -636,9 +657,6 @@ private:
     };
     std::unordered_map<VAddr, AheadBuilt> ahead_at; ///< under `mutex`
     u32 ahead_misses_logged = 0;
-    /// Beta 16-17: BuildAhead's time in the current 16 ms window (ns) and when that window began.
-    s64 ahead_ns = 0;
-    s64 ahead_window = 0;
     u64 total_used_samplers = 0;
     u64 sampler_generation = 0; ///< bbport: samplers freed so far (SamplerGeneration)
     u64 trigger_gc_samplers = 0;

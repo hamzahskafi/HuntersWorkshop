@@ -63,7 +63,9 @@ struct UniqueImage {
         return *this;
     }
 
-    void Create(const vk::ImageCreateInfo& image_ci);
+    /// `may_fail` (0.4.6 beta 4, an image prepared on a game thread): VRAM refusing it leaves no image
+    /// (false) instead of stopping.
+    bool Create(const vk::ImageCreateInfo& image_ci, bool may_fail = false);
 
     void Destroy();
 
@@ -86,7 +88,8 @@ public:
 
 struct Image {
     explicit Image(const Vulkan::Instance& instance, Vulkan::Runtime& runtime,
-                   Common::SlotVector<ImageView>& slot_image_views, const ImageInfo& info);
+                   Common::SlotVector<ImageView>& slot_image_views, const ImageInfo& info,
+                   bool may_fail = false);
     ~Image();
 
     Image(const Image&) = delete;
@@ -113,6 +116,22 @@ struct Image {
     bool IsTracked() {
         return track_addr != 0 && track_addr_end != 0;
     }
+
+    /// 0.4.6 beta 4: whether it got its Vulkan image (one made with `may_fail` may not have).
+    bool HasMemory() const {
+        return backing && backing->image;
+    }
+
+    /// 0.4.6 beta 4: an image built when the game created its texture was uploaded without hashing
+    /// its memory (RefreshImage): the hashes are only compared once the GPU has drawn into it. Taken
+    /// before anything marks it GpuModified (and by RefreshImage): of the memory as uploaded if it
+    /// is unchanged since (tracked, not written), else none (the next refresh uploads it).
+    void ResolveDeferredHashes() {
+        if (hashes_deferred) [[unlikely]] {
+            ResolveDeferredHashesNow();
+        }
+    }
+    void ResolveDeferredHashesNow();
 
     bool SafeToDownload() const {
         return True(flags & ImageFlagBits::GpuModified) && False(flags & (ImageFlagBits::Dirty));
@@ -173,6 +192,10 @@ public:
     bool store_pending = false;
     /// Beta 16: built ahead of its first draw (TextureCache::BuildAhead): 1 not drawn yet, 2 drawn.
     u8 ahead = 0;
+    /// 0.4.6 beta 4: its next refresh uploads without hashing (skip_hashes_once), and the hashes of
+    /// that upload are still to be taken (hashes_deferred, ResolveDeferredHashes).
+    bool skip_hashes_once = false;
+    bool hashes_deferred = false;
     /// Beta 15 (research): the collector pass at which the game destroyed the texture at its address
     /// (engine/gx_resources.h); 0: none.
     u64 gx_dead_tick = 0;

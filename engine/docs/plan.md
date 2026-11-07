@@ -6,7 +6,9 @@ What comes next, and the rules and decisions it works under. Updated 2026-11-05.
   step 1, the GPU steps, +8.4% at the lamp spot against 0.4.4 (release-notes-0.4.5.md). 0.4.6 is in
   beta: beta 1 (engine id 85) is what was tested as 0.4.5 betas 14 to 19, the VRAM and texture work
   (step 3 below; release-notes-0.4.6.md); beta 3 (engine id 87) makes `BB_VRAM_MANAGER=0` a test of
-  the game's own creates, destroys and releases alone, at any VRAM level. 0.4.4 was released on 2026-11-03 (`cbec5a2`, engine id 64).
+  the game's own creates, destroys and releases alone, at any VRAM level; beta 4 (engine id 88)
+  follows them as they happen, with no time budget: textures built in the game's own create call,
+  destroys and releases freed as soon as the GPU is done. 0.4.4 was released on 2026-11-03 (`cbec5a2`, engine id 64).
 - **Where the work goes:** the branch `claude/awesome-gates-cjba5e`.
 
 The other documents:

@@ -426,6 +426,7 @@ void Runtime::CopyImage(VideoCore::Image* src, VideoCore::Image* dst) {
                          vk::ImageLayout::eTransferDstOptimal, regions);
     });
 
+    dst->ResolveDeferredHashes(); // 0.4.6 beta 4: before the GPU draws into it
     dst->flags |= (src->flags & VideoCore::ImageFlagBits::GpuModified);
     dst->flags &= ~VideoCore::ImageFlagBits::Dirty;
 }
@@ -529,6 +530,7 @@ void Runtime::CopyImageWithBuffer(VideoCore::Image* src, VideoCore::Image* dst,
         }
     });
 
+    dst->ResolveDeferredHashes(); // 0.4.6 beta 4: before the GPU draws into it
     dst->flags |= (src->flags & VideoCore::ImageFlagBits::GpuModified);
     dst->flags &= ~VideoCore::ImageFlagBits::Dirty;
 }
@@ -584,6 +586,7 @@ void Runtime::CopyMip(VideoCore::Image* src, VideoCore::Image* dst, u32 mip, u32
                          vk::ImageLayout::eTransferDstOptimal, image_copy);
     });
 
+    dst->ResolveDeferredHashes(); // 0.4.6 beta 4: before the GPU draws into it
     dst->flags |= (src->flags & VideoCore::ImageFlagBits::GpuModified);
     dst->flags &= ~VideoCore::ImageFlagBits::Dirty;
 }
@@ -788,6 +791,7 @@ bool Runtime::CopyDepthToColor(VideoCore::Image* src, VideoCore::Image* dst) {
         }
     }
     // As CopyImage: the GPU's data, nothing to upload.
+    dst->ResolveDeferredHashes(); // 0.4.6 beta 4: before the GPU draws into it
     dst->flags |= (src->flags & VideoCore::ImageFlagBits::GpuModified);
     dst->flags &= ~VideoCore::ImageFlagBits::Dirty;
     return true;
@@ -894,6 +898,7 @@ bool Runtime::CopyColorToDepth(VideoCore::Image* src, VideoCore::Image* dst) {
     // The game's pipelines' dynamic state must be emitted again after this pipeline.
     scheduler.GetDynamicState().Invalidate();
     // As CopyImage: the GPU's data, nothing to upload.
+    dst->ResolveDeferredHashes(); // 0.4.6 beta 4: before the GPU draws into it
     dst->flags |= (src->flags & VideoCore::ImageFlagBits::GpuModified);
     dst->flags &= ~VideoCore::ImageFlagBits::Dirty;
     return true;
@@ -1126,6 +1131,7 @@ void Runtime::CopyDepthStencil(VideoCore::Image* src, VideoCore::Image* dst,
                          vk::ImageLayout::eTransferDstOptimal, region);
     });
 
+    dst->ResolveDeferredHashes(); // 0.4.6 beta 4: before the GPU draws into it
     dst->flags |= VideoCore::ImageFlagBits::GpuModified;
     dst->flags &= ~VideoCore::ImageFlagBits::Dirty;
 }
@@ -1205,6 +1211,7 @@ void Runtime::ResolveImage(VideoCore::Image* src, VideoCore::Image* dst,
         });
     }
 
+    dst->ResolveDeferredHashes(); // 0.4.6 beta 4: before the GPU draws into it
     dst->flags |= VideoCore::ImageFlagBits::GpuModified;
     dst->flags &= ~VideoCore::ImageFlagBits::Dirty;
 }
@@ -1232,6 +1239,7 @@ void Runtime::ClearImage(VideoCore::Image* dst, const VideoCore::SubresourceRang
         cmdbuf.clearColorImage(image, vk::ImageLayout::eTransferDstOptimal, color, vk_range);
     });
 
+    dst->ResolveDeferredHashes(); // 0.4.6 beta 4: before the GPU draws into it
     dst->flags |= VideoCore::ImageFlagBits::GpuModified;
     dst->flags &= ~VideoCore::ImageFlagBits::Dirty;
 }

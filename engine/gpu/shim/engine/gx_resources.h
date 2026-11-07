@@ -7,18 +7,25 @@
 //   loading screen, built in the first frame after it: that frame's 44-59 ms).
 //   Beta 16 follows them (BB_GX_FOLLOW=0: counted only, as beta 15):
 //     create   a texture created with its data: the T# GX built for it (its builder runs inside the
-//              creator) is queued (TakeAhead), and the texture cache builds, uploads and watches the
-//              image during the loading screen (or in play while frames have slack), below the VRAM
-//              manager's comfortable line (0.4.6 beta 3, BB_VRAM_MANAGER=0: at any level; an image
-//              of a texture destroyed there goes first). A draw then finds it ready.
+//              creator) goes to the texture cache, which builds, uploads and watches the image ahead
+//              of its first draw, below the VRAM manager's comfortable line (0.4.6 beta 3,
+//              BB_VRAM_MANAGER=0: at any level; an image of a texture destroyed there goes first).
+//              A draw then finds it ready.
 //     destroy  the game is done with the texture: on the game's thread the texture cache stops
 //              watching its pages (DestroyedHook: the next texture made there writes them without a
 //              fault each), and the collector frees its image once the GPU is done with it.
-//   Research: buffers released against the game's data in VRAM, and the game's shader creators.
+//   0.4.6 beta 4 follows them as the game does them, with no time budget:
+//     create   the creating thread (one of the game's loaders) prepares the texture's image (its
+//              Vulkan image and memory) inside the game's create call (CreatedHook); the game's main
+//              thread hands that to one worker instead. The GPU thread registers what was prepared
+//              at its next submission and records the upload.
+//     release  the game's data in VRAM leaves with the buffers the game releases (buffer cache).
+//   Research: the game's shader creators.
 #pragma once
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 namespace BbEngine::GxResources {
@@ -35,10 +42,14 @@ struct Gone {
     std::uint32_t bytes;
     std::uint64_t ns;
 };
-// The textures destroyed since the last call (the texture cache's collector, once a second).
+// The textures destroyed since the last call (the texture cache's collector; 0.4.6 beta 4: every
+// pass while DestroyedWaiting, which reads no lock).
 void TakeDestroyed(std::vector<Gone>& out);
-// The buffers released since the last call (the buffer cache, once a second; research).
+bool DestroyedWaiting();
+// The buffers released since the last call (the buffer cache; 0.4.6 beta 4: every pass while
+// ReleasedWaiting, which reads no lock).
 void TakeReleased(std::vector<Gone>& out);
+bool ReleasedWaiting();
 
 // A texture created with its data: the T# its GX layer built (the base filled in), its memory, size
 // and creation time (ns), and whether a loading screen was up.
@@ -49,12 +60,17 @@ struct Ahead {
     std::uint64_t ns;
     bool loading;
 };
-// The textures queued to be built ahead since the last call (the texture cache's collector).
-void TakeAhead(std::vector<Ahead>& out);
+// 0.4.6 beta 4: called inside the game's create call, on its thread (or the worker's for the game's
+// main thread), for each texture created with its data (Following only).
+using CreatedHook = void (*)(const Ahead& job);
+void SetCreatedHook(CreatedHook hook);
 // Whether the texture created at `memory` at `ns` is still the live one there.
 bool StillLive(std::uint64_t memory, std::uint64_t ns);
-// Whether any live texture of the game's overlaps [begin, end) (beta 19).
-bool LiveTextureOverlaps(std::uint64_t begin, std::uint64_t end);
+// Whether any live texture of the game's overlaps [begin, end) (beta 19); one starting at `skip_at`
+// (non-zero) is left out (0.4.6 beta 4: the texture being built there).
+bool LiveTextureOverlaps(std::uint64_t begin, std::uint64_t end, std::uint64_t skip_at = 0);
+// 0.4.6 beta 4: the game's live textures and buffers overlapping [begin, end), as [start, end) ranges.
+void LiveResourcesIn(std::uint64_t begin, std::uint64_t end, std::vector<std::pair<std::uint64_t, std::uint64_t>>& out);
 
 // Called on the game's thread when it destroys a texture (Following only).
 using DestroyedHook = void (*)(std::uint64_t memory, std::uint64_t bytes);
@@ -74,8 +90,24 @@ void NoteImage(const Made& made);
 void NoteDestroyedImage(bool had_image, std::uint64_t image_bytes);
 void NoteDeadInVram(std::uint64_t images, std::uint64_t bytes);
 void NoteDeadFreed(std::uint64_t bytes);
-enum class AheadResult { Built, Existed, Gone, TooOld, Invalid };
+// 0.4.6 beta 4: Refreshed, the same texture again over its live image (refreshed from memory, no
+// new image); NoMemory, VRAM refused its image; NoRoom, over the VRAM manager's comfortable line
+// (the manager on); NoRenderer, before the renderer was up. Those three are built at their first draw.
+enum class AheadResult { Built, Existed, Gone, TooOld, Invalid, Refreshed, NoMemory, NoRoom, NoRenderer };
 void NoteAhead(AheadResult result, std::uint64_t bytes);
+// 0.4.6 beta 4: why a texture was left to its draw (Existed): the image there belongs to a texture
+// the game has not destroyed, was used since its texture was destroyed, or the GPU drew it under
+// another live texture.
+enum class Occupant { NotDestroyed, UsedSince, GpuDrawn };
+void NoteOccupant(Occupant why);
+// 0.4.6 beta 4: one GPU-thread pass registering prepared textures (time and images), for the minute
+// line and the hitch reports (BuildPassTotals: running totals).
+void NoteBuildPass(std::uint64_t ns, std::uint64_t images);
+void BuildPassTotals(std::uint64_t& ns, std::uint64_t& images);
+// 0.4.6 beta 4: stale images (written over, unused 10 s) by whether a live game texture is over them,
+// and those freed for having none.
+void NoteStale(std::uint64_t with_texture_bytes, std::uint64_t without_texture_bytes);
+void NoteOrphanFreed(std::uint64_t bytes);
 void NoteAheadHit();
 void NoteAheadMiss();
 void NoteAheadUnused(std::uint64_t bytes);

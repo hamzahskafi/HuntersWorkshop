@@ -30,11 +30,13 @@
 //
 // BB_VRAM_TIGHT_PERCENT=N: tight N% (30 to 90), comfortable N - 10, full N + 10 (at most 95).
 // BB_VRAM_TEST_BUDGET_MB=N: the budget is N MiB (a smaller card on this one).
-// BB_VRAM_MANAGER=0 (0.4.6 beta 2-3, for testing): the manager measures and logs but frees nothing by
+// BB_VRAM_MANAGER=0 (0.4.6 beta 2-4, for testing): the manager measures and logs but frees nothing by
 // its own rules: no garbage, no trims at loading screens, while tight or when full. Only the game's
-// own calls decide (beta 3: whatever VRAM's level): textures built ahead when the game creates them,
-// images freed when it destroys their textures, its data in VRAM freed when it releases its buffers.
-// Nothing idle leaves VRAM otherwise, even when it runs out: only for cards with room.
+// own calls decide (beta 3: whatever VRAM's level): textures built when the game creates them, images
+// freed when it destroys their textures (beta 4: once the GPU is done, each pass; stale images with
+// no game texture over them too), its data in VRAM freed when it releases its buffers (beta 4: once
+// the GPU is done with it). Nothing idle leaves VRAM otherwise, even when it runs out: only for cards
+// with room.
 #pragma once
 
 #include <algorithm>

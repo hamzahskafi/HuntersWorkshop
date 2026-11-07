@@ -28,11 +28,24 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <map>
 #include <mutex>
+#include <string>
+#include <thread>
 #include <unordered_map>
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+#include <pthread.h>
+#endif
 
 namespace BbEngine::GxResources {
 namespace {
@@ -87,6 +100,7 @@ struct Pending {
     Kind kind;
     bool initial = false; // creators: initial data given
     bool tsharp = false;  // the T# builder
+    std::uint64_t entry_ns = 0;
 };
 thread_local std::vector<Pending> t_pending;
 // The T# the builder produced on this thread, for its creator's return.
@@ -97,13 +111,125 @@ std::mutex g_mutex;
 std::unordered_map<std::uint64_t, Entry> g_by_holder;
 // memory -> holder (live textures), ordered: LiveTextureOverlaps asks by range (beta 19).
 std::map<std::uint64_t, std::uint64_t> g_texture_at;
+// memory -> holder (live buffers; 0.4.6 beta 4: LiveResourcesIn, for released buffers' blocks).
+std::map<std::uint64_t, std::uint64_t> g_buffer_at;
 std::vector<Gone> g_gone, g_released;
-std::vector<Ahead> g_ahead;
 std::uint8_t* g_return_stub = nullptr;
 bool g_active = false, g_follow = false;
 std::atomic<DestroyedHook> g_destroyed_hook{nullptr};
+std::atomic<CreatedHook> g_created_hook{nullptr};
 std::atomic<std::uint64_t> g_live_texture_bytes{0};
+std::atomic<bool> g_gone_waiting{false}, g_released_waiting{false};
 constexpr std::size_t kQueueCap = 65536, kAheadCap = 16384;
+
+std::uint64_t NowNs() {
+    return std::uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                             std::chrono::steady_clock::now().time_since_epoch())
+                             .count());
+}
+
+// 0.4.6 beta 4: who creates the game's textures and how long that takes, per thread (by name); the
+// game's main thread (and its render thread) hand the preparing to a worker.
+struct ThreadSlot {
+    char name[32] = {};
+    bool frame_critical = false;
+    std::atomic<std::uint64_t> textures{0}, buffers{0}, creator_ns{0}, prepared{0}, prepare_ns{0};
+};
+constexpr std::size_t kThreadSlots = 32;
+std::array<ThreadSlot, kThreadSlots> g_slots;
+std::size_t g_slot_count = 0; // under g_mutex
+ThreadSlot g_other_slot;      // past kThreadSlots names
+thread_local ThreadSlot* t_slot = nullptr;
+
+std::string CurrentThreadName() {
+    std::string name;
+#ifdef _WIN32
+    PWSTR wide = nullptr;
+    if (SUCCEEDED(GetThreadDescription(GetCurrentThread(), &wide)) && wide) {
+        char text[64] = {};
+        WideCharToMultiByte(CP_UTF8, 0, wide, -1, text, sizeof(text) - 1, nullptr, nullptr);
+        name = text;
+        LocalFree(wide);
+    }
+#else
+    char text[32] = {};
+    if (pthread_getname_np(pthread_self(), text, sizeof(text)) == 0) {
+        name = text;
+    }
+#endif
+    return name.empty() ? std::string("(unnamed)") : name;
+}
+
+// The game's main loop thread ("main", runtime) and its render thread: the frame waits for them.
+bool FrameCritical(const std::string& name) {
+    return name == "main" || name == "GXRenderThread";
+}
+
+ThreadSlot& CurrentSlot() {
+    if (t_slot) {
+        return *t_slot;
+    }
+    const std::string name = CurrentThreadName();
+    std::scoped_lock lock{g_mutex};
+    for (std::size_t i = 0; i < g_slot_count; ++i) {
+        if (name == g_slots[i].name) {
+            return *(t_slot = &g_slots[i]);
+        }
+    }
+    if (g_slot_count == kThreadSlots) {
+        return *(t_slot = &g_other_slot);
+    }
+    ThreadSlot& slot = g_slots[g_slot_count++];
+    std::snprintf(slot.name, sizeof(slot.name), "%s", name.c_str());
+    slot.frame_critical = FrameCritical(name);
+    return *(t_slot = &slot);
+}
+
+// The worker for textures the game's main thread creates (started at the first).
+std::mutex g_worker_mutex;
+std::condition_variable g_worker_cv;
+std::deque<Ahead> g_worker_jobs;
+bool g_worker_started = false;
+
+void WorkerLoop() {
+#ifdef _WIN32
+    SetThreadDescription(GetCurrentThread(), L"bb:GxPrepare");
+#else
+    pthread_setname_np(pthread_self(), "bb:GxPrepare");
+#endif
+    ThreadSlot& slot = CurrentSlot();
+    for (;;) {
+        Ahead job;
+        {
+            std::unique_lock lock{g_worker_mutex};
+            g_worker_cv.wait(lock, [] { return !g_worker_jobs.empty(); });
+            job = g_worker_jobs.front();
+            g_worker_jobs.pop_front();
+        }
+        if (const CreatedHook hook = g_created_hook.load(std::memory_order_acquire)) {
+            const std::uint64_t start = NowNs();
+            hook(job);
+            slot.prepare_ns.fetch_add(NowNs() - start, std::memory_order_relaxed);
+            slot.prepared.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
+}
+
+bool HandToWorker(const Ahead& job) {
+    {
+        std::scoped_lock lock{g_worker_mutex};
+        if (g_worker_jobs.size() >= kAheadCap) {
+            return false;
+        }
+        g_worker_jobs.push_back(job);
+        if (!g_worker_started) {
+            g_worker_started = true;
+            std::thread(WorkerLoop).detach();
+        }
+    }
+    g_worker_cv.notify_one();
+    return true;
+}
 
 struct Counts {
     std::array<std::atomic<std::uint64_t>, kKinds> created{}, created_bytes{}, created_loading{}, destroyed{},
@@ -118,6 +244,12 @@ struct Counts {
     std::atomic<std::uint64_t> ahead_queued{0}, ahead_queue_full{0}, ahead_no_tsharp{0}, ahead_built{0},
         ahead_built_bytes{0}, ahead_existed{0}, ahead_gone{0}, ahead_old{0}, ahead_invalid{0}, ahead_hits{0},
         ahead_misses{0}, ahead_unused{0}, ahead_unused_bytes{0}, ahead_waiting{0};
+    // 0.4.6 beta 4.
+    std::atomic<std::uint64_t> ahead_refreshed{0}, ahead_no_memory{0}, ahead_no_room{0}, ahead_no_renderer{0},
+        occupant_live{0},
+        occupant_used{0}, occupant_gpu{0}, build_passes{0}, build_ns{0}, build_images{0}, build_max_ns{0},
+        stale_live_bytes{0}, stale_orphan_bytes{0}, orphans_freed{0}, orphans_freed_bytes{0};
+    std::atomic<std::uint64_t> build_ns_total{0}, build_images_total{0};
     std::atomic<std::uint64_t> dead_freed{0}, dead_freed_bytes{0};
     // Research (beta 16).
     std::atomic<std::uint64_t> released_checked{0}, released_resident{0}, released_resident_bytes{0};
@@ -125,12 +257,6 @@ struct Counts {
     std::atomic<std::uint64_t> shaders_loading{0};
 };
 Counts g_counts;
-
-std::uint64_t NowNs() {
-    return std::uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(
-                             std::chrono::steady_clock::now().time_since_epoch())
-                             .count());
-}
 
 template <typename T> T Read(std::uint64_t address) {
     T value{};
@@ -155,6 +281,8 @@ Entry Register(std::uint64_t holder, Kind kind) {
         if (e.memory) {
             g_texture_at[e.memory] = holder;
         }
+    } else if (e.memory) {
+        g_buffer_at[e.memory] = holder;
     }
     g_by_holder[holder] = e;
     return e;
@@ -183,6 +311,9 @@ void Unregister(std::uint64_t holder, bool texture) {
         if (const auto at = g_texture_at.find(e.memory); at != g_texture_at.end() && at->second == holder) {
             g_texture_at.erase(at);
         }
+        if (const auto at = g_buffer_at.find(e.memory); at != g_buffer_at.end() && at->second == holder) {
+            g_buffer_at.erase(at);
+        }
         if (!e.memory) {
             return;
         }
@@ -194,12 +325,14 @@ void Unregister(std::uint64_t holder, bool texture) {
             // For the buffer cache (research); bounded should it not run.
             if (e.kind == kBuffer && g_released.size() < kQueueCap) {
                 g_released.push_back({e.memory, e.bytes, NowNs()});
+                g_released_waiting.store(true, std::memory_order_release);
             }
             return;
         }
         // For the texture cache's collector; bounded should it not run (no renderer yet).
         if (g_gone.size() < kQueueCap) {
             g_gone.push_back({e.memory, e.bytes, NowNs()});
+            g_gone_waiting.store(true, std::memory_order_release);
         } else {
             g_counts.gone_dropped.fetch_add(1, std::memory_order_relaxed);
         }
@@ -216,8 +349,10 @@ void Unregister(std::uint64_t holder, bool texture) {
     }
 }
 
-// A 2D texture created with its data and its T#: queued for the texture cache to build ahead.
-void QueueAhead(const Entry& e) {
+// A 2D texture created with its data and its T#: its image prepared now, on this thread (0.4.6 beta
+// 4; the game's main thread hands it to the worker), for the texture cache to register at its next
+// submission.
+void HandCreated(const Entry& e, ThreadSlot& slot) {
     if (!t_tsharp_valid) {
         g_counts.ahead_no_tsharp.fetch_add(1, std::memory_order_relaxed);
         return;
@@ -231,18 +366,27 @@ void QueueAhead(const Entry& e) {
     const std::uint64_t base = e.memory >> 8;
     job.tsharp[0] = static_cast<std::uint32_t>(base);
     job.tsharp[1] = (job.tsharp[1] & ~0x3fu) | static_cast<std::uint32_t>((base >> 32) & 0x3f);
-    std::scoped_lock lock{g_mutex};
-    if (g_ahead.size() >= kAheadCap) {
-        g_counts.ahead_queue_full.fetch_add(1, std::memory_order_relaxed); // built at its first draw
+    g_counts.ahead_queued.fetch_add(1, std::memory_order_relaxed);
+    const CreatedHook hook = g_created_hook.load(std::memory_order_acquire);
+    if (!hook) {
+        g_counts.ahead_no_renderer.fetch_add(1, std::memory_order_relaxed); // built at its first draw
         return;
     }
-    g_ahead.push_back(job);
-    g_counts.ahead_queued.fetch_add(1, std::memory_order_relaxed);
+    if (slot.frame_critical) {
+        if (!HandToWorker(job)) {
+            g_counts.ahead_queue_full.fetch_add(1, std::memory_order_relaxed); // built at its first draw
+        }
+        return;
+    }
+    const std::uint64_t start = NowNs();
+    hook(job);
+    slot.prepare_ns.fetch_add(NowNs() - start, std::memory_order_relaxed);
+    slot.prepared.fetch_add(1, std::memory_order_relaxed);
 }
 
 // The creators' entry: keep the return address and the out pointer (rsi), return through the stub.
 template <Kind kind> GUEST_ABI std::int64_t CreatorEntry(std::uint64_t, const std::uint64_t* saved) {
-    t_pending.push_back({saved[6], saved[4], kind, saved[2] != 0, false});
+    t_pending.push_back({saved[6], saved[4], kind, saved[2] != 0, false, NowNs()});
     const_cast<std::uint64_t*>(saved)[6] = reinterpret_cast<std::uint64_t>(g_return_stub);
     return 0;
 }
@@ -250,7 +394,7 @@ template <Kind kind> GUEST_ABI std::int64_t CreatorEntry(std::uint64_t, const st
 // The T# builder: inside the 2D creator only (rsi = the T# out), read at its return.
 GUEST_ABI std::int64_t TsharpEntry(std::uint64_t, const std::uint64_t* saved) {
     if (!t_pending.empty() && !t_pending.back().tsharp && t_pending.back().kind == kTexture) {
-        t_pending.push_back({saved[6], saved[4], kTexture, false, true});
+        t_pending.push_back({saved[6], saved[4], kTexture, false, true, 0});
         const_cast<std::uint64_t*>(saved)[6] = reinterpret_cast<std::uint64_t>(g_return_stub);
     }
     return 0;
@@ -280,13 +424,20 @@ GUEST_ABI std::uint64_t CreatorReturn(std::uint64_t result) {
         }
         return p.ret;
     }
+    ThreadSlot& slot = CurrentSlot();
+    if (p.kind == kBuffer) {
+        slot.buffers.fetch_add(1, std::memory_order_relaxed);
+    } else {
+        slot.textures.fetch_add(1, std::memory_order_relaxed);
+        slot.creator_ns.fetch_add(NowNs() - p.entry_ns, std::memory_order_relaxed);
+    }
     if (static_cast<std::uint32_t>(result) != 0) {
         g_counts.failed.fetch_add(1, std::memory_order_relaxed);
     } else if (p.out) {
         if (const auto holder = Read<std::uint64_t>(p.out)) {
             const Entry e = Register(holder, p.kind);
             if (g_follow && p.kind == kTexture && p.initial) {
-                QueueAhead(e);
+                HandCreated(e, slot);
             }
         }
     }
@@ -353,10 +504,10 @@ bool Install(std::uint8_t* image, std::size_t size) {
     }
     Commit(hooks);
     g_active = true;
-    host_log(g_follow ? "GX resources: the texture cache follows the game's textures: built ahead when the game "
-                        "creates them with their data (during loading screens, below the VRAM manager's "
-                        "comfortable line), freed when it destroys them (BB_GX_FOLLOW=0: counted only; "
-                        "BB_GX_RESOURCES=0: off)"
+    host_log(g_follow ? "GX resources: the caches follow the game's resources: a texture created with its data "
+                        "is prepared in the game's create call and registered at the next submission, freed "
+                        "when the game destroys it; the game's data in VRAM leaves with the buffers it "
+                        "releases (BB_GX_FOLLOW=0: counted only; BB_GX_RESOURCES=0: off)"
                       : "GX resources: listening to the game's texture and buffer creators and destructors "
                         "(counted only, BB_GX_FOLLOW=0; BB_GX_RESOURCES=0: off)");
     return true;
@@ -374,18 +525,26 @@ void TakeDestroyed(std::vector<Gone>& out) {
     std::scoped_lock lock{g_mutex};
     out.swap(g_gone);
     g_gone.clear();
+    g_gone_waiting.store(false, std::memory_order_relaxed);
+}
+
+bool DestroyedWaiting() {
+    return g_gone_waiting.load(std::memory_order_acquire);
 }
 
 void TakeReleased(std::vector<Gone>& out) {
     std::scoped_lock lock{g_mutex};
     out.swap(g_released);
     g_released.clear();
+    g_released_waiting.store(false, std::memory_order_relaxed);
 }
 
-void TakeAhead(std::vector<Ahead>& out) {
-    std::scoped_lock lock{g_mutex};
-    out.swap(g_ahead);
-    g_ahead.clear();
+bool ReleasedWaiting() {
+    return g_released_waiting.load(std::memory_order_acquire);
+}
+
+void SetCreatedHook(CreatedHook hook) {
+    g_created_hook.store(hook, std::memory_order_release);
 }
 
 bool StillLive(std::uint64_t memory, std::uint64_t ns) {
@@ -398,7 +557,7 @@ bool StillLive(std::uint64_t memory, std::uint64_t ns) {
     return it != g_by_holder.end() && it->second.ns == ns;
 }
 
-bool LiveTextureOverlaps(std::uint64_t begin, std::uint64_t end) {
+bool LiveTextureOverlaps(std::uint64_t begin, std::uint64_t end, std::uint64_t skip_at) {
     if (!g_active || begin >= end) {
         return false;
     }
@@ -407,11 +566,40 @@ bool LiveTextureOverlaps(std::uint64_t begin, std::uint64_t end) {
     if (it != g_texture_at.begin()) {
         const auto before = std::prev(it);
         if (const auto e = g_by_holder.find(before->second);
-            e != g_by_holder.end() && before->first + std::max<std::uint64_t>(e->second.bytes, 1) > begin) {
+            before->first != skip_at && e != g_by_holder.end() &&
+            before->first + std::max<std::uint64_t>(e->second.bytes, 1) > begin) {
             return true;
         }
     }
-    return it != g_texture_at.end() && it->first < end;
+    for (; it != g_texture_at.end() && it->first < end; ++it) {
+        if (it->first != skip_at) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void LiveResourcesIn(std::uint64_t begin, std::uint64_t end,
+                     std::vector<std::pair<std::uint64_t, std::uint64_t>>& out) {
+    out.clear();
+    if (!g_active || begin >= end) {
+        return;
+    }
+    std::scoped_lock lock{g_mutex};
+    for (const auto* index : {&g_texture_at, &g_buffer_at}) {
+        auto it = index->upper_bound(begin);
+        if (it != index->begin()) {
+            --it; // the one starting before `begin` may reach into it
+        }
+        for (; it != index->end() && it->first < end; ++it) {
+            if (const auto e = g_by_holder.find(it->second); e != g_by_holder.end()) {
+                const std::uint64_t stop = it->first + std::max<std::uint64_t>(e->second.bytes, 1);
+                if (stop > begin) {
+                    out.emplace_back(it->first, stop);
+                }
+            }
+        }
+    }
 }
 
 void SetDestroyedHook(DestroyedHook hook) {
@@ -490,7 +678,52 @@ void NoteAhead(AheadResult result, std::uint64_t bytes) {
     case AheadResult::Invalid:
         g_counts.ahead_invalid.fetch_add(1, std::memory_order_relaxed);
         break;
+    case AheadResult::Refreshed:
+        g_counts.ahead_refreshed.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case AheadResult::NoMemory:
+        g_counts.ahead_no_memory.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case AheadResult::NoRoom:
+        g_counts.ahead_no_room.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case AheadResult::NoRenderer:
+        g_counts.ahead_no_renderer.fetch_add(1, std::memory_order_relaxed);
+        break;
     }
+}
+
+void NoteOccupant(Occupant why) {
+    (why == Occupant::NotDestroyed ? g_counts.occupant_live
+     : why == Occupant::UsedSince  ? g_counts.occupant_used
+                                   : g_counts.occupant_gpu)
+        .fetch_add(1, std::memory_order_relaxed);
+}
+
+void NoteBuildPass(std::uint64_t ns, std::uint64_t images) {
+    g_counts.build_passes.fetch_add(1, std::memory_order_relaxed);
+    g_counts.build_ns.fetch_add(ns, std::memory_order_relaxed);
+    g_counts.build_images.fetch_add(images, std::memory_order_relaxed);
+    g_counts.build_ns_total.fetch_add(ns, std::memory_order_relaxed);
+    g_counts.build_images_total.fetch_add(images, std::memory_order_relaxed);
+    std::uint64_t max = g_counts.build_max_ns.load(std::memory_order_relaxed);
+    while (ns > max && !g_counts.build_max_ns.compare_exchange_weak(max, ns, std::memory_order_relaxed)) {
+    }
+}
+
+void BuildPassTotals(std::uint64_t& ns, std::uint64_t& images) {
+    ns = g_counts.build_ns_total.load(std::memory_order_relaxed);
+    images = g_counts.build_images_total.load(std::memory_order_relaxed);
+}
+
+void NoteStale(std::uint64_t with_texture_bytes, std::uint64_t without_texture_bytes) {
+    g_counts.stale_live_bytes.store(with_texture_bytes, std::memory_order_relaxed);
+    g_counts.stale_orphan_bytes.store(without_texture_bytes, std::memory_order_relaxed);
+}
+
+void NoteOrphanFreed(std::uint64_t bytes) {
+    g_counts.orphans_freed.fetch_add(1, std::memory_order_relaxed);
+    g_counts.orphans_freed_bytes.fetch_add(bytes, std::memory_order_relaxed);
 }
 
 void NoteAheadHit() {
@@ -567,19 +800,73 @@ void LogMinute() {
              Mib(g_counts.dead_bytes.load(std::memory_order_relaxed)),
              g_counts.gone_dropped.load(std::memory_order_relaxed) ? " (some destroyed textures not checked)" : "");
     if (g_follow) {
-        host_log("GX follow this minute: %llu textures queued to build ahead (%llu without a T#, %llu over the "
-                 "queue), %llu built (%.0f MiB), %llu left to their draw (an image there), %llu destroyed first, %llu too old, %llu not "
-                 "buildable, %llu waiting; drawn %llu, a draw made another image %llu times, freed unused %llu "
-                 "(%.0f MiB); images freed when the game destroyed their texture %llu (%.0f MiB)",
+        host_log("GX follow this minute: %llu textures created with their data (%llu without a T#, %llu with no "
+                 "renderer yet, %llu over the worker's queue), %llu built (%.0f MiB), %llu refreshed in place (the "
+                 "same texture again), %llu left to their draw (an image there: %llu of a texture not destroyed, "
+                 "%llu used since its texture was destroyed, %llu drawn by the GPU under a live texture), %llu "
+                 "destroyed first, %llu too old, %llu not buildable, %llu refused by VRAM, %llu over the VRAM "
+                 "manager's comfortable line, %llu waiting; drawn %llu, "
+                 "a draw made another image %llu times, freed unused %llu (%.0f MiB); images freed when the game "
+                 "destroyed their texture %llu (%.0f MiB)",
                  (unsigned long long)take(g_counts.ahead_queued), (unsigned long long)take(g_counts.ahead_no_tsharp),
+                 (unsigned long long)take(g_counts.ahead_no_renderer),
                  (unsigned long long)take(g_counts.ahead_queue_full), (unsigned long long)take(g_counts.ahead_built),
-                 Mib(take(g_counts.ahead_built_bytes)), (unsigned long long)take(g_counts.ahead_existed),
+                 Mib(take(g_counts.ahead_built_bytes)), (unsigned long long)take(g_counts.ahead_refreshed),
+                 (unsigned long long)take(g_counts.ahead_existed), (unsigned long long)take(g_counts.occupant_live),
+                 (unsigned long long)take(g_counts.occupant_used), (unsigned long long)take(g_counts.occupant_gpu),
                  (unsigned long long)take(g_counts.ahead_gone), (unsigned long long)take(g_counts.ahead_old),
-                 (unsigned long long)take(g_counts.ahead_invalid),
+                 (unsigned long long)take(g_counts.ahead_invalid), (unsigned long long)take(g_counts.ahead_no_memory),
+                 (unsigned long long)take(g_counts.ahead_no_room),
                  (unsigned long long)g_counts.ahead_waiting.load(std::memory_order_relaxed),
                  (unsigned long long)take(g_counts.ahead_hits), (unsigned long long)take(g_counts.ahead_misses),
                  (unsigned long long)take(g_counts.ahead_unused), Mib(take(g_counts.ahead_unused_bytes)),
                  (unsigned long long)take(g_counts.dead_freed), Mib(take(g_counts.dead_freed_bytes)));
+        const std::uint64_t passes = take(g_counts.build_passes);
+        host_log("GX follow, where the work ran this minute: GPU thread %llu passes registering %llu prepared "
+                 "textures (%.1f ms, longest pass %.2f ms); stale images (written over, unused 10 s) %.0f MiB under "
+                 "a live game texture, %.0f MiB under none, %llu of those freed (%.0f MiB)",
+                 (unsigned long long)passes, (unsigned long long)take(g_counts.build_images),
+                 double(take(g_counts.build_ns)) / 1e6, double(take(g_counts.build_max_ns)) / 1e6,
+                 Mib(g_counts.stale_live_bytes.load(std::memory_order_relaxed)),
+                 Mib(g_counts.stale_orphan_bytes.load(std::memory_order_relaxed)),
+                 (unsigned long long)take(g_counts.orphans_freed), Mib(take(g_counts.orphans_freed_bytes)));
+        // The game's creating threads, busiest first.
+        struct Row {
+            const ThreadSlot* slot;
+            std::uint64_t textures, buffers, creator_ns, prepared, prepare_ns;
+        };
+        std::vector<Row> rows;
+        std::size_t count = 0;
+        {
+            std::scoped_lock lock{g_mutex};
+            count = g_slot_count;
+        }
+        for (std::size_t i = 0; i <= count; ++i) {
+            ThreadSlot& slot = i < count ? g_slots[i] : g_other_slot;
+            Row row{&slot, take(slot.textures), take(slot.buffers), take(slot.creator_ns), take(slot.prepared),
+                    take(slot.prepare_ns)};
+            if (row.textures + row.buffers + row.prepared != 0) {
+                rows.push_back(row);
+            }
+        }
+        std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) {
+            return a.textures + a.prepared > b.textures + b.prepared;
+        });
+        std::string line;
+        for (std::size_t i = 0; i < rows.size() && i < 8; ++i) {
+            const Row& r = rows[i];
+            char part[256];
+            std::snprintf(part, sizeof(part), "%s%s: %llu textures (%.1f ms in the game's creator), %llu buffers, "
+                          "%llu prepared (%.1f ms)%s",
+                          line.empty() ? "" : "; ", r.slot == &g_other_slot ? "(others)" : r.slot->name,
+                          (unsigned long long)r.textures, double(r.creator_ns) / 1e6, (unsigned long long)r.buffers,
+                          (unsigned long long)r.prepared, double(r.prepare_ns) / 1e6,
+                          r.slot->frame_critical ? ", handed to bb:GxPrepare" : "");
+            line += part;
+        }
+        if (!line.empty()) {
+            host_log("GX creates this minute by thread: %s", line.c_str());
+        }
     }
     host_log("GX research this minute: buffers released with the game's data in VRAM at their memory %llu of %llu "
              "(%.0f MiB); shaders created: vertex %llu + %llu, pixel %llu, compute %llu (%llu during loading screens)",

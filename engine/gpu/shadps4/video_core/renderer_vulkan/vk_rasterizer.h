@@ -133,6 +133,11 @@ public:
     void ReleaseDestroyedTexture(VAddr addr, u64 size) {
         texture_cache.ReleaseDestroyed(addr, size);
     }
+    /// 0.4.6 beta 4: a texture the game created with its data (engine/gx_resources.h, the game's
+    /// thread): its image made now (TextureCache::PrepareCreated).
+    void PrepareCreatedTexture(const BbEngine::GxResources::Ahead& job) {
+        texture_cache.PrepareCreated(job);
+    }
     /// bbport (stage A, BB_CONSTRAM_PIPE, default on): before the command processor writes guest
     /// memory with the CPU (a constant RAM dump), waits until the recording thread has run the
     /// queued packets that read those bytes (their buffer bindings, DMA), not all of them.

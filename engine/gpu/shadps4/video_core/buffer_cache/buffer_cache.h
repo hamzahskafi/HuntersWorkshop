@@ -243,6 +243,9 @@ private:
     };
     /// bbport: the housekeeping EnsureResident did before every binding (Process*), once a packet.
     void Maintain();
+    /// 0.4.6 beta 4: the buffers the game released, taken at every Maintain (not once a second);
+    /// with the VRAM manager off their data leaves VRAM as soon as the GPU is done with it.
+    void FollowGxReleases();
     u64 packet_epoch = 1, maintained_epoch = 0;
     /// bbport: answers of EnsureResident ("all resident") and IsInPlace for block ranges, valid
     /// while resident_ranges and in_place_blocks keep their generation.
@@ -430,7 +433,17 @@ private:
     /// Beta 16 (research): the buffers the game released (engine/gx_resources.h).
     std::vector<BbEngine::GxResources::Gone> gx_released;
     /// Beta 18: released buffers waiting for VRAM to be tight (ReleaseGxBuffers), oldest first.
-    std::deque<BbEngine::GxResources::Gone> released_pending;
+    /// 0.4.6 beta 4: with the scheduler's tick when it was taken (FollowGxReleases): a use of its
+    /// memory recorded after that tick is the memory in use again.
+    struct PendingRelease {
+        BbEngine::GxResources::Gone gone;
+        u64 tick;
+    };
+    std::deque<PendingRelease> released_pending, released_waiting;
+    std::vector<std::pair<u64, u64>> released_live;
+    /// 0.4.6 beta 4: the scheduler's tick at the last use of each group (NoteUse), for freeing the
+    /// game's released data as soon as the GPU is done with it.
+    std::vector<u64> group_use_tick;
     struct ResidencyChunk {
         u64 size;
         u64 used;         ///< bytes handed out and not returned

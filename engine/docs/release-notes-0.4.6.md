@@ -51,6 +51,27 @@ The engine follows the game's own textures (tested as 0.4.5 betas 16 to 19):
   manager's own freeing off and leaves only the game's own calls to decide, whatever VRAM's level
   (beta 3): textures built ahead when the game creates them, freed when it destroys them, and its
   data freed when it releases its buffers.
+- **Following the game as it goes (beta 4), no time budget:**
+  - A texture the game creates with its data gets its image (and the memory for it) inside the
+    game's own create call, on the game's loading thread, as the PS4 pays for it there; the game's
+    main thread hands that to one helper thread instead, so its frames don't wait. At the next
+    submission the GPU thread only registers what was made, protects the memory of textures side
+    by side in one go, and records the upload: no hashing of the new texture's data (it is taken
+    only if the GPU later draws into it). Beta 3's time slices (6 ms in 16 at loading screens, 2 ms
+    in play) are gone.
+  - What the game destroys is freed as soon as the GPU is done with it (checked at every
+    submission, not once a second), including smaller images inside a destroyed texture, which
+    nothing freed before (beta 3's 20-minute test ended with about 2 GB of such stale images).
+    A stale image with no game texture over it at all is freed too.
+  - Where the game made the same texture again over its live image, that image is refreshed
+    instead of the texture waiting for its first draw.
+  - With `BB_VRAM_MANAGER=0`, the game's data in released buffers leaves VRAM as soon as the GPU
+    has done the last work with it (no 2-second wait, no pacing), unless the memory is in use
+    again.
+  - The log says which game threads create textures and how long that takes, why a texture was
+    left to its first draw, where the GPU thread spent its time registering, how much of VRAM is
+    stale with and without a game texture over it, and, in hitch reports, what the texture cache
+    did between the last frame and the late one.
 - **Following, tightened (beta 3):** the game's destroys are taken before textures are built ahead,
   so a texture the game makes where it just destroyed one replaces it during the same loading
   screen (before, it waited for its first draw); an image of a destroyed texture with nothing drawn

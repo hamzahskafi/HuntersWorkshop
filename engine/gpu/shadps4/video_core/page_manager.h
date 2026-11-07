@@ -5,6 +5,8 @@
 
 #include <cstddef>
 #include <memory>
+#include <span>
+#include <utility>
 #include "common/alignment.h"
 #include "common/types.h"
 #include "video_core/buffer_cache//region_definitions.h"
@@ -48,6 +50,10 @@ public:
     /// Updates watches in the pages touching the specified region.
     template <bool track>
     void UpdatePageWatchers(VAddr addr, u64 size) const;
+
+    /// 0.4.6 beta 4: a write watcher more on the pages of each range (sorted by address), one
+    /// protection change per run of pages that become watched.
+    void WatchRanges(std::span<const std::pair<VAddr, u64>> ranges) const;
 
     /// Updates watches in the pages touching the specified region using a mask.
     template <bool track, bool is_read = false>
