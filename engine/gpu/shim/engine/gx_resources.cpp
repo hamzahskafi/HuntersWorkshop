@@ -403,7 +403,8 @@ struct Counts {
         overlap_base{}, overlap_part{};
     std::atomic<int> overlap_logged{0};
     std::atomic<std::uint64_t> creation_writes{0}, creation_write_bytes{0}, creation_surfaces_kept{0},
-        dead_taken_destroyed{0},
+        dead_taken_destroyed{0}, owner_handed{0}, owner_handed_bytes{0}, owner_retired{0},
+        owner_retired_bytes{0}, owner_retired_pooled{0},
         dead_taken_reused{0}, dead_taken_hand_over{0}, dead_taken_refuse{0}, dead_taken_bytes{0},
         copies_memory{0}, copies_memory_owned_destination{0}, copies_memory_both_owned{0};
     std::array<std::atomic<std::uint64_t>, std::size_t(OwnerGuess::kCount)> guesses{}, guess_bytes{};
@@ -508,12 +509,22 @@ void Insert(std::uint64_t key, const Entry& e) {
         if (g_created.size() < kQueueCap) {
             Gone made{e.memory, e.bytes, e.ns};
             made.with_data = e.initial;
+            made.owner = std::uint8_t(OwnerOf(e));
             if (kind == kYebis && !e.initial) {
                 made.width = e.width;
                 made.height = e.height;
                 made.levels = e.levels;
                 made.layers = e.layers;
                 made.hand_over = e.width != 0 && e.height != 0;
+            } else if (kind == kTexture && !e.initial && e.has_tsharp) {
+                // 0.4.6 beta 11: its shape as the texture cache reads a T# (ImageInfo): width and height
+                // (word 2), levels (word 3; one for MSAA), layers (word 4's depth; six a cube, one 3D).
+                const std::uint32_t type = (e.tsharp[3] >> 28) & 0xf;
+                made.width = (e.tsharp[2] & 0x3fff) + 1;
+                made.height = ((e.tsharp[2] >> 14) & 0x3fff) + 1;
+                made.levels = std::uint16_t(type == 14 || type == 15 ? 1 : ((e.tsharp[3] >> 16) & 0xf) + 1);
+                made.layers = std::uint16_t(type == 10 ? 1 : ((e.tsharp[4] & 0x1fff) + 1) * (type == 11 ? 6 : 1));
+                made.hand_over = true;
             }
             g_created.push_back(made);
             g_created_waiting.store(true, std::memory_order_release);
@@ -1487,6 +1498,19 @@ void NoteDeadImageTaken(bool destroyed, bool hand_over, bool refuse, std::uint64
     g_counts.dead_taken_bytes.fetch_add(bytes, std::memory_order_relaxed);
 }
 
+void NoteOwnerHandOver(std::uint64_t images, std::uint64_t bytes) {
+    g_counts.owner_handed.fetch_add(images, std::memory_order_relaxed);
+    g_counts.owner_handed_bytes.fetch_add(bytes, std::memory_order_relaxed);
+}
+
+void NoteOwnerRetired(std::uint64_t bytes, bool pooled) {
+    g_counts.owner_retired.fetch_add(1, std::memory_order_relaxed);
+    g_counts.owner_retired_bytes.fetch_add(bytes, std::memory_order_relaxed);
+    if (pooled) {
+        g_counts.owner_retired_pooled.fetch_add(1, std::memory_order_relaxed);
+    }
+}
+
 void NoteOwnerGuess(OwnerGuess guess, std::uint64_t bytes) {
     g_counts.guesses[std::size_t(guess)].fetch_add(1, std::memory_order_relaxed);
     g_counts.guess_bytes[std::size_t(guess)].fetch_add(bytes, std::memory_order_relaxed);
@@ -2121,6 +2145,12 @@ void LogMinute() {
             }
         }
     }
+    host_log("GX memory, the owner rule this minute (beta 11): images handed to a texture other than YEBIS's made "
+             "over them without data, of their shape, %llu (%.0f MiB); retired that the old guesses kept %llu (%.0f "
+             "MiB), of them taken by a new surface as its Vulkan image %llu",
+             (unsigned long long)take(g_counts.owner_handed), Mib(take(g_counts.owner_handed_bytes)),
+             (unsigned long long)take(g_counts.owner_retired), Mib(take(g_counts.owner_retired_bytes)),
+             (unsigned long long)take(g_counts.owner_retired_pooled));
     host_log("GX memory, owners this minute (beta 10): new textures over a live texture's memory, at its base: %s; "
              "partly: %s; images marked written by a creation with data over them %llu (%.0f MiB), live surfaces "
              "reaching past one kept %llu; dead images a draw took again: %llu after their texture's destroy, %llu "

@@ -231,6 +231,9 @@ public:
     /// texture's destroy and again for the resource made over it).
     u64 owner_noted_tick = 0;
     u64 guess_noted_tick = 0;
+    /// 0.4.6 beta 11: the scheduler's tick when it was found dead (its texture destroyed, or something
+    /// newer made over it): a use at or after it is a use since (DeadImageState, the owner rule).
+    u64 dead_sched_tick = 0;
 
     /// 0.4.6 beta 8 (part 4; the targets' default since beta 9, textures made with their data's since
     /// beta 10): its pages were left unwatched (the game's calls tell its writes); its track range is

@@ -65,6 +65,9 @@ struct Gone {
     // 0.4.6 beta 10: a texture made with its data (created events): its create call copied that data
     // into the memory, a write the images there are told of (whether their pages are watched or not).
     bool with_data = false;
+    // 0.4.6 beta 11: the resource's kind (Owner, created events), and for a GX 2D texture made without
+    // its data the shape from its T# (`hand_over` then too: BB_IMAGE_OWNERS, the texture cache).
+    std::uint8_t owner = 0;
 };
 // The textures destroyed since the last call (the texture cache's collector; 0.4.6 beta 4: every
 // pass while DestroyedWaiting, which reads no lock).
@@ -203,6 +206,11 @@ struct LiveHere {
 };
 LiveHere LiveAt(std::uint64_t memory);
 void NoteDeadImageTaken(bool destroyed, bool hand_over, bool refuse, std::uint64_t bytes);
+// 0.4.6 beta 11 (the owner rule): images handed to a texture of the game's other than YEBIS's made over
+// their memory without data, with their shape; images retired that the old guesses kept, and of them
+// those a new surface took as its Vulkan image.
+void NoteOwnerHandOver(std::uint64_t images, std::uint64_t bytes);
+void NoteOwnerRetired(std::uint64_t bytes, bool pooled);
 // Where today's rules guess and the owner rule would retire instead: a dead image kept because another
 // live texture overlaps it, or because it was used just before its memory's new resource was made; and
 // a stale image the collector freed that had an owner (the owner rule retires it when its texture goes).

@@ -4161,6 +4161,10 @@ bool Rasterizer::IsComputeImageCopy(const Pipeline* pipeline) {
         source.info.array_mode != dst.info.array_mode) {
         return reject(7, &source, &dst);
     }
+    // 0.4.6 beta 11: both images used by this submission, as FindImage marks the ones it finds (the
+    // collector's GPU check and the owner rule's "used since" read it).
+    texture_cache.MarkFound(src_id);
+    texture_cache.MarkFound(dst_id);
     const u64 tail = size - image_size;
     auto outcome = made ? &ImageCopyStats::made : &ImageCopyStats::exact;
     if (tail && !made) {

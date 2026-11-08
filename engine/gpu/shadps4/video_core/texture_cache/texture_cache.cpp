@@ -259,6 +259,37 @@ Unwatch UnwatchKinds() {
     }();
     return kinds;
 }
+// 0.4.6 beta 11 (BB_IMAGE_OWNERS=0: off; on by default, off in safe mode): the owner rule. An image of a
+// texture of the game's (one starting where the image does, OwnedImage) is retired when that texture is
+// destroyed or something newer is made over it, unless a draw used it since (the GPU's timeline is behind
+// the game's: a draw recorded after the destroy reads it, as the console's memory still holds it), not
+// kept by the old guesses (KeptByGuess); and any texture made without its data over an image of its
+// shape takes that image (beta 7's YEBIS hand-over, for every texture).
+bool ImageOwners() {
+    static const bool on = [] {
+        const char* env = std::getenv("BB_IMAGE_OWNERS");
+        return !(env && env[0] == '0');
+    }();
+    return on;
+}
+bool OwnedImage(const Image& image) {
+    using BbEngine::GxResources::Owner;
+    const Owner owner = Owner(image.gx_owner);
+    return image.gx_whole && owner != Owner::None && owner != Owner::Buffer && owner < Owner::kCount;
+}
+// The old guesses for a dead image the GPU drew: of memory something newer was made in, used from the
+// collector pass before (perhaps drawn for it, beta 5); otherwise another live texture overlapping it
+// (its contents may be that texture's, beta 19).
+bool KeptByGuess(const Image& image, VAddr skip_at) {
+    const bool drawn = True(image.flags & ImageFlagBits::GpuModified) || image.binding.is_target;
+    if (!drawn) {
+        return false;
+    }
+    return image.dead_by_reuse ? image.tick_accessed_last >= image.reuse_tick
+                               : BbEngine::GxResources::LiveTextureOverlaps(
+                                     image.info.guest_address, image.info.guest_address + image.info.guest_size,
+                                     skip_at);
+}
 // 0.4.6 beta 9 (BB_TAKE_EARLIER_WRITES=0: off; on by default): a surface whose memory the GPU wrote as a
 // buffer before the game made it takes those writes (another owner's) at its first use, as before.
 bool TakeEarlierWrites() {
@@ -2132,6 +2163,7 @@ void TextureCache::ProcessGxDestroyed() {
             if (image.info.guest_address >= gone.memory &&
                 image.info.guest_address + image.info.guest_size <= gone_end) {
                 image.gx_dead_tick = gc_tick;
+                image.dead_sched_tick = scheduler.CurrentTick();
                 // 0.4.6 beta 7: YEBIS destroys and re-creates its targets together (300-750 at a
                 // load, beta 6's log): a few seconds for the new one to take this image.
                 image.dead_grace_ns = gone.grace ? NowSteadyNs() + 3'000'000'000ull : 0;
@@ -2181,6 +2213,7 @@ void TextureCache::ProcessGxCreated() {
         }
         const VAddr made_end = made.memory + std::max<u64>(made.bytes, 1);
         u64 bytes = 0, images = 0, kept = 0, kept_bytes = 0, written = 0, written_bytes = 0, surfaces_kept = 0;
+        u64 handed = 0, handed_bytes = 0;
         // 0.4.6 beta 9: the GPU's newest write to its memory when the game made it (StartSurface tells
         // the writes since from those of the memory's previous owner).
         if (EmptySurfaces()) {
@@ -2221,11 +2254,19 @@ void TextureCache::ProcessGxCreated() {
             // 0.4.6 beta 7: YEBIS re-created a target over the same memory, made without data: the image
             // of the target it replaced, of the same shape, is this one's (bbhost keeps them too). It is
             // drawn into again; nothing of the old target's is read.
-            if (made.hand_over && True(image.flags & ImageFlagBits::Registered) &&
+            // 0.4.6 beta 11 (the owner rule): any texture of the game's made without data takes the image
+            // of its shape there whose texture is gone (or that was no texture's), its levels and layers
+            // those of the new texture or fewer (an image of a target is one level of it).
+            const bool yebis = made.owner == u8(BbEngine::GxResources::Owner::Yebis);
+            const bool owners = ImageOwners();
+            if (made.hand_over && (yebis || owners) && True(image.flags & ImageFlagBits::Registered) &&
                 image.registered_ns < made.ns && image.info.guest_address == made.memory &&
                 image.info.size.width == made.width && image.info.size.height == made.height &&
-                (made.levels == 0 || image.info.resources.levels == made.levels) &&
-                (made.layers == 0 || image.info.resources.layers == made.layers)) {
+                (made.levels == 0 || (yebis ? image.info.resources.levels == made.levels
+                                            : image.info.resources.levels <= made.levels)) &&
+                (made.layers == 0 || (yebis ? image.info.resources.layers == made.layers
+                                            : image.info.resources.layers <= made.layers)) &&
+                (!owners || image.gx_dead_tick != 0 || !OwnedImage(image))) {
                 image.gx_dead_tick = 0;
                 image.dead_by_reuse = false;
                 image.dead_grace_ns = 0;
@@ -2237,8 +2278,17 @@ void TextureCache::ProcessGxCreated() {
                         image.surface_ns = surface.ns;
                     }
                 }
-                ++kept;
-                kept_bytes += image.backing ? image.GetHostImageSize() : 0;
+                if (owners) {
+                    image.gx_owner = made.owner;
+                    image.gx_whole = true;
+                }
+                if (yebis) {
+                    ++kept;
+                    kept_bytes += image.backing ? image.GetHostImageSize() : 0;
+                } else {
+                    ++handed;
+                    handed_bytes += image.backing ? image.GetHostImageSize() : 0;
+                }
                 return;
             }
             // 0.4.6 beta 6: one reaching outside it too when its texture was destroyed (beta 5 kept a
@@ -2252,6 +2302,7 @@ void TextureCache::ProcessGxCreated() {
             image.dead_by_reuse = true;
             image.reuse_tick = before_tick;
             image.gx_dead_tick = gc_tick;
+            image.dead_sched_tick = scheduler.CurrentTick();
             ++images;
             bytes += image.backing ? image.GetHostImageSize() : 0;
             if (dead_images.size() < 65536) {
@@ -2264,6 +2315,9 @@ void TextureCache::ProcessGxCreated() {
         }
         if (kept != 0) {
             BbEngine::GxResources::NoteHandedOver(kept, kept_bytes);
+        }
+        if (handed != 0) {
+            BbEngine::GxResources::NoteOwnerHandOver(handed, handed_bytes);
         }
         if (written != 0 || surfaces_kept != 0) {
             BbEngine::GxResources::NoteCreationWrites(written, written_bytes, surfaces_kept);
@@ -2328,6 +2382,9 @@ void TextureCache::FreeDeadImages(u64 second) {
         // The game is done with it: not stored back even if the GPU drew it (that memory is the next
         // texture's).
         const u64 bytes = image.backing ? image.GetHostImageSize() : 0;
+        if (ImageOwners() && OwnedImage(image) && KeptByGuess(image, 0)) {
+            BbEngine::GxResources::NoteOwnerRetired(bytes, false); // beta 11: the old rules kept it
+        }
         ++gc_evictions;
         ++gc_freed_destroyed;
         BbStats::gc_freed_images.fetch_add(1, std::memory_order_relaxed);
@@ -2361,6 +2418,9 @@ ImageId TextureCache::TakeDeadDonor(const ImageInfo& info) {
         // Dead and the GPU done with it; a YEBIS texture's grace is over by now for this purpose (the
         // game's creates were taken first: none re-created over its memory with its shape).
         if (DeadImageState(d, 0, true) == Dead::Free) {
+            if (ImageOwners() && OwnedImage(d) && KeptByGuess(d, 0)) {
+                BbEngine::GxResources::NoteOwnerRetired(d.backing ? d.GetHostImageSize() : 0, true);
+            }
             return donor_id;
         }
     }
@@ -2377,15 +2437,16 @@ TextureCache::Dead TextureCache::DeadImageState(const Image& image, VAddr skip_a
     // 0.4.6 beta 5: of memory the game made a new resource in since (dead_by_reuse), the live
     // resource there is that one, not a sharer of this image's contents; one the GPU drew is kept
     // only when used from the pass before that resource was made (perhaps drawn for it).
+    // 0.4.6 beta 11 (the owner rule, ImageOwners): an image of a texture of the game's goes with it. Used
+    // since is told by the scheduler's tick too (a draw in the same collector pass after the death); the
+    // guesses keep only images of no texture of the game's.
+    const bool owned = ImageOwners() && OwnedImage(image);
     if (image.gx_dead_tick == 0 || False(image.flags & ImageFlagBits::Registered) ||
-        (image.lru_touched_tick != ~0ULL && image.lru_touched_tick > image.gx_dead_tick)) {
+        (image.lru_touched_tick != ~0ULL && image.lru_touched_tick > image.gx_dead_tick) ||
+        (owned && image.dead_sched_tick != 0 && image.tick_accessed_last >= image.dead_sched_tick)) {
         return Dead::No;
     }
-    const bool drawn = True(image.flags & ImageFlagBits::GpuModified) || image.binding.is_target;
-    if (image.dead_by_reuse ? drawn && image.tick_accessed_last >= image.reuse_tick
-                            : drawn && BbEngine::GxResources::LiveTextureOverlaps(
-                                           image.info.guest_address,
-                                           image.info.guest_address + image.info.guest_size, skip_at)) {
+    if (!owned && KeptByGuess(image, skip_at)) {
         return Dead::No;
     }
     // 0.4.6 beta 7: a YEBIS texture's image waits for the target YEBIS re-creates over it.

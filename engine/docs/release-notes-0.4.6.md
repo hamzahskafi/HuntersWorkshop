@@ -216,6 +216,19 @@ The tester's call on beta 4's logs: one beta with the whole design and the loggi
   and where the next beta's rule (an image belongs to its texture) would decide differently from
   today's rules, in one log line a minute. Nothing changes in what is drawn from these counts.
 
+## Images belong to the game's textures (beta 11)
+
+- **An image of one of the game's textures now goes with that texture.** When the game destroys the
+  texture, or makes something new in its memory, the image is freed once the GPU is done with it,
+  and a new render target of the same shape may take it over first. Before, two old rules of thumb
+  kept many of them: at each post-processing rebuild after a load, up to about 700 MB of old render
+  targets stayed in VRAM until the next rebuild landed on them.
+- **A draw the game recorded before it destroyed the texture still gets it,** as on the console,
+  where the memory still holds the texture until something new is made there.
+- **Any texture the game makes without data takes the image of the same shape it is made over,** as
+  YEBIS's did since beta 7: on the console the memory carries over.
+- `BB_IMAGE_OWNERS=0` in Extra variables brings back the old rules; safe mode does too.
+
 ## Diagnostics
 
 - **The "Building shaders" note** shows when a frame was late while shaders were being
