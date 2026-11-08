@@ -342,6 +342,42 @@ resource lives at an address.
   "draws that name no view" (YEBIS's, the wrapper's): the registry's live resource there still owns
   the image, so the draw goes into the right one.
 
+### The design note checked against the code (2026-11-08, the tester's request)
+
+- **A hole beta 9 opened (narrow).** A texture the game makes *with* its data copies that data
+  into its memory in the create call (beta 9's log: `+0x2166210`, inside CreateTexture). When an
+  image of a target sits there, and the target is unwatched since beta 9, that copy no longer
+  faults, so nothing tells the image. Usually harmless: the build-ahead path refreshes an exact
+  match in place, and a dead one is freed. The case left is "left to their draw (an image there)",
+  6-8 a minute in beta 9's run. There, if the draw's `FindImage` resolves to the unwatched target's
+  image, it can show the target's old contents. Nothing looked wrong to the tester. **Fix:** a
+  creation with data is a write call: the images over the new texture are marked written
+  (CPU-dirty) whatever their watching.
+- **Live textures do overlap.** The same "left to their draw" counts say that 6-8 times a minute a
+  new texture's memory holds an image of a texture the game has not destroyed. So "one owner per
+  image" cannot be assumed until it is counted: a census of new resources made over a live one's
+  memory, at the same base or partly, by kind (bbhost counts the same and reads them as destroys it
+  missed). Today's "used since" and "another live texture overlaps" rules exist for exactly this; the
+  0.4.5 beta 17-18 broken surfaces came from ignoring it.
+- **Images not at a resource's start** (3.5% of images made in beta 9's run: mips or layers sampled
+  on their own, stencil planes, merged images) have no owner and keep today's rules.
+- **The fast path:** `FindImage`'s cache would hand out an image whose owner changed. Marking
+  images in `ProcessGxCreated`/`ProcessGxDestroyed` must move `registry_generation`.
+- **What owners would buy:** correctness by construction (the hole above is one of the cases), and
+  dead images freed sooner (beta 9's run: 160 images, 219 MiB of destroyed textures still in VRAM).
+  The guesses themselves cost little (32-37 MiB of memory hashed a minute).
+
+**Revised order:** beta 10 measures before it acts.
+1. The fix above.
+2. The overlap census.
+3. The owner rule computed alongside today's rules and counted where it would decide differently
+   (refuse, hand over, retire), without acting.
+4. Textures made with their data unwatched (their creation copy is told by part 1, asset loads by
+   their own path).
+
+Beta 11 then turns the owner rule on, if the counts hold. Depth buffers, the game's buffers and the
+shaders move one number on (12, 13, 14).
+
 ### Beta 11: depth buffers
 
 - A depth target's compression metadata (HTILE) and its pending clear follow the owning resource,
