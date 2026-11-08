@@ -230,6 +230,13 @@ Built 2026-11-08 (engine id 92). Safe mode turns parts 1 and 3 off.
   made for the memory's previous owner; it should take only those made since the target was
   created (beta 9).
 
+**Run B's log** (`a49794df`, 2026-11-08, about 3 minutes, `BB_WATCH_GAME_TEXTURES=0`): 1,386-7,049
+images a minute left unwatched (578-2,804 MiB), 14 YEBIS rebuilds, no hitch report; frames in play
+33 ms or less (the 43-57 ms ones at the start and the first load); a clean exit. The same 21 CPU
+writes on textures made with their data at startup as in run A (small ones: 32x32, 1024x512), so
+not something unwatching changes; which code writes them is still to name. The tester's eyes on the
+picture decide part 4 (stale or wrong textures).
+
 ### Beta 9: watching only what no call covers; the ownership design
 
 - Part 4 on by default, for the kinds run A showed unwritten (textures made with their data and
