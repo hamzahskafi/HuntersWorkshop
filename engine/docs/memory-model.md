@@ -205,9 +205,37 @@ Built 2026-11-08 (engine id 92). Safe mode turns parts 1 and 3 off.
 - the rebuild stalls are down;
 - run A's write count on game textures is zero, or every writer it finds is named.
 
+**Run A's log** (`675ecf16`, 2026-11-08, about 8 minutes, switches as shipped):
+
+- **The rebuild stalls are gone.** In play, every frame was 28.5 ms or less but one of 41.6 ms
+  (84 MB of image uploads, below) and one of 43.8 ms (40 pipelines after a load); beta 7's area
+  crossings stalled 59-84 ms. One hitch report against beta 7's several.
+- **YEBIS destroys its whole set first, then builds the new one:** at all 22 rebuilds no YEBIS
+  texture was live when it began, and the previous set's count was destroyed in the 2 s before. The
+  sets alternate between 151 and 158 textures (two configurations, crossing between parts of an
+  area), 297 at loading screens. The new set lands mostly inside the old set's memory at other
+  offsets (73-230 a rebuild), on memory of the same shape 0-37: why beta 7's hand-over rarely held.
+- **Part 1:** 160-630 surfaces a minute started empty (nearly all YEBIS's); depth targets cleared
+  under the game's pending clear 4-15.
+- **Part 3:** 100-230 a minute took a dead target's image; 44-428 found none.
+- **Part 5:** CPU writes that landed on textures made with their data: 21 in the first minute
+  (startup), none after; on live GX buffers: none at all; on YEBIS textures 10-71 a minute (which of
+  YEBIS's textures: its CPU-updated ones are the likely writers, beta 9 hooks their calls); on
+  textures made without data (the CPU fills them by design) 1-2. Input layouts: 1,398 at startup,
+  then mostly during loading screens (59 in one minute of play). Shaders translated for draws with
+  the cache warm: 0-51 a minute, nearly all another variant of a program translated before.
+- **Left:** surfaces filled from the GPU's earlier writes to their memory as a buffer ("taken"),
+  21-32 a minute and up to 108 MiB (GX render and depth targets, 32 MiB depth targets among them):
+  most of the 41.6 ms frame's uploads. The check takes any GPU write ever made there, also one
+  made for the memory's previous owner; it should take only those made since the target was
+  created (beta 9).
+
 ### Beta 9: watching only what no call covers; the ownership design
 
-- Part 4 on by default, for the kinds run A showed unwritten.
+- Part 4 on by default, for the kinds run A showed unwritten (textures made with their data and
+  the game's targets, if run B shows nothing wrong).
+- A surface takes the GPU's buffer writes to its memory only when they came after its creation
+  (run A: 21-32 surfaces a minute, up to 108 MiB, filled from a previous owner's writes).
 - Each writer run A found gets its call hooked instead: YEBIS's Map, update and unmap of its 2D
   textures and Scaleform's texture unmap, as bbhost does.
 - Pages stay protected only for the engine's own data rings, YEBIS's buffers and memory no call
