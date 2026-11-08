@@ -5,7 +5,8 @@ What comes next, the rules and decisions it works under, and every open item. Up
 - **Where it stands:** 0.4.6 is in beta: the memory model release
   ([memory-model.md](memory-model.md)). Betas 1 to 7 (engine ids 85 to 91) moved the engine's
   caches onto the game's own create, destroy and release calls; beta 7's log came back on
-  2026-11-08, and beta 8 is next. 0.4.5 was released on 2026-11-07 from beta 13 (`a6b34b8`,
+  2026-11-08. Beta 8 (engine id 92, 2026-11-08) starts the game's GPU-owned surfaces empty instead of
+  filling them from memory, and reuses dead targets' images; it waits on the tester's runs. 0.4.5 was released on 2026-11-07 from beta 13 (`a6b34b8`,
   engine id 84): the GPU steps, +8.4% at the lamp spot against 0.4.4. 0.4.4 was released on
   2026-11-03 (`cbec5a2`, engine id 64).
 - **Where the work goes:** the branch `claude/awesome-gates-cjba5e`.
@@ -98,7 +99,7 @@ the order of the work does not change without the tester.
 | Beta | What it does | State |
 |---|---|---|
 | 1 to 7 | The caches follow the game's create, destroy and release calls: textures built in the game's create call, nothing freed on a release, YEBIS's and Scaleform's textures followed, YEBIS's same-memory targets kept across its rebuilds | Done; beta 7's log read 2026-11-08 |
-| 8 | GPU-owned surfaces start from their predecessor or empty, never from memory; the first-fill hash fix; a pool of dead targets by shape; write-watching replaced by the calls for game textures (off, counted); the logging for betas 9 to 13 | Next |
+| 8 | GPU-owned surfaces start from their predecessor or empty, never from memory, and take no hashes; dead targets' images reused by new ones of their shape; write-watching replaced by the calls for game textures (off, counted); the logging for betas 9 to 13 | Built 2026-11-08 (engine id 92), waiting on the tester |
 | 9 | Write-watching only where no call tells; the writers beta 8 finds hooked; the design note for beta 10, agreed with the tester before code | Planned |
 | 10 | Images belong to their textures: found through the registry at a draw or bind, retired with their resource, whole-texture copies image to image; the address guesses removed | Planned |
 | 11 | Depth buffers: their compression metadata and pending clears follow the owner; a new depth target starts from the game's clear | Planned |
@@ -108,9 +109,13 @@ the order of the work does not change without the tester.
 
 ### Waiting on the tester
 
-- Nothing until beta 8 is pushed. Then its runs: A (a normal session with loading screens and area
-  crossings), B (the same with part 4's switch on), and before beta 13, C (the shader cache
-  cleared, the same route).
+- **0.4.6 beta 8's runs** ([memory-model.md](memory-model.md), beta 8): A, a normal session with
+  loading screens and area crossings (the crossing that stalled in beta 7's log), switches as
+  shipped; B, the same route with `BB_WATCH_GAME_TEXTURES=0` in Extra variables; and before beta 13,
+  C, the shader cache cleared, the same route. Read: the `GX memory, surfaces this minute (beta 8)`
+  and `Shaders this minute (beta 8)` lines, the `YEBIS rebuild:` lines, and the hitch reports at
+  area crossings. If anything looks wrong in A, the same spot again with `BB_EMPTY_SURFACES=0`, then
+  with `BB_TARGET_POOL=0`.
 
 ## The register: every open item
 
@@ -123,11 +128,11 @@ found.
 | Item | From | Scheduled |
 |---|---|---|
 | YEBIS's rebuilds stall 59-84 ms at area crossings (about 280 targets filled from memory) | Beta 7's log, 2026-11-08 | Beta 8 |
-| A target's first fill hashes every level (beta 5's skip never applied to GPU-written images) | Research, 2026-11-08 | Beta 8, part 2 |
+| A target's first fill hashes every level | Research, 2026-11-08 | Beta 8, part 2: not a bug (the hashes protect GPU-written images from page-sharing writes); surfaces started empty take none |
 | Depth targets filled from memory; their HTILE followed by address | Research, 2026-11-08 | Beta 8 part 1, beta 11 |
-| Whether YEBIS frees its old context before building the new one; where new targets land | Research, 2026-11-08 | Beta 8's logging |
+| Whether YEBIS frees its old context before building the new one; where new targets land | Research, 2026-11-08 | Beta 8's `YEBIS rebuild:` lines (run A) |
 | Which owner objects build YEBIS contexts (the five virtual methods into `0x21d2dd0`) | Research, 2026-11-08 | Only if beta 8's numbers need it |
-| GX's input-layout creator in 1.09 (for predicting shader variants) | Research, 2026-11-08 | Found in beta 8 |
+| GX's input-layout creator in 1.09 (for predicting shader variants) | Research, 2026-11-08 | Done in beta 8: `0x21657a0`, hooked and counted |
 | "The game's data followed the same way (buffers built ahead, freed on release)" | Plan step 3 (0.4.5 beta 16) | Partly done (0.4.5 beta 17; 0.4.6 beta 5); the rest is beta 12 |
 | "Shaders translated when the game creates them" (all 13,277 at startup) | 0.4.5 beta 17, "Not done" | Beta 13, measured in beta 8 |
 | "The shader building and its threads" | 0.4.6 memory design, "Next" | Beta 13 |

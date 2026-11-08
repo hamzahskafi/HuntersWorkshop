@@ -277,6 +277,11 @@ public:
     /// Reuploads image contents.
     void RefreshImage(Image& image);
 
+    /// 0.4.6 beta 8 (part 1): a surface's first use (Image::surface_ns): cleared instead of filled from
+    /// the game's memory, unless the GPU wrote that memory as a buffer before or its resource is gone.
+    /// Whether it was started.
+    bool StartSurface(Image& image);
+
     /// Retrieves the sampler that matches the provided S# descriptor.
     /// extra_lod_bias: bbport, added to the S#'s bias (reduced scene rendering).
     [[nodiscard]] vk::Sampler GetSampler(const AmdGpu::Sampler& sampler,
@@ -509,7 +514,10 @@ private:
     /// 0.4.6 beta 5: or of memory the game made a new resource in (the live one there is that one).
     /// Under `mutex`. `skip_at`: a live texture there that does not count (beta 4: the one being built).
     enum class Dead { No, Busy, Free };
-    Dead DeadImageState(const Image& image, VAddr skip_at = 0);
+    Dead DeadImageState(const Image& image, VAddr skip_at = 0, bool ignore_grace = false);
+    /// 0.4.6 beta 8 (part 3): a dead image (the game destroyed its texture, or made something newer
+    /// over it) of `info`'s shape that the GPU is done with, whose Vulkan image a new target may take.
+    ImageId TakeDeadDonor(const ImageInfo& info);
     /// Beta 16: the textures the game created with their data, built ahead of their first draw. 0.4.6
     /// beta 4: their images come prepared from the game's threads (PrepareCreated); each collector
     /// pass registers all of them, no time budget.

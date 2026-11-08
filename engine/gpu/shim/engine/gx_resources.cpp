@@ -134,6 +134,13 @@ constexpr std::uint8_t kShaderPrologue[2][16] = {
     {0x55, 0x48, 0x89, 0xe5, 0x41, 0x57, 0x41, 0x56, 0x53, 0x48, 0x81, 0xec, 0x38, 0x01, 0x00, 0x00},
     {0x55, 0x48, 0x89, 0xe5, 0x41, 0x57, 0x41, 0x56, 0x53, 0x48, 0x81, 0xec, 0x28, 0x01, 0x00, 0x00},
 };
+// 0.4.6 beta 8 (research for building shaders ahead): GX's input-layout creator (ctx, object** out,
+// elements, element count, the vertex shader's code, ...): where the game gives a vertex shader's vertex
+// formats, as D3D11 does (bbhost's 0x25657a0). push rbp; mov rbp, rsp; push r15; push r14; push r12;
+// push rbx; sub rsp, 0x70
+constexpr std::size_t kCreateInputLayout = 0x21657a0;
+constexpr std::uint8_t kInputLayoutPrologue[] = {0x55, 0x48, 0x89, 0xe5, 0x41, 0x57, 0x41, 0x56,
+                                                 0x41, 0x54, 0x53, 0x48, 0x83, 0xec, 0x70};
 
 enum Kind : std::uint8_t {
     kBuffer = 0,
@@ -337,6 +344,27 @@ struct Counts {
     // shader writes, other), and YEBIS's re-created targets that kept their old images.
     std::array<std::atomic<std::uint64_t>, 5> no_data{};
     std::atomic<std::uint64_t> handed_over{0}, handed_over_bytes{0};
+    // 0.4.6 beta 8: surfaces' first uses by how they began and by owner; first fills from memory by
+    // owner; CPU write faults on images by owner (and kept: a live surface's contents not uploaded), on
+    // the game's buffers; the pool; images left unwatched; input layouts; shaders translated for draws.
+    std::array<std::array<std::atomic<std::uint64_t>, std::size_t(SurfaceStart::kCount)>, std::size_t(Owner::kCount)>
+        surface_start{};
+    std::array<std::atomic<std::uint64_t>, std::size_t(SurfaceStart::kCount)> surface_start_bytes{};
+    std::array<std::atomic<std::uint64_t>, std::size_t(Owner::kCount)> first_fill{}, first_fill_bytes{},
+        cpu_write{}, cpu_write_kept{};
+    std::atomic<std::uint64_t> buffer_cpu_write{0}, buffer_cpu_write_bytes{0};
+    struct Written {
+        std::uint64_t address, bytes;
+        std::uint32_t width, height;
+        Owner owner;
+        bool kept;
+    };
+    std::array<Written, 5> cpu_write_top{};
+    std::mutex cpu_write_mutex;
+    std::array<std::atomic<std::uint64_t>, std::size_t(PoolEvent::kCount)> pool{}, pool_bytes{};
+    std::atomic<std::uint64_t> unwatched{0}, unwatched_bytes{0};
+    std::atomic<std::uint64_t> input_layouts{0}, input_layouts_loading{0}, input_layout_elements{0};
+    std::array<std::atomic<std::uint64_t>, 4> translated{}, translated_ns{}, translated_seen{};
     struct Made {
         std::uint64_t address, bytes;
         std::uint32_t width, height, levels, layers, format, tile;
@@ -427,9 +455,10 @@ void Insert(std::uint64_t key, const Entry& e) {
 // 0.4.6 beta 6: a texture the game's middleware made (YEBIS, Scaleform), as a resource of the game's.
 void RegisterOther(std::uint64_t key, std::uint64_t memory, std::uint32_t bytes, Kind kind, bool initial,
                    bool render_target, bool depth_target, std::uint32_t width = 0, std::uint32_t height = 0,
-                   std::uint16_t levels = 0, std::uint16_t layers = 0) {
+                   std::uint16_t levels = 0, std::uint16_t layers = 0, std::uint8_t bind = 0) {
     Entry e{memory, bytes, kind, Loading::ScreenUp(), NowNs(), 2};
     e.initial = initial;
+    e.bind = bind;
     e.render_target = render_target;
     e.depth_target = depth_target;
     e.width = width;
@@ -440,6 +469,10 @@ void RegisterOther(std::uint64_t key, std::uint64_t memory, std::uint32_t bytes,
 }
 
 // `memory_now`: where the resource's memory is at its destructor's entry (the holder is still whole).
+namespace Rebuild {
+void Destroyed(std::uint64_t memory, const Entry& e);
+}
+
 void Unregister(std::uint64_t holder, bool texture, std::uint64_t memory_now) {
     // 0.4.6 beta 5: the game's Map does not move a resource's memory (a rename writes into a copy
     // from GX's own pool, the holder's memory unchanged), so a resource whose memory differs here is
@@ -455,6 +488,9 @@ void Unregister(std::uint64_t holder, bool texture, std::uint64_t memory_now) {
         }
         const Entry e = it->second;
         g_by_holder.erase(it);
+        if (e.kind == kYebis) {
+            Rebuild::Destroyed(e.memory == memory_now ? e.memory : 0, e);
+        }
         g_counts.destroyed[e.kind].fetch_add(1, std::memory_order_relaxed);
         g_counts.destroyed_bytes[e.kind].fetch_add(e.bytes, std::memory_order_relaxed);
         if (e.kind != kBuffer) {
@@ -577,6 +613,116 @@ GUEST_ABI std::int64_t ScaleformInitEntry(std::uint64_t, const std::uint64_t* sa
     return 0;
 }
 
+// 0.4.6 beta 8 (research): YEBIS's rebuilds. A rebuild is a burst of YEBIS 2D textures made less than
+// 250 ms apart; for each, where its textures landed against the YEBIS textures destroyed in the last 10 s
+// (the memory of one with the same shape, of one with another shape, inside one's memory, or fresh
+// memory), how many YEBIS textures were live when it began, and the destroys around it (the 2 s before,
+// during, the 2 s after): whether the old set goes before or after the new one is made.
+namespace Rebuild {
+struct Dead {
+    std::uint64_t bytes, ns;
+    std::uint32_t width, height;
+    std::uint16_t levels, layers;
+};
+enum Landed { kSameShape, kOtherShape, kInside, kFresh, kLandedCount };
+struct Burst {
+    std::uint64_t first_ns = 0, last_ns = 0, made = 0, targets = 0, live_at_start = 0, before = 0, during = 0,
+                  after = 0;
+    std::array<std::uint64_t, kLandedCount> landed{};
+};
+constexpr std::uint64_t kGapNs = 250'000'000, kAroundNs = 2'000'000'000, kDeadNs = 10'000'000'000;
+std::mutex mutex;
+std::map<std::uint64_t, Dead> dead;   // memory -> a YEBIS 2D texture destroyed in the last 10 s
+std::deque<std::uint64_t> destroys;   // when YEBIS 2D textures were destroyed (the last 2 s)
+std::int64_t live = 0;                // YEBIS 2D textures live
+Burst current, ended;                 // `ended` waits for its 2 s after
+int reported = 0;
+
+void Report(const Burst& b) {
+    if (b.made < 32 || reported >= 40) {
+        return; // single textures, or enough reported
+    }
+    ++reported;
+    host_log("YEBIS rebuild: %llu 2D textures made over %.0f ms (%llu render targets); landed on: the memory of a "
+             "destroyed one with the same shape %llu, with another shape %llu, inside a destroyed one's memory "
+             "%llu, fresh memory %llu; YEBIS 2D textures live when it began %llu; destroyed in the 2 s before it "
+             "%llu, during it %llu, in the 2 s after it %llu",
+             (unsigned long long)b.made, double(b.last_ns - b.first_ns) / 1e6, (unsigned long long)b.targets,
+             (unsigned long long)b.landed[kSameShape], (unsigned long long)b.landed[kOtherShape],
+             (unsigned long long)b.landed[kInside], (unsigned long long)b.landed[kFresh],
+             (unsigned long long)b.live_at_start, (unsigned long long)b.before, (unsigned long long)b.during,
+             (unsigned long long)b.after);
+}
+
+// Under `mutex`: the ended burst reported once its 2 s after have passed.
+void Settle(std::uint64_t now) {
+    if (ended.made != 0 && now - ended.last_ns >= kAroundNs) {
+        Report(ended);
+        ended = {};
+    }
+    while (!destroys.empty() && now - destroys.front() > kAroundNs) {
+        destroys.pop_front();
+    }
+    for (auto it = dead.begin(); it != dead.end();) {
+        it = now - it->second.ns > kDeadNs ? dead.erase(it) : std::next(it);
+    }
+}
+
+void Made(std::uint64_t memory, std::uint32_t width, std::uint32_t height, std::uint16_t levels,
+          std::uint16_t layers, bool target) {
+    const std::uint64_t now = NowNs();
+    std::scoped_lock lock{mutex};
+    if (current.made != 0 && now - current.last_ns > kGapNs) {
+        if (ended.made != 0) {
+            Report(ended); // a third burst before the second's 2 s after: report it as it stands
+        }
+        ended = current;
+        current = {};
+    }
+    Settle(now);
+    if (current.made == 0) {
+        current.first_ns = now;
+        current.live_at_start = std::uint64_t(std::max<std::int64_t>(live, 0));
+        current.before = destroys.size();
+    }
+    current.last_ns = now;
+    ++current.made;
+    current.targets += target ? 1 : 0;
+    Landed landed = kFresh;
+    if (const auto at = dead.find(memory); at != dead.end()) {
+        const Dead& d = at->second;
+        landed = d.width == width && d.height == height && d.levels == levels && d.layers == layers ? kSameShape
+                                                                                                    : kOtherShape;
+    } else if (auto it = dead.upper_bound(memory); it != dead.begin() && std::prev(it)->first +
+                                                                             std::prev(it)->second.bytes > memory) {
+        landed = kInside;
+    }
+    ++current.landed[landed];
+    ++live;
+}
+
+void Destroyed(std::uint64_t memory, const Entry& e) {
+    const std::uint64_t now = NowNs();
+    std::scoped_lock lock{mutex};
+    Settle(now);
+    --live;
+    destroys.push_back(now);
+    if (current.made != 0 && now - current.last_ns <= kGapNs) {
+        ++current.during;
+    } else if (ended.made != 0 && now - ended.last_ns < kAroundNs) {
+        ++ended.after;
+    }
+    if (memory && dead.size() < 8192) {
+        dead[memory] = Dead{std::max<std::uint64_t>(e.bytes, 1), now, e.width, e.height, e.levels, e.layers};
+    }
+}
+
+void Minute() {
+    std::scoped_lock lock{mutex};
+    Settle(NowNs());
+}
+} // namespace Rebuild
+
 void NoteYebisCreated(std::uint64_t object, bool initial) {
     if (!object || Read<std::uint32_t>(object + 0x80) != 3) {
         return; // not a 2D texture
@@ -596,9 +742,11 @@ void NoteYebisCreated(std::uint64_t object, bool initial) {
     if (ds) {
         g_counts.yebis_ds.fetch_add(1, std::memory_order_relaxed);
     }
-    RegisterOther(kYebisKey | object, memory, bytes, kYebis, initial, rt, ds, shape[0], shape[1],
-                  std::uint16_t(std::min<std::uint32_t>(shape[2], 0xffff)),
-                  std::uint16_t(std::min<std::uint32_t>(shape[3], 0xffff)));
+    const auto levels = std::uint16_t(std::min<std::uint32_t>(shape[2], 0xffff)),
+               layers = std::uint16_t(std::min<std::uint32_t>(shape[3], 0xffff));
+    Rebuild::Made(memory, shape[0], shape[1], levels, layers, rt || ds);
+    RegisterOther(kYebisKey | object, memory, bytes, kYebis, initial, rt, ds, shape[0], shape[1], levels, layers,
+                  std::uint8_t(bind & 0xff));
 }
 
 // Scaleform made a texture's hardware planes: each one with memory of its own is a texture of the
@@ -685,6 +833,16 @@ template <int stage> GUEST_ABI std::int64_t ShaderCreated(std::uint64_t, const s
     g_counts.shaders[stage].fetch_add(1, std::memory_order_relaxed);
     if (Loading::ScreenUp()) {
         g_counts.shaders_loading.fetch_add(1, std::memory_order_relaxed);
+    }
+    return 0;
+}
+
+// 0.4.6 beta 8 (research): an input layout (ecx: its element count).
+GUEST_ABI std::int64_t InputLayoutCreated(std::uint64_t, const std::uint64_t* saved) {
+    g_counts.input_layouts.fetch_add(1, std::memory_order_relaxed);
+    g_counts.input_layout_elements.fetch_add(saved[2] & 0xffffffffu, std::memory_order_relaxed);
+    if (Loading::ScreenUp()) {
+        g_counts.input_layouts_loading.fetch_add(1, std::memory_order_relaxed);
     }
     return 0;
 }
@@ -807,7 +965,7 @@ bool Install(std::uint8_t* image, std::size_t size) {
     if (const char* env = std::getenv("BB_GX_FOLLOW"); !(env && env[0] == '0')) {
         g_follow = true;
     }
-    Hook hooks[22];
+    Hook hooks[23];
     bool ok = Prepare(hooks[0], image, size, kCreateBuffer, kCreatorPrologue, &CreatorEntry<kBuffer>) &&
               Prepare(hooks[1], image, size, kCreateTexture, kCreatorPrologue, &CreatorEntry<kTexture>) &&
               Prepare(hooks[2], image, size, kCreateTexture3D, kCreatorPrologue, &CreatorEntry<kTexture3D>) &&
@@ -822,7 +980,8 @@ bool Install(std::uint8_t* image, std::size_t size) {
               Prepare(hooks[21], image, size, kScaleformRelease, kScaleformReleasePrologue, &ScaleformRelease) &&
               Prepare(hooks[14], image, size, kCreateRtv, kCreatorPrologue, &ViewEntry<1>) &&
               Prepare(hooks[15], image, size, kCreateDsv, kDsvPrologue, &ViewEntry<2>) &&
-              Prepare(hooks[16], image, size, kCreate1D, kCreate1DPrologue, &Create1DEntry);
+              Prepare(hooks[16], image, size, kCreate1D, kCreate1DPrologue, &Create1DEntry) &&
+              Prepare(hooks[22], image, size, kCreateInputLayout, kInputLayoutPrologue, &InputLayoutCreated);
     // The game's destructors (2D and 3D textures at 4-7, 1D at 17-18) and YEBIS's 2D texture's (19).
     for (std::size_t i = 0; ok && i < std::size(kDestructors) + std::size(k1DDestructors) + 1; ++i) {
         const bool one_d = i >= std::size(kDestructors) && i < std::size(kDestructors) + std::size(k1DDestructors);
@@ -975,6 +1134,104 @@ Owner Classify(std::uint64_t begin, std::uint64_t end, bool* at_start) {
         return OwnerOf(*e);
     }
     return Owner::None;
+}
+
+Surface SurfaceAt(std::uint64_t begin, std::uint64_t end) {
+    Surface s;
+    if (!g_active || !g_follow || begin >= end) {
+        return s;
+    }
+    std::scoped_lock lock{g_mutex};
+    const auto at = g_texture_at.find(begin);
+    if (at == g_texture_at.end()) {
+        return s;
+    }
+    const auto it = g_by_holder.find(at->second);
+    if (it == g_by_holder.end()) {
+        return s;
+    }
+    const Entry& e = it->second;
+    if (e.initial || e.memory != begin || begin + e.bytes < end || (e.kind != kTexture && e.kind != kYebis)) {
+        return s; // made with its data, not wholly over the image, or not a GX or YEBIS 2D texture
+    }
+    if ((e.bind & 0xe0) == 0 && !e.render_target && !e.depth_target) {
+        return s; // nothing the GPU writes: the CPU fills it (a texture made without data, sampled only)
+    }
+    s.found = true;
+    s.owner = OwnerOf(e);
+    s.ns = e.ns;
+    return s;
+}
+
+void NoteSurfaceStart(Owner owner, SurfaceStart how, std::uint64_t bytes) {
+    const std::size_t o = std::min<std::size_t>(std::size_t(owner), std::size_t(Owner::kCount) - 1);
+    const std::size_t h = std::min<std::size_t>(std::size_t(how), std::size_t(SurfaceStart::kCount) - 1);
+    g_counts.surface_start[o][h].fetch_add(1, std::memory_order_relaxed);
+    g_counts.surface_start_bytes[h].fetch_add(bytes, std::memory_order_relaxed);
+}
+
+void NoteFirstFill(Owner owner, std::uint64_t bytes) {
+    const std::size_t o = std::min<std::size_t>(std::size_t(owner), std::size_t(Owner::kCount) - 1);
+    g_counts.first_fill[o].fetch_add(1, std::memory_order_relaxed);
+    g_counts.first_fill_bytes[o].fetch_add(bytes, std::memory_order_relaxed);
+}
+
+void NoteCpuWrite(Owner owner, bool kept, std::uint64_t address, std::uint64_t bytes, std::uint32_t width,
+                  std::uint32_t height) {
+    const std::size_t o = std::min<std::size_t>(std::size_t(owner), std::size_t(Owner::kCount) - 1);
+    g_counts.cpu_write[o].fetch_add(1, std::memory_order_relaxed);
+    if (kept) {
+        g_counts.cpu_write_kept[o].fetch_add(1, std::memory_order_relaxed);
+    }
+    if (owner == Owner::None) {
+        return; // only the game's resources are described
+    }
+    std::scoped_lock lock{g_counts.cpu_write_mutex};
+    auto& top = g_counts.cpu_write_top;
+    for (const auto& w : top) {
+        if (w.address == address && w.bytes != 0) {
+            return; // described already
+        }
+    }
+    auto smallest = std::min_element(top.begin(), top.end(), [](const auto& a, const auto& b) { return a.bytes < b.bytes; });
+    if (bytes > smallest->bytes) {
+        *smallest = {address, bytes, width, height, owner, kept};
+    }
+}
+
+void NoteBufferCpuWrite(std::uint64_t address, std::uint64_t bytes) {
+    if (!g_active) {
+        return;
+    }
+    {
+        std::scoped_lock lock{g_mutex};
+        bool at_start = false;
+        if (!Covering(g_buffer_at, address, address + std::max<std::uint64_t>(bytes, 1), &at_start)) {
+            return; // not a live GX buffer's memory
+        }
+    }
+    g_counts.buffer_cpu_write.fetch_add(1, std::memory_order_relaxed);
+    g_counts.buffer_cpu_write_bytes.fetch_add(bytes, std::memory_order_relaxed);
+}
+
+void NotePool(PoolEvent event, std::uint64_t bytes) {
+    const std::size_t i = std::min<std::size_t>(std::size_t(event), std::size_t(PoolEvent::kCount) - 1);
+    g_counts.pool[i].fetch_add(1, std::memory_order_relaxed);
+    g_counts.pool_bytes[i].fetch_add(bytes, std::memory_order_relaxed);
+}
+
+void NoteUnwatched(std::uint64_t images, std::uint64_t bytes) {
+    g_counts.unwatched.fetch_add(images, std::memory_order_relaxed);
+    g_counts.unwatched_bytes.fetch_add(bytes, std::memory_order_relaxed);
+}
+
+void NoteShaderTranslated(unsigned stage, std::uint64_t ns, bool program_seen) {
+    const unsigned s = std::min(stage, 3u);
+    g_counts.translated[s].fetch_add(1, std::memory_order_relaxed);
+    g_counts.translated_ns[s].fetch_add(ns, std::memory_order_relaxed);
+    if (program_seen) {
+        g_counts.translated_seen[s].fetch_add(1, std::memory_order_relaxed);
+    }
 }
 
 void NoteDrawMade(Owner owner, std::uint64_t bytes) {
@@ -1487,5 +1744,93 @@ void LogMinute() {
              Mib(take(g_counts.released_resident_bytes)), (unsigned long long)take(g_counts.shaders[0]),
              (unsigned long long)take(g_counts.shaders[1]), (unsigned long long)take(g_counts.shaders[2]),
              (unsigned long long)take(g_counts.shaders[3]), (unsigned long long)take(g_counts.shaders_loading));
+    // 0.4.6 beta 8: surfaces, first fills, CPU writes, the pool and the unwatched images; then shaders.
+    Rebuild::Minute();
+    static const char* const kStartNames[] = {"empty", "depth cleared", "depth cleared under the game's clear",
+                                              "taken from the GPU's writes as a buffer",
+                                              "filled from memory (its resource gone)"};
+    std::string starts, fills, writes;
+    for (std::size_t h = 0; h < std::size_t(SurfaceStart::kCount); ++h) {
+        std::string owners;
+        std::uint64_t total = 0;
+        for (std::size_t o = 0; o < std::size_t(Owner::kCount); ++o) {
+            const std::uint64_t n = take(g_counts.surface_start[o][h]);
+            if (n != 0) {
+                char part[96];
+                std::snprintf(part, sizeof(part), "%s%s %llu", owners.empty() ? "" : ", ", OwnerName(Owner(o)),
+                              (unsigned long long)n);
+                owners += part;
+                total += n;
+            }
+        }
+        const std::uint64_t bytes = take(g_counts.surface_start_bytes[h]);
+        if (total != 0) {
+            char part[512];
+            std::snprintf(part, sizeof(part), "%s%s %llu (%.0f MiB: %s)", starts.empty() ? "" : "; ", kStartNames[h],
+                          (unsigned long long)total, Mib(bytes), owners.c_str());
+            starts += part;
+        }
+    }
+    for (std::size_t o = 0; o < std::size_t(Owner::kCount); ++o) {
+        const std::uint64_t n = take(g_counts.first_fill[o]), bytes = take(g_counts.first_fill_bytes[o]);
+        if (n != 0) {
+            char part[128];
+            std::snprintf(part, sizeof(part), "%s%s %llu (%.0f MiB)", fills.empty() ? "" : ", ", OwnerName(Owner(o)),
+                          (unsigned long long)n, Mib(bytes));
+            fills += part;
+        }
+        const std::uint64_t w = take(g_counts.cpu_write[o]), kept = take(g_counts.cpu_write_kept[o]);
+        if (w != 0) {
+            char part[128];
+            std::snprintf(part, sizeof(part), "%s%s %llu (%llu kept)", writes.empty() ? "" : ", ",
+                          OwnerName(Owner(o)), (unsigned long long)w, (unsigned long long)kept);
+            writes += part;
+        }
+    }
+    std::string written;
+    {
+        std::scoped_lock lock{g_counts.cpu_write_mutex};
+        auto top = g_counts.cpu_write_top;
+        g_counts.cpu_write_top = {};
+        std::sort(top.begin(), top.end(), [](const auto& a, const auto& b) { return a.bytes > b.bytes; });
+        for (const auto& w : top) {
+            if (w.bytes == 0) {
+                break;
+            }
+            char part[160];
+            std::snprintf(part, sizeof(part), "%s0x%llx %.1f MiB %ux%u (%s%s)", written.empty() ? "" : "; ",
+                          (unsigned long long)w.address, double(w.bytes) / 1048576.0, w.width, w.height,
+                          OwnerName(w.owner), w.kept ? ", kept" : "");
+            written += part;
+        }
+    }
+    host_log("GX memory, surfaces this minute (beta 8): first uses of surfaces the game made without data for the "
+             "GPU: %s; first fills from memory, by the resource there: %s; CPU writes that landed on images, by the "
+             "live resource there: %s%s%s; on the game's buffers %llu (%.0f MiB); new surfaces that took a dead "
+             "target's Vulkan image of their shape %llu (%.0f MiB), found none %llu; images left unwatched (the "
+             "calls tell their writes) %llu (%.0f MiB)",
+             starts.empty() ? "none" : starts.c_str(), fills.empty() ? "none" : fills.c_str(),
+             writes.empty() ? "none" : writes.c_str(), written.empty() ? "" : "; the largest written: ",
+             written.c_str(), (unsigned long long)take(g_counts.buffer_cpu_write),
+             Mib(take(g_counts.buffer_cpu_write_bytes)), (unsigned long long)take(g_counts.pool[0]),
+             Mib(take(g_counts.pool_bytes[0])), (unsigned long long)take(g_counts.pool[1]),
+             (unsigned long long)take(g_counts.unwatched), Mib(take(g_counts.unwatched_bytes)));
+    static const char* const kStageNames[] = {"vertex", "pixel", "compute", "other"};
+    std::string translated;
+    for (unsigned s = 0; s < 4; ++s) {
+        const std::uint64_t n = take(g_counts.translated[s]), ns = take(g_counts.translated_ns[s]),
+                            seen = take(g_counts.translated_seen[s]);
+        if (n != 0) {
+            char part[160];
+            std::snprintf(part, sizeof(part), "%s%s %llu (%.1f ms; %llu of a program translated before)",
+                          translated.empty() ? "" : ", ", kStageNames[s], (unsigned long long)n, double(ns) / 1e6,
+                          (unsigned long long)seen);
+            translated += part;
+        }
+    }
+    host_log("Shaders this minute (beta 8): input layouts the game created %llu (%llu during loading screens, %llu "
+             "vertex elements); translated for draws: %s",
+             (unsigned long long)take(g_counts.input_layouts), (unsigned long long)take(g_counts.input_layouts_loading),
+             (unsigned long long)take(g_counts.input_layout_elements), translated.empty() ? "none" : translated.c_str());
 }
 } // namespace BbEngine::GxResources

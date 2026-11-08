@@ -281,9 +281,16 @@ Image::Image(const Vulkan::Instance& instance, Vulkan::Runtime& runtime_,
 
     backing = &backing_images.emplace_back();
     backing->num_samples = info.num_samples;
-    backing->image = UniqueImage{instance.GetDevice(), instance.GetAllocator()};
-    if (!backing->image.Create(image_ci, may_fail)) {
-        return; // VRAM refused it (HasMemory: false)
+    if (t_adopt_image && t_adopt_image->image && t_adopt_image->image_ci == image_ci) {
+        // 0.4.6 beta 8 (part 3): a dead target's image of the same creation info, the GPU done with it.
+        // Its contents are no one's: it starts in the undefined layout (backing->state) and is cleared
+        // or filled at its first use as a new image is.
+        backing->image = std::move(*t_adopt_image);
+    } else {
+        backing->image = UniqueImage{instance.GetDevice(), instance.GetAllocator()};
+        if (!backing->image.Create(image_ci, may_fail)) {
+            return; // VRAM refused it (HasMemory: false)
+        }
     }
 
     Vulkan::SetObjectName(instance.GetDevice(), GetImage(),

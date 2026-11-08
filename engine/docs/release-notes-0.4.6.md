@@ -152,6 +152,41 @@ The tester's call on beta 4's logs: one beta with the whole design and the loggi
 - **The log** counts the textures made without their data by what they are bound as, and the
   rebuilt targets that kept their images.
 
+## Post-processing rebuilds without the stall (beta 8)
+
+0.4.6 is the memory model release: the engine follows the game's own calls, not its memory
+(`docs/memory-model.md`). Beta 8 is its first step.
+
+- **New render targets start empty.** A target the game makes without data for the GPU to draw
+  into is a new Vulkan image. This covers YEBIS's (the post-processing middleware) and the game's
+  own targets, depth targets and textures shaders write. Such an image is no longer filled from the
+  game's memory, which never holds what the GPU drew there anyway. It starts cleared, as bbhost
+  starts its new targets. Only if the GPU wrote that memory as a buffer before is it filled, from
+  that. YEBIS rebuilds about 280 targets at loading screens and when you cross from one part of an
+  area into the next. In beta 7's log that stalled 59-84 ms, most of it hashing (29 ms), detiling
+  (14 ms) and uploading that memory. `BB_EMPTY_SURFACES=0` in Extra variables brings back the fill
+  from memory.
+- **No hashing for those targets.** The hashes of a target's first fill were there to tell a real
+  CPU write from another write in the same 4 KiB page. For a target the game made without data, a
+  write in its pages while the game's texture lives is counted and its contents kept. The game's
+  calls are what change it.
+- **Rebuilt targets reuse dead ones' images.** A new target takes the Vulkan image of a target the
+  game destroyed, when it has the same shape and the GPU is done with it, instead of allocating
+  another (about 4 ms a rebuild). VRAM no longer holds the old set beside the new one for 3 seconds.
+  A target re-made over the same memory still keeps its old image first (beta 7).
+  `BB_TARGET_POOL=0` turns this off.
+- **Safe mode turns both off.**
+- **For the next step (off by default):** `BB_WATCH_GAME_TEXTURES=0` stops write-protecting the
+  pages of the game's textures. That covers textures made with their data, targets, and YEBIS's
+  targets: the game's calls tell what writes them. Pages stay watched for everything else.
+- **The log** has two new lines a minute and one per YEBIS rebuild:
+  - **Surfaces:** first uses by how they began, first fills from memory by owner, and CPU writes
+    that landed on the game's textures and buffers, with the largest described. Also targets that
+    reused a dead one's image, and images left unwatched.
+  - **Shaders:** input layouts the game created, and shaders translated for draws by stage, with
+    their time.
+  - **Each YEBIS rebuild:** where its targets landed, and the destroys before, during and after it.
+
 ## Diagnostics
 
 - **The "Building shaders" note** shows when a frame was late while shaders were being

@@ -6092,6 +6092,10 @@ bool Rasterizer::OnWriteFault(VAddr addr, bool assume_locks) {
         return false;
     }
     buffer_cache.ExtendWriteFault(addr);
+    // 0.4.6 beta 8 (part 5): the CPU's writes to the game's live GX buffers (beta 12's measurement).
+    if (BbEngine::GxResources::Active()) {
+        BbEngine::GxResources::NoteBufferCpuWrite(addr, size);
+    }
     return true;
 }
 

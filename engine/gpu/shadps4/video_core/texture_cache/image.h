@@ -90,6 +90,11 @@ public:
     bool in_system_memory = false;
 };
 
+/// 0.4.6 beta 8 (part 3): a dead target's Vulkan image that the next Image constructed on this thread
+/// takes instead of allocating one, when their creation info is the same (TextureCache::FindImage);
+/// left as it is otherwise.
+inline thread_local UniqueImage* t_adopt_image = nullptr;
+
 struct Image {
     explicit Image(const Vulkan::Instance& instance, Vulkan::Runtime& runtime,
                    Common::SlotVector<ImageView>& slot_image_views, const ImageInfo& info,
@@ -213,6 +218,18 @@ public:
     /// 0.4.6 beta 7: the image of a YEBIS texture YEBIS destroyed waits until then (steady clock, ns)
     /// for the target it re-creates over the same memory (ProcessGxCreated hands it over).
     u64 dead_grace_ns = 0;
+    /// 0.4.6 beta 8: the game resource at its memory when it was registered (GxResources::Owner), and
+    /// when that resource is a surface the game made without its data for the GPU to write
+    /// (GxResources::SurfaceAt), its creation time (0: none). Such an image never takes the game's
+    /// memory: its first use starts it empty (TextureCache::StartSurface), and a CPU write to its pages
+    /// while that resource lives is counted, not uploaded (InvalidateMemory).
+    u64 surface_ns = 0;
+    u8 gx_owner = 0;
+    bool gx_whole = false; ///< that resource starts where the image does
+
+    /// 0.4.6 beta 8 (part 4, BB_WATCH_GAME_TEXTURES=0): its pages were left unwatched (the game's calls
+    /// tell its writes); its track range is bookkeeping only.
+    bool calls_watch = false;
     ImageId depth_id{};
     u64 depth_uid{};
     u64 image_uid{};

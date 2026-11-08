@@ -59,7 +59,7 @@ Still the generic model (the gaps the 2026-11-08 research found):
 | Gap | Cost seen | Where it goes |
 |---|---|---|
 | A new render target, depth target or shader-written texture is filled from the game's memory at its first draw | YEBIS's rebuilds: 59-84 ms stalls (hashing 28.8 ms, detiling 13.6 ms, page faults); reading untouched memory also commits its pages | Beta 8, part 1 |
-| Beta 5's "no hash on a first fill" never applies to images the GPU writes: the draw marks them GPU-written before their fill | The 28.8 ms of hashing above | Beta 8, part 2 |
+| A GPU-written image's first fill hashes every level: the hashes tell a real CPU write from one elsewhere in the same 4 KiB page (not a bug, as first thought: beta 8's correction) | The 28.8 ms of hashing above | Beta 8, part 2: none for surfaces started empty |
 | Every new image's pages are write-protected (`texture_cache.cpp`, `TrackImage` after `InsertImage`), targets included | About 8 ms of protecting a rebuild, faults when memory is reused | Beta 8 part 4 (measured), beta 9 |
 | Images found by address and shape; a stack of guesses decides whose an image is (retired when something newer is made over it, dead-by-reuse, the 3 s grace, the same-memory hand-over, hashing 32-37 MiB of memory a minute to tell overwritten drawings) | Rebuilt targets mostly miss the hand-over (8-36 kept a minute against about 280 a rebuild); stale images; CPU time | Beta 10 |
 | Every rebuilt target is a new Vulkan image, and the old set waits out the grace | About 4 ms of allocation a rebuild, both sets in VRAM for seconds (YEBIS made 744-775 MiB a minute in beta 7's log) | Beta 8, part 3 |
@@ -115,12 +115,17 @@ Still the generic model (the gaps the 2026-11-08 research found):
   before it reads. Filling from memory gives neither the console's bits (the GPU's drawings never
   go back to memory) nor anything YEBIS uses.
 
-### The first-fill hash bug
+### The first-fill hashes (corrected while building beta 8)
 
 `TextureCache::RegisterImage` sets `skip_hashes_once`; `RefreshImage` honours it only while the
 image is not marked GPU-modified (`texture_cache.cpp`, `skip_hashes`). `FindRenderTarget` and
 `FindDepthTarget` mark the image GPU-modified before `UpdateImage`, so a target's first fill hashes
-every level. Beta 5's skip never reached render targets, depth targets or storage images.
+every level. The research called that a bug; it is not. Under the generic model the hashes are what
+protect a GPU-written image: a CPU write anywhere in one of its 4 KiB pages marks it written, and the
+next use compares its memory with the hashes before uploading over what the GPU drew (0.4.5's black
+character-creator preview was that upload). What makes them unneeded is the model itself: a surface
+started empty takes none, and a CPU write in its pages while its resource lives is counted, its
+contents kept (beta 8, part 2).
 
 ### Shaders
 
@@ -143,7 +148,10 @@ release, with the tester's agreement.
 
 ### Beta 8: GPU-owned surfaces never read the game's memory; the measurements
 
-1. **New GPU-owned surfaces start from their predecessor or empty** (on by default). An image
+Built 2026-11-08 (engine id 92). Safe mode turns parts 1 and 3 off.
+
+1. **New GPU-owned surfaces start from their predecessor or empty** (on by default;
+   `BB_EMPTY_SURFACES=0` fills them from memory as before). An image
    made at a draw for memory that belongs to a game resource made without data (a GX texture
    without initial data whose bind flags say render target, depth or shader writes; a YEBIS
    texture made without data) and with nothing to carry (beta 7's hand-over, an image copied in by
@@ -154,15 +162,17 @@ release, with the tester's agreement.
      count).
    - **Still filled from memory:** textures made with data, and memory no known resource holds.
    - Page tracking stays (part 4 decides it), so a CPU write after creation still reaches the image.
-2. **The first-fill hash fix** (always on, a bug fix): a first fill takes no hashes whether or not
-   the draw has already marked the image, for every image kind.
-3. **A pool of dead targets by shape** (on by default). The image of a destroyed target made
-   without data (format, size, levels, layers, tiling) waits in a pool, up to a cap, and a new
-   target of the same shape at any address takes it (re-keyed to its memory, cleared by part 1)
-   instead of a new allocation. The pool is emptied when VRAM is tight and after a time unused.
-   The 3 s grace stays only for beta 7's same-memory hand-over.
-4. **Write-watching replaced by the calls, for game textures** (off by default). With the switch
-   on, the pages of GX textures (targets, and textures made with data), YEBIS's targets (default
+2. **No hashes for those surfaces** (with part 1): a surface started empty takes no hashes, and a
+   CPU write in its pages while its resource lives is counted, its contents kept (`InvalidateMemory`).
+   The hashes stay for every image still filled from memory (see "The first-fill hashes").
+3. **Dead targets' images reused** (on by default; `BB_TARGET_POOL=0` off). A new surface takes the
+   Vulkan image of a dead image (its texture destroyed, or something newer made over it) of the same
+   shape that the GPU is done with, instead of allocating one; part 1 clears it. The game's pending
+   destroys and creates are taken first, so beta 7's same-memory hand-over keeps its image. Built
+   on the dead list itself rather than a pool kept apart: the old set waits out its 3 s grace on that
+   list, so a separate pool would be empty when a rebuild needs it.
+4. **Write-watching replaced by the calls, for game textures** (off by default;
+   `BB_WATCH_GAME_TEXTURES=0` turns it on). With the switch on, the pages of GX textures (targets, and textures made with data), YEBIS's targets (default
    usage, render-target or depth binding) and their views are not write-protected. YEBIS's
    CPU-written textures and Scaleform's planes with memory of their own stay watched until beta 9
    hooks their write calls.
@@ -177,9 +187,9 @@ release, with the tester's agreement.
    - **Part 1:** surfaces started empty, carried, still filled (by owner kind); depth targets
      cleared with no game clear pending.
    - **Part 3:** pool hits and misses, bytes held, freed for VRAM or age.
-   - **Shaders:** translations in play (count, time, by stage), with the session's cache state;
-     how many a vertex format given at creation would have predicted. This needs GX's
-     input-layout creator, found in the 1.09 executable as part of beta 8 (bbhost records it).
+   - **Shaders:** translations for draws (count, time, by stage) and how many were another variant
+     of a program translated before; input layouts the game created (count, elements, during
+     loading screens), from GX's input-layout creator `0x21657a0` (bbhost's `0x25657a0`).
    - **The rebuild stalls** in the hitch reports and Stall lines, against beta 7's 59-84 ms.
 
 **Test:**

@@ -139,6 +139,46 @@ bool StillLive(std::uint64_t memory, std::uint64_t ns);
 // (non-zero) is left out (0.4.6 beta 4: the texture being built there).
 bool LiveTextureOverlaps(std::uint64_t begin, std::uint64_t end, std::uint64_t skip_at = 0);
 
+// 0.4.6 beta 8 (part 1): the live resource that starts at `begin` and covers [begin, end), when the game
+// made it without its data for the GPU to write (GX: a render-target, depth or shader-write binding, or
+// a render-target or depth view; YEBIS: a render-target, depth or shader-write binding). Such a surface
+// never takes the game's memory: it starts from its predecessor's image or empty. `ns` is its creation
+// time (StillLive tells later whether it is still the one there). Following only.
+struct Surface {
+    bool found = false;
+    Owner owner = Owner::None;
+    std::uint64_t ns = 0;
+};
+Surface SurfaceAt(std::uint64_t begin, std::uint64_t end);
+// How a surface's first use began (the texture cache, RefreshImage).
+enum class SurfaceStart : std::uint8_t {
+    Empty,       // cleared (colour to zero)
+    DepthEmpty,  // a depth target cleared (depth 1, stencil 0), no game clear pending in its HTILE
+    DepthCleared, // the same, with the game's clear pending (it lands on top)
+    Taken,       // the GPU had written its memory as a buffer before: filled from that
+    Gone,        // its resource was no longer the live one there: filled from memory as before
+    kCount
+};
+void NoteSurfaceStart(Owner owner, SurfaceStart how, std::uint64_t bytes);
+// An image's first fill from the game's memory (not a surface started empty), by the resource there.
+void NoteFirstFill(Owner owner, std::uint64_t bytes);
+// A CPU write fault that landed on an image, by the live resource at its memory (part 5's measurement);
+// `kept`: a surface whose resource lives, its contents kept (counted, not uploaded). The largest few a
+// minute are described.
+void NoteCpuWrite(Owner owner, bool kept, std::uint64_t address, std::uint64_t bytes, std::uint32_t width,
+                  std::uint32_t height);
+// The same for the game's buffers (the buffer cache's write faults on a live GX buffer's memory).
+void NoteBufferCpuWrite(std::uint64_t address, std::uint64_t bytes);
+// 0.4.6 beta 8 (part 3): a new surface took a dead target's Vulkan image of its shape, or found none.
+enum class PoolEvent : std::uint8_t { Taken, NoShape, kCount };
+void NotePool(PoolEvent event, std::uint64_t bytes);
+// 0.4.6 beta 8 (part 4): images whose pages were left unwatched (the game's calls tell their writes).
+void NoteUnwatched(std::uint64_t images, std::uint64_t bytes);
+// 0.4.6 beta 8 (part 5): a shader translated for a draw, by stage (0 vertex, 1 pixel, 2 compute, 3
+// other), its time, and whether its program had been translated before in this session (another
+// variant of it).
+void NoteShaderTranslated(unsigned stage, std::uint64_t ns, bool program_seen);
+
 // Called on the game's thread when it destroys a texture (Following only).
 using DestroyedHook = void (*)(std::uint64_t memory, std::uint64_t bytes);
 void SetDestroyedHook(DestroyedHook hook);

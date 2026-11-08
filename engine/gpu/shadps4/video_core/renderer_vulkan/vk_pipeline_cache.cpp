@@ -10,6 +10,7 @@
 #include <string>
 #include <unordered_set>
 
+#include "engine/gx_resources.h"
 #include "common/hash.h"
 #include "common/elf_info.h"
 #include "common/io_file.h"
@@ -1010,6 +1011,26 @@ vk::ShaderModule PipelineCache::CompileModule(Shader::Info& info, Shader::Runtim
              perm_idx != 0 ? "(permutation)" : "");
     DumpShader(code, info.pgm_hash, info.hw_stage, perm_idx, "bin");
     CompileTimer timer;
+    // 0.4.6 beta 8 (part 5): translations for draws, by stage, with their time; a permutation is another
+    // variant of a program translated before (what knowing the draw's state ahead would have built).
+    struct TranslationNote {
+        Shader::HwStage stage;
+        bool seen;
+        std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+        ~TranslationNote() {
+            const unsigned s = stage == Shader::HwStage::Fragment  ? 1u
+                               : stage == Shader::HwStage::Compute ? 2u
+                               : stage == Shader::HwStage::Vertex || stage == Shader::HwStage::Export ||
+                                       stage == Shader::HwStage::Local
+                                   ? 0u
+                                   : 3u;
+            BbEngine::GxResources::NoteShaderTranslated(
+                s,
+                u64(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start)
+                        .count()),
+                seen);
+        }
+    } translation_note{info.hw_stage, perm_idx != 0};
 
     const auto runtime_before = runtime_info; // the compile changes it (clip distance emulation)
     const auto ir_program = Shader::TranslateProgram(code, pools, info, runtime_info, profile);

@@ -327,7 +327,8 @@ const SwitchGroup kSwitchGroups[] = {
          {"BB_INDIRECT_CLAMP", "1"}, {"BB_GPU_THREAD_PRIORITY", "0"},
          {"BB_AUDIO_THREAD_PRIORITY", "0"}, {"BB_NATIVE_SHADERS", "0"}, {"BB_SLEEP_SPIN_US", "600"},
          {"BB_ASYNC_PIPELINES", "0"}, {"BB_OCCLUSION", "0"}, {"BB_MODS_ENABLED", "0"},
-         {"BB_FAST_DRAWS", "0"}, {"BB_COMPILE_SKIP", "0"}, {"BB_VRAM_MANAGER", "1"}}},
+         {"BB_FAST_DRAWS", "0"}, {"BB_COMPILE_SKIP", "0"}, {"BB_VRAM_MANAGER", "1"},
+         {"BB_EMPTY_SURFACES", "0"}, {"BB_TARGET_POOL", "0"}}},
     {"BB_FAST_DRAWS", "0", false,
      {
          {"BB_SUBMIT_END_TASKS", "0"}, {"BB_MEMO_REVALIDATE", "0"}, {"BB_SAMPLER_MEMO", "0"},
