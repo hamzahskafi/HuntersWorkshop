@@ -164,6 +164,7 @@ found.
 | eFMann's smoothness leads ([archive/hitches-2026-10.md](archive/hitches-2026-10.md)) | Plan step 3, "Later" | Only if stutter after loads remains after 0.4.6 |
 | A flicker at two area crossings: post-processing effects off and on for a split second | The tester, 2026-11-08 | Not the memory work: there in 0.4.4 and 0.4.5, and in beta 8 with `BB_EMPTY_SURFACES=0`, `BB_TARGET_POOL=0` or `BB_GX_FOLLOW=0` (log `8d281c42`). Likely the game's own reset of its post-processing when YEBIS rebuilds; parked until a PS4 recording of those spots shows otherwise |
 | A hitch when a controller connects at startup (the UI changes its button prompts; possibly a YEBIS rebuild) | The tester, 2026-11-08: "something for later if I ever even bother with it" | Low priority; beta 8's rebuild logging may show whether it is a rebuild |
+| The tombstones in a graveyard do not look right to the tester | The tester, 2026-11-08 (beta 10's second run) | Not the memory work: the same in 0.4.5. Looked at only with a screenshot and the place, or a PS4 comparison |
 
 ### Performance, after 0.4.6
 

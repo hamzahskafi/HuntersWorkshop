@@ -421,6 +421,19 @@ resource lives at an address.
    - stale images left (near zero for owned ones);
    - copies through memory with an owned destination.
 
+**Revised by beta 10's runs** (proposed to the tester, 2026-11-08):
+
+- **Item 4's grace stays for YEBIS.** Its old set is destroyed up to 2 s before the new set is made
+  (the rebuild lines: 113-158 destroyed in the 2 s before, none during or after but at one load). Freed
+  sooner, the old images would be gone before the new set's hand-overs and beta 8's pool could take them.
+- **What the rule changes most:** the drawn images the "used just before" guess keeps (YEBIS's old
+  targets under the new set, up to 696 MiB a minute at loads) become dead images like any other: the
+  pool's donors first (beta 8's pool finds none for 45-55% of new surfaces, 164 and 215 a minute), then
+  freed. Measured by the pool's misses and the images kept.
+- **Item 6 goes:** no copy through memory reaches an owned image (beta 10's runs).
+- **At a draw:** the hand-over and refusal decide few images (3-18 a minute); the hand-over keeps
+  today's result, and a refused image is one part 1 already marks written.
+
 **What could go wrong, and the guard:**
 
 - **A resource the registry misses.** 3D and 1D textures have hooks, but not every path may be
