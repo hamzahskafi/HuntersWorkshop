@@ -133,7 +133,6 @@ found.
 | Whether YEBIS frees its old context before building the new one; where new targets land | Research, 2026-11-08 | Beta 8's `YEBIS rebuild:` lines (run A) |
 | Which owner objects build YEBIS contexts (the five virtual methods into `0x21d2dd0`) | Research, 2026-11-08 | Only if beta 8's numbers need it |
 | Surfaces filled from the GPU's buffer writes made before they existed (run A: 21-32 a minute, up to 108 MiB; most of its one 41.6 ms frame) | Beta 8 run A, 2026-11-08 | Beta 9: only writes since the surface's creation |
-| **A flicker at area crossings: post-processing effects off and on for a split second, the brightness or glow shifting (not all of it), new with beta 8, with and without part 4** | The tester, 2026-11-08 (logs `a49794df`, `031f2a7e`, `213fbb4f`) | Beta 9, first. Not beta 8's parts: `BB_EMPTY_SURFACES=0` and `BB_TARGET_POOL=0` each left it as it was (the tester, 2026-11-08), and with both off beta 8 behaves as beta 7. Likely older and hidden by beta 7's 59-84 ms freeze at the same moment. Next checks: `BB_GX_FOLLOW=0` (betas 4-7's following of the game's creates and destroys off: if it goes, the retiring of the old YEBIS set's images loses something the new set reads), then 0.4.5 at the same crossing, then a PS4 recording of it (the game's own reset of its post-processing at a rebuild) |
 | CPU writes on YEBIS textures, 10-71 a minute: which of its textures (its CPU-updated ones expected) | Beta 8 run A | Beta 9: YEBIS's Map, update and unmap hooked |
 | 21 CPU writes on small textures made with their data at every startup (32x32, 1024x512): which code writes them | Beta 8 runs A and B | Beta 9: the writer named (the log's largest-written list gives the addresses) |
 | GX's input-layout creator in 1.09 (for predicting shader variants) | Research, 2026-11-08 | Done in beta 8: `0x21657a0`, hooked and counted |
@@ -151,6 +150,7 @@ found.
 |---|---|---|
 | The game's area prefetch (made for a hard disk; its model could drive the loads) | 0.4.6 memory design, "Next" | Looked at after beta 10, if loading screens or the frames after them still stall |
 | eFMann's smoothness leads ([archive/hitches-2026-10.md](archive/hitches-2026-10.md)) | Plan step 3, "Later" | Only if stutter after loads remains after 0.4.6 |
+| A flicker at two area crossings: post-processing effects off and on for a split second | The tester, 2026-11-08 | Not the memory work: there in 0.4.4 and 0.4.5, and in beta 8 with `BB_EMPTY_SURFACES=0`, `BB_TARGET_POOL=0` or `BB_GX_FOLLOW=0` (log `8d281c42`). Likely the game's own reset of its post-processing when YEBIS rebuilds; parked until a PS4 recording of those spots shows otherwise |
 | A hitch when a controller connects at startup (the UI changes its button prompts; possibly a YEBIS rebuild) | The tester, 2026-11-08: "something for later if I ever even bother with it" | Low priority; beta 8's rebuild logging may show whether it is a rebuild |
 
 ### Performance, after 0.4.6
