@@ -90,3 +90,7 @@ Oldest first:
 - [plan-0.4.4.md](plan-0.4.4.md): the plan to 0.4.4 stable, beta by beta (23 to 28), with the decisions
   as they stood and the questions settled, 2026-10-31 to 11-03; the decisions that stand are in
   [plan.md](../plan.md). Moved out of the plan on 2026-11-05.
+- [plan-0.4.5.md](plan-0.4.5.md): the plan from 0.4.4 to 0.4.5 stable and 0.4.6 beta 7: the GPU steps
+  (released as 0.4.5), the memory cleanup that became 0.4.6 betas 1 to 7, and the shader and CPU
+  steps not yet started, 2026-11-05 to 11-08; its open items are in [plan.md](../plan.md)'s register,
+  the 0.4.6 roadmap in [memory-model.md](../memory-model.md). Moved out of the plan on 2026-11-08.

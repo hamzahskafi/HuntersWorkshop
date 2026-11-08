@@ -1,31 +1,31 @@
 # Hunter's Workshop: the plan
 
-What comes next, and the rules and decisions it works under. Updated 2026-11-07.
+What comes next, the rules and decisions it works under, and every open item. Updated 2026-11-08.
 
-- **Where it stands:** 0.4.5 was released on 2026-11-07 from beta 13 (`a6b34b8`, engine id 84):
-  step 1, the GPU steps, +8.4% at the lamp spot against 0.4.4 (release-notes-0.4.5.md). 0.4.6 is in
-  beta: beta 1 (engine id 85) is what was tested as 0.4.5 betas 14 to 19, the VRAM and texture work
-  (step 3 below; release-notes-0.4.6.md); beta 3 (engine id 87) makes `BB_VRAM_MANAGER=0` a test of
-  the game's own creates, destroys and releases alone, at any VRAM level; beta 4 (engine id 88)
-  follows them as they happen, with no time budget: textures built in the game's own create call,
-  destroys and releases freed as soon as the GPU is done; beta 5 (engine id 89) is the memory design
-  below ("The 0.4.6 memory design"), with the logging that tests it, and the VRAM manager off by
-  default; beta 6 (engine id 90) follows the textures the game makes outside GX (YEBIS, Scaleform)
-  and frees the GPU's stale drawings the game's memory has moved on from; beta 7 (engine id 91) keeps
-  YEBIS's target images across its rebuilds and prepares sampled textures made without data at
-  creation. 0.4.4 was released on 2026-11-03 (`cbec5a2`, engine id 64).
+- **Where it stands:** 0.4.6 is in beta: the memory model release
+  ([memory-model.md](memory-model.md)). Betas 1 to 7 (engine ids 85 to 91) moved the engine's
+  caches onto the game's own create, destroy and release calls; beta 7's log came back on
+  2026-11-08, and beta 8 is next. 0.4.5 was released on 2026-11-07 from beta 13 (`a6b34b8`,
+  engine id 84): the GPU steps, +8.4% at the lamp spot against 0.4.4. 0.4.4 was released on
+  2026-11-03 (`cbec5a2`, engine id 64).
 - **Where the work goes:** the branch `claude/awesome-gates-cjba5e`.
+- **How nothing gets lost:** every open item, whatever its size or source, is a row of
+  [the register](#the-register-every-open-item) below, with where it is scheduled. See the ground
+  rule "Nothing is dropped silently".
 
 The other documents:
 
-- [performance.md](performance.md): the findings behind the performance work below.
+- [memory-model.md](memory-model.md): 0.4.6's design, the research behind it and its roadmap, beta
+  by beta, with what each must show before the next.
+- [performance.md](performance.md): the findings behind the performance work after 0.4.4.
 - [changelog.md](changelog.md): every change since Hunter's Workshop (HW) began, with its
   measurements and credits.
 - [community-fixes.md](community-fixes.md): what the other Bloodborne PC projects fixed, vetted
   against HW.
 - [engine-map.md](engine-map.md): how the engine works.
 - [archive/](archive/README.md): finished plans and closed investigations. The plan that led to
-  0.4.4 is [archive/plan-0.4.4.md](archive/plan-0.4.4.md).
+  0.4.4 is [archive/plan-0.4.4.md](archive/plan-0.4.4.md); the one to 0.4.5 and 0.4.6 beta 7,
+  [archive/plan-0.4.5.md](archive/plan-0.4.5.md).
 
 ## Ground rules
 
@@ -48,8 +48,18 @@ The other documents:
   workaround for one card is the last resort.
 - **The launcher's pages and settings:** changes are proposed to the tester before they are
   built.
-- **One beta per step.** Each beta has its own branch and engine id, and is measured on the
-  tester's PC against the one before.
+- **One step per beta, or several when one log can tell them apart** (the tester, 2026-11-08):
+  each part then has its own switch in Extra variables that brings back the old behaviour. Each
+  beta has its own engine id and is measured on the tester's PC against the one before.
+- **Nothing is dropped silently** (the tester, 2026-11-08: "so that we don't lose on or forget any
+  steps"). Every finding, deferral, idea, measurement still to make and tester report becomes a
+  row of the register below in the commit that meets it, with where it is scheduled. A row leaves
+  only as done (with its beta or commit) or dropped (with the tester's agreement and the reason).
+  Before a beta is built, its section lists the rows it takes; its commit updates them. An item
+  that waits on a log says which log and which line.
+- **The engine follows the game's calls, not its memory** (the tester, 2026-11-08, on leaving the
+  generic emulator model: "in order to have a fulfilling experience and optimal engine"). A change
+  that would guard against the game where its calls already say what happens needs a reason.
 - **Linux waits until Windows is done.**
 
 Addresses in these documents: **patch** addresses are the ones `Bloodborne.xml`,
@@ -74,237 +84,92 @@ The decisions that still stand. How each was reached is in [archive/plan-0.4.4.m
 | The follow camera | Fixed in HW's engine (0.4.4 beta 24): every per-frame weight converted each frame with the frame timer. FPS++ is that base plus only what Kyo changed. bbhost's weight list is a cross-check only. |
 | PC memory model | Removed (0.4.4 beta 28). The game's data lives in VRAM; the GX region is read in place. |
 | Online connections | The engine reports a connection to the game once the server gives the player's address, and a failure when the server says the player left or timed out. That is how bbhost and Lantern 0.9.39 do it; nothing to change (checked 2026-11-03). |
+| The memory model (0.4.6) | The engine's caches follow the game's own calls (GX, YEBIS, Scaleform): images and buffers belong to the resources the game creates, GPU-owned surfaces never read the game's memory, and writes are learned from the calls; pages are watched only where no call tells (the tester, 2026-11-08). 0.4.6 is that release, depth buffers, the game's buffers and the shaders built ahead included. The roadmap: [memory-model.md](memory-model.md). |
+| The VRAM manager | Off by default since 0.4.6 beta 5 (the tester's call): the game's calls decide. `BB_VRAM_MANAGER=1`, Use less VRAM and safe mode turn it on, its rules unchanged. |
+| The game's GX calls straight to the host GPU | Not planned. Decided after 0.4.6 by profiling how much frame time replaying the command stream takes; done only if that share is worth it, and then one part at a time ([memory-model.md](memory-model.md), "After 0.4.6"). |
 | Test PC | RTX 3070 Ti, i5-14600KF, 60 Hz display; Windows HDR is off. HDR-output items are checked in the code, not in the tester's runs. |
 
-## Now: performance
+## Now: 0.4.6, the memory model release
 
-The work after 0.4.4, in order: the tester's call (2026-11-05) puts fewer GPU steps first and the
-memory cleanup after them. The evidence for each item is in [performance.md](performance.md).
+The detail of every beta (its parts, switches, test runs and what it must show) is in
+[memory-model.md](memory-model.md). The numbers after beta 8 may shift with what each log shows;
+the order of the work does not change without the tester.
 
-- **The targets:** time back at the busiest spots without changing a setting or a pixel, then
-  smoothness at every frame rate.
-- **Each change behind a switch while it is tested;** its gain is the lamp spot's FPS with it on and
-  off. Settled switches are removed with the tester's agreement (beta 7: `BB_SKIP_EMPTY_DRAWS`,
-  `BB_SHADOW_CLEAR_FOLD`).
-
-**Step 1: fewer GPU steps (done, betas 1–12; beta 13 the cleanup).** Each change gives the same picture.
-
-- **Done:**
-  - **The empty full-screen draws, 0.1 ms** (beta 1, `Rasterizer::SkipEmptyDraw`): GCN's in-place
-    depth expansions, which change nothing on the PC.
-  - **Lamp shadow faces drawn into their blur's scratch image, the copy left out, 0.24 ms** (beta 4,
-    `ShadowRedirect`). Its switch `BB_SHADOW_COPY_SKIP` removed in beta 13 (settled).
-  - **Their clears folded into the face's render pass, 0.12–0.17 ms** (beta 5; beta 6 keeps the
-    fold inside a pass smaller than the face).
-  - **Beta 7, the cleanup:** the copy-neighbour tally (beta 2), the shadow trace (beta 3) and the
-    empty draws' register log (beta 1) removed once answered, with two settled switches. Kept: the
-    counters (`GPU steps per second (0.4.5)`), the profile labels for indirect dispatches and image
-    clears, the put-back safety net.
-- **Closed:** `a954e79d` (beta 1's one step gained nothing: its 0.21 ms was the indirect dispatch
-  after it) and that dispatch, `2da7fe60`: the game's particle update, cleanly translated, real work
-  (performance.md).
-- **The copy shader, done (betas 8–12, 2026-11-06):** its copies held to their pass's end (beta 9)
-  and merged into one dispatch by GPU address, a dispatch's batches together (betas 10–12). Lamp
-  spot 6.98 to 6.83 ms a frame; in the tester's three-build scene 0.13 ms before beta 12; barriers
-  44 to 23 a frame. What it cost before, and how it was found, below.
-- **Left, with the tester's say:**
-  - **The copy shader (closed, kept for the record):** 0.35–0.45 ms a frame in every scene of play (60–78 dispatches), and 20–25
-    render passes a frame begun again after one of them. Moving a pass's copies ahead of it, in
-    fewer dispatches, needs to know that no earlier draw in the pass touches what they copy, and to
-    place work ahead of commands already recorded: the riskiest change of step 1. Beta 8 traces one
-    frame's copies in their passes (`vk_copy_trace.h`, removed in beta 13); then the decision.
-    Estimate 0.15–0.3 ms, everywhere.
-    - **Beta 8's trace (2026-11-05, performance.md):** 53 copy dispatches a frame, 25 inside a pass
-      and 28 at its end; every copy inside could move to its pass's start, and **no draw later in
-      the same pass reads what any copy wrote**. So the copies can wait for the pass's end instead:
-      nothing goes ahead of recorded commands.
-    - **Built as beta 9 (the tester's go-ahead): copies held to the pass's end.** A copy-shader
-      dispatch that comes inside a pass leaves it open; its copies are recorded where the pass ends
-      anyway (other targets, an upload, a barrier, a submission), before what ended it. A draw or
-      dispatch that binds bytes a held copy writes, or writes bytes it reads, sends the held copies
-      first (the pass ends, as today). Copies reading the game's memory in place are not held. A
-      switch for the A/B, and counters. Then beta 10: a pass's held copies in one dispatch by buffer
-      address (188 copy commands a frame to about 30).
-    - **What others do (read 2026-11-05).** **bbhost** (droogie, `bdc5cdf`): copy-backs of renamed
-      dynamic buffers end 55% of its draw runs, and it makes them *copy versions*: the bytes go into
-      a staging copy at the copy, the draws after it bind that copy, and the copies into place wait
-      for the next transfer batch, dispatch or submission, with no pass end or barrier at the copy
-      (`gpu_internal.h`, `docs/list-resolve.md`). It also merges copies into runs (`copy_runs.h`)
-      and leaves image copies unmade by sending their reads elsewhere (`copy_elide.h`, the general
-      form of beta 4's shadow redirect). **bbport 0.7** (deadinside28, `BB_COPY_SKIP_SAME`, on by
-      default): of each copy shader call only the copies that change their destination run (the
-      last copy into exactly it wrote the same bytes, nothing copied over it since), checked on a
-      thread of its own; a call left with none is left out. +1–4% in heavy views. Built on its own
-      buffer code (stage A); for HW it would compare the source bytes when the copy is recorded.
-      **shadPS4 upstream**: one `vkCmdCopyBuffer` per buffer pair; HW is past it.
-    - **What HW measured before:** a render pass begun again with no barrier costs a few µs (0.4.4
-      beta 21), so the restarts are not the cost; the copies' own dispatches and barriers are (about
-      5 µs a step). Moving copies pays only if they then run in fewer dispatches.
-    - **The choice, after the trace:** (a) a pass's movable copies in one dispatch at its start;
-      (b) bbhost's copy versions, no pass end at all (larger: the draws after a copy bind its
-      staging copy); (c) bbport's copies that change nothing left out, which first needs a count of
-      how many change nothing.
-  - **Smaller items, moved to "The rest of 0.4.5" below:** `mem-4`; `upscale-2` and `-3` (0.29 ms at
-    Quality, nothing at DLAA); the GPU idle between submissions (about 0.1 ms, 3 a frame).
-- **The result** (0.4.4 against beta 12 in the same scenes, 2026-11-06): the lamp spot 135.0 to
-  146.4 FPS (+8.4%), a second spot 122.3 to 131.0 (+7.1%), the Hunter's Dream (late game, few
-  lamps, ~970 draws) 146.3 to 149.8 (+2.4%). The tester saw GPU use 96 to 98% and power 245 to 258 W
-  at the second spot: less energy a frame (2.00 to 1.97 J), more of the GPU busy at once.
-
-**The rest of 0.4.5, in order** (the tester's choice, 2026-11-06: 0.4.5 goes on as betas; stable
-when the tester says).
-
-1. **Beta 13, the cleanup:** beta 8's copy trace and `BB_SHADOW_COPY_SKIP` removed. `BB_COPY_HOLD`
-   and `BB_COPY_MERGE` stay through the stable release (the merged copies' shader has run on the
-   tester's NVIDIA card only), then go.
-2. **The barriers that remain:** about 23 a frame at the lamp spot. A measurement beta: reads
-   tracked exactly instead of by 4 KiB (`BbToggle::CoarseReadTracking`) behind a switch in Extra
-   variables, with the barrier counts by what they wait for; the same scene with and without. Built
-   into a feature only if the false waits are many and the CPU cost of exact tracking small.
-3. **The GPU idle between submissions:** about 0.12 ms a frame in 3.3 gaps (the Hunter's Dream's
-   profile): why the GPU runs out of work there, and whether the submissions can overlap.
-4. **Step 2, shader code** (below), with the Hunter's Dream as its scene: there DLAA's 0.96 ms, the
-   G-buffer pass's 0.74 ms and the lighting passes are most of the frame.
-5. **Step 3, the memory cleanup: beta 16** (below). Its test: a normal session of about 30 minutes
-   with lamp travel, and one with `BB_VRAM_TEST_BUDGET_MB=3500` in Extra variables (a 4 GB card), a
-   long route through several areas. Read: the frames after loading screens (Frame stats' worst
-   frame and the Stall lines' images registered), `GX follow` (built, drawn, misses), the VRAM
-   manager's minute. **Next, by the numbers:** the misses' descriptions if many; the game's data
-   followed the same way (buffers built ahead, freed on release: the `GX research` line says how
-   much of it sits in VRAM); shaders translated when the game creates them, if the shader counts and
-   the post-load shader work say it is worth it.
-6. `mem-4` and `upscale-2`/`-3` when one of the above passes near them (0.1 ms at most; the second
-   only at reduced upscaler presets).
-
-**Step 2: shader code.** It acts on the shading, the part of the frame that scales with pixels
-(1.5–2 ms at 1080p).
-
-- Rank the game's shaders by GPU time, then check the top ones with `bb-shader-gpu-stats`
-  (`native_shader_compiler.md`). Look at registers and occupancy, inputs still interpolated by GCN's
-  formula (321 of 1,201), and the legacy multiply.
-- Vertex shader contraction with an invariant position (`shader-5`, about 4% of vertex code).
-- The native compiler's step 2 (control flow without goto variables): measured in the lab first, and
-  built only if the hot shaders gain.
-
-**Step 3: the memory cleanup, for smoothness at every frame rate.**
-
-- **The tester's session with it off** (2026-11-06, performance.md "With the cleanup off"): no long
-  frame in play, write faults gone (median 22.5 a second to 0), the game's data level at 1.4 GB,
-  VRAM at most 54% of the driver's budget. So on a card with room the cleanup only costs.
-- **Beta 14 (the tester's call, 2026-11-06): one VRAM manager** (`vram_policy.h`) for the texture
-  cache and the buffer cache, in place of the first step proposed (the age cleanup only above 70%).
-  With room in VRAM (below 80% of the driver's budget) nothing leaves for its age, textures (until
-  then 20 s on cards up to about 10 GB) or the game's data (180 s). From 80% the longest unused goes
-  first, both alike, in steps (5 minutes, 2, 1, 30 s) until 75%; from 90% 10 s then 1 s, and
-  textures the GPU drew are stored into the game's memory without the GPU wait. The launcher's two
-  VRAM rows are one, "Use less VRAM" (65%). The points below remain for smaller cards' logs.
-- **Beta 15 (the tester's call, 2026-11-06, on beta 14's log):** beta 14 overshot (freed memory
-  shows in the driver's count only once whole allocations go back) and its single blocks of the
-  game's data gave nothing back. So the manager learns where the player is (areas from the files
-  the game opens, visits, scores and the likely next areas, nothing hard-coded), keeps three lines
-  (comfortable 70, tight 80, full 90), frees at loading screens and only with slack in play, takes
-  garbage first and whole 64 MiB chunks, and logs refaults and what went back to the driver. It also
-  listens to the game's GX texture and buffer calls (research, logged only).
-- **Beta 17 (2026-11-07, on beta 16's logs):** loads after the first: 1 of 10 with a frame over 33
-  ms (beta 15: 11 of 20). The session's first load translated about 40 shaders every session (the
-  ordinary permutations motion draws asked for only to look at their buffers): asked with motion
-  first now. Building ahead paced per 16 ms; the game's data in released buffers freed.
-- **Beta 16 (the tester's call, 2026-11-07, on beta 15's logs):** the area tracker removed (it would
-  work against the game, which says what it creates and destroys); the texture cache follows the
-  game's textures: built during the loading screen that creates them (from the T# its graphics layer
-  builds, as bbhost does), freed when it destroys them. The VRAM manager stays for what the game does
-  not say and for cards without the room.
-
-- **The 0.4.6 memory design (beta 5, the tester's call on beta 4's logs, 2026-11-07: "all in one
-  beta, and the findings will inform us").** The game's memory is managed as the PS4 manages it, the
-  engine's caches following the game's own calls rather than guarding against them:
-  - **The game's resources are known whole** (`gx_resources.cpp`): creators, destructors, Map (types
-    0-2 in place, 3 a renamed copy of a buffer from GX's pool, 4 that copy again, read in 1.09), the
-    render-target and depth views, and the 1D textures with their destructors.
-  - **Memory belongs to the newest resource in it:** an image wholly inside the memory of a resource
-    the game made after it is no one's and goes once the GPU is done (`ProcessGxCreated`,
-    `dead_by_reuse`); one the GPU drew and used from the pass before is kept.
-  - **A release frees nothing** (beta 4's eviction on release gave 82-201 ms frames at loading
-    screens); the game's data stays in VRAM until the game unmaps its memory, and the unbinds then go
-    one per run of blocks, not per 64 KiB block; the cache's own marking is no longer counted as the
-    game's write faults.
-  - **Textures made without their data** get their image at their first Map, registered without an
-    upload (the first draw uploads it); every new image's first upload takes no hashes.
-  - **VRAM full:** an image goes to system memory (over the budget if it must) instead of stopping.
-  - **The VRAM manager is off by default** (the tester's call); `BB_VRAM_MANAGER=1`, Use less VRAM or
-    safe mode turn it on, its rules unchanged.
-  - **The logging that tests it:** who holds the card when the budget moves (Windows' per-process GPU
-    memory counters), images draws still make and stale images by the game resource over them (the
-    largest five described), Map and view counts, sparse bind calls and their time (minute line,
-    hitch reports, `BB_FRAME_STATS`), images in system memory.
-  - **Beta 6 (on beta 5's log, 2026-11-08):** about 1.1 GB of stale images were the GPU's drawings
-    over memory no GX resource held (1920x1080 targets, unused for minutes), and two in-play hitches
-    were bursts of textures there too (186 and 57). bbhost had found why: YEBIS (the post-processing
-    middleware) has its own device, and Scaleform (the UI) its own textures. Beta 6 follows YEBIS's 2D
-    textures and Scaleform's planes with memory of their own as the game's resources (1.09 sites
-    checked), drops resources whose memory the game unmaps, frees a stale image the GPU drew once the
-    memory under it was written over (what its next use would upload over), retires a destroyed
-    texture's image as soon as any new resource overlaps it, and stops following Map (only buffers,
-    always renamed). The minute log describes the largest images draws still make over no resource,
-    with the mapping each lies in.
-  - **The two slow areas of beta 5's run** (53-57 FPS for 10-20 s after arriving in m23 and m24): the
-    GPU busy (idle 1-3 ms a frame against 10-12), not shaders (none compiled); the second came as
-    VRAM reached 91% of the budget. Beta 6's freeing should tell whether VRAM was the cause.
-  - **Beta 7 (on beta 6's log, 2026-11-08: the two slow areas at 60 FPS with the GPU idle 10-11 ms a
-    frame, stale images under 1 MiB, images 0.9-1.4 GB against 2-2.5, VRAM at most 72% of the budget;
-    the budget steps between 7,249 and 5,859 MiB as the game's own use crosses about 3.9 GB, nothing
-    else moving):** both hitches left were YEBIS rebuilding its targets (158 and 175 images made at a
-    draw, 183 and 261 MiB uploaded; the second came with a controller connecting). YEBIS's re-created
-    target now keeps the image of the one it replaces when memory and shape match (a destroyed YEBIS
-    texture's images wait 3 s for it), and a GX texture made without its data that is sampled only
-    (bind flags +0x3b: 0x8 without 0x20, 0x40 or 0x80) gets its image at creation, registered without
-    an upload (after some loads draws made about 1,000 of these a minute).
-  - **Next (the logs decide):** the game's area prefetch (it was made for a hard disk: its model can
-    drive the loads), the shader building and its threads, bbport's no-sparse memory module (the
-    Linux phase).
-- **Evict by the VRAM budget, not by age alone.** Done in beta 14 (above).
-- **Paced:** in play, at most a set amount a second (beta 15: 12 ms a second and one 64 MiB chunk of
-  the game's data, only while frames have slack); loading screens trim down to the comfortable line
-  (beta 15).
-- **The bind waits only for the work that used the evicted blocks.** This needs a last-use tick per
-  block; until then, the unbinds go in batches on loading screens.
-- **With it, the counters:** MiB and blocks per cleanup, stage B's time in it, bind waits, and blocks
-  coming back within 10 minutes (the churn). Beta 15: freed by kind, returned to the driver at once,
-  and what came back within 5 minutes (refaults, which raise the comfortable line).
-- **Expected:** 3 of the 4 long-frame minutes of the 217 gone, with the uploads and write faults of
-  the churn.
-- **Later, if the logs still show stutter after loads:** eFMann's ideas
-  ([archive/hitches-2026-10.md](archive/hitches-2026-10.md), "Smoothness leads").
-
-**Step 4: the CPU, for other PCs.**
-
-- Stage B on two threads (`parallel-stageb.md`, approach B), once a 6-core CPU or a frame rate above
-  about 230 FPS makes it the limit.
-- The small CPU items with it: `idle-1`, `pipe-1`, `asc-2` and `rt-1`.
-
-**Later, if at all:**
-
-- A GPU timer at pass ends that doesn't wait at each label, if an item's gain needs a finer measure
-  than FPS.
-- Serve the copy shader's ranges from the engine's snapshots, so no copy runs (not the PC memory
-  model; see performance.md).
-- Draws built from the game's GX objects and barriers taken from its drain calls, as bbhost does: a
-  renderer of a different kind, not a step of this plan.
-
-**Not reopened:**
-
-- `seg-1`, `renderer-3`, `renderer-4`, `renderer-6` and the refuted ideas (`engine-map.md` 5).
-- The October hitch leads (the game's job threads, the online summon, the PC memory model): fixed,
-  removed, or not the cause in 0.4.4's logs.
+| Beta | What it does | State |
+|---|---|---|
+| 1 to 7 | The caches follow the game's create, destroy and release calls: textures built in the game's create call, nothing freed on a release, YEBIS's and Scaleform's textures followed, YEBIS's same-memory targets kept across its rebuilds | Done; beta 7's log read 2026-11-08 |
+| 8 | GPU-owned surfaces start from their predecessor or empty, never from memory; the first-fill hash fix; a pool of dead targets by shape; write-watching replaced by the calls for game textures (off, counted); the logging for betas 9 to 13 | Next |
+| 9 | Write-watching only where no call tells; the writers beta 8 finds hooked; the design note for beta 10, agreed with the tester before code | Planned |
+| 10 | Images belong to their textures: found through the registry at a draw or bind, retired with their resource, whole-texture copies image to image; the address guesses removed | Planned |
+| 11 | Depth buffers: their compression metadata and pending clears follow the owner; a new depth target starts from the game's clear | Planned |
+| 12 | The game's buffers by the calls: creation and Map say what changed | Planned |
+| 13 | Shaders built ahead: translated at startup for the variants the game's calls predict, pipelines built during loading screens (moves earlier if beta 8 shows compiles are the bigger stutter) | Planned |
+| Release | Switches settled with the tester, old paths agreed on removed, a small-card run, the docs | Planned |
 
 ### Waiting on the tester
 
-- **0.4.6 beta 7's runs** (step 3, "The 0.4.6 memory design"): a normal session with loading screens,
-  and the minute lines named there.
+- Nothing until beta 8 is pushed. Then its runs: A (a normal session with loading screens and area
+  crossings), B (the same with part 4's switch on), and before beta 13, C (the shader cache
+  cleared, the same route).
 
-## Next, after the performance work
+## The register: every open item
 
-- AMD FSR frame generation through the SDK, on AMD's swapchain.
+Every item not done, wherever it was raised, with where it is scheduled (the ground rule "Nothing
+is dropped silently"). Items the 0.4.6 roadmap took are listed first, so their old wording can be
+found.
+
+### Taken into 0.4.6
+
+| Item | From | Scheduled |
+|---|---|---|
+| YEBIS's rebuilds stall 59-84 ms at area crossings (about 280 targets filled from memory) | Beta 7's log, 2026-11-08 | Beta 8 |
+| A target's first fill hashes every level (beta 5's skip never applied to GPU-written images) | Research, 2026-11-08 | Beta 8, part 2 |
+| Depth targets filled from memory; their HTILE followed by address | Research, 2026-11-08 | Beta 8 part 1, beta 11 |
+| Whether YEBIS frees its old context before building the new one; where new targets land | Research, 2026-11-08 | Beta 8's logging |
+| Which owner objects build YEBIS contexts (the five virtual methods into `0x21d2dd0`) | Research, 2026-11-08 | Only if beta 8's numbers need it |
+| GX's input-layout creator in 1.09 (for predicting shader variants) | Research, 2026-11-08 | Found in beta 8 |
+| "The game's data followed the same way (buffers built ahead, freed on release)" | Plan step 3 (0.4.5 beta 16) | Partly done (0.4.5 beta 17; 0.4.6 beta 5); the rest is beta 12 |
+| "Shaders translated when the game creates them" (all 13,277 at startup) | 0.4.5 beta 17, "Not done" | Beta 13, measured in beta 8 |
+| "The shader building and its threads" | 0.4.6 memory design, "Next" | Beta 13 |
+| `pipeline_compiles.md`'s "Remaining (not done)": catalog coverage, the warm-up's state rebuilt on the main thread, a profile change emptying the cache, the scene-curve folder unseeded, AMD and Intel catalogs | `pipeline_compiles.md` | Looked at in beta 13 |
+| `BB_COPY_HOLD` and `BB_COPY_MERGE` removed ("stay through the stable release, then go") | The rest of 0.4.5, item 1 | The 0.4.6 release, with the tester |
+| A small-card run: `BB_VRAM_TEST_BUDGET_MB=3500` with the VRAM manager on (its rules predate the memory model) | Plan step 3 (0.4.5 beta 16's test) | The 0.4.6 release |
+| The VRAM manager's unbinds wait only for the work that used the evicted blocks (a last-use tick per block) | Plan step 3 | With the small-card run; built only if it shows bind waits |
+
+### Candidates the logs decide
+
+| Item | From | Scheduled |
+|---|---|---|
+| The game's area prefetch (made for a hard disk; its model could drive the loads) | 0.4.6 memory design, "Next" | Looked at after beta 10, if loading screens or the frames after them still stall |
+| eFMann's smoothness leads ([archive/hitches-2026-10.md](archive/hitches-2026-10.md)) | Plan step 3, "Later" | Only if stutter after loads remains after 0.4.6 |
+| A hitch when a controller connects at startup (the UI changes its button prompts; possibly a YEBIS rebuild) | The tester, 2026-11-08: "something for later if I ever even bother with it" | Low priority; beta 8's rebuild logging may show whether it is a rebuild |
+
+### Performance, after 0.4.6
+
+The evidence for each is in [performance.md](performance.md) and [engine-map.md](engine-map.md); the
+plan they come from is [archive/plan-0.4.5.md](archive/plan-0.4.5.md).
+
+| Item | From | Scheduled |
+|---|---|---|
+| Shader code (step 2): rank the game's shaders by GPU time and check the top ones with `bb-shader-gpu-stats`: registers and occupancy, inputs still interpolated by GCN's formula (321 of 1,201), the legacy multiply. The Hunter's Dream as its scene (DLAA 0.96 ms, the G-buffer pass 0.74 ms, the lighting passes) | Plan step 2 | After 0.4.6 |
+| Vertex shader contraction with an invariant position (`shader-5`, about 4% of vertex code) | Plan step 2 | With step 2 |
+| The native compiler's step 2 (control flow without goto variables), measured in the lab first | Plan step 2 | With step 2, if the hot shaders gain |
+| The barriers that remain (about 23 a frame at the lamp spot): a measurement beta with reads tracked exactly (`BbToggle::CoarseReadTracking`) and barrier counts by what they wait for | The rest of 0.4.5, item 2 | After 0.4.6 |
+| The GPU idle between submissions (about 0.12 ms a frame in 3.3 gaps): why the GPU runs dry there, and whether submissions can overlap | The rest of 0.4.5, item 3 | After 0.4.6 |
+| `mem-4`, `upscale-2`, `upscale-3` (0.1 ms at most; the second only at reduced upscaler presets) | The rest of 0.4.5, item 6 | When nearby work passes them |
+| The CPU (step 4): stage B on two threads (`parallel-stageb.md`, approach B), with `idle-1`, `pipe-1`, `asc-2` and `rt-1` | Plan step 4 | When a 6-core CPU or a frame rate above about 230 FPS makes it the limit |
+| A GPU timer at pass ends that doesn't wait at each label | Plan, "Later, if at all" | If an item's gain needs a finer measure than FPS |
+| The copy shader's ranges served from the engine's snapshots, so no copy runs | Plan, "Later, if at all" | Later, if at all |
+| `engine-map.md` section 6: the first test session, the small measurement code and what the agents could not determine | `engine-map.md` | Gone through with step 2 and step 4; what was answered since is marked there then |
+
+Not reopened: `seg-1`, `renderer-3`, `renderer-4`, `renderer-6` and the refuted ideas
+(`engine-map.md` section 5); the October hitch leads (the game's job threads, the online summon,
+the PC memory model), fixed, removed, or not the cause in 0.4.4's logs.
+
+### Features and fixes, after 0.4.6
+
+- AMD FSR frame generation through the SDK, on AMD's swapchain: only if the tester brings frame
+  generation back (Decisions).
 - OptiScaler checked again, then kept or dropped.
 - A proper DLSS test, then its cost table.
 - The SSR patch's tuning writes measured (bbhost: 7.8 ms against the game's 6.1).
@@ -317,8 +182,11 @@ when the tester says).
 - The AMD and Intel shader item (`shader-3`).
 - Small: the online probe's log line says how long the probing took, as bbhost's does
   (`after N ms`), since log lines carry no time.
+- The features bbport 0.7 noted that HW has not taken: GT-VBAO, the shader recipe pack (to be
+  converted to HW's cache inputs), video skipping, invert mouse X ([community-fixes.md](community-fixes.md),
+  "bbport 0.7, reviewed").
 
-## Checks not made before 0.4.4
+### Checks not made
 
 - **The launcher's texts on screen:** at 100% and 150% scaling, in English, German and Japanese,
   in both Classic and Modern layouts, plus the Insert menu's Enhancements section.
@@ -331,11 +199,22 @@ when the tester says).
   is checked: two invasions on 2026-11-03.
 - **Untested for want of hardware:** AMD FSR 4.1 on Radeon cards, FSR 2.3.4, HDR output.
 
-## Open decisions
+### Open decisions
 
 - NVIDIA Reflex on `VK_NV_low_latency2` without Streamline: whether, and when.
 - The GPU-path tracers that overlap.
 - The System menu's PC pages under one parent entry, if the game's menu code allows it.
+
+### Linux, for later
+
+| Topic | Note |
+|---|---|
+| The launcher | The Avalonia launcher rebuilt on the Windows launcher's pages, with its stale texts, the dead DLSS model row and the 7 texts only it looks up. |
+| FSR | AMD's SDK is Windows only. Linux has no FSR until AMD ships for Linux; the Linux build keeps compiling, and FSR is not offered there. |
+| DLSS | NVIDIA's Linux loader library (`libnvsdk_ngx.a`) has the same licence problem as Windows': Linux keeps HW's own path (`libnvidia-ngx.so.1`), the driver's core, with the shared id. |
+| Old Linux pieces | Removed in 0.4.4 beta 28: the Python GTK launcher, the Nix/AppImage build, `shell.nix` and `test_packaged_vulkan.py`. Linux keeps `packaging/linux/` (Ubuntu setup, `bb-start`, `play.sh`), `run.sh` with the Python start scripts, and the Avalonia launcher. A Nix or AppImage build, if wanted, is made again from those. |
+| bbport's no-sparse memory module | For drivers without sparse binding (the 0.4.6 memory design, "Next"). |
+| FSR 3.1 out of protected memory | For RADV handhelds (bbport 0.7's fix, [community-fixes.md](community-fixes.md)). |
 
 ## Closed since 0.4.4
 
@@ -346,12 +225,3 @@ when the tester says).
   screen 26.7 s until the game ended the session, which is the game's own handling. Four of five
   players never answered the probes; the game also connects to players whose signs and ghosts it
   shows, and the relay is the server's choice.
-
-## Linux, for later
-
-| Topic | Note |
-|---|---|
-| The launcher | The Avalonia launcher rebuilt on the Windows launcher's pages, with its stale texts, the dead DLSS model row and the 7 texts only it looks up. |
-| FSR | AMD's SDK is Windows only. Linux has no FSR until AMD ships for Linux; the Linux build keeps compiling, and FSR is not offered there. |
-| DLSS | NVIDIA's Linux loader library (`libnvsdk_ngx.a`) has the same licence problem as Windows': Linux keeps HW's own path (`libnvidia-ngx.so.1`), the driver's core, with the shared id. |
-| Old Linux pieces | Removed in 0.4.4 beta 28: the Python GTK launcher, the Nix/AppImage build, `shell.nix` and `test_packaged_vulkan.py`. Linux keeps `packaging/linux/` (Ubuntu setup, `bb-start`, `play.sh`), `run.sh` with the Python start scripts, and the Avalonia launcher. A Nix or AppImage build, if wanted, is made again from those. |

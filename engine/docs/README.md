@@ -15,8 +15,9 @@ features are in [archive/](archive/README.md) (was `history/`).
 
 ## The plan, the log and the map
 
-- [plan.md](plan.md): what comes next (the performance work after 0.4.4, then the rest), the ground
-  rules, the decisions that stand, the checks still to make and what waits on the tester.
+- [plan.md](plan.md): what comes next (0.4.6, the memory model release, then the rest), the ground
+  rules, the decisions that stand, what waits on the tester, and the register: every open item with
+  where it is scheduled.
 - [performance.md](performance.md): what the 0.4.4 logs show about smoothness and frame rate: the
   VRAM cleanup's long frames, where the GPU's frame goes, and what each costly item is.
 - [changelog.md](changelog.md): every change since Hunter's Workshop began, with its measurements and
@@ -51,5 +52,8 @@ features are in [archive/](archive/README.md) (was `history/`).
 
 ## GPU memory
 
+- [memory-model.md](memory-model.md): 0.4.6's memory model (the engine following the game's own
+  calls, not its memory): the design, the research of 2026-11-08 (YEBIS in 1.09, bbhost, bbport,
+  Lantern) and the roadmap beta by beta, with what each must show before the next.
 - [gpu-memory.md](gpu-memory.md): why frames were late while memory was moved, and what 0.4.4 did
   about it (the GX region read in place, fences written when the GPU is done).
