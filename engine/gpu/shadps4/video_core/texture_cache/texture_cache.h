@@ -508,6 +508,8 @@ private:
     /// the images. An image wholly inside one's memory, registered before it was made, holds what
     /// the memory held before: the game has moved on, as the PS4's memory does (dead_by_reuse).
     void ProcessGxCreated();
+    /// 0.4.6 beta 9: the images over textures the CPU wrote through their calls marked written.
+    void ProcessWritten();
     void FreeDeadImages(u64 second);
     /// 0.4.6 beta 3: whether an image is of a texture the game destroyed (not used since, and not
     /// GPU-drawn contents another live texture may share), and if so whether the GPU is done with it.
@@ -650,6 +652,11 @@ private:
     std::vector<BbEngine::GxResources::Gone> gx_gone, gx_created;
     /// Beta 16: images of textures the game destroyed, waiting for the GPU to be done with them.
     std::vector<std::pair<ImageId, u64>> dead_images;
+    /// 0.4.6 beta 9: the GPU's newest write to a resource's memory when the game made it (memory ->
+    /// creation time, GpuWriteVersion); StartSurface tells the writes since from older ones.
+    std::unordered_map<VAddr, std::pair<u64, u64>> created_gpu_version;
+    /// 0.4.6 beta 9: the textures the CPU wrote through their own calls (GxResources::TakeWritten).
+    std::vector<BbEngine::GxResources::Gone> gx_written;
     /// Beta 16: textures to build ahead (BuildAhead), and where each was built: its info, for the
     /// log when a draw makes another image there (a miss). 0.4.6 beta 4: with their images, made on
     /// the game's threads (prepared_in, under prepared_mutex).

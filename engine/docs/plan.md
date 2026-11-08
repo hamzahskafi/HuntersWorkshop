@@ -100,7 +100,7 @@ the order of the work does not change without the tester.
 |---|---|---|
 | 1 to 7 | The caches follow the game's create, destroy and release calls: textures built in the game's create call, nothing freed on a release, YEBIS's and Scaleform's textures followed, YEBIS's same-memory targets kept across its rebuilds | Done; beta 7's log read 2026-11-08 |
 | 8 | GPU-owned surfaces start from their predecessor or empty, never from memory, and take no hashes; dead targets' images reused by new ones of their shape; write-watching replaced by the calls for game textures (off, counted); the logging for betas 9 to 13 | Built 2026-11-08 (engine id 92). Run A read: the rebuild stalls gone (frames in play 28.5 ms or less but one of 41.6). Run B read: no hitch, frames in play 33 ms or less; the tester's look at the picture decides part 4 |
-| 9 | Write-watching only where no call tells; the writers beta 8 finds hooked; the design note for beta 10, agreed with the tester before code | Planned |
+| 9 | The game's targets unwatched by default; YEBIS's and Scaleform's write calls hooked; the GPU's earlier writes to a surface's memory measured (`BB_TAKE_EARLIER_WRITES=0` leaves them out); the writer of textures made with their data named; the design note for beta 10 | Built 2026-11-08 (engine id 93), waiting on the tester; the design note waits on the tester's agreement |
 | 10 | Images belong to their textures: found through the registry at a draw or bind, retired with their resource, whole-texture copies image to image; the address guesses removed | Planned |
 | 11 | Depth buffers: their compression metadata and pending clears follow the owner; a new depth target starts from the game's clear | Planned |
 | 12 | The game's buffers by the calls: creation and Map say what changed | Planned |
@@ -109,13 +109,13 @@ the order of the work does not change without the tester.
 
 ### Waiting on the tester
 
-- **0.4.6 beta 8's runs** ([memory-model.md](memory-model.md), beta 8): A, a normal session with
-  loading screens and area crossings (the crossing that stalled in beta 7's log), switches as
-  shipped; B, the same route with `BB_WATCH_GAME_TEXTURES=0` in Extra variables; and before beta 13,
-  C, the shader cache cleared, the same route. Read: the `GX memory, surfaces this minute (beta 8)`
-  and `Shaders this minute (beta 8)` lines, the `YEBIS rebuild:` lines, and the hitch reports at
-  area crossings. If anything looks wrong in A, the same spot again with `BB_EMPTY_SURFACES=0`, then
-  with `BB_TARGET_POOL=0`.
+- **0.4.6 beta 9's run:** a normal session with loading screens, area crossings and the menus (button
+  prompts, the UI), switches as shipped. Read: the `GX memory, write calls this minute (beta 9)` line,
+  the `a CPU write landed on a texture made with its data` lines, and the surfaces line's starts taken
+  from the GPU's earlier writes. Watch for stale or wrong textures.
+- **The beta 10 design note** ([memory-model.md](memory-model.md), "Beta 10"): the tester's
+  agreement before any code.
+- **Run C** (the shader cache cleared, the same route), before beta 13 only.
 
 ## The register: every open item
 
@@ -132,9 +132,9 @@ found.
 | Depth targets filled from memory; their HTILE followed by address | Research, 2026-11-08 | Beta 8 part 1, beta 11 |
 | Whether YEBIS frees its old context before building the new one; where new targets land | Research, 2026-11-08 | Beta 8's `YEBIS rebuild:` lines (run A) |
 | Which owner objects build YEBIS contexts (the five virtual methods into `0x21d2dd0`) | Research, 2026-11-08 | Only if beta 8's numbers need it |
-| Surfaces filled from the GPU's buffer writes made before they existed (run A: 21-32 a minute, up to 108 MiB; most of its one 41.6 ms frame) | Beta 8 run A, 2026-11-08 | Beta 9: only writes since the surface's creation |
-| CPU writes on YEBIS textures, 10-71 a minute: which of its textures (its CPU-updated ones expected) | Beta 8 run A | Beta 9: YEBIS's Map, update and unmap hooked |
-| 21 CPU writes on small textures made with their data at every startup (32x32, 1024x512): which code writes them | Beta 8 runs A and B | Beta 9: the writer named (the log's largest-written list gives the addresses) |
+| Surfaces filled from the GPU's buffer writes made before they existed (run A: 21-32 a minute, up to 108 MiB; most of its one 41.6 ms frame) | Beta 8 run A, 2026-11-08 | Beta 9 measures them (`BB_TAKE_EARLIER_WRITES=0` leaves them out); left out by default only if the counts and the tester's eyes agree (a depth buffer copied through memory before its texture is made needs them) |
+| CPU writes on YEBIS textures, 10-71 a minute: which of its textures (its CPU-updated ones expected) | Beta 8 run A | Beta 9 hooks YEBIS's update, Map and Unmap (and Scaleform's unmap): its write-calls line says |
+| 21 CPU writes on small textures made with their data at every startup (32x32, 1024x512): which code writes them | Beta 8 runs A and B | Beta 9 logs the guest code of the first 24 such writes; then whether a call of the game's can tell them |
 | GX's input-layout creator in 1.09 (for predicting shader variants) | Research, 2026-11-08 | Done in beta 8: `0x21657a0`, hooked and counted |
 | "The game's data followed the same way (buffers built ahead, freed on release)" | Plan step 3 (0.4.5 beta 16) | Partly done (0.4.5 beta 17; 0.4.6 beta 5); the rest is beta 12 |
 | "Shaders translated when the game creates them" (all 13,277 at startup) | 0.4.5 beta 17, "Not done" | Beta 13, measured in beta 8 |

@@ -548,7 +548,11 @@ extern "C" int bbgpu_handle_fault(void* ucontext, void* address) {
     if (bb_fault_recovers_only && runtime_fault_recover) {
         return 0; // the loader jumps to the recovery point (bbport_toggles.h)
     }
-    if (Core::Signals::Instance()->DispatchAccessViolation(ucontext, address)) {
+    // 0.4.6 beta 9: the fault's context, for naming the code that writes a texture made with its data.
+    BbEngine::GxResources::SetFaultContext(ucontext);
+    const bool dispatched = Core::Signals::Instance()->DispatchAccessViolation(ucontext, address);
+    BbEngine::GxResources::SetFaultContext(nullptr);
+    if (dispatched) {
         if (FaultRepeats(ucontext, address)) {
             runtime_memory_restore_access(ucontext, reinterpret_cast<uintptr_t>(address), 1);
         }

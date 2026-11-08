@@ -241,11 +241,24 @@ bool DeadTargetPool() {
     }();
     return on;
 }
-// 0.4.6 beta 8, part 4 (BB_WATCH_GAME_TEXTURES=0: on; off by default): the pages of the game's textures
-// (GX's, and YEBIS's surfaces) are not write-protected: the game's calls tell what writes them.
-bool WatchGameTextures() {
-    static const bool on = [] {
+// 0.4.6 beta 8, part 4; beta 9 the default: the pages of the game's targets (surfaces made without data
+// for the GPU, textures with a render-target or depth view) are not write-protected: the game's calls tell
+// what writes them (beta 8's runs: none of them written by the CPU). BB_WATCH_GAME_TEXTURES=1 watches
+// every image as before; =0 leaves textures made with their data unwatched too (beta 8's run B; the CPU
+// wrote 21 of them at every start).
+enum class Unwatch { None, Targets, TargetsAndData };
+Unwatch UnwatchKinds() {
+    static const Unwatch kinds = [] {
         const char* env = std::getenv("BB_WATCH_GAME_TEXTURES");
+        return env && env[0] == '1' ? Unwatch::None : env && env[0] == '0' ? Unwatch::TargetsAndData : Unwatch::Targets;
+    }();
+    return kinds;
+}
+// 0.4.6 beta 9 (BB_TAKE_EARLIER_WRITES=0: off; on by default): a surface whose memory the GPU wrote as a
+// buffer before the game made it takes those writes (another owner's) at its first use, as before.
+bool TakeEarlierWrites() {
+    static const bool on = [] {
+        const char* env = std::getenv("BB_TAKE_EARLIER_WRITES");
         return !(env && env[0] == '0');
     }();
     return on;
@@ -719,10 +732,15 @@ void TextureCache::InvalidateMemory(VAddr addr, size_t size) {
         }
         if (image.Overlaps(addr, size) && BbEngine::GxResources::Active()) {
             // Part 5: the write faults on the game's resources, by the live one there.
-            BbEngine::GxResources::NoteCpuWrite(
-                BbEngine::GxResources::Classify(image_begin, std::max(image_end, image_begin + 1)), kept, image_begin,
-                image.backing ? image.GetHostImageSize() : image.info.guest_size, image.info.size.width,
-                image.info.size.height);
+            const auto owner = BbEngine::GxResources::Classify(image_begin, std::max(image_end, image_begin + 1));
+            BbEngine::GxResources::NoteCpuWrite(owner, kept, image_begin,
+                                                image.backing ? image.GetHostImageSize() : image.info.guest_size,
+                                                image.info.size.width, image.info.size.height);
+            // 0.4.6 beta 9: who writes a texture made with its data (the first few, with the code).
+            if (owner == BbEngine::GxResources::Owner::TextureData) {
+                BbEngine::GxResources::NoteDataTextureWrite(image_begin, image.info.guest_size, image.info.size.width,
+                                                            image.info.size.height);
+            }
         }
         if (kept) {
             RefreshTrace::Mark(image, "CPU write counted, a live surface's contents kept", addr, size);
@@ -1487,9 +1505,26 @@ bool TextureCache::StartSurface(Image& image) {
     }
     // The GPU wrote this memory as a buffer before (a compute shader, a copy): the fill takes that, as
     // bbhost's target takes a texture a shader stored there first.
+    bool skip_earlier = false;
     if (buffer_cache.IsRegionGpuModified(image.info.guest_address, image.info.guest_size)) {
-        NoteSurfaceStart(owner, SurfaceStart::Taken, bytes);
-        return false;
+        // 0.4.6 beta 9: writes made before the resource was (its memory's previous owner's) or since.
+        if (BbEngine::GxResources::CreatedWaiting()) {
+            ProcessGxDestroyed();
+            ProcessGxCreated();
+        }
+        const auto at = created_gpu_version.find(image.info.guest_address);
+        const bool earlier = at != created_gpu_version.end() && at->second.first == image.surface_ns &&
+                             buffer_cache.GpuWriteVersion(image.info.guest_address, image.info.guest_size) ==
+                                 at->second.second;
+        if (!earlier) {
+            NoteSurfaceStart(owner, SurfaceStart::Taken, bytes);
+            return false;
+        }
+        if (TakeEarlierWrites()) {
+            NoteSurfaceStart(owner, SurfaceStart::TakenEarlier, bytes);
+            return false;
+        }
+        skip_earlier = true;
     }
     if (!StillLive(image.info.guest_address, image.surface_ns)) {
         image.surface_ns = 0; // its resource is gone: the image is filled and followed as any other
@@ -1515,7 +1550,7 @@ bool TextureCache::StartSurface(Image& image) {
     image.hashes_deferred = false;
     image.mip_hashes_current = false;
     RefreshTrace::Refresh(image, entry_flags, "started empty: a surface the game made without its data");
-    NoteSurfaceStart(owner, how, bytes);
+    NoteSurfaceStart(owner, skip_earlier ? SurfaceStart::EarlierSkipped : how, bytes);
     return true;
 }
 
@@ -1823,9 +1858,10 @@ void TextureCache::TrackImage(ImageId image_id) {
         // tell (made with its data, a target, a surface) is not write-protected; its range is kept.
         using BbEngine::GxResources::Owner;
         const Owner owner = Owner(image.gx_owner);
-        if (!WatchGameTextures() && image.gx_whole &&
-            (image.surface_ns != 0 || owner == Owner::TextureData || owner == Owner::RenderTarget ||
-             owner == Owner::DepthTarget)) {
+        const Unwatch kinds = UnwatchKinds();
+        if (kinds != Unwatch::None && image.gx_whole &&
+            (image.surface_ns != 0 || owner == Owner::RenderTarget || owner == Owner::DepthTarget ||
+             (kinds == Unwatch::TargetsAndData && owner == Owner::TextureData))) {
             image.calls_watch = true;
             BbEngine::GxResources::NoteUnwatched(1, image.backing ? image.GetHostImageSize() : 0);
             return;
@@ -1967,7 +2003,7 @@ void TextureCache::GarbageCollectImages() {
     // them, at every pass (beta 16-3: once a second, a second or more after the game let them go).
     const bool dead_work = BbEngine::GxResources::Following() &&
                            (!dead_images.empty() || BbEngine::GxResources::DestroyedWaiting() ||
-                            BbEngine::GxResources::CreatedWaiting());
+                            BbEngine::GxResources::CreatedWaiting() || BbEngine::GxResources::WrittenWaiting());
     // Nothing to do (no trim, no store under way, not a new second): no lock taken (one pass per
     // guest submission). pending_stores changes size on this thread only.
     const VramPolicy::Mode mode = VramPolicy::CurrentMode();
@@ -1981,6 +2017,7 @@ void TextureCache::GarbageCollectImages() {
     if (new_second || dead_work) {
         ProcessGxDestroyed();
         ProcessGxCreated();
+        ProcessWritten();
         FreeDeadImages(gc_second);
     }
     if (new_second) {
@@ -2117,6 +2154,17 @@ void TextureCache::ProcessGxCreated() {
         }
         const VAddr made_end = made.memory + std::max<u64>(made.bytes, 1);
         u64 bytes = 0, images = 0, kept = 0, kept_bytes = 0;
+        // 0.4.6 beta 9: the GPU's newest write to its memory when the game made it (StartSurface tells
+        // the writes since from those of the memory's previous owner).
+        if (EmptySurfaces()) {
+            if (created_gpu_version.size() > 65536) {
+                created_gpu_version.clear();
+            }
+            const u64 version = buffer_cache.IsRegionGpuModified(made.memory, std::max<u64>(made.bytes, 1))
+                                    ? buffer_cache.GpuWriteVersion(made.memory, std::max<u64>(made.bytes, 1))
+                                    : 0;
+            created_gpu_version[made.memory] = {made.ns, version};
+        }
         ForEachImageInRegion(made.memory, std::max<u64>(made.bytes, 1), [&](ImageId image_id, Image& image) {
             // 0.4.6 beta 7: YEBIS re-created a target over the same memory, made without data: the image
             // of the target it replaced, of the same shape, is this one's (bbhost keeps them too). It is
@@ -2167,6 +2215,27 @@ void TextureCache::ProcessGxCreated() {
         }
     }
     gx_created.clear();
+}
+
+void TextureCache::ProcessWritten() {
+    if (!BbEngine::GxResources::Following() || !BbEngine::GxResources::WrittenWaiting()) {
+        return;
+    }
+    BbEngine::GxResources::TakeWritten(gx_written);
+    for (const auto& written : gx_written) {
+        ForEachImageInRegion(written.memory, std::max<u64>(written.bytes, 1), [&](ImageId, Image& image) {
+            if (False(image.flags & ImageFlagBits::Registered)) {
+                return;
+            }
+            // Written by the CPU through the game's own call: its next use takes the memory (by its
+            // hashes when the GPU drew it too); no longer a surface whose writes only the GPU makes.
+            RefreshTrace::Mark(image, "CPU written through its call", written.memory, written.bytes);
+            image.flags |= ImageFlagBits::CpuDirty;
+            image.mip_hashes_current = false;
+            image.surface_ns = 0;
+        });
+    }
+    gx_written.clear();
 }
 
 void TextureCache::FreeDeadImages(u64 second) {
@@ -2352,6 +2421,7 @@ void TextureCache::BuildAhead() {
         std::scoped_lock lock{mutex};
         ProcessGxDestroyed();
         ProcessGxCreated();
+        ProcessWritten();
     }
     const u64 now_ns = u64(std::chrono::duration_cast<std::chrono::nanoseconds>(start.time_since_epoch()).count());
     constexpr u64 MaxWaitNs = 30'000'000'000ull;
@@ -2481,7 +2551,7 @@ void TextureCache::BuildAhead() {
             image.track_addr = image.guest_begin;
             image.track_addr_end = image.guest_end;
             // 0.4.6 beta 8 (part 4): a texture made with its data, unwatched as TrackImage leaves it.
-            if (!WatchGameTextures() && image.gx_whole &&
+            if (UnwatchKinds() == Unwatch::TargetsAndData && image.gx_whole &&
                 BbEngine::GxResources::Owner(image.gx_owner) == BbEngine::GxResources::Owner::TextureData) {
                 image.calls_watch = true;
                 BbEngine::GxResources::NoteUnwatched(1, image.backing ? image.GetHostImageSize() : 0);

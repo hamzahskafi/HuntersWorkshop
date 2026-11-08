@@ -155,8 +155,10 @@ enum class SurfaceStart : std::uint8_t {
     Empty,       // cleared (colour to zero)
     DepthEmpty,  // a depth target cleared (depth 1, stencil 0), no game clear pending in its HTILE
     DepthCleared, // the same, with the game's clear pending (it lands on top)
-    Taken,       // the GPU had written its memory as a buffer before: filled from that
+    Taken,       // the GPU had written its memory as a buffer since it was made: filled from that
     Gone,        // its resource was no longer the live one there: filled from memory as before
+    TakenEarlier,   // 0.4.6 beta 9: the GPU's writes there are older than the resource: filled from them
+    EarlierSkipped, // the same left out (BB_TAKE_EARLIER_WRITES=0): started empty
     kCount
 };
 void NoteSurfaceStart(Owner owner, SurfaceStart how, std::uint64_t bytes);
@@ -174,6 +176,16 @@ enum class PoolEvent : std::uint8_t { Taken, NoShape, kCount };
 void NotePool(PoolEvent event, std::uint64_t bytes);
 // 0.4.6 beta 8 (part 4): images whose pages were left unwatched (the game's calls tell their writes).
 void NoteUnwatched(std::uint64_t images, std::uint64_t bytes);
+// 0.4.6 beta 9: the textures the CPU wrote through their own calls since the last call: YEBIS's
+// UpdateSubresource and Unmap of a 2D texture, Scaleform's unmapTexture of a plane with memory of
+// its own (memory and size). The texture cache marks the images over them written (CPU-dirty).
+void TakeWritten(std::vector<Gone>& out);
+bool WrittenWaiting();
+// 0.4.6 beta 9 (research): the fault being handled on this thread (bbgpu_handle_fault sets it, and
+// clears it with null), and a CPU write that landed on a texture made with its data: the first few
+// are logged with the guest code that wrote (its instruction and callers, image offsets).
+void SetFaultContext(void* ucontext);
+void NoteDataTextureWrite(std::uint64_t address, std::uint64_t bytes, std::uint32_t width, std::uint32_t height);
 // 0.4.6 beta 8 (part 5): a shader translated for a draw, by stage (0 vertex, 1 pixel, 2 compute, 3
 // other), its time, and whether its program had been translated before in this session (another
 // variant of it).

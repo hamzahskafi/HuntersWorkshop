@@ -46,7 +46,9 @@
 #include <windows.h>
 #else
 #include <pthread.h>
+#include <ucontext.h>
 #endif
+#include "bbport_platform.h"
 
 extern "C" int runtime_memory_region(std::uintptr_t address, std::uintptr_t* start, std::uintptr_t* end,
                                      int* mapped);
@@ -139,6 +141,22 @@ constexpr std::uint8_t kShaderPrologue[2][16] = {
 // formats, as D3D11 does (bbhost's 0x25657a0). push rbp; mov rbp, rsp; push r15; push r14; push r12;
 // push rbx; sub rsp, 0x70
 constexpr std::size_t kCreateInputLayout = 0x21657a0;
+// 0.4.6 beta 9: YEBIS's context's UpdateSubresource (ctx, resource, subresource, box, data, ...), Map
+// (ctx, resource, subresource, type, flags, mapped*) and Unmap (a thunk: mov rdi, [rdi + 0xaa0]; mov
+// esi, 0x38; xor edx, edx; xor ecx, ecx; jmp), bbhost's 0x15d8d70, 0x15d92c0 and 0x15d99c0; Scaleform's
+// texture manager's unmapTexture (manager, texture, ...), bbhost's 0x7a3270, where its CPU writes into
+// a texture's planes end (Update and Unmap both come there).
+constexpr std::size_t kYebisUpdate = 0x11d8d70, kYebisMap = 0x11d92c0, kYebisUnmap = 0x11d99c0,
+                      kScaleformUnmap = 0x3a3270;
+constexpr std::uint8_t kYebisUpdatePrologue[] = {0x55, 0x48, 0x89, 0xe5, 0x41, 0x57, 0x41, 0x56, 0x41, 0x55,
+                                                 0x41, 0x54, 0x53, 0x48, 0x81, 0xec, 0x58, 0x01, 0x00, 0x00};
+constexpr std::uint8_t kYebisMapPrologue[] = {0x55, 0x48, 0x89, 0xe5, 0x41, 0x57, 0x41, 0x56, 0x41, 0x55,
+                                              0x41, 0x54, 0x53, 0x48, 0x81, 0xec, 0x98, 0x00, 0x00, 0x00};
+constexpr std::uint8_t kYebisUnmapPrologue[] = {0x48, 0x8b, 0xbf, 0xa0, 0x0a, 0x00, 0x00, 0xbe,
+                                                0x38, 0x00, 0x00, 0x00, 0x31, 0xd2, 0x31, 0xc9};
+// push rbp; mov rbp, rsp; push r14; push rbx; mov r14, rdi; mov rbx, [rsi + 0x50]
+constexpr std::uint8_t kScaleformUnmapPrologue[] = {0x55, 0x48, 0x89, 0xe5, 0x41, 0x56, 0x53,
+                                                    0x49, 0x89, 0xfe, 0x48, 0x8b, 0x5e, 0x50};
 constexpr std::uint8_t kInputLayoutPrologue[] = {0x55, 0x48, 0x89, 0xe5, 0x41, 0x57, 0x41, 0x56,
                                                  0x41, 0x54, 0x53, 0x48, 0x83, 0xec, 0x70};
 
@@ -169,10 +187,13 @@ struct Entry {
     std::uint16_t levels = 0, layers = 0;
     bool has_tsharp = false;
     std::array<std::uint32_t, 8> tsharp{};
+    // 0.4.6 beta 9: the CPU wrote it through its own calls (YEBIS's update or Unmap): not a surface
+    // (SurfaceAt), filled from memory at its first use.
+    bool cpu_written = false;
 };
 
 // What a return through the stub belongs to.
-enum Op : std::uint8_t { kOpCreate, kOpTsharp, kOpView, kOpCreate1D, kOpYebis, kOpScaleform };
+enum Op : std::uint8_t { kOpCreate, kOpTsharp, kOpView, kOpCreate1D, kOpYebis, kOpScaleform, kOpYebisUpdate };
 
 struct Pending {
     std::uint64_t ret;
@@ -205,6 +226,11 @@ std::atomic<bool> g_gone_waiting{false}, g_released_waiting{false}, g_created_wa
 // 0.4.6 beta 5: resources made since the texture cache last asked (any kind with memory): their
 // memory is theirs now, so images left there from before belong to nothing (TakeCreated).
 std::vector<Gone> g_created;
+std::vector<Gone> g_written; // 0.4.6 beta 9, under g_mutex
+std::atomic<bool> g_written_waiting{false};
+std::uint8_t* g_image_base = nullptr;
+std::size_t g_image_size = 0;
+thread_local void* t_fault_context = nullptr;
 constexpr std::size_t kQueueCap = 65536, kAheadCap = 16384;
 
 std::uint64_t NowNs() {
@@ -365,6 +391,11 @@ struct Counts {
     std::atomic<std::uint64_t> unwatched{0}, unwatched_bytes{0};
     std::atomic<std::uint64_t> input_layouts{0}, input_layouts_loading{0}, input_layout_elements{0};
     std::array<std::atomic<std::uint64_t>, 4> translated{}, translated_ns{}, translated_seen{};
+    // 0.4.6 beta 9: YEBIS's update, Map and Unmap calls on its registered 2D textures (updates of
+    // surfaces made without data for the GPU), Scaleform's unmaps of planes it owns, and the written
+    // events queued and dropped; CPU writes on textures made with data logged with their code.
+    std::atomic<std::uint64_t> yebis_updates{0}, yebis_update_surfaces{0}, yebis_maps{0}, yebis_unmaps{0},
+        sf_unmaps{0}, written_events{0}, written_dropped{0}, data_writes_logged{0};
     struct Made {
         std::uint64_t address, bytes;
         std::uint32_t width, height, levels, layers, format, tile;
@@ -816,6 +847,76 @@ GUEST_ABI std::int64_t ScaleformRelease(std::uint64_t, const std::uint64_t* save
     return 0;
 }
 
+// 0.4.6 beta 9: a registered texture the CPU wrote through its own call: it is not a surface from now on
+// (SurfaceAt), and the texture cache marks the images over it written. Whether it was registered.
+bool Written(std::uint64_t key, bool count_surface = false) {
+    std::scoped_lock lock{g_mutex};
+    const auto it = g_by_holder.find(key);
+    if (it == g_by_holder.end() || !it->second.memory || !it->second.bytes) {
+        return false;
+    }
+    Entry& e = it->second;
+    if (count_surface && !e.initial && ((e.bind & 0xe0) != 0 || e.render_target || e.depth_target)) {
+        g_counts.yebis_update_surfaces.fetch_add(1, std::memory_order_relaxed);
+    }
+    e.cpu_written = true;
+    if (g_follow) {
+        if (g_written.size() < kQueueCap) {
+            g_written.push_back(Gone{e.memory, e.bytes, NowNs()});
+            g_written_waiting.store(true, std::memory_order_release);
+            g_counts.written_events.fetch_add(1, std::memory_order_relaxed);
+        } else {
+            g_counts.written_dropped.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
+    return true;
+}
+
+bool YebisRegistered(std::uint64_t object) {
+    std::scoped_lock lock{g_mutex};
+    return object && g_by_holder.count(kYebisKey | object) != 0;
+}
+
+// YEBIS's UpdateSubresource (rsi: the resource): its texture is written when it returns.
+GUEST_ABI std::int64_t YebisUpdateEntry(std::uint64_t, const std::uint64_t* saved) {
+    if (!YebisRegistered(saved[4])) {
+        return 0; // a buffer, or a texture this registry does not hold
+    }
+    Pending p{saved[6], 0, kYebis, false, false, NowNs(), kOpYebisUpdate};
+    p.holder = saved[4];
+    t_pending.push_back(p);
+    const_cast<std::uint64_t*>(saved)[6] = reinterpret_cast<std::uint64_t>(g_return_stub);
+    return 0;
+}
+
+// YEBIS's Map (rsi: the resource): counted (bbhost found its 2D textures never mapped).
+GUEST_ABI std::int64_t YebisMapEntry(std::uint64_t, const std::uint64_t* saved) {
+    if (YebisRegistered(saved[4])) {
+        g_counts.yebis_maps.fetch_add(1, std::memory_order_relaxed);
+    }
+    return 0;
+}
+
+// YEBIS's Unmap (rsi: the resource): the writes after its Map went to the memory itself.
+GUEST_ABI std::int64_t YebisUnmapEntry(std::uint64_t, const std::uint64_t* saved) {
+    if (saved[4] && Written(kYebisKey | saved[4])) {
+        g_counts.yebis_unmaps.fetch_add(1, std::memory_order_relaxed);
+    }
+    return 0;
+}
+
+// Scaleform's unmapTexture (rdi: the manager, rsi: the texture): the CPU's writes into its planes are in.
+GUEST_ABI std::int64_t ScaleformUnmapEntry(std::uint64_t, const std::uint64_t* saved) {
+    if (saved[4]) {
+        for (unsigned i = 0; i < 4; ++i) {
+            if (Written(ScaleformKey(saved[4], i))) {
+                g_counts.sf_unmaps.fetch_add(1, std::memory_order_relaxed);
+            }
+        }
+    }
+    return 0;
+}
+
 void NoteView(std::uint64_t out, bool depth) {
     const std::uint64_t view = out ? Read<std::uint64_t>(out) : 0;
     const std::uint64_t holder = view ? Read<std::uint64_t>(view + 0x08) : 0;
@@ -869,6 +970,12 @@ GUEST_ABI std::uint64_t CreatorReturn(std::uint64_t result) {
             NoteYebisCreated(Read<std::uint64_t>(p.out), p.initial);
         } else if (static_cast<std::uint32_t>(result) != 0) {
             g_counts.failed.fetch_add(1, std::memory_order_relaxed);
+        }
+        return p.ret;
+    }
+    if (p.op == kOpYebisUpdate) {
+        if (Written(kYebisKey | p.holder, true)) {
+            g_counts.yebis_updates.fetch_add(1, std::memory_order_relaxed);
         }
         return p.ret;
     }
@@ -958,6 +1065,8 @@ bool Install(std::uint8_t* image, std::size_t size) {
     if (const char* env = std::getenv("BB_GX_RESOURCES"); env && env[0] == '0') {
         return false;
     }
+    g_image_base = image;
+    g_image_size = size;
     g_return_stub = ReturnStub(&CreatorReturn);
     if (!g_return_stub) {
         return false;
@@ -965,7 +1074,7 @@ bool Install(std::uint8_t* image, std::size_t size) {
     if (const char* env = std::getenv("BB_GX_FOLLOW"); !(env && env[0] == '0')) {
         g_follow = true;
     }
-    Hook hooks[23];
+    Hook hooks[27];
     bool ok = Prepare(hooks[0], image, size, kCreateBuffer, kCreatorPrologue, &CreatorEntry<kBuffer>) &&
               Prepare(hooks[1], image, size, kCreateTexture, kCreatorPrologue, &CreatorEntry<kTexture>) &&
               Prepare(hooks[2], image, size, kCreateTexture3D, kCreatorPrologue, &CreatorEntry<kTexture3D>) &&
@@ -981,7 +1090,11 @@ bool Install(std::uint8_t* image, std::size_t size) {
               Prepare(hooks[14], image, size, kCreateRtv, kCreatorPrologue, &ViewEntry<1>) &&
               Prepare(hooks[15], image, size, kCreateDsv, kDsvPrologue, &ViewEntry<2>) &&
               Prepare(hooks[16], image, size, kCreate1D, kCreate1DPrologue, &Create1DEntry) &&
-              Prepare(hooks[22], image, size, kCreateInputLayout, kInputLayoutPrologue, &InputLayoutCreated);
+              Prepare(hooks[22], image, size, kCreateInputLayout, kInputLayoutPrologue, &InputLayoutCreated) &&
+              Prepare(hooks[23], image, size, kYebisUpdate, kYebisUpdatePrologue, &YebisUpdateEntry) &&
+              Prepare(hooks[24], image, size, kYebisMap, kYebisMapPrologue, &YebisMapEntry) &&
+              Prepare(hooks[25], image, size, kYebisUnmap, kYebisUnmapPrologue, &YebisUnmapEntry) &&
+              Prepare(hooks[26], image, size, kScaleformUnmap, kScaleformUnmapPrologue, &ScaleformUnmapEntry);
     // The game's destructors (2D and 3D textures at 4-7, 1D at 17-18) and YEBIS's 2D texture's (19).
     for (std::size_t i = 0; ok && i < std::size(kDestructors) + std::size(k1DDestructors) + 1; ++i) {
         const bool one_d = i >= std::size(kDestructors) && i < std::size(kDestructors) + std::size(k1DDestructors);
@@ -1062,6 +1175,67 @@ void TakeCreated(std::vector<Gone>& out) {
 
 bool CreatedWaiting() {
     return g_created_waiting.load(std::memory_order_acquire);
+}
+
+void TakeWritten(std::vector<Gone>& out) {
+    std::scoped_lock lock{g_mutex};
+    out.swap(g_written);
+    g_written.clear();
+    g_written_waiting.store(false, std::memory_order_relaxed);
+}
+
+bool WrittenWaiting() {
+    return g_written_waiting.load(std::memory_order_acquire);
+}
+
+void SetFaultContext(void* ucontext) {
+    t_fault_context = ucontext;
+}
+
+void NoteDataTextureWrite(std::uint64_t address, std::uint64_t bytes, std::uint32_t width, std::uint32_t height) {
+    if (!t_fault_context || g_counts.data_writes_logged.fetch_add(1, std::memory_order_relaxed) >= 24) {
+        return;
+    }
+    std::uint64_t rip = 0, rbp = 0;
+#ifdef _WIN32
+    const auto* pointers = static_cast<const EXCEPTION_POINTERS*>(t_fault_context);
+    if (pointers && pointers->ContextRecord) {
+        rip = pointers->ContextRecord->Rip;
+        rbp = pointers->ContextRecord->Rbp;
+    }
+#else
+    const auto* uc = static_cast<const ucontext_t*>(t_fault_context);
+    rip = std::uint64_t(uc->uc_mcontext.gregs[REG_RIP]);
+    rbp = std::uint64_t(uc->uc_mcontext.gregs[REG_RBP]);
+#endif
+    const auto base = reinterpret_cast<std::uint64_t>(g_image_base);
+    auto describe = [&](std::uint64_t at, char* out, std::size_t size) {
+        if (base && at >= base && at < base + g_image_size) {
+            std::snprintf(out, size, "+0x%llx", (unsigned long long)(at - base));
+        } else {
+            std::snprintf(out, size, "0x%llx", (unsigned long long)at);
+        }
+    };
+    char frames[512];
+    std::size_t used = 0;
+    char part[48];
+    describe(rip, part, sizeof(part));
+    used += std::snprintf(frames + used, sizeof(frames) - used, "%s", part);
+    // Game code keeps frame pointers (push rbp; mov rbp, rsp): its callers from the saved rbp chain.
+    for (int i = 0; i < 6 && rbp && used < sizeof(frames) - 64; ++i) {
+        std::uint64_t pair[2] = {};
+        if (!BbPlatform::ReadProcessMemory(reinterpret_cast<const void*>(rbp), pair, sizeof(pair)) || !pair[1]) {
+            break;
+        }
+        describe(pair[1], part, sizeof(part));
+        used += std::snprintf(frames + used, sizeof(frames) - used, " < %s", part);
+        if (pair[0] <= rbp) {
+            break;
+        }
+        rbp = pair[0];
+    }
+    host_log("GX memory: a CPU write landed on a texture made with its data (0x%llx, %.1f KiB, %ux%u): %s",
+             (unsigned long long)address, double(bytes) / 1024.0, width, height, frames);
 }
 
 const char* OwnerName(Owner owner) {
@@ -1151,7 +1325,8 @@ Surface SurfaceAt(std::uint64_t begin, std::uint64_t end) {
         return s;
     }
     const Entry& e = it->second;
-    if (e.initial || e.memory != begin || begin + e.bytes < end || (e.kind != kTexture && e.kind != kYebis)) {
+    if (e.initial || e.cpu_written || e.memory != begin || begin + e.bytes < end ||
+        (e.kind != kTexture && e.kind != kYebis)) {
         return s; // made with its data, not wholly over the image, or not a GX or YEBIS 2D texture
     }
     if ((e.bind & 0xe0) == 0 && !e.render_target && !e.depth_target) {
@@ -1747,8 +1922,10 @@ void LogMinute() {
     // 0.4.6 beta 8: surfaces, first fills, CPU writes, the pool and the unwatched images; then shaders.
     Rebuild::Minute();
     static const char* const kStartNames[] = {"empty", "depth cleared", "depth cleared under the game's clear",
-                                              "taken from the GPU's writes as a buffer",
-                                              "filled from memory (its resource gone)"};
+                                              "taken from the GPU's writes as a buffer since it was made",
+                                              "filled from memory (its resource gone)",
+                                              "taken from the GPU's writes from before it was made",
+                                              "started empty, the GPU's earlier writes left out"};
     std::string starts, fills, writes;
     for (std::size_t h = 0; h < std::size_t(SurfaceStart::kCount); ++h) {
         std::string owners;
@@ -1828,6 +2005,13 @@ void LogMinute() {
             translated += part;
         }
     }
+    host_log("GX memory, write calls this minute (beta 9): YEBIS's updates of its 2D textures %llu (%llu of "
+             "surfaces made without data for the GPU), Maps %llu, Unmaps %llu; Scaleform's unmaps of planes "
+             "with memory of their own %llu; written textures told to the texture cache %llu (%llu dropped)",
+             (unsigned long long)take(g_counts.yebis_updates), (unsigned long long)take(g_counts.yebis_update_surfaces),
+             (unsigned long long)take(g_counts.yebis_maps), (unsigned long long)take(g_counts.yebis_unmaps),
+             (unsigned long long)take(g_counts.sf_unmaps), (unsigned long long)take(g_counts.written_events),
+             (unsigned long long)take(g_counts.written_dropped));
     host_log("Shaders this minute (beta 8): input layouts the game created %llu (%llu during loading screens, %llu "
              "vertex elements); translated for draws: %s",
              (unsigned long long)take(g_counts.input_layouts), (unsigned long long)take(g_counts.input_layouts_loading),

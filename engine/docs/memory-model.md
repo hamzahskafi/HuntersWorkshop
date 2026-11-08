@@ -239,33 +239,90 @@ picture decide part 4 (stale or wrong textures).
 
 ### Beta 9: watching only what no call covers; the ownership design
 
-- Part 4 on by default, for the kinds run A showed unwritten (textures made with their data and
-  the game's targets, if run B shows nothing wrong).
-- A surface takes the GPU's buffer writes to its memory only when they came after its creation
-  (run A: 21-32 surfaces a minute, up to 108 MiB, filled from a previous owner's writes).
-- Each writer run A found gets its call hooked instead: YEBIS's Map, update and unmap of its 2D
-  textures and Scaleform's texture unmap, as bbhost does.
-- Pages stay protected only for the engine's own data rings, YEBIS's buffers and memory no call
-  covers.
-- **The design note for beta 10** is written here and gone through with the tester before any code:
-  the lookup at a draw and a bind, the retire and successor rules, copies, the old path's switch.
+Built 2026-11-08 (engine id 93), from beta 8's runs. Safe mode watches every image as before.
 
-**Moves on when:** no stale or broken texture in the tester's runs, and the design note is agreed.
+1. **The game's targets unwatched by default** (`BB_WATCH_GAME_TEXTURES=1` watches every image;
+   `=0` also leaves textures made with their data unwatched, beta 8's run B). Surfaces made without
+   data for the GPU and textures with a render-target or depth view: no CPU write landed on them in
+   beta 8's runs. Textures made with their data stay watched: the CPU wrote 21 of them at every
+   start.
+2. **The GPU's earlier writes, measured** (`BB_TAKE_EARLIER_WRITES=0` leaves them out; on by
+   default). A surface whose memory the GPU wrote as a buffer is told whether those writes came
+   after the game made it or before (its memory's previous owner's): the GPU's newest write there
+   is noted when the creation is taken (`created_gpu_version`). They are taken either way by
+   default, as before. The game may copy a depth buffer through memory and then make a texture
+   over it, which needs the earlier writes, so leaving them out waits for the counts and the
+   tester's eyes.
+3. **YEBIS's and Scaleform's write calls hooked** (bbhost's sites, 1.09 prologues checked): YEBIS's
+   UpdateSubresource `0x11d8d70` and Unmap `0x11d99c0`, its Map `0x11d92c0` (counted), Scaleform's
+   unmapTexture `0x3a3270`. The texture they wrote is marked CPU-written in the registry (no longer a
+   surface: filled from memory at its first use) and the images over it are marked written
+   (`ProcessWritten`). Beta 8's flicker theory needed this; it turned out older (the register).
+4. **The writer of textures made with their data named:** the GPU library's fault entry keeps the
+   fault's context (`SetFaultContext`), and the first 24 CPU writes that land on such a texture are
+   logged with the guest instruction and its callers (image offsets).
+5. **The design note for beta 10**, below, to go through with the tester before any code.
 
-### Beta 10: images belong to their textures
+**The log:** `GX memory, write calls this minute (beta 9)` (YEBIS's updates, Maps and Unmaps of its
+2D textures, Scaleform's unmaps, the written events), `a CPU write landed on a texture made with its
+data` lines, and in the surfaces line the starts taken from the GPU's earlier writes.
 
-- **At a draw or a bind,** the registry names the resource that owns the memory. An image is that
-  resource's.
-- **Destroying a resource** retires its image once the GPU is done with it. The image passes only
-  to a resource made over its memory without data (rule 1).
-- **A whole texture copied** from one the GPU wrote is copied image to image, so the copy carries
-  the GPU's work.
-- **Removed:** retiring an image when something newer is made over it, dead-by-reuse, the grace,
-  hashing memory to tell overwritten drawings, address guessing for game resources.
-- The old path behind a switch for this beta only.
+**Moves on when:** no stale or broken texture in the tester's runs (button prompts, the UI, YEBIS's
+effects), and the design note is agreed.
 
-**Moves on when:** no broken surface in the tester's runs (the wrong tombstone and white streak of
-0.4.5 betas 17 and 18, fixed in beta 19, are the kind to watch for), and stale images stay near zero.
+### Beta 10: images belong to their textures (the design note)
+
+**Today** an image is found by address and shape, and a stack of rules decides whose it is:
+
+- `ProcessGxCreated` retires the images inside a new resource's memory (`dead_by_reuse`, with a
+  `reuse_tick` exception for images used since);
+- `DeadImageState` keeps a drawn image another live texture overlaps;
+- YEBIS's dead images wait 3 s for a same-memory hand-over (beta 7);
+- `GarbagePass` hashes the memory under stale drawn images to tell whether it was written over
+  (`DrawnOverwritten`).
+
+**The rule instead:** an image belongs to the resource it was made for, and the registry says which
+resource lives at an address.
+
+1. **Owner at registration.** An image whose memory a live resource starts at and covers takes that
+   resource's identity (its key and creation time; beta 8's `surface_ns` and `gx_owner`, made
+   general). An image over memory no resource of the game's holds has no owner and keeps today's
+   rules (the engine's own data, and anything the registry does not hook).
+2. **At a draw or a bind.** `FindImage` takes an image at the address only while its owner is the
+   live resource there (`StillLive`), or while it has no owner and no resource lives there. The game's
+   pending creates and destroys are taken first (as beta 8's part 3 does), so the registry is current.
+3. **When the owner is gone and another resource lives there:**
+   - **The same shape, made without data:** the image passes to the new resource with its contents.
+     On the console the memory carries over. This is beta 7's hand-over, made general from YEBIS to
+     every resource.
+   - **Any other case:** the image is retired once the GPU is done with it, and a new image is made.
+     A surface starts empty; a texture made with its data is filled from it.
+4. **Destroying a resource** retires its images once the GPU is done, unless rule 3 passed one on
+   first (`FreeDeadImages`, unchanged). The 3 s grace goes: the creates are taken before the draws
+   that would use them.
+5. **No guessing for owned images:**
+   - `dead_by_reuse`, `reuse_tick`, the `LiveTextureOverlaps` exception and the grace go.
+   - An owned image lives and dies with its owner, so `DrawnOverwritten`'s hashing and the stale
+     collector keep only ownerless images.
+6. **Copies.** The copy shader already copies image to image where it recognises an image copy (run
+   B: 415 a second). Its copies through memory (58 a second) land in the destination's memory, and
+   that resource's image takes them (beta 9's "taken"). Beta 10 counts the copies through memory
+   whose source and destination are both owned images. If they are many, the copy goes image to
+   image (beta 11 or later).
+7. **The switch:** `BB_IMAGE_OWNERS=0` keeps today's rules, for beta 10 only.
+8. **The measurements:**
+   - images refused because their owner was gone, handed over, and retired;
+   - stale images left (near zero for owned ones);
+   - copies through memory with an owned destination.
+
+**What could go wrong, and the guard:**
+
+- **A resource the registry misses.** 3D and 1D textures have hooks, but not every path may be
+  covered. Such an image has no owner and keeps today's rules.
+- **A draw before the creation is taken.** The pending events are taken first.
+- **The game drawing into a resource's memory through a view of another resource.** bbhost's
+  "draws that name no view" (YEBIS's, the wrapper's): the registry's live resource there still owns
+  the image, so the draw goes into the right one.
 
 ### Beta 11: depth buffers
 

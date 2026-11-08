@@ -187,6 +187,19 @@ The tester's call on beta 4's logs: one beta with the whole design and the loggi
     their time.
   - **Each YEBIS rebuild:** where its targets landed, and the destroys before, during and after it.
 
+## The game's own calls tell more (beta 9)
+
+- **The game's render targets are no longer write-protected.** They are written only by the GPU
+  (beta 8's sessions: no CPU write on any), so watching their pages for CPU writes only cost time
+  at every crossing. Textures the game loads with their data stay watched. `BB_WATCH_GAME_TEXTURES=1`
+  in Extra variables watches everything as before; safe mode does too.
+- **YEBIS's and Scaleform's texture updates are followed through their own calls** (YEBIS's update
+  and unmap, Scaleform's unmap), as bbhost does: a texture they write from the CPU is filled from
+  what they wrote, never started empty.
+- **The log** counts those calls, names the game code behind the few CPU writes to textures loaded
+  with their data, and tells apart the GPU's writes to a new target's memory from before the game
+  made it (`BB_TAKE_EARLIER_WRITES=0` leaves those out, for testing).
+
 ## Diagnostics
 
 - **The "Building shaders" note** shows when a frame was late while shaders were being
