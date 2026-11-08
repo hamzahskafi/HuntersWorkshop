@@ -226,8 +226,11 @@ public:
     u64 surface_ns = 0;
     u8 gx_owner = 0;
     bool gx_whole = false; ///< that resource starts where the image does
-    /// 0.4.6 beta 10: the gx_dead_tick at which a draw's taking it back was counted (NoteOwnerTake).
+    /// 0.4.6 beta 10: the gx_dead_tick at which a draw's taking it back was counted (NoteOwnerTake), and
+    /// at which its being kept by a guess was (FreeDeadImages: it is on the dead list once for its
+    /// texture's destroy and again for the resource made over it).
     u64 owner_noted_tick = 0;
+    u64 guess_noted_tick = 0;
 
     /// 0.4.6 beta 8 (part 4; the targets' default since beta 9, textures made with their data's since
     /// beta 10): its pages were left unwatched (the game's calls tell its writes); its track range is

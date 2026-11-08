@@ -338,6 +338,29 @@ and explained, and refusals rare on images draws take. Then beta 11 turns the ru
 **Test:** a normal session with loading screens and area crossings, switches as shipped (the two
 flicker spots are the game's, parked: unchanged is expected).
 
+**The tester's quick run** (`57912614`, 2026-11-08, about 8 minutes, 3 loading screens, switches as
+shipped): a clean exit; 60 FPS, frames in play 30.3 ms or less, 44.1 ms and 45.6 ms at the ends of
+loading screens (a load's 425 MB of buffer uploads).
+
+- **Part 1:** 0-424 images a minute marked written by a creation with data (86 MiB at a load); 2
+  live surfaces reaching past one kept.
+- **Part 4:** 3,239-5,588 images a minute left unwatched in the busy minutes (beta 9: 319-360). Write
+  faults unchanged (about 10 a second on average, as in beta 9): they are the game's buffers (beta 13).
+- **The census: no new texture made over a live one,** at its base or partly, in 8 minutes. The design
+  check misread beta 9's "left to their draw (an image there: N of a texture not destroyed)": that
+  counts images whose own texture had no destroy (an image a draw made over memory no texture holds,
+  memory the game released), not a live texture under the new one. "One owner per image" holds so far.
+- **The owner rule, at a draw:** dead images a draw took again 0-10 a minute; the rule would hand
+  29 of them over (a texture made without data and as large lives there) and refuse 2.
+- **Kept by a guess:** 76-371 drawn images a minute at loads (81-584 MiB), kept because they were used
+  just before the new resource was made over them: YEBIS's old targets under the new set (its rebuild
+  lands 124 of 158 inside a destroyed target's memory). They are freed only when a later rebuild
+  lands over them again; the owner rule would retire them at the rebuild. The overlap count beside it
+  counted the same images a second time (they are on the dead list for the destroy and for the
+  create); counted once from engine id 95.
+- **Copies through memory:** up to 2,809 a minute, none to an owned image. The design note's item 6
+  (copying those image to image) has nothing to do.
+
 ### Beta 11: images belong to their textures (the design note)
 
 **Today** an image is found by address and shape, and a stack of rules decides whose it is:

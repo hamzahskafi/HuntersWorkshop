@@ -2308,9 +2308,10 @@ void TextureCache::FreeDeadImages(u64 second) {
         case Dead::No:
             // 0.4.6 beta 10 (counted only): kept by a guess, not by a use since its texture went; the
             // owner rule would retire an image of a game's texture once the GPU is done with it.
-            if (image.gx_dead_tick != 0 && image.gx_whole && image.gx_owner != 0 &&
-                True(image.flags & ImageFlagBits::Registered) &&
+            if (image.gx_dead_tick != 0 && image.guess_noted_tick != image.gx_dead_tick && image.gx_whole &&
+                image.gx_owner != 0 && True(image.flags & ImageFlagBits::Registered) &&
                 !(image.lru_touched_tick != ~0ULL && image.lru_touched_tick > image.gx_dead_tick)) {
+                image.guess_noted_tick = image.gx_dead_tick; // once: the first reason found
                 BbEngine::GxResources::NoteOwnerGuess(image.dead_by_reuse
                                                           ? BbEngine::GxResources::OwnerGuess::KeptUsedBefore
                                                           : BbEngine::GxResources::OwnerGuess::KeptOverlap,
