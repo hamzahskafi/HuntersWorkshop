@@ -62,6 +62,9 @@ struct Gone {
     std::uint32_t width = 0, height = 0;
     std::uint16_t levels = 0, layers = 0;
     bool hand_over = false, grace = false;
+    // 0.4.6 beta 10: a texture made with its data (created events): its create call copied that data
+    // into the memory, a write the images there are told of (whether their pages are watched or not).
+    bool with_data = false;
 };
 // The textures destroyed since the last call (the texture cache's collector; 0.4.6 beta 4: every
 // pass while DestroyedWaiting, which reads no lock).
@@ -186,6 +189,28 @@ bool WrittenWaiting();
 // are logged with the guest code that wrote (its instruction and callers, image offsets).
 void SetFaultContext(void* ucontext);
 void NoteDataTextureWrite(std::uint64_t address, std::uint64_t bytes, std::uint32_t width, std::uint32_t height);
+// 0.4.6 beta 10: images marked written because a texture was made with its data over them, and live
+// surfaces reaching past it left as they are (their CPU writes are kept, beta 8).
+void NoteCreationWrites(std::uint64_t images, std::uint64_t bytes, std::uint64_t surfaces_kept);
+// 0.4.6 beta 10 (the owner rule, counted only): a draw or bind took an image whose texture is gone
+// (destroyed, or something newer made over it). `live` is what lives at its memory now: whether a
+// texture of the game's does, made without its data and as large (the owner rule would hand the
+// image over), or otherwise (it would refuse the image and make a new one).
+struct LiveHere {
+    bool found = false;
+    bool without_data = false;
+    std::uint64_t bytes = 0;
+};
+LiveHere LiveAt(std::uint64_t memory);
+void NoteDeadImageTaken(bool destroyed, bool hand_over, bool refuse, std::uint64_t bytes);
+// Where today's rules guess and the owner rule would retire instead: a dead image kept because another
+// live texture overlaps it, or because it was used just before its memory's new resource was made; and
+// a stale image the collector freed that had an owner (the owner rule retires it when its texture goes).
+enum class OwnerGuess : std::uint8_t { KeptOverlap, KeptUsedBefore, StaleOwned, kCount };
+void NoteOwnerGuess(OwnerGuess guess, std::uint64_t bytes);
+// A copy the copy shader runs through memory (not image to image): whether its source and its
+// destination are images of a game's texture, at its start.
+void NoteCopyThroughMemory(bool source_owned, bool destination_owned);
 // 0.4.6 beta 8 (part 5): a shader translated for a draw, by stage (0 vertex, 1 pixel, 2 compute, 3
 // other), its time, and whether its program had been translated before in this session (another
 // variant of it).

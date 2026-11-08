@@ -3,6 +3,7 @@
 
 #include <xxhash.h>
 #include <algorithm>
+#include <cstring>
 #include <optional>
 
 #include "bbport_copy.h"
@@ -243,14 +244,18 @@ bool DeadTargetPool() {
 }
 // 0.4.6 beta 8, part 4; beta 9 the default: the pages of the game's targets (surfaces made without data
 // for the GPU, textures with a render-target or depth view) are not write-protected: the game's calls tell
-// what writes them (beta 8's runs: none of them written by the CPU). BB_WATCH_GAME_TEXTURES=1 watches
-// every image as before; =0 leaves textures made with their data unwatched too (beta 8's run B; the CPU
-// wrote 21 of them at every start).
+// what writes them (beta 8's runs: none of them written by the CPU). 0.4.6 beta 10 the default: textures
+// made with their data are not either (beta 9's run: their CPU writes are the create call's own copy, told
+// by the created event, ProcessGxCreated, and asset loads, told by Rasterizer::NoteAssetWrite).
+// BB_WATCH_GAME_TEXTURES=1 watches every image as before; =0 is the default; =targets is beta 9's.
 enum class Unwatch { None, Targets, TargetsAndData };
 Unwatch UnwatchKinds() {
     static const Unwatch kinds = [] {
         const char* env = std::getenv("BB_WATCH_GAME_TEXTURES");
-        return env && env[0] == '1' ? Unwatch::None : env && env[0] == '0' ? Unwatch::TargetsAndData : Unwatch::Targets;
+        if (env && env[0] == '1') {
+            return Unwatch::None;
+        }
+        return env && std::strcmp(env, "targets") == 0 ? Unwatch::Targets : Unwatch::TargetsAndData;
     }();
     return kinds;
 }
@@ -1154,6 +1159,13 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
 
     std::scoped_lock lock{mutex};
 
+    // 0.4.6 beta 10: the game's pending destroys and creates are taken before a draw looks (a texture
+    // made with its data marks the images over it written, ProcessGxCreated).
+    if (BbEngine::GxResources::Following() && BbEngine::GxResources::CreatedWaiting()) {
+        ProcessGxDestroyed();
+        ProcessGxCreated();
+    }
+
     u64 key_hash = info.guest_address ^ info.guest_size << 17 ^ u64(info.pixel_format) << 40 ^
                    u64(info.size.width) << 24 ^ info.size.height ^ u64(desc.type) << 58 ^
                    u64(exact_fmt) << 63;
@@ -1185,6 +1197,7 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
         cached.layout_key == info.LayoutKey() &&
         !BbToggle::Disabled(BbToggle::FindImageCache)) {
         Image& image = slot_images[cached.image_id];
+        NoteOwnerTake(image);
         image.tick_accessed_last = scheduler.CurrentTick();
         TouchImage(image);
         if (cached.view_mip > 0) {
@@ -1295,6 +1308,7 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
     }
 
     Image& image = slot_images[image_id];
+    NoteOwnerTake(image);
     image.tick_accessed_last = scheduler.CurrentTick();
     TouchImage(image);
 
@@ -1854,8 +1868,8 @@ void TextureCache::TrackImage(ImageId image_id) {
         // Re-track the whole image
         image.track_addr = image_begin;
         image.track_addr_end = image_end;
-        // 0.4.6 beta 8 (part 4, BB_WATCH_GAME_TEXTURES=0): a texture of the game's whose writes its calls
-        // tell (made with its data, a target, a surface) is not write-protected; its range is kept.
+        // 0.4.6 beta 8 (part 4; UnwatchKinds): a texture of the game's whose writes its calls tell (made
+        // with its data, a target, a surface) is not write-protected; its range is kept.
         using BbEngine::GxResources::Owner;
         const Owner owner = Owner(image.gx_owner);
         const Unwatch kinds = UnwatchKinds();
@@ -2123,6 +2137,19 @@ void TextureCache::ProcessGxDestroyed() {
                 image.dead_grace_ns = gone.grace ? NowSteadyNs() + 3'000'000'000ull : 0;
                 had = true;
                 bytes += image.backing ? image.GetHostImageSize() : 0;
+                // 0.4.6 beta 10: an image whose pages the calls watch (ReleaseDestroyed, on the game's
+                // thread, passes over pages nothing write-protects) is marked as a watched one is there:
+                // what the game writes in that memory next is the next resource's.
+                if (image.calls_watch && False(image.flags & ImageFlagBits::GpuModified) &&
+                    !image.binding.is_target && !image.store_pending &&
+                    !BbEngine::GxResources::LiveTextureOverlaps(
+                        image.info.guest_address, image.info.guest_address + image.info.guest_size)) {
+                    image.mip_hashes_current = false;
+                    if (False(image.flags & ImageFlagBits::CpuDirty) && garbage_candidates.size() < 16384) {
+                        garbage_candidates.emplace_back(image_id, image.image_uid);
+                    }
+                    image.flags |= ImageFlagBits::CpuDirty;
+                }
                 // Beta 16: freed once the GPU is done with it (FreeDeadImages).
                 if (BbEngine::GxResources::Following() && dead_images.size() < 65536) {
                     dead_images.emplace_back(image_id, image.image_uid);
@@ -2153,7 +2180,7 @@ void TextureCache::ProcessGxCreated() {
             }
         }
         const VAddr made_end = made.memory + std::max<u64>(made.bytes, 1);
-        u64 bytes = 0, images = 0, kept = 0, kept_bytes = 0;
+        u64 bytes = 0, images = 0, kept = 0, kept_bytes = 0, written = 0, written_bytes = 0, surfaces_kept = 0;
         // 0.4.6 beta 9: the GPU's newest write to its memory when the game made it (StartSurface tells
         // the writes since from those of the memory's previous owner).
         if (EmptySurfaces()) {
@@ -2166,6 +2193,31 @@ void TextureCache::ProcessGxCreated() {
             created_gpu_version[made.memory] = {made.ns, version};
         }
         ForEachImageInRegion(made.memory, std::max<u64>(made.bytes, 1), [&](ImageId image_id, Image& image) {
+            // 0.4.6 beta 10: made with its data: the create call copied that data into the memory, a CPU
+            // write the images there hear of whether their pages are watched or not (since beta 9 a
+            // target's are not, since beta 10 a texture made with its data's are not). Each takes the
+            // memory at its next use (its hashes tell which mips changed), as a watched one did, except a
+            // live surface reaching past the new texture: its CPU writes are kept (beta 8), and the
+            // memory outside the new texture's is older than what the GPU drew. A surface wholly inside
+            // it is the new texture's memory now (the case beta 9 left open: a draw for the new texture
+            // took that image with the target's old contents).
+            if (made.with_data && True(image.flags & ImageFlagBits::Registered) && image.registered_ns < made.ns) {
+                const VAddr image_end = image.info.guest_address + std::max<u64>(image.info.guest_size, 1);
+                const bool within = image.info.guest_address >= made.memory && image_end <= made_end;
+                if (within || image.surface_ns == 0) {
+                    RefreshTrace::Mark(image, "a texture made with its data over it", made.memory, made.bytes);
+                    if (False(image.flags & ImageFlagBits::CpuDirty) && garbage_candidates.size() < 16384) {
+                        garbage_candidates.emplace_back(image_id, image.image_uid); // unused from now: garbage
+                    }
+                    image.flags |= ImageFlagBits::CpuDirty;
+                    image.mip_hashes_current = false;
+                    image.surface_ns = 0;
+                    ++written;
+                    written_bytes += image.backing ? image.GetHostImageSize() : 0;
+                } else {
+                    ++surfaces_kept;
+                }
+            }
             // 0.4.6 beta 7: YEBIS re-created a target over the same memory, made without data: the image
             // of the target it replaced, of the same shape, is this one's (bbhost keeps them too). It is
             // drawn into again; nothing of the old target's is read.
@@ -2213,6 +2265,9 @@ void TextureCache::ProcessGxCreated() {
         if (kept != 0) {
             BbEngine::GxResources::NoteHandedOver(kept, kept_bytes);
         }
+        if (written != 0 || surfaces_kept != 0) {
+            BbEngine::GxResources::NoteCreationWrites(written, written_bytes, surfaces_kept);
+        }
     }
     gx_created.clear();
 }
@@ -2251,6 +2306,16 @@ void TextureCache::FreeDeadImages(u64 second) {
         Image& image = slot_images[image_id];
         switch (DeadImageState(image)) {
         case Dead::No:
+            // 0.4.6 beta 10 (counted only): kept by a guess, not by a use since its texture went; the
+            // owner rule would retire an image of a game's texture once the GPU is done with it.
+            if (image.gx_dead_tick != 0 && image.gx_whole && image.gx_owner != 0 &&
+                True(image.flags & ImageFlagBits::Registered) &&
+                !(image.lru_touched_tick != ~0ULL && image.lru_touched_tick > image.gx_dead_tick)) {
+                BbEngine::GxResources::NoteOwnerGuess(image.dead_by_reuse
+                                                          ? BbEngine::GxResources::OwnerGuess::KeptUsedBefore
+                                                          : BbEngine::GxResources::OwnerGuess::KeptOverlap,
+                                                      image.backing ? image.GetHostImageSize() : 0);
+            }
             image.dead_by_reuse = false; // in use: the next resource made over it is checked again
             continue; // used since, or kept for a live texture (DeadImageState)
         case Dead::Busy:
@@ -2677,6 +2742,12 @@ void TextureCache::GarbagePass(u64 second) {
             ++gc_freed_superseded;
             BbEngine::GxResources::NoteSuperseded(image.backing ? image.GetHostImageSize() : 0);
         }
+        // 0.4.6 beta 10 (counted only): a stale image of a game's texture, which the owner rule retires
+        // when that texture goes.
+        if ((orphan || superseded) && image.gx_whole && image.gx_owner != 0) {
+            BbEngine::GxResources::NoteOwnerGuess(BbEngine::GxResources::OwnerGuess::StaleOwned,
+                                                  image.backing ? image.GetHostImageSize() : 0);
+        }
         BbStats::gc_freed_images.fetch_add(1, std::memory_order_relaxed);
         NoteCollected(image, second, VramPolicy::Freed::Garbage);
         FreeImage(image_id);
@@ -2930,6 +3001,23 @@ void TextureCache::RunGarbageCollector() {
 
     GarbageCollectImages();
     GarbageCollectSamplers();
+}
+
+// 0.4.6 beta 10 (the owner rule, counted only): a draw or bind takes an image of a game's texture that
+// went (destroyed, or something newer made over its memory), the first time since. Today it takes it
+// back; the owner rule would hand it to the texture living there when that one was made without its data
+// and is as large, and otherwise refuse it (a new image, from the memory or empty).
+void TextureCache::NoteOwnerTake(Image& image) {
+    if (image.gx_dead_tick == 0 || image.owner_noted_tick == image.gx_dead_tick || !image.gx_whole ||
+        image.gx_owner == 0 || (image.lru_touched_tick != ~0ULL && image.lru_touched_tick > image.gx_dead_tick) ||
+        !BbEngine::GxResources::Following()) {
+        return;
+    }
+    image.owner_noted_tick = image.gx_dead_tick;
+    const auto live = BbEngine::GxResources::LiveAt(image.info.guest_address);
+    const bool hand_over = live.found && live.without_data && live.bytes >= image.info.guest_size;
+    BbEngine::GxResources::NoteDeadImageTaken(!image.dead_by_reuse, hand_over, !hand_over,
+                                              image.backing ? image.GetHostImageSize() : 0);
 }
 
 void TextureCache::TouchImage(const Image& image) {

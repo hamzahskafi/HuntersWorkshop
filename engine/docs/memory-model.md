@@ -61,11 +61,11 @@ Still the generic model (the gaps the 2026-11-08 research found):
 | A new render target, depth target or shader-written texture is filled from the game's memory at its first draw | YEBIS's rebuilds: 59-84 ms stalls (hashing 28.8 ms, detiling 13.6 ms, page faults); reading untouched memory also commits its pages | Beta 8, part 1 |
 | A GPU-written image's first fill hashes every level: the hashes tell a real CPU write from one elsewhere in the same 4 KiB page (not a bug, as first thought: beta 8's correction) | The 28.8 ms of hashing above | Beta 8, part 2: none for surfaces started empty |
 | Every new image's pages are write-protected (`texture_cache.cpp`, `TrackImage` after `InsertImage`), targets included | About 8 ms of protecting a rebuild, faults when memory is reused | Beta 8 part 4 (measured), beta 9 |
-| Images found by address and shape; a stack of guesses decides whose an image is (retired when something newer is made over it, dead-by-reuse, the 3 s grace, the same-memory hand-over, hashing 32-37 MiB of memory a minute to tell overwritten drawings) | Rebuilt targets mostly miss the hand-over (8-36 kept a minute against about 280 a rebuild); stale images; CPU time | Beta 10 |
+| Images found by address and shape; a stack of guesses decides whose an image is (retired when something newer is made over it, dead-by-reuse, the 3 s grace, the same-memory hand-over, hashing 32-37 MiB of memory a minute to tell overwritten drawings) | Rebuilt targets mostly miss the hand-over (8-36 kept a minute against about 280 a rebuild); stale images; CPU time | Beta 10 (counted), beta 11 |
 | Every rebuilt target is a new Vulkan image, and the old set waits out the grace | About 4 ms of allocation a rebuild, both sets in VRAM for seconds (YEBIS made 744-775 MiB a minute in beta 7's log) | Beta 8, part 3 |
-| A depth target's first use reads memory; its compression metadata (HTILE) is followed by address | Part of the rebuilds' uploads | Beta 8 part 1, beta 11 |
-| The game's buffers are write-protected and re-read by page | Write faults and re-uploads | Beta 12 |
-| Shaders translated at a draw; pipelines a new area needs built in play | Compile stutter with a cold cache | Beta 13 |
+| A depth target's first use reads memory; its compression metadata (HTILE) is followed by address | Part of the rebuilds' uploads | Beta 8 part 1, beta 12 |
+| The game's buffers are write-protected and re-read by page | Write faults and re-uploads | Beta 13 |
+| Shaders translated at a draw; pipelines a new area needs built in play | Compile stutter with a cold cache | Beta 14 |
 
 ## The research of 2026-11-08
 
@@ -142,6 +142,10 @@ contents kept (beta 8, part 2).
 
 ## The roadmap
 
+The betas after 9 were renumbered on 2026-11-08 when beta 10 became the measurement before the owner
+rule (the design check below): the owner rule is beta 11, depth buffers 12, the game's buffers 13,
+shaders 14. Earlier text that named them by their old numbers has been brought up to date.
+
 One log must be able to tell each change apart: every part has its own switch in Extra variables
 that brings back the old behaviour, named in the changelog when built. A beta's switches go at the
 release, with the tester's agreement.
@@ -158,7 +162,7 @@ Built 2026-11-08 (engine id 92). Safe mode turns parts 1 and 3 off.
    overlap, a texture a shader stored there first) is not filled from memory:
    - **Colour targets and shader-written textures:** cleared to zero (bbhost's rule).
    - **Depth targets:** not filled either; the first use takes the game's pending clear from its
-     HTILE, as now. Where none is pending, the target is cleared and counted (beta 11 uses that
+     HTILE, as now. Where none is pending, the target is cleared and counted (beta 12 uses that
      count).
    - **Still filled from memory:** textures made with data, and memory no known resource holds.
    - Page tracking stays (part 4 decides it), so a CPU write after creation still reaches the image.
@@ -180,7 +184,7 @@ Built 2026-11-08 (engine id 92). Safe mode turns parts 1 and 3 off.
    - **Write faults that land on live game resources after their creation,** by kind (GX target,
      GX texture with data, YEBIS target, YEBIS other, Scaleform plane, GX buffer), the largest few
      described (address, kind, size, seconds since creation). This is part 4's measurement in the
-     default run, and beta 12's for buffers.
+     default run, and beta 13's for buffers.
    - **Each YEBIS rebuild:** where its new targets landed (a dead target's memory with the same
      shape, with another shape, memory a live target still holds, fresh memory), and whether the
      old set's destroys came before or after the new set's creates.
@@ -197,7 +201,7 @@ Built 2026-11-08 (engine id 92). Safe mode turns parts 1 and 3 off.
 - **Run A:** a normal session with loading screens and area crossings (the crossing that stalled
   in beta 7's log), switches as shipped.
 - **Run B:** the same route with part 4's switch on.
-- **Run C** (any time before beta 13): the shader cache cleared, the same route.
+- **Run C** (any time before beta 14): the shader cache cleared, the same route.
 
 **Moves on when:**
 
@@ -261,7 +265,8 @@ Built 2026-11-08 (engine id 93), from beta 8's runs. Safe mode watches every ima
 4. **The writer of textures made with their data named:** the GPU library's fault entry keeps the
    fault's context (`SetFaultContext`), and the first 24 CPU writes that land on such a texture are
    logged with the guest instruction and its callers (image offsets).
-5. **The design note for beta 10**, below, to go through with the tester before any code.
+5. **The design note for the owner rule**, below (beta 11 since the design check), to go through
+   with the tester before any code.
 
 **The log:** `GX memory, write calls this minute (beta 9)` (YEBIS's updates, Maps and Unmaps of its
 2D textures, Scaleform's unmaps, the written events), `a CPU write landed on a texture made with its
@@ -285,7 +290,55 @@ images a minute left unwatched in the busy minutes.
 - **The GPU's earlier writes:** surfaces filled from writes older than the resource 1-58 a minute
   (render targets, up to 83 MiB); from writes since, 2-10 (depth targets among them, 64-110 MiB).
 
-### Beta 10: images belong to their textures (the design note)
+### Beta 10: the hole closed; the owner rule counted before it acts
+
+Built 2026-11-08 (engine id 94), from the design check below (the tester: "go ahead"). Safe mode
+watches every image as before.
+
+1. **A texture made with its data tells the images over it** (no switch: it closes beta 9's hole).
+   Its create call copies the data into its memory (`+0x2166210`). The created event now says the
+   texture came with its data, and `ProcessGxCreated` marks every older image over that memory
+   CPU-written, whatever its watching. Each takes the memory at its next use, its hashes telling
+   which levels changed, as a watched image did at the fault.
+   - **Kept:** a live surface reaching past the new texture (beta 8's rule: the memory outside the
+     new texture is older than what the GPU drew there). Counted.
+   - **Marked:** a surface wholly inside the new texture. That is beta 9's hole: a draw for the new
+     texture took that image with the old target's contents.
+   - `FindImage` takes the game's pending destroys and creates before it looks, so a draw after the
+     creation finds the mark.
+2. **The overlap census.** Every new texture made over a live texture's memory, at its base or
+   partly, by the pair of kinds. The first 12 are described (addresses, sizes, seconds between the
+   two). bbhost counts the same and reads them as destroys it missed.
+3. **The owner rule computed alongside today's rules, not acting.** Only images at a resource's start
+   (with an owner) are counted; the rest keep today's rules under the owner rule too.
+   - **A dead image a draw takes again** (its texture destroyed, or something newer made over it),
+     once per death: today the draw takes it back. The owner rule would hand it to the texture
+     living there when that one was made without its data and is as large, and otherwise refuse it.
+   - **Dead images today's guesses keep:** because another live texture overlaps, or because it was
+     used just before the new resource was made. The owner rule would retire them.
+   - **Stale images the collector freed that had an owner** (the owner rule retires them when their
+     texture goes).
+   - **Copies run through memory:** in all, to an owned image, owned to owned.
+4. **Textures made with their data unwatched by default** (`BB_WATCH_GAME_TEXTURES=1` watches every
+   image; `=targets` is beta 9's). Their CPU writes are the create call's copy (part 1) and asset
+   loads (`Rasterizer::NoteAssetWrite`, which reaches unwatched images). The game's destroy marks
+   such an image as it marked a watched one: `ProcessGxDestroyed` does it, since `ReleaseDestroyed`,
+   on the game's thread, passes over pages nothing write-protects.
+
+**Not in beta 10:** `registry_generation` stays as it is. Part 1 only marks images written, which the
+draw's refresh reads after `FindImage`; the owner changes that need the fast path to forget come with
+beta 11.
+
+**The log:** `GX memory, owners this minute (beta 10)` (all of the above in one line) and
+`GX memory: ... made over the live ...` (the census's first 12).
+
+**Moves on when:** no stale or broken texture in the tester's runs, and the counts hold: overlaps few
+and explained, and refusals rare on images draws take. Then beta 11 turns the rule on.
+
+**Test:** a normal session with loading screens and area crossings, switches as shipped (the two
+flicker spots are the game's, parked: unchanged is expected).
+
+### Beta 11: images belong to their textures (the design note)
 
 **Today** an image is found by address and shape, and a stack of rules decides whose it is:
 
@@ -324,11 +377,11 @@ resource lives at an address.
    that resource's image takes them (beta 9's "taken"). Beta 10 counts the copies through memory
    whose source and destination are both owned images. If they are many, the copy goes image to
    image (beta 11 or later).
-7. **The switch:** `BB_IMAGE_OWNERS=0` keeps today's rules, for beta 10 only.
+7. **The switch:** `BB_IMAGE_OWNERS=0` keeps today's rules, for beta 11 only.
 8. **Textures made with their data unwatched too** (beta 9's run: their CPU writes are the create
    call's own copy and asset loads, both told without faults); `BB_WATCH_GAME_TEXTURES=1` still
-   watches everything.
-9. **The measurements:**
+   watches everything. Done in beta 10.
+9. **The measurements** (counted in beta 10 before the rule acts):
    - images refused because their owner was gone, handed over, and retired;
    - stale images left (near zero for owned ones);
    - copies through memory with an owned destination.
@@ -367,7 +420,7 @@ resource lives at an address.
   dead images freed sooner (beta 9's run: 160 images, 219 MiB of destroyed textures still in VRAM).
   The guesses themselves cost little (32-37 MiB of memory hashed a minute).
 
-**Revised order:** beta 10 measures before it acts.
+**Revised order:** beta 10 measures before it acts (built: "Beta 10" above).
 1. The fix above.
 2. The overlap census.
 3. The owner rule computed alongside today's rules and counted where it would decide differently
@@ -378,7 +431,7 @@ resource lives at an address.
 Beta 11 then turns the owner rule on, if the counts hold. Depth buffers, the game's buffers and the
 shaders move one number on (12, 13, 14).
 
-### Beta 11: depth buffers
+### Beta 12: depth buffers
 
 - A depth target's compression metadata (HTILE) and its pending clear follow the owning resource,
   not the address.
@@ -388,7 +441,7 @@ shaders move one number on (12, 13, 14).
 **Moves on when:** no depth artefacts (shadows, the lamp faces, the scene's depth copies) in the
 tester's runs.
 
-### Beta 12: the game's buffers by the calls
+### Beta 13: the game's buffers by the calls
 
 - GX's buffer creation with data marks the memory it fills.
 - Map (types 0-2 in place, 3 a renamed copy kept in GX's rename table at ctx + `0xb6f8`, 4 that copy
@@ -400,7 +453,7 @@ tester's runs.
 **Moves on when:** no geometry or animation errors in the tester's runs; write faults and buffer
 re-uploads down.
 
-### Beta 13: shaders built ahead
+### Beta 14: shaders built ahead
 
 - GX's input-layout creation hooked; every shader the game creates at startup translated on
   background threads for the variants its vertex formats and the targets predict.
@@ -409,7 +462,7 @@ re-uploads down.
 - `pipeline_compiles.md`'s "Remaining (not done)" items are looked at with it: catalog coverage, the
   warm-up's state rebuilt on the main thread, a profile change emptying the cache, the scene-curve
   cache folder, AMD and Intel catalogs.
-- Independent of betas 9 to 12: it moves earlier if beta 8's numbers make compiles the bigger
+- Independent of betas 9 to 13: it moves earlier if beta 8's numbers make compiles the bigger
   stutter.
 
 **Moves on when:** with a cold cache, no compile stutter on run C's route.
@@ -444,7 +497,7 @@ command stream (Lantern's native plan, bbhost's YEBIS path). It builds on 0.4.6,
 - "Can't we do more in the next beta?": beta 8 carries five parts, each with its own switch, and the
   measurement for beta 9 rides with its change switched off.
 - "0.4.6 is the memory model release, so you need to fold the .7 into it": depth buffers and the
-  game's buffers are betas 11 and 12.
-- "we haven't made the shader building on game start and in loading": beta 13, measured in beta 8.
+  game's buffers are betas 12 and 13 (11 and 12 before the renumbering).
+- "we haven't made the shader building on game start and in loading": beta 14, measured in beta 8.
 - "prepare the full plan/documentation so that we don't lose on or forget any steps": this document
   and plan.md's register.

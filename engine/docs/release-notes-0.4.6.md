@@ -200,6 +200,22 @@ The tester's call on beta 4's logs: one beta with the whole design and the loggi
   with their data, and tells apart the GPU's writes to a new target's memory from before the game
   made it (`BB_TAKE_EARLIER_WRITES=0` leaves those out, for testing).
 
+## Textures follow the game's create calls (beta 10)
+
+- **A texture the game makes with its data tells the images over its memory.** The game copies the
+  data in inside its create call. Since beta 9 a render target's pages are not write-protected, so
+  that copy no longer reached a target's image left in the same memory, and a draw could show the
+  target's old contents there. Every image over a new texture's memory is now marked written when
+  the game creates it, watched or not, and takes the new data at its next use. A render target that
+  only partly overlaps the new texture and is still in use keeps what the GPU drew (beta 8's rule).
+- **Textures the game loads with their data are no longer write-protected either.** Their CPU
+  writes are that create call's copy and the game's file loads, both told without page faults.
+  `BB_WATCH_GAME_TEXTURES=1` in Extra variables watches everything as before (safe mode does);
+  `BB_WATCH_GAME_TEXTURES=targets` is beta 9's choice.
+- **Measured before the next step acts:** how often the game makes a texture over one still alive,
+  and where the next beta's rule (an image belongs to its texture) would decide differently from
+  today's rules, in one log line a minute. Nothing changes in what is drawn from these counts.
+
 ## Diagnostics
 
 - **The "Building shaders" note** shows when a frame was late while shaders were being

@@ -396,6 +396,17 @@ struct Counts {
     // events queued and dropped; CPU writes on textures made with data logged with their code.
     std::atomic<std::uint64_t> yebis_updates{0}, yebis_update_surfaces{0}, yebis_maps{0}, yebis_unmaps{0},
         sf_unmaps{0}, written_events{0}, written_dropped{0}, data_writes_logged{0};
+    // 0.4.6 beta 10: new textures made over a live texture's memory, at its base or partly, by [the live
+    // one's owner kind][the new one's]; images marked written by a creation with data; dead images a draw
+    // took (after a destroy / after something newer), of them the owner rule's hand-overs and refusals.
+    std::array<std::array<std::atomic<std::uint64_t>, std::size_t(Owner::kCount)>, std::size_t(Owner::kCount)>
+        overlap_base{}, overlap_part{};
+    std::atomic<int> overlap_logged{0};
+    std::atomic<std::uint64_t> creation_writes{0}, creation_write_bytes{0}, creation_surfaces_kept{0},
+        dead_taken_destroyed{0},
+        dead_taken_reused{0}, dead_taken_hand_over{0}, dead_taken_refuse{0}, dead_taken_bytes{0},
+        copies_memory{0}, copies_memory_owned_destination{0}, copies_memory_both_owned{0};
+    std::array<std::atomic<std::uint64_t>, std::size_t(OwnerGuess::kCount)> guesses{}, guess_bytes{};
     struct Made {
         std::uint64_t address, bytes;
         std::uint32_t width, height, levels, layers, format, tile;
@@ -423,6 +434,7 @@ template <typename T> T Read(std::uint64_t address) {
 }
 
 void Insert(std::uint64_t key, const Entry& e);
+Owner OwnerOf(const Entry& e);
 
 // `key`: the holder, or kMemoryKey | memory for a 1D texture (its holder is read for the fields).
 Entry Register(std::uint64_t key, std::uint64_t holder, Kind kind, bool initial) {
@@ -455,6 +467,34 @@ void Insert(std::uint64_t key, const Entry& e) {
     if (const auto old = g_by_holder.find(key); old != g_by_holder.end() && old->second.kind != kBuffer) {
         g_live_texture_bytes.fetch_sub(old->second.bytes, std::memory_order_relaxed); // reused unseen
     }
+    // 0.4.6 beta 10 (census): live textures the new one's memory overlaps, at their base or partly (memory
+    // the game gave to something new while the registry still holds the old one: an alias, or a destroy
+    // it did not see; bbhost counts the same).
+    if (kind != kBuffer && e.memory && e.bytes) {
+        auto it = g_texture_at.upper_bound(e.memory);
+        if (it != g_texture_at.begin()) {
+            --it;
+        }
+        for (int guard = 0; it != g_texture_at.end() && it->first < e.memory + e.bytes && guard < 64; ++it, ++guard) {
+            if (it->second == key) {
+                continue;
+            }
+            const auto live = g_by_holder.find(it->second);
+            if (live == g_by_holder.end() || live->second.memory + std::max<std::uint32_t>(live->second.bytes, 1) <= e.memory) {
+                continue;
+            }
+            const Entry& old = live->second;
+            const bool base = old.memory == e.memory;
+            const std::size_t a = std::size_t(OwnerOf(old)), b = std::size_t(OwnerOf(e));
+            (base ? g_counts.overlap_base : g_counts.overlap_part)[a][b].fetch_add(1, std::memory_order_relaxed);
+            if (g_counts.overlap_logged.fetch_add(1, std::memory_order_relaxed) < 12) {
+                host_log("GX memory: %s [0x%llx, +0x%x) made over the live %s [0x%llx, +0x%x) made %.1f s before (%s)",
+                         OwnerName(Owner(b)), (unsigned long long)e.memory, e.bytes, OwnerName(Owner(a)),
+                         (unsigned long long)old.memory, old.bytes, double(e.ns - old.ns) / 1e9,
+                         base ? "at its base" : "partly");
+            }
+        }
+    }
     if (kind != kBuffer) {
         g_live_texture_bytes.fetch_add(e.bytes, std::memory_order_relaxed);
         if (e.memory) {
@@ -467,6 +507,7 @@ void Insert(std::uint64_t key, const Entry& e) {
     if (g_follow && e.memory && e.bytes) {
         if (g_created.size() < kQueueCap) {
             Gone made{e.memory, e.bytes, e.ns};
+            made.with_data = e.initial;
             if (kind == kYebis && !e.initial) {
                 made.width = e.width;
                 made.height = e.height;
@@ -1409,6 +1450,58 @@ void NoteShaderTranslated(unsigned stage, std::uint64_t ns, bool program_seen) {
     }
 }
 
+void NoteCreationWrites(std::uint64_t images, std::uint64_t bytes, std::uint64_t surfaces_kept) {
+    g_counts.creation_writes.fetch_add(images, std::memory_order_relaxed);
+    g_counts.creation_write_bytes.fetch_add(bytes, std::memory_order_relaxed);
+    g_counts.creation_surfaces_kept.fetch_add(surfaces_kept, std::memory_order_relaxed);
+}
+
+LiveHere LiveAt(std::uint64_t memory) {
+    LiveHere here;
+    if (!g_active) {
+        return here;
+    }
+    std::scoped_lock lock{g_mutex};
+    const auto at = g_texture_at.find(memory);
+    if (at == g_texture_at.end()) {
+        return here;
+    }
+    const auto it = g_by_holder.find(at->second);
+    if (it == g_by_holder.end()) {
+        return here;
+    }
+    here.found = true;
+    here.without_data = !it->second.initial;
+    here.bytes = it->second.bytes;
+    return here;
+}
+
+void NoteDeadImageTaken(bool destroyed, bool hand_over, bool refuse, std::uint64_t bytes) {
+    (destroyed ? g_counts.dead_taken_destroyed : g_counts.dead_taken_reused).fetch_add(1, std::memory_order_relaxed);
+    if (hand_over) {
+        g_counts.dead_taken_hand_over.fetch_add(1, std::memory_order_relaxed);
+    }
+    if (refuse) {
+        g_counts.dead_taken_refuse.fetch_add(1, std::memory_order_relaxed);
+    }
+    g_counts.dead_taken_bytes.fetch_add(bytes, std::memory_order_relaxed);
+}
+
+void NoteOwnerGuess(OwnerGuess guess, std::uint64_t bytes) {
+    g_counts.guesses[std::size_t(guess)].fetch_add(1, std::memory_order_relaxed);
+    g_counts.guess_bytes[std::size_t(guess)].fetch_add(bytes, std::memory_order_relaxed);
+}
+
+void NoteCopyThroughMemory(bool source_owned, bool destination_owned) {
+    g_counts.copies_memory.fetch_add(1, std::memory_order_relaxed);
+    if (destination_owned) {
+        g_counts.copies_memory_owned_destination.fetch_add(1, std::memory_order_relaxed);
+        if (source_owned) {
+            g_counts.copies_memory_both_owned.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
+}
+
 void NoteDrawMade(Owner owner, std::uint64_t bytes) {
     const std::size_t i = std::min<std::size_t>(std::size_t(owner), std::size_t(Owner::kCount) - 1);
     g_counts.draw_made[i].fetch_add(1, std::memory_order_relaxed);
@@ -2012,6 +2105,45 @@ void LogMinute() {
              (unsigned long long)take(g_counts.yebis_maps), (unsigned long long)take(g_counts.yebis_unmaps),
              (unsigned long long)take(g_counts.sf_unmaps), (unsigned long long)take(g_counts.written_events),
              (unsigned long long)take(g_counts.written_dropped));
+    std::string base_pairs, part_pairs;
+    for (std::size_t a = 0; a < std::size_t(Owner::kCount); ++a) {
+        for (std::size_t b = 0; b < std::size_t(Owner::kCount); ++b) {
+            for (int which = 0; which < 2; ++which) {
+                const std::uint64_t n = take((which ? g_counts.overlap_part : g_counts.overlap_base)[a][b]);
+                if (n == 0) {
+                    continue;
+                }
+                std::string& out = which ? part_pairs : base_pairs;
+                char part[160];
+                std::snprintf(part, sizeof(part), "%s%s over %s %llu", out.empty() ? "" : ", ", OwnerName(Owner(b)),
+                              OwnerName(Owner(a)), (unsigned long long)n);
+                out += part;
+            }
+        }
+    }
+    host_log("GX memory, owners this minute (beta 10): new textures over a live texture's memory, at its base: %s; "
+             "partly: %s; images marked written by a creation with data over them %llu (%.0f MiB), live surfaces "
+             "reaching past one kept %llu; dead images a draw took again: %llu after their texture's destroy, %llu "
+             "after something newer was made over them (%.0f MiB in all), of which the owner rule would hand over "
+             "%llu (a texture made without data and as large lives there) and refuse %llu; today's guesses it would replace by retiring: dead images kept because another "
+             "live texture overlaps %llu (%.0f MiB), because used just before the new resource %llu (%.0f MiB), "
+             "stale images freed that had an owner %llu (%.0f MiB); copies run through memory %llu, to an owned "
+             "image %llu, owned to owned %llu",
+             base_pairs.empty() ? "none" : base_pairs.c_str(), part_pairs.empty() ? "none" : part_pairs.c_str(),
+             (unsigned long long)take(g_counts.creation_writes), Mib(take(g_counts.creation_write_bytes)),
+             (unsigned long long)take(g_counts.creation_surfaces_kept),
+             (unsigned long long)take(g_counts.dead_taken_destroyed), (unsigned long long)take(g_counts.dead_taken_reused),
+             Mib(take(g_counts.dead_taken_bytes)), (unsigned long long)take(g_counts.dead_taken_hand_over),
+             (unsigned long long)take(g_counts.dead_taken_refuse),
+             (unsigned long long)take(g_counts.guesses[std::size_t(OwnerGuess::KeptOverlap)]),
+             Mib(take(g_counts.guess_bytes[std::size_t(OwnerGuess::KeptOverlap)])),
+             (unsigned long long)take(g_counts.guesses[std::size_t(OwnerGuess::KeptUsedBefore)]),
+             Mib(take(g_counts.guess_bytes[std::size_t(OwnerGuess::KeptUsedBefore)])),
+             (unsigned long long)take(g_counts.guesses[std::size_t(OwnerGuess::StaleOwned)]),
+             Mib(take(g_counts.guess_bytes[std::size_t(OwnerGuess::StaleOwned)])),
+             (unsigned long long)take(g_counts.copies_memory),
+             (unsigned long long)take(g_counts.copies_memory_owned_destination),
+             (unsigned long long)take(g_counts.copies_memory_both_owned));
     host_log("Shaders this minute (beta 8): input layouts the game created %llu (%llu during loading screens, %llu "
              "vertex elements); translated for draws: %s",
              (unsigned long long)take(g_counts.input_layouts), (unsigned long long)take(g_counts.input_layouts_loading),

@@ -510,6 +510,8 @@ private:
     void ProcessGxCreated();
     /// 0.4.6 beta 9: the images over textures the CPU wrote through their calls marked written.
     void ProcessWritten();
+    /// 0.4.6 beta 10: a dead image of a game's texture taken again, counted as the owner rule would decide.
+    void NoteOwnerTake(Image& image);
     void FreeDeadImages(u64 second);
     /// 0.4.6 beta 3: whether an image is of a texture the game destroyed (not used since, and not
     /// GPU-drawn contents another live texture may share), and if so whether the GPU is done with it.

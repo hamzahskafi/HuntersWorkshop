@@ -5,8 +5,11 @@ What comes next, the rules and decisions it works under, and every open item. Up
 - **Where it stands:** 0.4.6 is in beta: the memory model release
   ([memory-model.md](memory-model.md)). Betas 1 to 7 (engine ids 85 to 91) moved the engine's
   caches onto the game's own create, destroy and release calls; beta 7's log came back on
-  2026-11-08. Beta 8 (engine id 92, 2026-11-08) starts the game's GPU-owned surfaces empty instead of
-  filling them from memory, and reuses dead targets' images; it waits on the tester's runs. 0.4.5 was released on 2026-11-07 from beta 13 (`a6b34b8`,
+  2026-11-08. Beta 8 (engine id 92) starts the game's GPU-owned surfaces empty instead of filling
+  them from memory, and reuses dead targets' images; beta 9 (93) leaves the game's targets unwatched
+  and hooks YEBIS's and Scaleform's write calls. Beta 10 (94, 2026-11-08) closes beta 9's hole, counts
+  live textures made over each other and counts the owner rule's decisions without acting on them; it
+  waits on the tester's run. 0.4.5 was released on 2026-11-07 from beta 13 (`a6b34b8`,
   engine id 84): the GPU steps, +8.4% at the lamp spot against 0.4.4. 0.4.4 was released on
   2026-11-03 (`cbec5a2`, engine id 64).
 - **Where the work goes:** the branch `claude/awesome-gates-cjba5e`.
@@ -94,28 +97,28 @@ The decisions that still stand. How each was reached is in [archive/plan-0.4.4.m
 
 The detail of every beta (its parts, switches, test runs and what it must show) is in
 [memory-model.md](memory-model.md). The numbers after beta 8 may shift with what each log shows;
-the order of the work does not change without the tester.
+the order of the work does not change without the tester. Renumbered 2026-11-08 after the design
+check: beta 10 measures the owner rule, beta 11 acts, and depth, buffers and shaders moved on one.
 
 | Beta | What it does | State |
 |---|---|---|
 | 1 to 7 | The caches follow the game's create, destroy and release calls: textures built in the game's create call, nothing freed on a release, YEBIS's and Scaleform's textures followed, YEBIS's same-memory targets kept across its rebuilds | Done; beta 7's log read 2026-11-08 |
 | 8 | GPU-owned surfaces start from their predecessor or empty, never from memory, and take no hashes; dead targets' images reused by new ones of their shape; write-watching replaced by the calls for game textures (off, counted); the logging for betas 9 to 13 | Built 2026-11-08 (engine id 92). Run A read: the rebuild stalls gone (frames in play 28.5 ms or less but one of 41.6). Run B read: no hitch, frames in play 33 ms or less; the tester's look at the picture decides part 4 |
-| 9 | The game's targets unwatched by default; YEBIS's and Scaleform's write calls hooked; the GPU's earlier writes to a surface's memory measured (`BB_TAKE_EARLIER_WRITES=0` leaves them out); the writer of textures made with their data named; the design note for beta 10 | Built 2026-11-08 (engine id 93). The tester's run read: a clean session, frames in play 28.2 ms or less but two after loads; the writers named. The design note waits on the tester's agreement |
-| 10 | Images belong to their textures: found through the registry at a draw or bind, retired with their resource, whole-texture copies image to image; the address guesses removed | Planned |
-| 11 | Depth buffers: their compression metadata and pending clears follow the owner; a new depth target starts from the game's clear | Planned |
-| 12 | The game's buffers by the calls: creation and Map say what changed | Planned |
-| 13 | Shaders built ahead: translated at startup for the variants the game's calls predict, pipelines built during loading screens (moves earlier if beta 8 shows compiles are the bigger stutter) | Planned |
+| 9 | The game's targets unwatched by default; YEBIS's and Scaleform's write calls hooked; the GPU's earlier writes to a surface's memory measured (`BB_TAKE_EARLIER_WRITES=0` leaves them out); the writer of textures made with their data named; the design note for the owner rule | Built 2026-11-08 (engine id 93). The tester's run read: a clean session, frames in play 28.2 ms or less but two after loads; the writers named. The design check revised the order (beta 10 measures first) and the tester agreed |
+| 10 | Beta 9's hole closed (a texture made with its data marks the images over it written); the census of live textures made over each other; the owner rule counted alongside today's rules without acting; textures made with their data unwatched | Built 2026-11-08 (engine id 94); waits on the tester's run |
+| 11 | Images belong to their textures: found through the registry at a draw or bind, retired with their resource, whole-texture copies image to image; the address guesses removed (`BB_IMAGE_OWNERS=0` keeps today's rules) | Planned, if beta 10's counts hold |
+| 12 | Depth buffers: their compression metadata and pending clears follow the owner; a new depth target starts from the game's clear | Planned |
+| 13 | The game's buffers by the calls: creation and Map say what changed | Planned |
+| 14 | Shaders built ahead: translated at startup for the variants the game's calls predict, pipelines built during loading screens (moves earlier if beta 8 shows compiles are the bigger stutter) | Planned |
 | Release | Switches settled with the tester, old paths agreed on removed, a small-card run, the docs | Planned |
 
 ### Waiting on the tester
 
-- **0.4.6 beta 9's run:** a normal session with loading screens, area crossings and the menus (button
-  prompts, the UI), switches as shipped. Read: the `GX memory, write calls this minute (beta 9)` line,
-  the `a CPU write landed on a texture made with its data` lines, and the surfaces line's starts taken
-  from the GPU's earlier writes. Watch for stale or wrong textures.
-- **The beta 10 design note** ([memory-model.md](memory-model.md), "Beta 10"): the tester's
-  agreement before any code.
-- **Run C** (the shader cache cleared, the same route), before beta 13 only.
+- **0.4.6 beta 10's run:** a normal session with loading screens, area crossings and the menus
+  (button prompts, the UI), switches as shipped. Read: the `GX memory, owners this minute (beta 10)`
+  line and the `made over the live` lines. Watch for stale or wrong textures (textures made with their
+  data are no longer write-protected).
+- **Run C** (the shader cache cleared, the same route), before beta 14 only.
 
 ## The register: every open item
 
@@ -129,19 +132,22 @@ found.
 |---|---|---|
 | YEBIS's rebuilds stall 59-84 ms at area crossings (about 280 targets filled from memory) | Beta 7's log, 2026-11-08 | Beta 8 |
 | A target's first fill hashes every level | Research, 2026-11-08 | Beta 8, part 2: not a bug (the hashes protect GPU-written images from page-sharing writes); surfaces started empty take none |
-| Depth targets filled from memory; their HTILE followed by address | Research, 2026-11-08 | Beta 8 part 1, beta 11 |
+| Depth targets filled from memory; their HTILE followed by address | Research, 2026-11-08 | Beta 8 part 1, beta 12 |
 | Whether YEBIS frees its old context before building the new one; where new targets land | Research, 2026-11-08 | Beta 8's `YEBIS rebuild:` lines (run A) |
 | Which owner objects build YEBIS contexts (the five virtual methods into `0x21d2dd0`) | Research, 2026-11-08 | Only if beta 8's numbers need it |
-| **Beta 9's narrow hole:** a texture made with its data over an unwatched target's image, left to its draw (6-8 a minute), can show the target's old contents: its creation's copy no longer faults | The design check, 2026-11-08 | Beta 10, first: a creation with data marks the images over it written |
-| Live textures overlap (6-8 a minute a new texture's memory holds a live texture's image): "one owner per image" not yet safe | The design check, 2026-11-08 | Beta 10: the overlap census, the owner rule counted without acting; beta 11 acts |
+| **Beta 9's narrow hole:** a texture made with its data over an unwatched target's image, left to its draw (6-8 a minute), can show the target's old contents: its creation's copy no longer faults | The design check, 2026-11-08 | Done in beta 10: a creation with data marks the images over it written (a live surface reaching past it keeps beta 8's rule, counted) |
+| Live textures overlap (6-8 a minute a new texture's memory holds a live texture's image): "one owner per image" not yet safe | The design check, 2026-11-08 | Beta 10 counts them (the census and the owner rule alongside); beta 11 acts if the counts hold |
 | Surfaces filled from the GPU's buffer writes made before they existed (run A: 21-32 a minute, up to 108 MiB; most of its one 41.6 ms frame) | Beta 8 run A, 2026-11-08 | Beta 9 measures them (`BB_TAKE_EARLIER_WRITES=0` leaves them out); left out by default only if the counts and the tester's eyes agree (a depth buffer copied through memory before its texture is made needs them) |
 | CPU writes on YEBIS textures, 10-71 a minute: which of its textures (its CPU-updated ones expected) | Beta 8 run A | Answered by beta 9's run: YEBIS updates its sampled textures 58-145 times a minute (never a surface; no Map or Unmap), now told by the call |
-| 21 CPU writes on small textures made with their data at every startup (32x32, 1024x512): which code writes them | Beta 8 runs A and B | Answered by beta 9's run: GX's create call copying the data in, and asset loads (told without faults). Textures made with their data go unwatched in beta 10 |
+| 21 CPU writes on small textures made with their data at every startup (32x32, 1024x512): which code writes them | Beta 8 runs A and B | Answered by beta 9's run: GX's create call copying the data in, and asset loads (told without faults). Textures made with their data unwatched in beta 10 (done) |
+| `FindImage`'s fast path must forget an image whose owner changed (`registry_generation`) | The design check, 2026-11-08 | Beta 11, with the owner changes (beta 10 only marks images written, which the refresh after `FindImage` reads) |
+| Textures made with their data unwatched: a CPU write no call tells would go unseen (none in beta 9's run beyond the create copy and asset loads) | Beta 10 | The tester's runs; `BB_WATCH_GAME_TEXTURES=1` and safe mode watch everything |
+| A live surface reaching past a new texture made with its data keeps its contents (the memory outside the new texture is older than the GPU's drawing) | Beta 10 | Counted in the owners line; looked at with the census in beta 11 |
 | GX's input-layout creator in 1.09 (for predicting shader variants) | Research, 2026-11-08 | Done in beta 8: `0x21657a0`, hooked and counted |
-| "The game's data followed the same way (buffers built ahead, freed on release)" | Plan step 3 (0.4.5 beta 16) | Partly done (0.4.5 beta 17; 0.4.6 beta 5); the rest is beta 12 |
-| "Shaders translated when the game creates them" (all 13,277 at startup) | 0.4.5 beta 17, "Not done" | Beta 13, measured in beta 8 |
-| "The shader building and its threads" | 0.4.6 memory design, "Next" | Beta 13 |
-| `pipeline_compiles.md`'s "Remaining (not done)": catalog coverage, the warm-up's state rebuilt on the main thread, a profile change emptying the cache, the scene-curve folder unseeded, AMD and Intel catalogs | `pipeline_compiles.md` | Looked at in beta 13 |
+| "The game's data followed the same way (buffers built ahead, freed on release)" | Plan step 3 (0.4.5 beta 16) | Partly done (0.4.5 beta 17; 0.4.6 beta 5); the rest is beta 13 |
+| "Shaders translated when the game creates them" (all 13,277 at startup) | 0.4.5 beta 17, "Not done" | Beta 14, measured in beta 8 |
+| "The shader building and its threads" | 0.4.6 memory design, "Next" | Beta 14 |
+| `pipeline_compiles.md`'s "Remaining (not done)": catalog coverage, the warm-up's state rebuilt on the main thread, a profile change emptying the cache, the scene-curve folder unseeded, AMD and Intel catalogs | `pipeline_compiles.md` | Looked at in beta 14 |
 | `BB_COPY_HOLD` and `BB_COPY_MERGE` removed ("stay through the stable release, then go") | The rest of 0.4.5, item 1 | The 0.4.6 release, with the tester |
 | A small-card run: `BB_VRAM_TEST_BUDGET_MB=3500` with the VRAM manager on (its rules predate the memory model) | Plan step 3 (0.4.5 beta 16's test) | The 0.4.6 release |
 | The VRAM manager's unbinds wait only for the work that used the evicted blocks (a last-use tick per block) | Plan step 3 | With the small-card run; built only if it shows bind waits |
@@ -150,7 +156,7 @@ found.
 
 | Item | From | Scheduled |
 |---|---|---|
-| The game's area prefetch (made for a hard disk; its model could drive the loads) | 0.4.6 memory design, "Next" | Looked at after beta 10, if loading screens or the frames after them still stall |
+| The game's area prefetch (made for a hard disk; its model could drive the loads) | 0.4.6 memory design, "Next" | Looked at after beta 11, if loading screens or the frames after them still stall |
 | eFMann's smoothness leads ([archive/hitches-2026-10.md](archive/hitches-2026-10.md)) | Plan step 3, "Later" | Only if stutter after loads remains after 0.4.6 |
 | A flicker at two area crossings: post-processing effects off and on for a split second | The tester, 2026-11-08 | Not the memory work: there in 0.4.4 and 0.4.5, and in beta 8 with `BB_EMPTY_SURFACES=0`, `BB_TARGET_POOL=0` or `BB_GX_FOLLOW=0` (log `8d281c42`). Likely the game's own reset of its post-processing when YEBIS rebuilds; parked until a PS4 recording of those spots shows otherwise |
 | A hitch when a controller connects at startup (the UI changes its button prompts; possibly a YEBIS rebuild) | The tester, 2026-11-08: "something for later if I ever even bother with it" | Low priority; beta 8's rebuild logging may show whether it is a rebuild |

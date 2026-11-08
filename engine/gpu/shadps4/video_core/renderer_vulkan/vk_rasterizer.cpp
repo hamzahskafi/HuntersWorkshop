@@ -4008,6 +4008,21 @@ bool Rasterizer::IsComputeImageCopy(const Pipeline* pipeline) {
     // statistics on, with the images found (as bbport's BB_IMAGE_COPY_LOG).
     const auto reject = [&](int why, const VideoCore::Image* a, const VideoCore::Image* b) {
         CountImageCopy(&ImageCopyStats::through_memory);
+        // 0.4.6 beta 10 (counted only): whether the copy's source and destination are images of the
+        // game's textures, at their start (the owner rule could copy those image to image).
+        if (BbEngine::GxResources::Following()) {
+            const auto owned_at = [&](const VideoCore::Image* image, VAddr address) {
+                if (!image || image->info.guest_address != address) { // none, or the other side's
+                    if (const auto there = texture_cache.FindImageFromRange(address, size, false)) {
+                        image = &texture_cache.GetImage(there);
+                    }
+                }
+                return image && image->gx_whole && image->gx_owner != 0;
+            };
+            const VAddr source_at = desc0.is_written ? buf1.base_address : buf0.base_address;
+            const VAddr destination_at = desc0.is_written ? buf0.base_address : buf1.base_address;
+            BbEngine::GxResources::NoteCopyThroughMemory(owned_at(a, source_at), owned_at(b, destination_at));
+        }
         if (!BbStats::enabled || size < 1_MB) {
             return false;
         }

@@ -226,9 +226,12 @@ public:
     u64 surface_ns = 0;
     u8 gx_owner = 0;
     bool gx_whole = false; ///< that resource starts where the image does
+    /// 0.4.6 beta 10: the gx_dead_tick at which a draw's taking it back was counted (NoteOwnerTake).
+    u64 owner_noted_tick = 0;
 
-    /// 0.4.6 beta 8 (part 4, BB_WATCH_GAME_TEXTURES=0): its pages were left unwatched (the game's calls
-    /// tell its writes); its track range is bookkeeping only.
+    /// 0.4.6 beta 8 (part 4; the targets' default since beta 9, textures made with their data's since
+    /// beta 10): its pages were left unwatched (the game's calls tell its writes); its track range is
+    /// bookkeeping only.
     bool calls_watch = false;
     ImageId depth_id{};
     u64 depth_uid{};
