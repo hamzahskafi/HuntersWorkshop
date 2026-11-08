@@ -270,6 +270,21 @@ data` lines, and in the surfaces line the starts taken from the GPU's earlier wr
 **Moves on when:** no stale or broken texture in the tester's runs (button prompts, the UI, YEBIS's
 effects), and the design note is agreed.
 
+**The tester's run** (`2803b47d`, 2026-11-08, about 10 minutes, switches as shipped): a clean exit;
+in play every frame 28.2 ms or less but one of 37.9 ms and one of 40.8 ms after a load (4 pipelines,
+and 80 MiB of textures the game fills from the CPU; the texture cache's own time 2.8 ms). 319-360
+images a minute left unwatched in the busy minutes.
+
+- **YEBIS's write calls:** 58-145 updates a minute, all on its sampled textures (none on a surface);
+  no Map or Unmap of a 2D texture (as bbhost found). Scaleform's unmaps 1-82 a minute.
+- **The CPU writes on textures made with their data:** the one with a fault context is GX's own
+  create call copying the texture's data in (`+0x2166210`, inside CreateTexture `0x2165f90`), over an
+  image left from the memory's previous owner. The rest have no fault: they come through the asset
+  and DMA path (`Rasterizer::NoteAssetWrite`), which tells the texture cache directly whether its
+  pages are watched or not. So textures made with their data can go unwatched too (beta 10).
+- **The GPU's earlier writes:** surfaces filled from writes older than the resource 1-58 a minute
+  (render targets, up to 83 MiB); from writes since, 2-10 (depth targets among them, 64-110 MiB).
+
 ### Beta 10: images belong to their textures (the design note)
 
 **Today** an image is found by address and shape, and a stack of rules decides whose it is:
@@ -310,7 +325,10 @@ resource lives at an address.
    whose source and destination are both owned images. If they are many, the copy goes image to
    image (beta 11 or later).
 7. **The switch:** `BB_IMAGE_OWNERS=0` keeps today's rules, for beta 10 only.
-8. **The measurements:**
+8. **Textures made with their data unwatched too** (beta 9's run: their CPU writes are the create
+   call's own copy and asset loads, both told without faults); `BB_WATCH_GAME_TEXTURES=1` still
+   watches everything.
+9. **The measurements:**
    - images refused because their owner was gone, handed over, and retired;
    - stale images left (near zero for owned ones);
    - copies through memory with an owned destination.
