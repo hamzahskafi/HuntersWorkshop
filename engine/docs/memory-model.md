@@ -361,6 +361,18 @@ loading screens (a load's 425 MB of buffer uploads).
 - **Copies through memory:** up to 2,809 a minute, none to an owned image. The design note's item 6
   (copying those image to image) has nothing to do.
 
+**The tester's second run** (`5a20e6b9`, 2026-11-08, about 5 minutes, 4 loading screens, engine id
+94): a clean exit, the same picture. No new texture over a live one; the owner rule would hand over
+27 dead images draws took and refuse 1; copies through memory up to 3,600 a minute, none to an owned
+image; 0-140 images a minute marked written by a creation with data, 4 live surfaces kept. Frames in
+play 28.4 ms or less, but one of 37.7 ms with 42 pipelines built on a first visit (beta 14's work).
+
+- **The frame after the 3.8 s load into m34 (both runs: 44.1 and 48.6 ms):** about 400 MB of the game's
+  buffers uploaded and about 100,000 pages write-protected in that one frame, 23-25 ms of it in the
+  protect calls; no texture work. Not new: 0.4.5 betas 13 and 14 and 0.4.6 beta 3 had the same frame
+  (380-400 MB, 24-25 ms of protecting), then with 730-820 images registered beside it (58-69 ms).
+  Beta 9's run had no such load. It is the game's buffers watched by page: beta 13's work.
+
 ### Beta 11: images belong to their textures (the design note)
 
 **Today** an image is found by address and shape, and a stack of rules decides whose it is:
