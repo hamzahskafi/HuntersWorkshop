@@ -528,6 +528,17 @@ void StoreLabel(void* address, u64 value, u32 num_bytes) {
     }
 }
 
+// 0.4.6 beta 12: a label stored straight into guest memory (no backing view) used to fault on a page
+// the buffer cache watched and so reach it; a page of a live GX buffer is writable now, so it is told
+// (BufferCache::NoteEngineStore). Labels written through the backing view never reached the buffer
+// cache, before beta 12 either.
+void StoreLabelTold(void* address, u64 value, u32 num_bytes) {
+    StoreLabel(address, value, num_bytes);
+    if (auto* rasterizer = Core::Memory::Instance()->GetRasterizer()) {
+        rasterizer->NoteEngineStore(reinterpret_cast<VAddr>(address), num_bytes);
+    }
+}
+
 void SignalEop(const PM4CmdEventWriteEop& eop, u64 seq) {
     eop.SignalFence(
         [seq](void* address, u64 data, u32 num_bytes) {
@@ -538,7 +549,7 @@ void SignalEop(const PM4CmdEventWriteEop& eop, u64 seq) {
             BbWriteLog::Note(reinterpret_cast<u64>(address), &data, num_bytes, BbWriteLog::Fence);
             const auto write_start = std::chrono::steady_clock::now();
             if (!memory->TryWriteBacking(address, &data, num_bytes)) {
-                StoreLabel(address, data, num_bytes);
+                StoreLabelTold(address, data, num_bytes);
             }
             BbStats::eop_written.fetch_add(1, std::memory_order_relaxed);
             BbFreeCheck::NoteFenceWritten(
@@ -771,7 +782,7 @@ void WriteEosLabel(void* address, u64 value, u32 num_bytes) {
     BbFreeCheck::NoteFenceWriting(reinterpret_cast<u64>(address));
     BbWriteLog::Note(reinterpret_cast<u64>(address), &value, num_bytes, BbWriteLog::Fence);
     if (!memory->TryWriteBacking(address, &value, num_bytes)) {
-        StoreLabel(address, value, num_bytes);
+        StoreLabelTold(address, value, num_bytes);
     }
     BbFreeCheck::NoteFenceWritten(reinterpret_cast<u64>(address));
 }

@@ -559,8 +559,11 @@ code. Safe mode sets `BB_WATCH_GAME_BUFFERS=1`.
 - **The engine's own CPU stores tell the buffer cache:** some GPU commands are executed as CPU stores
   into guest memory (`WRITE_DATA`, a DMA fill or copy not yet on the GPU, the stand-in occlusion
   counts), and the code counted on the page fault to tell the buffer cache ("the VRAM copy follows
-  through write tracking"). Each now marks its range to upload (`BufferCache::NoteEngineStore`). Labels
-  are written through the backing view, never by fault, as before.
+  through write tracking"). Each now marks its range to upload (`BufferCache::NoteEngineStore`).
+- **End-of-pipe and end-of-shader labels** (the tester's builder, 2026-11-09): written through the
+  backing view they never fault and never reached the buffer cache, before beta 12 too (unchanged).
+  Where there is no backing view the fallback stores straight into guest memory and counted on the
+  fault; it now tells the buffer cache too (`StoreLabelTold`, engine id 98).
 - **Where each part runs:** the tracker's regions are made only on the thread that uploads (no lock
   guards their making), so the game's thread does only what is safe anywhere: marking the range to
   upload (`MarkToUploadButGpu`, no region made). The pages' entering and leaving the calls' watch go
