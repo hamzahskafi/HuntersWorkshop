@@ -856,6 +856,23 @@ expected (56 shaders, 115 keys; 215 compiles in play).
   the calls); VRAM 2.6-3.9 GB of 7.25; the game's data to 1.34 GB; each minute's report still one
   26-30 ms frame (the tester's call).
 
+**Two more runs the same evening** (the shader cache warm):
+
+- `b4244009` (4 minutes): the Dream, `m23`, the Dream, `m34` (3.15 s), the Dream, `m23`, the Dream. The
+  m34 entry's worst frame 16.9 ms (the first run's 36.1 ms was the recompile and 11.8 ms of image
+  allocation); `m23` again 16.9 ms. The slow frames: the title screen (up to 131 ms, around the
+  controller connecting), the first area after the title (45.5 ms, the breakdown under 1 ms), one of
+  65.8 ms during the m34 loading screen after the minute report, one of 45.5 ms after the last load
+  (nothing in the breakdown), before quitting.
+- `e4fc8e33` (4 minutes): the Dream, `m34` (3.13 s), the Dream, `m23`, the Dream, `m34` again (3.11 s),
+  the Dream. `m34` twice, with `m23` between: its second load took as long as the first and its worst
+  frame was 19.1 ms. Beta 10's slow return was `m34`, the Dream, straight back to `m34` (3.83 and
+  3.85 s, about 400 MB uploaded at its first frame); with another area between, the return is a first
+  entry again. After the last Dream load one 43.8 ms frame with nothing in the breakdown (as the run
+  before: the game's own work, or something the breakdown does not time).
+- So beta 12's last gate stands on the `m33` frame of the first run (287 MB uploaded, 1.5 ms of
+  protecting); the exact return (`m34`, the Dream, `m34`) would add the 400 MB case.
+
 ### Beta 14: shaders built ahead
 
 - GX's input-layout creation hooked; every shader the game creates at startup translated on

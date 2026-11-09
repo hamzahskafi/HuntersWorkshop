@@ -118,10 +118,11 @@ then the game's buffers went before depth (the tester, with beta 11): buffers 12
 
 ### Waiting on the tester
 
-- **Beta 12's last gate:** the second entry into m34 is the Hunter's Dream, then back to the same
-  lamp in `m34` (beta 10's 3.83 and 3.85 s loads); beta 13's route went from the Dream to `m32`. A
-  frame of the same kind (after the `m33` load, 287 MB uploaded) already shows the protect cost gone
-  (1.5 ms over 2,007 pages, against 23-25 ms over about 100,000); the m34 frame confirms it.
+- **Beta 12's last gate:** met in kind by beta 13's `m33` frame (287 MB uploaded; 1.5 ms of
+  protecting over 2,007 pages, against 23-25 ms over about 100,000). The exact case, `m34`, the
+  Hunter's Dream, then straight back to `m34` (beta 10's 3.83 and 3.85 s loads), is still not run:
+  with another area between (the tester's `e4fc8e33`), the return loads as a first entry (3.11 s,
+  worst frame 19.1 ms). Optional now.
 - **Not covered by any run since beta 9:** a boss, a cutscene, character creation, online play
   (the sampling net is the check there).
 - **Optional, beta 11's A/B:** the same route twice, as shipped and with `BB_IMAGE_OWNERS=0`, to put
