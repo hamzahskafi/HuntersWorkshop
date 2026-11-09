@@ -681,6 +681,11 @@ loads mostly gone; the frame after the m34 load without its protect time.
 
 ### Beta 13: depth buffers
 
+- **First, the labels** (from beta 12's build, the tester's builder): an end-of-pipe or end-of-shader
+  label written through the backing view never reaches a VRAM copy of its page. Each label write
+  checks whether its page holds an uploaded copy not marked to upload, and only then marks it (a
+  region lookup and a bit test, about 700 a second); how often is counted, in place of the
+  "exact writes/s" counter nothing increments today.
 - A depth target's compression metadata (HTILE) and its pending clear follow the owning resource,
   not the address.
 - A depth target made without data starts from the game's clear. Beta 8's count says how often there
