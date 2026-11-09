@@ -545,19 +545,60 @@ resource lives at an address.
 Beta 11 then turns the owner rule on, if the counts hold. Depth buffers, the game's buffers and the
 shaders move one number on (12, 13, 14; the game's buffers then went before depth, 12 and 13).
 
-### Beta 12: the game's buffers by the calls
+### Beta 12: the game's buffers by the calls (the design, 2026-11-09)
 
-- GX's buffer creation with data marks the memory it fills.
-- Map (types 0-2 in place, 3 a renamed copy kept in GX's rename table at ctx + `0xb6f8`, 4 that copy
-  again) tells which data changed. The device-local copies of vertex and index data are updated only
-  when told.
-- Pages stay protected only for the engine's own data rings and YEBIS's buffers.
-- Beta 8's fault count on GX buffers decides how far this goes.
-- The frame after the 3.8 s load into m34 (beta 10's runs: about 400 MB of buffers uploaded and about
-  100,000 pages write-protected at once, 23-25 ms) is its first measure.
+**What the logs say** (beta 5's Map counts, beta 8-11's fault counts and sites, beta 10-11's long
+frames):
 
-**Moves on when:** no geometry or animation errors in the tester's runs; write faults and buffer
-re-uploads down.
+- **The CPU writes a GX buffer's own memory once: when GX creates it.** Every Map of a buffer in beta
+  5's run (up to 115,000 a minute) went into a renamed copy from GX's pool (types 3 and 4), none in
+  place (types 0-2), and no texture was ever mapped. No write fault landed on a live GX buffer after
+  its creation in about 33 minutes of beta 9-11 runs (beta 8's count). The renamed copies are GX's
+  pool, which the engine already reads in place (the GX region, 0.4.4).
+- **91% of the write faults left are the game's create calls copying data in:** of 22,991 in beta 11's
+  run, 10,849 are CreateTexture's copy (`+0x2166210`) and 10,050 CreateBuffer's (`+0x2165e2e`, its call
+  to `0x216d420` with the initial data), landing on memory the buffer cache still watches from an
+  earlier resource there. Each fault stops the game's thread (and reads back first any page the GPU
+  wrote, data the copy then overwrites). The rest: 901 from the game's code at `+0xc21ef2` (through
+  memcpy), 343 YEBIS's, a few hundred others: memory no GX resource holds.
+- **The buffer cache protects every page it uploads** (`RegionManager`: a page is writable exactly
+  while it is CPU-modified, `writeable == cpu`). The frame after the 3.8 s load into m34 (beta 10:
+  44-49 ms) spent 23-25 ms write-protecting about 100,000 pages after uploading about 400 MB.
+
+**The design:**
+
+1. **The pages of the game's GX resources are watched by the calls, not by protection.** A third
+   page state in `RegionManager`, `calls`: such a page stays writable after an upload
+   (`writeable = cpu | calls`), so an upload protects nothing there. It is set for the pages wholly
+   inside a live GX buffer or GX texture (2D, 3D, 1D); a page the resource shares with other memory
+   stays watched as now. YEBIS's and Scaleform's memory and everything else stay watched.
+2. **A creation is a write.** At GX's creator return (the game's thread, `Insert`), the resource's
+   pages are marked CPU-modified, so the next use uploads what the creation wrote; when it was made
+   with its data, the GPU's older data on its inside pages is dropped (the creation overwrote it).
+3. **A destroy or a release hands the memory back.** At the destructor or release (the game's thread),
+   the resource's pages leave `calls` and become CPU-modified (writable), but for pages the GPU wrote,
+   which keep today's handling. The next resource's creation copy then takes no fault.
+4. **What still tells a write:** the creations (2), the asset loads (`NoteAssetWrite`, as now), the
+   GPU (as now). Map is not hooked again: it never writes a buffer in place. Beta 8's count of CPU
+   writes on live GX buffers keeps running and stays zero only while it cannot see them, so the
+   safety net is the switch and the tester's eyes.
+5. **Measured:** write faults by site (the creators' share), pages kept writable by the calls,
+   protect calls and pages per minute and in the long-frame breakdown, and the game's data in VRAM
+   that no live GX resource holds (what a later step could hand back: the game's data grew to 1.6 GB
+   in beta 11's run; beta 4's freeing at releases cost 82-201 ms frames, so it is only measured here).
+6. **The switch:** `BB_WATCH_GAME_BUFFERS=1` watches every page as before; safe mode sets it.
+
+**Not in beta 12:** uploading buffers during loading screens instead of at their first draw (the
+upload's copying runs on the copy threads; whether the frame after a load still waits for it is read
+from beta 12's long-frame breakdown first), and freeing the game's dead data from VRAM (part 5's
+number first).
+
+**What could go wrong:** a CPU write to a live GX resource's inside pages that no call tells: its
+draws would use old data (geometry, animation, a texture's contents). None was seen in beta 5-11's
+runs. `BB_WATCH_GAME_BUFFERS=1` is the check.
+
+**Moves on when:** no geometry, animation or texture errors in the tester's runs; write faults at
+loads mostly gone; the frame after the m34 load without its protect time.
 
 ### Beta 13: depth buffers
 
