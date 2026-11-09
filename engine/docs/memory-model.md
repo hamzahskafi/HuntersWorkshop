@@ -815,6 +815,47 @@ GPU cache once (beta 12's run: about 130 pipelines then built in play in the fir
 **Test:** a normal session through the second entry into m34 (title, m34, a load elsewhere, the 3.8 s
 load back into m34), and if possible a boss, a cutscene, character creation or online play.
 
+**The tester's run** (`64b52c0d`, 2026-11-09, about 7 minutes, 10 loading screens, engine id 99, the RTX
+3070 Ti): a clean exit, no hitch report, nothing wrong seen; the GPU cache recompiled at the start as
+expected (56 shaders, 115 keys; 215 compiles in play).
+
+- **The route, from the new loading lines:** the Hunter's Dream (`m21_00_00_00`, every 1.9 s load),
+  `m34_00_00_00` with `m35_00_00_00` and `m36` (3.15 s), `m32_00_00_00` with `m27` (1.73 s),
+  `m33_00_00_00` (2.41 s), `m23_00_00_00` with `m24`, `m28` (2.13 s), and `m23_00_00_00` again with
+  `m28`, `m24_00_00_00`, `m22`, `m27` (4.31 s). Beta 10's runs show the second m34 entry is the Dream
+  then back to `m34` (3.83 s and 3.85 s): this route went from the Dream to `m32` instead, so that
+  frame is still not run.
+- **But a frame like it was:** after the `m33` load, 45.2 ms, 286.6 MB of buffer uploads; protecting
+  took 1.5 ms over 2,007 pages, where beta 10's frame after the second m34 entry took 23.4-24.6 ms
+  over 99,186-104,305 pages (425 and 407 MB uploaded). Beta 12's protect cost is gone on a frame of
+  that kind. The frame was no shorter: its sparse binds (the game's data put into VRAM) took 23.0 ms
+  (beta 10's: 1.0-1.3 ms), the rest is the upload's copying. The frame still waits for the game's
+  buffers.
+- **The other frames after loads, now broken down from 25 ms:** after the 4.31 s load, 27.1 ms, of
+  which 14.3 ms allocating the memory of 11 images (surfaces made at their first draw); after the m34
+  load, 36.1 ms: 38 pipelines (26.3 ms, the recompile) and 11.8 ms allocating 21 images; the first
+  area after the title, 61.1 ms: 35.9 ms allocating 194 images and 12.3 ms of sparse binds (beta 12's
+  same frame: 40.8 ms, 9.5 ms allocating). What is left after a load is the game's buffers going into
+  VRAM and the surfaces' memory being allocated, both at the first frame after the load.
+- **The labels' check:** 15,000-27,000 stores a second (labels and occlusion results; the design
+  guessed 700, counting end-of-pipe labels only). 17 in the run landed on a page holding an uploaded
+  copy (one every 25 s or so; up to 7 in a window): a real gap, now closed; none on a page the GPU
+  wrote. The GPU thread's time a draw in play: median 3.15 us (beta 12: 3.06, beta 11: 3.18).
+- **The write faults by what watched the page:** 2,606 in the run (6.2 a second, as beta 12's 6.7).
+  - The create calls' copies, as the plan asked: CreateTexture's (`+0x2166210`) 1,098: the GPU's data
+    on the page 599, an uploaded copy 443, an image 64; CreateBuffer's (`+0x2165e2e`) 497: the GPU's
+    data 272, an uploaded copy 223. By whose memory: nearly all memory no live resource holds (the
+    copy runs before the new resource is registered). So: pages a dead resource's GPU writes still
+    hold, which beta 12 keeps watched on purpose (a late read gets the GPU's data), and pages uploaded
+    while no resource the calls follow held them. Each of the GPU's-data faults reads the page back
+    from VRAM first (readbacks 2.2 a second in the run, about 930), only for the copy to overwrite it.
+  - YEBIS's own CPU writes (`+0xc21ef2` 460, `+0x29297ba` 318, others about 100): an image watches the
+    page; about 20 of them landed in an image, the rest beside it on a shared page. About 2 a second.
+  - Scaleform's plane (`+0x114171`, 49): its 1024x1024 texture, written by the UI.
+- **The rest as beta 12:** the net found no untold write (about 60 MiB a minute, up to 744 MiB under
+  the calls); VRAM 2.6-3.9 GB of 7.25; the game's data to 1.34 GB; each minute's report still one
+  26-30 ms frame (the tester's call).
+
 ### Beta 14: shaders built ahead
 
 - GX's input-layout creation hooked; every shader the game creates at startup translated on
