@@ -417,6 +417,28 @@ rise and "found none" fall (beta 10: 126-255 took, 164-215 found none, a minute 
 **Moves on when:** no missing or wrong texture, target or effect in the tester's runs (YEBIS's
 effects after loads above all); the kept images gone at loads.
 
+**The tester's run** (`21528c98`, 2026-11-09, about 13 minutes, 14 loading screens, engine id 96;
+the tester: "runs like sex", VRAM "much lower and more consistent"): a clean exit, nothing wrong seen.
+
+- **The rule at work:** 35-252 images a minute retired that the old guesses kept (31-400 MiB); 21-44
+  GX images a minute (up to 459 MiB) handed to the texture re-created over them. Beta 10's kept-by-guess
+  counts fell to 0-2 (the 1-2 "used just before" are images the exact "used since" kept: the label
+  predates the rule). No new texture over a live one. Stale images under 3 MiB all session.
+- **VRAM (the minute lines):** the texture cache's images 938-1,761 MiB, 1,223 on average (beta 10's
+  runs: 1,329 and 1,374; beta 9: 1,279), with more areas visited; idle images the GPU drew 17-184 MiB
+  (beta 10: 56-334); memory handed back to the driver 131-530 MiB a minute (beta 10: 0-320), so VRAM
+  falls back after loads. The driver's total is about the same (2.4-4.2 GB; beta 10 2.7-3.8 GB),
+  lower only in the first minutes (about 350 MB), because the game's buffer data grows with the areas
+  (1.6 GB by the end; beta 10 1.3 GB): beta 12's subject. The log samples once a minute, so it cannot
+  show the swings between; a run on the same route with `BB_IMAGE_OWNERS=0` would compare directly.
+- **Frames:** pacing p99 17.0 ms on average, its worst 26.7 ms (beta 10: 29.1); in play no frame over
+  30.1 ms; 40-56 ms only at the start and around loads (one of 40.8 ms with no engine work in it).
+  This route had no 3.8 s load into m34, so its buffer frame is not compared.
+- **The pool barely gained** (5-186 new surfaces a minute took a dead target's image; 30-469 found
+  none): the retired YEBIS targets were drawn up to the frame before the rebuild, so the GPU is still
+  on them when the new set is first used, and the pool takes only images the GPU is done with.
+- **Write faults** 26.6 a second on average (beta 10: 10.7 and 17.7): the route's buffers (beta 12).
+
 **The design note** (written before beta 10; the reasoning behind the above):
 
 **Today** an image is found by address and shape, and a stack of rules decides whose it is:

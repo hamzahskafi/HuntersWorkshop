@@ -107,7 +107,7 @@ then the game's buffers went before depth (the tester, with beta 11): buffers 12
 | 8 | GPU-owned surfaces start from their predecessor or empty, never from memory, and take no hashes; dead targets' images reused by new ones of their shape; write-watching replaced by the calls for game textures (off, counted); the logging for betas 9 to 13 | Built 2026-11-08 (engine id 92). Run A read: the rebuild stalls gone (frames in play 28.5 ms or less but one of 41.6). Run B read: no hitch, frames in play 33 ms or less; the tester's look at the picture decides part 4 |
 | 9 | The game's targets unwatched by default; YEBIS's and Scaleform's write calls hooked; the GPU's earlier writes to a surface's memory measured (`BB_TAKE_EARLIER_WRITES=0` leaves them out); the writer of textures made with their data named; the design note for the owner rule | Built 2026-11-08 (engine id 93). The tester's run read: a clean session, frames in play 28.2 ms or less but two after loads; the writers named. The design check revised the order (beta 10 measures first) and the tester agreed |
 | 10 | Beta 9's hole closed (a texture made with its data marks the images over it written); the census of live textures made over each other; the owner rule counted alongside today's rules without acting; textures made with their data unwatched | Built 2026-11-08 (engine id 94); waits on the tester's run |
-| 11 | Images belong to their textures: an image of a game's texture retired with it (unless a draw used it since), the old guesses kept for the rest; any texture made without data takes the image of its shape it is made over (`BB_IMAGE_OWNERS=0` keeps the old rules) | Built 2026-11-08 (engine id 96); waits on the tester's run |
+| 11 | Images belong to their textures: an image of a game's texture retired with it (unless a draw used it since), the old guesses kept for the rest; any texture made without data takes the image of its shape it is made over (`BB_IMAGE_OWNERS=0` keeps the old rules) | Built 2026-11-08 (engine id 96). The tester's run read: clean, smooth, textures about 8-11% lower in VRAM and more handed back after loads; the driver's total set by the game's buffers |
 | 12 | The game's buffers by the calls: creation and Map say what changed (before depth since 2026-11-08: the only cost left in beta 10's logs) | Planned |
 | 13 | Depth buffers: their compression metadata and pending clears follow the owner; a new depth target starts from the game's clear | Planned |
 | 14 | Shaders built ahead: translated at startup for the variants the game's calls predict, pipelines built during loading screens (moves earlier if beta 8 shows compiles are the bigger stutter) | Planned |
@@ -115,10 +115,8 @@ then the game's buffers went before depth (the tester, with beta 11): buffers 12
 
 ### Waiting on the tester
 
-- **0.4.6 beta 11's run:** a normal session with several loading screens and area crossings (the 3.8
-  s load into m34 among them), switches as shipped. Read: the `the owner rule this minute (beta 11)`
-  line, beta 10's owners line (its kept-by-guess counts near zero) and the surfaces line's dead-target
-  reuse. Watch for missing or wrong effects after loads, targets and textures.
+- **Optional, beta 11's A/B:** the same route twice, as shipped and with `BB_IMAGE_OWNERS=0`, to put
+  a number on the VRAM difference the tester saw.
 - **Run C** (the shader cache cleared, the same route), before beta 14 only.
 
 ## The register: every open item
@@ -149,6 +147,9 @@ found.
 | Refusing a dead image at a draw (the design note's item 2) | The design note | Not built in beta 11: draws recorded after the game's destroy read the texture (0-3 a minute in beta 10's runs; the console's memory still holds it). Looked at again only if a stale image is seen |
 | Images whose texture's memory the game released (no destroy event) are not dead for the owner rule | Beta 11 | None in beta 10's runs ("live resources whose memory the game unmapped 0"); a destroy event for them if they appear |
 | A hand-over by shape alone: a texture made without data of another format over an image of the same size takes it (contents kept, the format's view decided at the draw) | Beta 11 | Counted in the owner rule line; looked at if images handed over go unused |
+| The dead-target pool barely gains from the rule: YEBIS's retired targets are still in the GPU's hands when the new set is first used (5-186 taken, 30-469 found none a minute) | Beta 11's run | Later, if VRAM churn at loads matters: a pool that takes an image the GPU is finishing, its reuse ordered after that work on the same queue |
+| Beta 10's "kept because used just before" label also counts images the beta 11 rule keeps by the exact "used since" (1-2 a minute) | Beta 11's run | The label is beta 10's; reworded or removed with the release's log pass |
+| How much lower VRAM is with beta 11: the minute lines show textures 8-11% lower and more handed back after loads, the driver's total about the same (the game's buffers grow with the areas) | Beta 11's run, the tester | The optional A/B run above |
 | Textures made with their data unwatched: a CPU write no call tells would go unseen (none in beta 9's run beyond the create copy and asset loads) | Beta 10 | The tester's runs; `BB_WATCH_GAME_TEXTURES=1` and safe mode watch everything |
 | A live surface reaching past a new texture made with its data keeps its contents (the memory outside the new texture is older than the GPU's drawing) | Beta 10 | Counted in the owners line; kept as is in beta 11 (2 and 4 a minute in beta 10's runs) |
 | GX's input-layout creator in 1.09 (for predicting shader variants) | Research, 2026-11-08 | Done in beta 8: `0x21657a0`, hooked and counted |
