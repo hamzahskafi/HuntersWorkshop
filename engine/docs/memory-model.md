@@ -759,7 +759,10 @@ loads mostly gone; the frame after the m34 load without its protect time.
 - A depth target's compression metadata (HTILE) and its pending clear follow the owning resource,
   not the address.
 - A depth target made without data starts from the game's clear. Beta 8's count says how often there
-  was none.
+  was none: never. 404 depth targets started under the game's pending clear in 67 minutes of beta
+  8-12 runs, none without one, so nothing is built for it; the count stays.
+- **The loading lines name the area** (from beta 12's run: which m34 entry a load was had to be read
+  from the files it opened): each `Loading:` line says the map the game opened during it.
 
 **Moves on when:** no depth artefacts (shadows, the lamp faces, the scene's depth copies) in the
 tester's runs.
