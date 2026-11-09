@@ -588,16 +588,65 @@ same route as beta 11's `21528c98`, the loading screens within 0.07 s of each ot
 hitch report (beta 11: three of 25-26 ms), nothing wrong seen.
 
 - **Write faults down 76%:** 5,615 against 22,991; 4.5 a second on average (26.6), at most 75 (376).
-  The create calls' copies: textures 2,268 (10,849, -79%), buffers 1,487 (10,050, -85%). What is left
-  of them lands on memory not handed back (pages shared at a resource's edges, pages the GPU wrote,
-  memory no GX resource held before).
+  The create calls' copies: textures 2,268 (10,849, -79%), buffers 1,487 (10,050, -85%). Where the
+  rest land is not measured: memory not handed back is the guess (pages shared at a resource's edges,
+  pages the GPU wrote, memory no GX resource held before), and beta 13 counts each fault by what
+  watched its page.
 - **The net found no untold write:** about 60 MiB hashed a minute, 27-463 buffers; up to 224,031 pages
   (875 MiB) kept writable for the calls. No new resource was made over a live buffer.
 - **Frames:** pacing p99 16.94 ms on average (beta 11: 17.02), 23 frames over 1.5 times the median
   (27); frames over 33 ms only at the start, after the first load, and one with 58 pipelines built
-  (40.2 ms: beta 14's work). This route has no 3.8 s load into m34, so that frame is not compared.
+  (40.2 ms: the GPU cache recompiled at the start, below). The m34 load in this route is the first
+  entry (3.13 s, from the title); beta 10's 44-49 ms frame came on the second (3.8 s), not run here.
 - **VRAM** as beta 11 (beta 12 does not change it): images 1,157 MiB on average, the game's data
   growing to 1.66 GB.
+
+**The run read in full** (2026-11-09, the tester's request; against beta 11's `21528c98`, the same
+route; `cmp.py`-style totals over every 5-second window):
+
+- **What the fewer faults bought, in time:** the game's texture creator 1,959 ms over the run against
+  2,058 ms (-5%, 53.7 against 56.5 us a texture; 36,517 and 36,406 textures). A fault costs about
+  11 us there, so the 8,581 fewer saved about 0.1 s in 14 minutes, most of it during loading
+  screens; buffers' creator time is not timed. The larger gains are elsewhere: other threads'
+  protection changes 0.263 a frame against 0.915 (-71%), the GPU thread 3.91 us a draw against 4.27
+  (-8%). GPU time a frame (16.67 ms), its idle (11.18 ms), the game's sleeps, readbacks and sparse
+  binds are as beta 11.
+- **Every long frame outside a load is the engine's minute report.** Each minute the presenting
+  thread writes the RAM, VRAM, VRAM manager and GX lines (`LogRam` in `videoout/driver.cpp`, on the
+  flip path), and that window's worst frame is 25.7-30.1 ms: 14 of 14 minutes here, 13 of 13 in beta
+  11. Outside loads and those windows beta 12 has no frame over 25 ms (beta 11: 2). It began with
+  0.4.6 beta 5: every minute in every log of betas 5-12 (85 of 85 windows over 22 ms), against 1 of
+  36 in betas 3-4 and 5 of 61 in 0.4.5 betas 14-17. It runs in every session, not only with
+  diagnostics. Nothing in the report's code reads as 10 ms of work (counters, a few registry copies,
+  `GetProcessMemoryInfo`, the VMA budget); which part costs it is not known from the log. Beta 13:
+  the report timed part by part, and moved off the presenting thread.
+- **The extra shader compiles are the GPU cache recompiled at the start**, not beta 12's memory
+  work. The cache's identity (`out/gpu-cache.id`, `build.sh`) hashes the shader recompiler, the
+  register layouts and everything in `video_core/amdgpu`, which holds `liverpool.cpp`, the command
+  processor; beta 12 changed it (`NoteEngineStore` at WRITE_DATA, the occlusion counts and the label
+  fallback), the only file of the set that changed since beta 11. The start recompiled the cache
+  (3.0 s): 1,213 shaders kept, 58 left out (changed or without a state), 113 pipeline keys removed
+  with them. So 704 pipelines were built at the start (beta 11: 740 of 745) and 229 compiles ran in
+  play (140 ms; beta 11: 98, 71 ms), most in the first areas: 58 in the frame after the m34 load
+  (39.2 ms), 31 in the next window with 12 draws of 3 pipelines left out while they compiled (scene
+  geometry missing for up to a second), then 23, 14, 11. The run kept their states, so the next run
+  on beta 12 starts without them. Nothing in `liverpool.cpp` is stored in the cache (it applies
+  register packets and runs PM4; a different state only makes different keys); beta 13 changes it
+  again (the labels) and leaves it out of the identity, one recompile at its first start.
+- **Writes told over live buffers: 0 all run.** The writes the engine hears of (file reads into GPU
+  memory, `NoteAssetWrite`) landed only on memory that was not a live GX buffer: the game reads into
+  its own memory and the create call copies from there, as the design expected.
+- **The net's reach:** about 60 MiB a minute against 213-875 MiB under the calls, so one pass over
+  all of them takes 4-15 minutes. Enough for a check that finds nothing; a write it finds is late by
+  up to that much.
+- **Hitch reports:** beta 11's three (25-26 ms) were the game's main thread in its own code (stacks
+  at `+0x2034b08`, `+0x24c5cc1`), just over the 25 ms line; none here. One run each: not put down to
+  beta 12.
+- **The rest as beta 11:** the owner rule (retired 2,859 MiB, handed over 311, pooled 136; beta 11:
+  2,819, 298, 136), YEBIS's rebuilds, images freed at destroys (10.5 GB), textures built at creation
+  (7.2 GB), RAM (the game 5.5 GB by the end; beta 11 5.3 GB, one minute shorter), the clean exit. Submissions a frame 14.8 at the median
+  against 13.4: more fence submissions when the GPU runs out of work (13.95 against 12.84 a frame),
+  with GPU time and idle equal; a matter of timing, nothing beta 12 submits.
 
 **The design** (2026-11-09):
 
@@ -702,6 +751,11 @@ loads mostly gone; the frame after the m34 load without its protect time.
   checks whether its page holds an uploaded copy not marked to upload, and only then marks it (a
   region lookup and a bit test, about 700 a second); how often is counted, in place of the
   "exact writes/s" counter nothing increments today.
+- **From beta 12's run:** the minute report timed part by part and run off the presenting thread
+  (each minute's 26-30 ms frame since beta 5); `liverpool.cpp` left out of the GPU cache's identity
+  (beta 12's change to it recompiled the cache at the start); each write fault counted by what
+  watched its page (the GPU wrote it, an image, a page shared at a buffer's edge, no GX resource), so
+  the create calls' remaining 3,755 faults are explained by measurement.
 - A depth target's compression metadata (HTILE) and its pending clear follow the owning resource,
   not the address.
 - A depth target made without data starts from the game's clear. Beta 8's count says how often there
