@@ -565,19 +565,43 @@ frames):
   while it is CPU-modified, `writeable == cpu`). The frame after the 3.8 s load into m34 (beta 10:
   44-49 ms) spent 23-25 ms write-protecting about 100,000 pages after uploading about 400 MB.
 
+**Checked against the code before building (2026-11-09, the tester: "are you sure?"):**
+
+- **The count of CPU writes on live GX buffers can see them:** `Covering` finds the buffer holding
+  any faulting address, every write fault reaches it, and a page of a live buffer is write-protected
+  from its first upload on, so a write after that faults at least once (`ExtendWriteFault` then opens
+  the window around it). Zero in about 33 minutes means none after a first use.
+- **Map's renamed copies are not a registered buffer:** Map's type 3 (`0x2169c30`) takes its copy from
+  an allocator whose retry (`0x26aa860`) is the GX range allocator's own (its init `0x26a9b50`), the
+  region the engine reads in place with no write tracking (0.4.4); the logs agree: thousands of
+  bindings a second there, 26 write faults a second in all.
+- **Textures are written after their creation:** GX's depth view creator (`0x2166610`, through
+  `0x217a210`) fills the depth texture's HTILE with its clear pattern (dwords `0x0000000F`) when the
+  game makes a depth view, a CPU write into a GX texture's memory that is not its creation. So part 1
+  is for GX buffers only; textures stay watched (part 3 still hands their memory back at a destroy).
+- **The other writers in the fault sites are not GX memory:** `+0xc21ef2` (901, through memcpy) writes
+  around `0x105ef9xxxxx`, YEBIS's memory; `0x216c5d0` (58) fills a block it allocates; YEBIS's 343.
+- **Not certain until beta 12 runs:** that the creators' faults land on memory of destroyed GX
+  resources (part 3 removes only those); that the pages protected after the m34 load are GX buffers'
+  (part 1 removes only those); and that no CPU write into a live GX buffer happens in what beta 9-11's
+  runs did not cover (bosses, cutscenes, character creation, online). Part 7 is the net for the last.
+
 **The design:**
 
-1. **The pages of the game's GX resources are watched by the calls, not by protection.** A third
-   page state in `RegionManager`, `calls`: such a page stays writable after an upload
+1. **The pages of the game's GX buffers are watched by the calls, not by protection.** A third page
+   state in `RegionManager`, `calls`: such a page stays writable after an upload
    (`writeable = cpu | calls`), so an upload protects nothing there. It is set for the pages wholly
-   inside a live GX buffer or GX texture (2D, 3D, 1D); a page the resource shares with other memory
-   stays watched as now. YEBIS's and Scaleform's memory and everything else stay watched.
-2. **A creation is a write.** At GX's creator return (the game's thread, `Insert`), the resource's
-   pages are marked CPU-modified, so the next use uploads what the creation wrote; when it was made
-   with its data, the GPU's older data on its inside pages is dropped (the creation overwrote it).
-3. **A destroy or a release hands the memory back.** At the destructor or release (the game's thread),
-   the resource's pages leave `calls` and become CPU-modified (writable), but for pages the GPU wrote,
-   which keep today's handling. The next resource's creation copy then takes no fault.
+   inside a live GX buffer; a page the buffer shares with other memory stays watched as now. GX's
+   textures (written again at a depth view's creation), YEBIS's and Scaleform's memory and everything
+   else stay watched.
+2. **A creation is a write.** At GX's buffer creator return (the game's thread, `Insert`), the
+   buffer's pages are marked CPU-modified, so the next use uploads what the creation wrote; when it was
+   made with its data, the GPU's older data on its inside pages is dropped (the creation overwrote it).
+3. **A destroy or a release hands the memory back,** for buffers and textures. At the destructor or
+   release (the game's thread), the resource's pages leave `calls` and become CPU-modified (writable),
+   but for pages the GPU wrote, which keep today's handling. Marking pages CPU-modified only costs an
+   upload at their next use, so this part is safe on its own. The next resource's creation copy then
+   takes no fault.
 4. **What still tells a write:** the creations (2), the asset loads (`NoteAssetWrite`, as now), the
    GPU (as now). Map is not hooked again: it never writes a buffer in place. Beta 8's count of CPU
    writes on live GX buffers keeps running and stays zero only while it cannot see them, so the
@@ -587,14 +611,18 @@ frames):
    that no live GX resource holds (what a later step could hand back: the game's data grew to 1.6 GB
    in beta 11's run; beta 4's freeing at releases cost 82-201 ms frames, so it is only measured here).
 6. **The switch:** `BB_WATCH_GAME_BUFFERS=1` watches every page as before; safe mode sets it.
+7. **The net:** once a minute, a slice of the live GX buffers kept writable (up to 32 MiB, in turn) is
+   hashed and compared with what was last uploaded; one that changed with no call telling it is
+   counted, described (address, size, the buffer's age) and marked for upload. Beta 8's count stops
+   seeing such writes once the pages are writable; this one keeps looking.
 
 **Not in beta 12:** uploading buffers during loading screens instead of at their first draw (the
 upload's copying runs on the copy threads; whether the frame after a load still waits for it is read
 from beta 12's long-frame breakdown first), and freeing the game's dead data from VRAM (part 5's
 number first).
 
-**What could go wrong:** a CPU write to a live GX resource's inside pages that no call tells: its
-draws would use old data (geometry, animation, a texture's contents). None was seen in beta 5-11's
+**What could go wrong:** a CPU write to a live GX buffer's inside pages that no call tells: its draws
+would use old data (geometry, animation) until part 7's pass finds it. None was seen in beta 5-11's
 runs. `BB_WATCH_GAME_BUFFERS=1` is the check.
 
 **Moves on when:** no geometry, animation or texture errors in the tester's runs; write faults at
