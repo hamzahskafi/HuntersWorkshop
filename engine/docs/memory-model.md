@@ -772,7 +772,15 @@ Depth buffers were this beta's subject until 2026-11-09; the tester dropped both
   not needed (the tester, 2026-11-09). The minute's 26-30 ms frame and a cache recompile whenever
   `liverpool.cpp` changes stay as they are.
 
-**Moves on when:** the label count and the faults' watchers read, nothing wrong seen.
+- **Its run closes beta 12** (the plan checked, 2026-11-09): beta 12's last gate is the frame after
+  the second entry into m34 (title, m34, a load elsewhere, the 3.8 s load back), which must be
+  without beta 10's 23-25 ms of protecting; that frame also decides whether the game's buffers are
+  uploaded during loading screens (no frame in beta 12's run waited for buffer uploads, but that one
+  was not in it). Proposed with it: the long-frame breakdown for frames over 25 ms in the 2 s after
+  a load (it starts at 40 ms; beta 11-12's 27-32 ms frames after 3 of 14 loads have none).
+
+**Moves on when:** the label count and the faults' watchers read, the second m34 entry's frame read,
+nothing wrong seen.
 
 ### Beta 14: shaders built ahead
 
