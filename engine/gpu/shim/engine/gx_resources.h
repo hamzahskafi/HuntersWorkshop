@@ -206,6 +206,26 @@ struct LiveHere {
 };
 LiveHere LiveAt(std::uint64_t memory);
 void NoteDeadImageTaken(bool destroyed, bool hand_over, bool refuse, std::uint64_t bytes);
+// 0.4.6 beta 12 (BB_WATCH_GAME_BUFFERS): the game's calls about memory, for the buffer cache, on the
+// game's thread outside the registry's lock: a GX buffer made (with its data or not) or released, a
+// texture of the game's destroyed, and a live GX buffer's memory a new resource was made over.
+enum class MemoryEvent : std::uint8_t { BufferMade, BufferMadeWithData, BufferGone, TextureGone, Covered };
+using MemoryHook = void (*)(std::uint64_t address, std::uint64_t size, MemoryEvent event);
+void SetMemoryHook(MemoryHook hook);
+// A write the engine was told of (an asset or DMA write) over live GX buffers' memory: counted on them
+// for the buffer cache's net (SampleBuffers).
+void NoteToldWrite(std::uint64_t address, std::uint64_t bytes);
+// Up to `max_bytes` of live GX buffers of a page or more, in turn from where the last call stopped.
+struct BufferSample {
+    std::uint64_t key = 0, memory = 0, ns = 0;
+    std::uint32_t bytes = 0, told = 0;
+};
+void SampleBuffers(std::vector<BufferSample>& out, std::uint64_t max_bytes);
+// The buffer cache's side: pages kept writable for the calls (a change), and the net's pass (buffers
+// and bytes hashed, CPU writes found that no call told, the first ones described).
+void NoteCallsPages(std::int64_t delta);
+void NoteNet(std::uint64_t buffers, std::uint64_t bytes);
+void NoteUntoldWrite(std::uint64_t address, std::uint64_t bytes, std::uint64_t key);
 // 0.4.6 beta 11 (the owner rule): images handed to a texture of the game's other than YEBIS's made over
 // their memory without data, with their shape; images retired that the old guesses kept, and of them
 // those a new surface took as its Vulkan image.

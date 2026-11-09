@@ -110,6 +110,16 @@ public:
     /// Invalidates any buffer in the logical page range.
     void InvalidateMemory(VAddr device_addr, u64 size, bool assume_locks = false);
 
+    /// 0.4.6 beta 12 (BB_WATCH_GAME_BUFFERS): the game's calls about memory (GxResources::MemoryEvent), on
+    /// the game's thread: the range is marked to upload now (but for pages the GPU wrote), and a
+    /// buffer's pages enter or leave the calls' watch on the uploading thread (ProcessCallsEvents).
+    void NoteGameMemory(VAddr addr, u64 size, u8 event);
+    /// 0.4.6 beta 12: memory the game unmapped leaves the calls' watch.
+    void NoteGameMemoryUnmapped(VAddr addr, u64 size);
+    /// 0.4.6 beta 12: the engine wrote guest memory on the CPU for a GPU command (WRITE_DATA, a DMA
+    /// fill or copy, occlusion counts): marked to upload, as a fault on a watched page would have.
+    void NoteEngineStore(VAddr addr, u64 size);
+
     /// bbport: a guest write fault at `device_addr` was handled; unprotect its neighbourhood.
     void ExtendWriteFault(VAddr device_addr);
 
@@ -243,6 +253,32 @@ private:
     };
     /// bbport: the housekeeping EnsureResident did before every binding (Process*), once a packet.
     void Maintain();
+    /// 0.4.6 beta 12: the game's buffer events, in order, applied where the tracker's regions are made
+    /// (op 0: made, 1: released, its inside pages; 2: unmapped or made over, every page).
+    struct CallsEvent {
+        VAddr addr;
+        u64 size;
+        u8 op;
+        bool with_data;
+    };
+    std::mutex calls_mutex;
+    std::vector<CallsEvent> calls_events, calls_taken;
+    std::atomic<bool> calls_waiting{false};
+    void ProcessCallsEvents();
+    /// 0.4.6 beta 12 (the net): each second up to 1 MiB of the live GX buffers hashed, in turn (the first
+    /// MiB of a larger one); a buffer whose memory changed since its last turn with nothing told is a CPU
+    /// write no call told (counted, described, marked to upload).
+    struct NetEntry {
+        u64 key;
+        u32 told;
+        u64 gpu_version;
+        u64 hash;
+        u64 size;
+    };
+    std::unordered_map<VAddr, NetEntry> net_entries;
+    std::vector<u8> net_scratch;
+    u64 net_next_ns = 0;
+    void CheckGameBuffers();
     /// 0.4.6 beta 4: the buffers the game released, taken at every Maintain (not once a second);
     /// with the VRAM manager off their data leaves VRAM as soon as the GPU is done with it.
     void FollowGxReleases();

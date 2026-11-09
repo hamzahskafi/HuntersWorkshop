@@ -5970,6 +5970,7 @@ void Rasterizer::FillBuffer(VAddr address, u32 num_bytes, u32 value, bool is_gds
             u32* buffer = std::bit_cast<u32*>(address);
             std::fill(buffer, buffer + (num_bytes / sizeof(u32)), value);
             BbWriteLog::Note(address, buffer, num_bytes, BbWriteLog::Dma);
+            buffer_cache.NoteEngineStore(address, num_bytes); // 0.4.6 beta 12
             return;
         }
     }
@@ -6031,6 +6032,7 @@ void Rasterizer::CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, b
             BbFreeCheck::Check(dst, num_bytes, std::bit_cast<const void*>(src), BbFreeCheck::DmaCopy);
             std::memcpy(std::bit_cast<void*>(dst), std::bit_cast<void*>(src), num_bytes);
             BbWriteLog::Note(dst, std::bit_cast<const void*>(dst), num_bytes, BbWriteLog::Dma);
+            buffer_cache.NoteEngineStore(dst, num_bytes); // 0.4.6 beta 12
             return;
         }
     }
@@ -6081,6 +6083,8 @@ bool Rasterizer::InvalidateMemory(VAddr addr, u64 size, bool assume_locks) {
 void Rasterizer::NoteAssetWrite(VAddr addr, u64 size) {
     const VideoCore::InvalidateReason reason{"asset or DMA"};
     InvalidateMemory(addr, size);
+    // 0.4.6 beta 12: a write told over live GX buffers (beta 12's net does not count it as untold).
+    BbEngine::GxResources::NoteToldWrite(addr, size);
 }
 
 bool Rasterizer::FaultSkipsTextureCache() {
@@ -6161,6 +6165,7 @@ void Rasterizer::RegisterMemory(VAddr addr, u64 size) {
 }
 
 void Rasterizer::UnmapMemory(VAddr addr, u64 size) {
+    buffer_cache.NoteGameMemoryUnmapped(addr, size); // 0.4.6 beta 12: leaves the calls' watch
     buffer_cache.NotePreuploadMapping(addr, size, false);
     buffer_cache.UnmapInPlace(addr, size);
     buffer_cache.DropTwins(addr, size);

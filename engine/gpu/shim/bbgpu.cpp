@@ -172,7 +172,14 @@ void MemoryManager::SetRasterizer(Vulkan::Rasterizer* rasterizer_) {
             rasterizer->ReleaseDestroyedTexture(address, size);
         }
     });
-    // 0.4.6 beta 4: a texture the game created with its data (the game's thread, inside its create).
+    // 0.4.6 beta 12: the game's calls about memory, for the buffer cache (the game's thread).
+    BbEngine::GxResources::SetMemoryHook(
+        [](std::uint64_t address, std::uint64_t size, BbEngine::GxResources::MemoryEvent event) {
+            if (auto* rasterizer = Memory::Instance()->GetRasterizer()) {
+                rasterizer->NoteGameMemory(address, size, static_cast<u8>(event));
+            }
+        });
+        // 0.4.6 beta 4: a texture the game created with its data (the game's thread, inside its create).
     BbEngine::GxResources::SetCreatedHook([](const BbEngine::GxResources::Ahead& job) {
         if (auto* rasterizer = Memory::Instance()->GetRasterizer()) {
             rasterizer->PrepareCreatedTexture(job);

@@ -329,7 +329,8 @@ const SwitchGroup kSwitchGroups[] = {
          {"BB_ASYNC_PIPELINES", "0"}, {"BB_OCCLUSION", "0"}, {"BB_MODS_ENABLED", "0"},
          {"BB_FAST_DRAWS", "0"}, {"BB_COMPILE_SKIP", "0"}, {"BB_VRAM_MANAGER", "1"},
          {"BB_EMPTY_SURFACES", "0"}, {"BB_TARGET_POOL", "0"},
-         {"BB_WATCH_GAME_TEXTURES", "1"}, {"BB_IMAGE_OWNERS", "0"}}},
+         {"BB_WATCH_GAME_TEXTURES", "1"}, {"BB_IMAGE_OWNERS", "0"},
+         {"BB_WATCH_GAME_BUFFERS", "1"}}},
     {"BB_FAST_DRAWS", "0", false,
      {
          {"BB_SUBMIT_END_TASKS", "0"}, {"BB_MEMO_REVALIDATE", "0"}, {"BB_SAMPLER_MEMO", "0"},

@@ -190,6 +190,8 @@ struct Entry {
     // 0.4.6 beta 9: the CPU wrote it through its own calls (YEBIS's update or Unmap): not a surface
     // (SurfaceAt), filled from memory at its first use.
     bool cpu_written = false;
+    // 0.4.6 beta 12: writes the engine was told of over a buffer's memory since it was made (NoteToldWrite).
+    std::uint32_t told = 0;
 };
 
 // What a return through the stub belongs to.
@@ -220,6 +222,8 @@ std::vector<Gone> g_gone, g_released;
 std::uint8_t* g_return_stub = nullptr;
 bool g_active = false, g_follow = false;
 std::atomic<DestroyedHook> g_destroyed_hook{nullptr};
+std::atomic<MemoryHook> g_memory_hook{nullptr}; // 0.4.6 beta 12
+std::uint64_t g_sample_cursor = 0;            // SampleBuffers' place (under g_mutex)
 std::atomic<CreatedHook> g_created_hook{nullptr};
 std::atomic<std::uint64_t> g_live_texture_bytes{0};
 std::atomic<bool> g_gone_waiting{false}, g_released_waiting{false}, g_created_waiting{false};
@@ -407,6 +411,12 @@ struct Counts {
         owner_retired_bytes{0}, owner_retired_pooled{0},
         dead_taken_reused{0}, dead_taken_hand_over{0}, dead_taken_refuse{0}, dead_taken_bytes{0},
         copies_memory{0}, copies_memory_owned_destination{0}, copies_memory_both_owned{0};
+    // 0.4.6 beta 12: the memory events given to the buffer cache, pages kept writable for the calls (a
+    // running total), and the net's passes.
+    std::array<std::atomic<std::uint64_t>, 5> memory_events{}, memory_event_bytes{};
+    std::atomic<std::int64_t> calls_pages{0};
+    std::atomic<std::uint64_t> net_buffers{0}, net_bytes{0}, net_untold{0}, net_untold_bytes{0}, told_writes{0};
+    std::atomic<int> untold_logged{0};
     std::array<std::atomic<std::uint64_t>, std::size_t(OwnerGuess::kCount)> guesses{}, guess_bytes{};
     struct Made {
         std::uint64_t address, bytes;
@@ -464,75 +474,128 @@ void Insert(std::uint64_t key, const Entry& e) {
     if (e.loading) {
         g_counts.created_loading[kind].fetch_add(1, std::memory_order_relaxed);
     }
-    std::scoped_lock lock{g_mutex};
-    if (const auto old = g_by_holder.find(key); old != g_by_holder.end() && old->second.kind != kBuffer) {
-        g_live_texture_bytes.fetch_sub(old->second.bytes, std::memory_order_relaxed); // reused unseen
-    }
-    // 0.4.6 beta 10 (census): live textures the new one's memory overlaps, at their base or partly (memory
-    // the game gave to something new while the registry still holds the old one: an alias, or a destroy
-    // it did not see; bbhost counts the same).
-    if (kind != kBuffer && e.memory && e.bytes) {
-        auto it = g_texture_at.upper_bound(e.memory);
-        if (it != g_texture_at.begin()) {
-            --it;
+    // 0.4.6 beta 12: live GX buffers whose memory this resource is made over, given back to watching
+    // (the newer resource's), told to the buffer cache once the lock is let go.
+    std::array<std::pair<std::uint64_t, std::uint64_t>, 8> covered{};
+    std::size_t covered_n = 0;
+    {
+        std::scoped_lock lock{g_mutex};
+        if (const auto old = g_by_holder.find(key); old != g_by_holder.end() && old->second.kind != kBuffer) {
+            g_live_texture_bytes.fetch_sub(old->second.bytes, std::memory_order_relaxed); // reused unseen
         }
-        for (int guard = 0; it != g_texture_at.end() && it->first < e.memory + e.bytes && guard < 64; ++it, ++guard) {
-            if (it->second == key) {
-                continue;
+        // 0.4.6 beta 10 (census): live textures the new one's memory overlaps, at their base or partly (memory
+        // the game gave to something new while the registry still holds the old one: an alias, or a destroy
+        // it did not see; bbhost counts the same).
+        if (kind != kBuffer && e.memory && e.bytes) {
+            auto it = g_texture_at.upper_bound(e.memory);
+            if (it != g_texture_at.begin()) {
+                --it;
             }
-            const auto live = g_by_holder.find(it->second);
-            if (live == g_by_holder.end() || live->second.memory + std::max<std::uint32_t>(live->second.bytes, 1) <= e.memory) {
-                continue;
-            }
-            const Entry& old = live->second;
-            const bool base = old.memory == e.memory;
-            const std::size_t a = std::size_t(OwnerOf(old)), b = std::size_t(OwnerOf(e));
-            (base ? g_counts.overlap_base : g_counts.overlap_part)[a][b].fetch_add(1, std::memory_order_relaxed);
-            if (g_counts.overlap_logged.fetch_add(1, std::memory_order_relaxed) < 12) {
-                host_log("GX memory: %s [0x%llx, +0x%x) made over the live %s [0x%llx, +0x%x) made %.1f s before (%s)",
-                         OwnerName(Owner(b)), (unsigned long long)e.memory, e.bytes, OwnerName(Owner(a)),
-                         (unsigned long long)old.memory, old.bytes, double(e.ns - old.ns) / 1e9,
-                         base ? "at its base" : "partly");
+            for (int guard = 0; it != g_texture_at.end() && it->first < e.memory + e.bytes && guard < 64; ++it, ++guard) {
+                if (it->second == key) {
+                    continue;
+                }
+                const auto live = g_by_holder.find(it->second);
+                if (live == g_by_holder.end() || live->second.memory + std::max<std::uint32_t>(live->second.bytes, 1) <= e.memory) {
+                    continue;
+                }
+                const Entry& old = live->second;
+                const bool base = old.memory == e.memory;
+                const std::size_t a = std::size_t(OwnerOf(old)), b = std::size_t(OwnerOf(e));
+                (base ? g_counts.overlap_base : g_counts.overlap_part)[a][b].fetch_add(1, std::memory_order_relaxed);
+                if (g_counts.overlap_logged.fetch_add(1, std::memory_order_relaxed) < 12) {
+                    host_log("GX memory: %s [0x%llx, +0x%x) made over the live %s [0x%llx, +0x%x) made %.1f s before (%s)",
+                             OwnerName(Owner(b)), (unsigned long long)e.memory, e.bytes, OwnerName(Owner(a)),
+                             (unsigned long long)old.memory, old.bytes, double(e.ns - old.ns) / 1e9,
+                             base ? "at its base" : "partly");
+                }
             }
         }
-    }
-    if (kind != kBuffer) {
-        g_live_texture_bytes.fetch_add(e.bytes, std::memory_order_relaxed);
-        if (e.memory) {
-            g_texture_at[e.memory] = key;
-        }
-    } else if (e.memory) {
-        g_buffer_at[e.memory] = key;
-    }
-    // 0.4.6 beta 5: the memory is this resource's now (the texture cache retires images left there).
-    if (g_follow && e.memory && e.bytes) {
-        if (g_created.size() < kQueueCap) {
-            Gone made{e.memory, e.bytes, e.ns};
-            made.with_data = e.initial;
-            made.owner = std::uint8_t(OwnerOf(e));
-            if (kind == kYebis && !e.initial) {
-                made.width = e.width;
-                made.height = e.height;
-                made.levels = e.levels;
-                made.layers = e.layers;
-                made.hand_over = e.width != 0 && e.height != 0;
-            } else if (kind == kTexture && !e.initial && e.has_tsharp) {
-                // 0.4.6 beta 11: its shape as the texture cache reads a T# (ImageInfo): width and height
-                // (word 2), levels (word 3; one for MSAA), layers (word 4's depth; six a cube, one 3D).
-                const std::uint32_t type = (e.tsharp[3] >> 28) & 0xf;
-                made.width = (e.tsharp[2] & 0x3fff) + 1;
-                made.height = ((e.tsharp[2] >> 14) & 0x3fff) + 1;
-                made.levels = std::uint16_t(type == 14 || type == 15 ? 1 : ((e.tsharp[3] >> 16) & 0xf) + 1);
-                made.layers = std::uint16_t(type == 10 ? 1 : ((e.tsharp[4] & 0x1fff) + 1) * (type == 11 ? 6 : 1));
-                made.hand_over = true;
+        // 0.4.6 beta 12: the same for live GX buffers, any new resource; their memory under the new one
+        // goes back to being watched (MemoryEvent::Covered).
+        if (e.memory && e.bytes) {
+            auto it = g_buffer_at.upper_bound(e.memory);
+            if (it != g_buffer_at.begin()) {
+                --it;
             }
-            g_created.push_back(made);
-            g_created_waiting.store(true, std::memory_order_release);
-        } else {
-            g_counts.created_dropped.fetch_add(1, std::memory_order_relaxed);
+            for (int guard = 0; it != g_buffer_at.end() && it->first < e.memory + e.bytes && guard < 64; ++it, ++guard) {
+                if (it->second == key) {
+                    continue;
+                }
+                const auto live = g_by_holder.find(it->second);
+                if (live == g_by_holder.end() || !live->second.bytes ||
+                    live->second.memory + live->second.bytes <= e.memory) {
+                    continue;
+                }
+                const Entry& old = live->second;
+                const bool base = old.memory == e.memory;
+                const std::size_t a = std::size_t(OwnerOf(old)), b = std::size_t(OwnerOf(e));
+                (base ? g_counts.overlap_base : g_counts.overlap_part)[a][b].fetch_add(1, std::memory_order_relaxed);
+                if (g_counts.overlap_logged.fetch_add(1, std::memory_order_relaxed) < 12) {
+                    host_log("GX memory: %s [0x%llx, +0x%x) made over the live %s [0x%llx, +0x%x) made %.1f s before (%s)",
+                             OwnerName(Owner(b)), (unsigned long long)e.memory, e.bytes, OwnerName(Owner(a)),
+                             (unsigned long long)old.memory, old.bytes, double(e.ns - old.ns) / 1e9,
+                             base ? "at its base" : "partly");
+                }
+                if (covered_n < covered.size()) {
+                    const std::uint64_t from = std::max(old.memory, e.memory);
+                    const std::uint64_t to = std::min(old.memory + old.bytes, e.memory + e.bytes);
+                    covered[covered_n++] = {from, to - from};
+                    g_counts.memory_events[std::size_t(MemoryEvent::Covered)].fetch_add(1, std::memory_order_relaxed);
+                    g_counts.memory_event_bytes[std::size_t(MemoryEvent::Covered)].fetch_add(to - from,
+                                                                                         std::memory_order_relaxed);
+                }
+            }
+        }
+        if (kind != kBuffer) {
+            g_live_texture_bytes.fetch_add(e.bytes, std::memory_order_relaxed);
+            if (e.memory) {
+                g_texture_at[e.memory] = key;
+            }
+        } else if (e.memory) {
+            g_buffer_at[e.memory] = key;
+        }
+        // 0.4.6 beta 5: the memory is this resource's now (the texture cache retires images left there).
+        if (g_follow && e.memory && e.bytes) {
+            if (g_created.size() < kQueueCap) {
+                Gone made{e.memory, e.bytes, e.ns};
+                made.with_data = e.initial;
+                made.owner = std::uint8_t(OwnerOf(e));
+                if (kind == kYebis && !e.initial) {
+                    made.width = e.width;
+                    made.height = e.height;
+                    made.levels = e.levels;
+                    made.layers = e.layers;
+                    made.hand_over = e.width != 0 && e.height != 0;
+                } else if (kind == kTexture && !e.initial && e.has_tsharp) {
+                    // 0.4.6 beta 11: its shape as the texture cache reads a T# (ImageInfo): width and height
+                    // (word 2), levels (word 3; one for MSAA), layers (word 4's depth; six a cube, one 3D).
+                    const std::uint32_t type = (e.tsharp[3] >> 28) & 0xf;
+                    made.width = (e.tsharp[2] & 0x3fff) + 1;
+                    made.height = ((e.tsharp[2] >> 14) & 0x3fff) + 1;
+                    made.levels = std::uint16_t(type == 14 || type == 15 ? 1 : ((e.tsharp[3] >> 16) & 0xf) + 1);
+                    made.layers = std::uint16_t(type == 10 ? 1 : ((e.tsharp[4] & 0x1fff) + 1) * (type == 11 ? 6 : 1));
+                    made.hand_over = true;
+                }
+                g_created.push_back(made);
+                g_created_waiting.store(true, std::memory_order_release);
+            } else {
+                g_counts.created_dropped.fetch_add(1, std::memory_order_relaxed);
+            }
+        }
+        g_by_holder[key] = e;
+    }
+    if (const MemoryHook hook = g_memory_hook.load(std::memory_order_acquire); hook && e.memory && e.bytes) {
+        for (std::size_t i = 0; i < covered_n; ++i) {
+            hook(covered[i].first, covered[i].second, MemoryEvent::Covered);
+        }
+        if (kind == kBuffer) {
+            const MemoryEvent event = e.initial ? MemoryEvent::BufferMadeWithData : MemoryEvent::BufferMade;
+            g_counts.memory_events[std::size_t(event)].fetch_add(1, std::memory_order_relaxed);
+            g_counts.memory_event_bytes[std::size_t(event)].fetch_add(e.bytes, std::memory_order_relaxed);
+            hook(e.memory, e.bytes, event);
         }
     }
-    g_by_holder[key] = e;
 }
 
 // 0.4.6 beta 6: a texture the game's middleware made (YEBIS, Scaleform), as a resource of the game's.
@@ -562,6 +625,9 @@ void Unregister(std::uint64_t holder, bool texture, std::uint64_t memory_now) {
     // not one this registry knows the history of, and is left alone (that range may be another's by
     // now). 0.4.6 beta 6: one whose memory the game unmapped has none (MemoryReleased).
     std::uint64_t memory = 0, bytes = 0;
+    // 0.4.6 beta 12: what the buffer cache is told once the lock is let go (MemoryEvent).
+    std::uint64_t gone_memory = 0, gone_bytes = 0;
+    bool gone_buffer = false;
     {
         std::scoped_lock lock{g_mutex};
         const auto it = g_by_holder.find(holder);
@@ -592,25 +658,40 @@ void Unregister(std::uint64_t holder, bool texture, std::uint64_t memory_now) {
             g_counts.moved.fetch_add(1, std::memory_order_relaxed);
             return;
         }
+        gone_memory = e.memory;
+        gone_bytes = e.bytes;
+        gone_buffer = e.kind == kBuffer;
         if (!texture || e.kind == kBuffer) {
             // For the buffer cache (research); bounded should it not run.
             if (e.kind == kBuffer && g_released.size() < kQueueCap) {
                 g_released.push_back({e.memory, e.bytes, NowNs()});
                 g_released_waiting.store(true, std::memory_order_release);
             }
-            return;
-        }
-        // For the texture cache's collector; bounded should it not run (no renderer yet).
-        if (g_gone.size() < kQueueCap) {
-            Gone gone{e.memory, e.bytes, NowNs()};
-            gone.grace = e.kind == kYebis; // a rebuild may take its images (beta 7)
-            g_gone.push_back(gone);
-            g_gone_waiting.store(true, std::memory_order_release);
+            memory = 0;
+            bytes = 0;
         } else {
-            g_counts.gone_dropped.fetch_add(1, std::memory_order_relaxed);
+            // For the texture cache's collector; bounded should it not run (no renderer yet).
+            if (g_gone.size() < kQueueCap) {
+                Gone gone{e.memory, e.bytes, NowNs()};
+                gone.grace = e.kind == kYebis; // a rebuild may take its images (beta 7)
+                g_gone.push_back(gone);
+                g_gone_waiting.store(true, std::memory_order_release);
+            } else {
+                g_counts.gone_dropped.fetch_add(1, std::memory_order_relaxed);
+            }
+            memory = e.memory;
+            bytes = e.bytes;
         }
-        memory = e.memory;
-        bytes = e.bytes;
+    }
+    // 0.4.6 beta 12: the buffer cache hands the memory back to the next resource now, on this thread
+    // (its creation's copy takes no fault there), and a buffer's pages leave the calls' watch.
+    if (gone_bytes != 0) {
+        if (const MemoryHook hook = g_memory_hook.load(std::memory_order_acquire)) {
+            const MemoryEvent event = gone_buffer ? MemoryEvent::BufferGone : MemoryEvent::TextureGone;
+            g_counts.memory_events[std::size_t(event)].fetch_add(1, std::memory_order_relaxed);
+            g_counts.memory_event_bytes[std::size_t(event)].fetch_add(gone_bytes, std::memory_order_relaxed);
+            hook(gone_memory, gone_bytes, event);
+        }
     }
     // The texture cache stops watching its pages now, on this thread, before the game writes the
     // next texture there (without it each page faulted once on the game's thread: thousands a
@@ -1644,6 +1725,84 @@ void SetDestroyedHook(DestroyedHook hook) {
     g_destroyed_hook.store(hook, std::memory_order_release);
 }
 
+void SetMemoryHook(MemoryHook hook) {
+    g_memory_hook.store(hook, std::memory_order_release);
+}
+
+void NoteToldWrite(std::uint64_t address, std::uint64_t bytes) {
+    if (!g_active || bytes == 0 || !g_memory_hook.load(std::memory_order_relaxed)) {
+        return;
+    }
+    std::scoped_lock lock{g_mutex};
+    auto it = g_buffer_at.upper_bound(address);
+    if (it != g_buffer_at.begin()) {
+        --it;
+    }
+    for (int guard = 0; it != g_buffer_at.end() && it->first < address + bytes && guard < 64; ++it, ++guard) {
+        const auto live = g_by_holder.find(it->second);
+        if (live != g_by_holder.end() && live->second.memory + live->second.bytes > address) {
+            ++live->second.told;
+            g_counts.told_writes.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
+}
+
+void SampleBuffers(std::vector<BufferSample>& out, std::uint64_t max_bytes) {
+    out.clear();
+    if (!g_active) {
+        return;
+    }
+    std::scoped_lock lock{g_mutex};
+    if (g_buffer_at.empty()) {
+        return;
+    }
+    std::uint64_t taken = 0;
+    auto it = g_buffer_at.upper_bound(g_sample_cursor);
+    for (std::size_t seen = 0; seen < g_buffer_at.size() && taken < max_bytes; ++seen) {
+        if (it == g_buffer_at.end()) {
+            it = g_buffer_at.begin();
+        }
+        g_sample_cursor = it->first;
+        if (const auto live = g_by_holder.find(it->second);
+            live != g_by_holder.end() && live->second.bytes >= 4096 && live->second.memory) {
+            const Entry& e = live->second;
+            out.push_back({it->second, e.memory, e.ns, e.bytes, e.told});
+            taken += e.bytes;
+        }
+        ++it;
+    }
+}
+
+void NoteCallsPages(std::int64_t delta) {
+    g_counts.calls_pages.fetch_add(delta, std::memory_order_relaxed);
+}
+
+void NoteNet(std::uint64_t buffers, std::uint64_t bytes) {
+    g_counts.net_buffers.fetch_add(buffers, std::memory_order_relaxed);
+    g_counts.net_bytes.fetch_add(bytes, std::memory_order_relaxed);
+}
+
+void NoteUntoldWrite(std::uint64_t address, std::uint64_t bytes, std::uint64_t key) {
+    g_counts.net_untold.fetch_add(1, std::memory_order_relaxed);
+    g_counts.net_untold_bytes.fetch_add(bytes, std::memory_order_relaxed);
+    if (g_counts.untold_logged.fetch_add(1, std::memory_order_relaxed) >= 12) {
+        return;
+    }
+    double age = -1.0;
+    std::uint32_t size = 0, told = 0;
+    {
+        std::scoped_lock lock{g_mutex};
+        if (const auto it = g_by_holder.find(key); it != g_by_holder.end()) {
+            age = double(NowNs() - it->second.ns) / 1e9;
+            size = it->second.bytes;
+            told = it->second.told;
+        }
+    }
+    host_log("GX memory: the CPU wrote a live GX buffer with no call telling it (beta 12's net): [0x%llx, +0x%llx) "
+             "of a buffer of %u bytes made %.1f s before (%u writes told); marked to upload",
+             (unsigned long long)address, (unsigned long long)bytes, size, age, told);
+}
+
 Made TextureAt(std::uint64_t memory) {
     Made made{false, 0, false};
     if (!g_active) {
@@ -2151,6 +2310,27 @@ void LogMinute() {
              (unsigned long long)take(g_counts.owner_handed), Mib(take(g_counts.owner_handed_bytes)),
              (unsigned long long)take(g_counts.owner_retired), Mib(take(g_counts.owner_retired_bytes)),
              (unsigned long long)take(g_counts.owner_retired_pooled));
+    {
+        auto ev = [&](MemoryEvent e) { return (unsigned long long)take(g_counts.memory_events[std::size_t(e)]); };
+        auto evb = [&](MemoryEvent e) { return Mib(take(g_counts.memory_event_bytes[std::size_t(e)])); };
+        const unsigned long long made = ev(MemoryEvent::BufferMade), made_data = ev(MemoryEvent::BufferMadeWithData);
+        const double made_mib = evb(MemoryEvent::BufferMade), made_data_mib = evb(MemoryEvent::BufferMadeWithData);
+        const unsigned long long gone = ev(MemoryEvent::BufferGone), tex_gone = ev(MemoryEvent::TextureGone);
+        const double gone_mib = evb(MemoryEvent::BufferGone), tex_gone_mib = evb(MemoryEvent::TextureGone);
+        const unsigned long long covered = ev(MemoryEvent::Covered);
+        const double covered_mib = evb(MemoryEvent::Covered);
+        const std::int64_t pages = g_counts.calls_pages.load(std::memory_order_relaxed);
+        host_log("GX memory, the game's buffers by the calls this minute (beta 12): buffers made %llu (%.0f MiB) and "
+                 "%llu with their data (%.0f MiB), released %llu (%.0f MiB); textures destroyed, their memory handed "
+                 "back %llu (%.0f MiB); live buffers' memory a new resource was made over %llu (%.0f MiB); pages kept "
+                 "writable for the calls now %lld (%.0f MiB); writes told over live buffers %llu; the net: %llu buffers "
+                 "hashed (%.0f MiB), CPU writes found that no call told %llu (%.0f MiB)",
+                 made, made_mib, made_data, made_data_mib, gone, gone_mib, tex_gone, tex_gone_mib, covered,
+                 covered_mib, (long long)pages, double(pages) * 4096.0 / (1024.0 * 1024.0),
+                 (unsigned long long)take(g_counts.told_writes), (unsigned long long)take(g_counts.net_buffers),
+                 Mib(take(g_counts.net_bytes)), (unsigned long long)take(g_counts.net_untold),
+                 Mib(take(g_counts.net_untold_bytes)));
+    }
     host_log("GX memory, owners this minute (beta 10): new textures over a live texture's memory, at its base: %s; "
              "partly: %s; images marked written by a creation with data over them %llu (%.0f MiB), live surfaces "
              "reaching past one kept %llu; dead images a draw took again: %llu after their texture's destroy, %llu "

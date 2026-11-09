@@ -545,7 +545,42 @@ resource lives at an address.
 Beta 11 then turns the owner rule on, if the counts hold. Depth buffers, the game's buffers and the
 shaders move one number on (12, 13, 14; the game's buffers then went before depth, 12 and 13).
 
-### Beta 12: the game's buffers by the calls (the design, 2026-11-09)
+### Beta 12: the game's buffers by the calls
+
+Built 2026-11-09 (engine id 97), the tester's go-ahead after the design below was checked against the
+code. Safe mode sets `BB_WATCH_GAME_BUFFERS=1`.
+
+**As built** (what differs from the design, found while building):
+
+- **Pages the GPU wrote stay protected:** the writable set is `cpu | (calls & ~gpu)`
+  (`RegionManager::WriteTarget`), re-applied whenever the GPU's bits change, so a CPU write on a page
+  the GPU wrote still faults and reads the GPU's data back first. Only pages holding no GPU data are
+  left writable.
+- **The engine's own CPU stores tell the buffer cache:** some GPU commands are executed as CPU stores
+  into guest memory (`WRITE_DATA`, a DMA fill or copy not yet on the GPU, the stand-in occlusion
+  counts), and the code counted on the page fault to tell the buffer cache ("the VRAM copy follows
+  through write tracking"). Each now marks its range to upload (`BufferCache::NoteEngineStore`). Labels
+  are written through the backing view, never by fault, as before.
+- **Where each part runs:** the tracker's regions are made only on the thread that uploads (no lock
+  guards their making), so the game's thread does only what is safe anywhere: marking the range to
+  upload (`MarkToUploadButGpu`, no region made). The pages' entering and leaving the calls' watch go
+  through an ordered queue applied at the per-packet housekeeping (`Maintain`), before the packet's
+  bindings: a buffer is created before any packet that uses it is submitted.
+- **The net** hashes up to 1 MiB of live GX buffers each second (the first MiB of a larger one), not
+  32 MiB once a minute: about 0.1 ms a pass on that thread instead of a few milliseconds at once.
+- **The census** covers live buffers too (any new resource over one), in the same minute counts and
+  `made over the live` lines.
+
+**The log:** `GX memory, the game's buffers by the calls this minute (beta 12)` (buffers made and
+released, textures' memory handed back, buffers made over, pages kept writable now, writes told, the
+net's hashed buffers and MiB, CPU writes no call told) and `the CPU wrote a live GX buffer with no call
+telling it` lines (the first 12).
+
+**Test:** a normal session with several loading screens, the 3.8 s load into m34 among them, and if
+possible a boss, a cutscene, character creation or online play (what beta 9-11's runs did not cover).
+Watch for wrong geometry, stretched or exploding meshes, broken animation.
+
+**The design** (2026-11-09):
 
 **What the logs say** (beta 5's Map counts, beta 8-11's fault counts and sites, beta 10-11's long
 frames):

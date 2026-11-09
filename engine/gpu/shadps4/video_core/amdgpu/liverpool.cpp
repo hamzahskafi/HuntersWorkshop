@@ -703,6 +703,8 @@ void RunWriteData(Vulkan::Rasterizer& rasterizer, const u8* data) {
                      (header->type3.count.Value() - 2) * sizeof(u32), BbWriteLog::WriteData);
     std::memcpy(write_data->Address<u64*>(), write_data->data,
                 (header->type3.count.Value() - 2) * sizeof(u32));
+    // 0.4.6 beta 12: told to the buffer cache, as a fault on a watched page would have.
+    rasterizer.NoteEngineStore(write_data->Address<VAddr>(), (header->type3.count.Value() - 2) * sizeof(u32));
 }
 
 // bbport: the stand-in occlusion counts (BB_OCCLUSION=0) in stream order. The game starts every
@@ -751,6 +753,9 @@ void WriteZpassCounters(Vulkan::Rasterizer* rasterizer, const ZpassDump& dump, b
             waited = true;
         }
         StoreLabel(results, dump.value, sizeof(dump.value));
+    }
+    if (rasterizer) {
+        rasterizer->NoteEngineStore(dump.address, size); // 0.4.6 beta 12: as a fault would have
     }
 }
 

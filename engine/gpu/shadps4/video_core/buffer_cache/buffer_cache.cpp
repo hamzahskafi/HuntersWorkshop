@@ -18,6 +18,8 @@
 #include "bbport_free_check.h"
 #include "bbport_guest_memory.h"
 #include "bbport_gx_ring.h"
+#include "engine/gx_resources.h"
+#include <xxhash.h>
 #include "common/alignment.h"
 #include "core/memory.h"
 #include "video_core/amdgpu/liverpool.h"
@@ -2219,8 +2221,141 @@ void BufferCache::UnmapInPlace(VAddr addr, u64 size) {
     unmaps_pending.store(true, std::memory_order_release);
 }
 
+namespace {
+// 0.4.6 beta 12 (BB_WATCH_GAME_BUFFERS=1: off; off in safe mode): the pages of the game's GX buffers are
+// watched by its calls (their creation and release), not by protection (RegionManager::CallsCreate).
+bool GameBuffersByCalls() {
+    static const bool on = [] {
+        const char* env = std::getenv("BB_WATCH_GAME_BUFFERS");
+        return !(env && env[0] == '1');
+    }();
+    return on;
+}
+u64 SteadyNs() {
+    return u64(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                   std::chrono::steady_clock::now().time_since_epoch())
+                   .count());
+}
+} // namespace
+
+void BufferCache::NoteGameMemory(VAddr addr, u64 size, u8 event) {
+    using BbEngine::GxResources::MemoryEvent;
+    if (!GameBuffersByCalls() || size == 0) {
+        return;
+    }
+    // Now, on the game's thread: what the creation wrote, or the memory a destroy hands back (the next
+    // resource's creation copy takes no fault there). Regions not made yet are all to upload already.
+    memory_tracker->MarkToUploadButGpu(addr, size);
+    const auto e = MemoryEvent(event);
+    if (e == MemoryEvent::TextureGone) {
+        return; // textures are not watched by the calls
+    }
+    const u8 op = (e == MemoryEvent::BufferMade || e == MemoryEvent::BufferMadeWithData) ? 0
+                  : e == MemoryEvent::BufferGone                                         ? 1
+                                                                                         : 2;
+    std::scoped_lock lk{calls_mutex};
+    calls_events.push_back({addr, size, op, e == MemoryEvent::BufferMadeWithData});
+    calls_waiting.store(true, std::memory_order_release);
+}
+
+void BufferCache::NoteGameMemoryUnmapped(VAddr addr, u64 size) {
+    if (!GameBuffersByCalls() || size == 0) {
+        return;
+    }
+    std::scoped_lock lk{calls_mutex};
+    calls_events.push_back({addr, size, 2, false});
+    calls_waiting.store(true, std::memory_order_release);
+}
+
+void BufferCache::NoteEngineStore(VAddr addr, u64 size) {
+    if (GameBuffersByCalls() && size != 0) {
+        memory_tracker->MarkToUploadButGpu(addr, size);
+    }
+}
+
+void BufferCache::ProcessCallsEvents() {
+    if (!calls_waiting.load(std::memory_order_acquire)) {
+        return;
+    }
+    {
+        std::scoped_lock lk{calls_mutex};
+        calls_taken.swap(calls_events);
+        calls_waiting.store(false, std::memory_order_relaxed);
+    }
+    s64 pages = 0;
+    for (const CallsEvent& e : calls_taken) {
+        if (e.op == 0) {
+            pages += memory_tracker->CallsCreate(e.addr, e.size, e.with_data);
+        } else {
+            pages -= memory_tracker->CallsRelease(e.addr, e.size, e.op == 2);
+        }
+    }
+    calls_taken.clear();
+    if (pages != 0) {
+        BbEngine::GxResources::NoteCallsPages(pages);
+    }
+}
+
+void BufferCache::CheckGameBuffers() {
+    if (!GameBuffersByCalls()) {
+        return;
+    }
+    // A slice a second (about 0.1 ms on this thread), not one pass a minute: a buffer comes round again
+    // after the others, its hash then compared with the one kept.
+    const u64 now = SteadyNs();
+    if (net_next_ns == 0) {
+        net_next_ns = now + 10'000'000'000ull;
+        return;
+    }
+    if (now < net_next_ns) {
+        return;
+    }
+    net_next_ns = now + 1'000'000'000ull;
+    constexpr u64 Budget = 1_MB, Chunk = 256_KB, Page = 4_KB;
+    std::vector<BbEngine::GxResources::BufferSample> samples;
+    BbEngine::GxResources::SampleBuffers(samples, Budget);
+    net_scratch.resize(Chunk);
+    u64 hashed = 0, bytes = 0, budget = Budget;
+    for (const auto& s : samples) {
+        // The inside pages only: those are the calls' (a page shared with other memory stays watched).
+        const VAddr first = Common::AlignUp(s.memory, Page);
+        const VAddr last = Common::AlignDown(s.memory + s.bytes, Page);
+        if (first >= last || budget == 0) {
+            continue;
+        }
+        const u64 size = std::min<u64>(last - first, budget);
+        if (IsInPlace(first, size) || IsRegionGpuModified(first, size)) {
+            net_entries.erase(first); // the GPU's to write, or read in place: not the net's
+            continue;
+        }
+        const u64 version = GpuWriteVersion(first, size);
+        u64 hash = 0;
+        for (u64 done = 0; done < size; done += Chunk) {
+            const u64 n = std::min(Chunk, size - done);
+            memory->CopySparseMemory(first + done, net_scratch.data(), n);
+            hash = XXH3_64bits_withSeed(net_scratch.data(), n, hash);
+        }
+        budget -= size;
+        ++hashed;
+        bytes += size;
+        const auto it = net_entries.find(first);
+        if (it != net_entries.end() && it->second.key == s.key && it->second.told == s.told &&
+            it->second.gpu_version == version && it->second.size == size && it->second.hash != hash) {
+            BbEngine::GxResources::NoteUntoldWrite(first, size, s.key);
+            memory_tracker->MarkRegionAsCpuModifiedQuiet(first, size);
+        }
+        net_entries[first] = NetEntry{s.key, s.told, version, hash, size};
+    }
+    if (net_entries.size() > 65536) {
+        net_entries.clear();
+    }
+    BbEngine::GxResources::NoteNet(hashed, bytes);
+}
+
 void BufferCache::Maintain() {
     maintained_epoch = packet_epoch;
+    ProcessCallsEvents();
+    CheckGameBuffers();
     if (gx_state.load(std::memory_order_acquire) == u8(GxState::Waiting) && BbGxRing::Known()) {
         PollGxRegion(0, 0);
     }

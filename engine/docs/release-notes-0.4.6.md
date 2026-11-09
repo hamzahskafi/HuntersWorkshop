@@ -229,6 +229,20 @@ The tester's call on beta 4's logs: one beta with the whole design and the loggi
   YEBIS's did since beta 7: on the console the memory carries over.
 - `BB_IMAGE_OWNERS=0` in Extra variables brings back the old rules; safe mode does too.
 
+## The game's buffers follow its calls (beta 12)
+
+- **The game's buffers are no longer write-protected.** The game writes a buffer's memory only when
+  it creates it (every later write goes into a fresh copy GX hands out), so the engine now takes the
+  creation as the write and stops watching those pages for the CPU. The frame after some loading
+  screens spent about 24 ms protecting about 100,000 pages it had just uploaded: that should be gone.
+- **Memory the game frees is handed back at once.** When the game destroys a buffer or a texture, its
+  pages stop being watched, so the next thing the game creates there no longer stops on a fault per
+  page (nine in ten of the write faults left were those).
+- **Pages the GPU wrote are still watched,** and a sampling check looks each second for any buffer
+  the CPU changed without the game saying so; it fixes the buffer and writes it to the log.
+- `BB_WATCH_GAME_BUFFERS=1` in Extra variables watches the game's buffers as before; safe mode does
+  too.
+
 ## Diagnostics
 
 - **The "Building shaders" note** shows when a frame was late while shaders were being

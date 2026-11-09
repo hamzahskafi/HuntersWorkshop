@@ -117,6 +117,33 @@ public:
                             });
     }
 
+    /// 0.4.6 beta 12: see RegionManager::MarkToUploadButGpu (regions not made yet are all to upload).
+    /// Any thread: no region is made here.
+    void MarkToUploadButGpu(VAddr addr, u64 size) {
+        IteratePages<false>(addr, size, [](RegionManager* manager, u64 offset, size_t size) {
+            std::scoped_lock lk{manager->lock};
+            manager->MarkToUploadButGpu(offset, size);
+        });
+    }
+    /// 0.4.6 beta 12: see RegionManager::CallsCreate; makes the regions (the thread that uploads only).
+    s64 CallsCreate(VAddr addr, u64 size, bool with_data) {
+        s64 pages = 0;
+        IteratePages<true>(addr, size, [&pages, with_data](RegionManager* manager, u64 offset, size_t size) {
+            std::scoped_lock lk{manager->lock};
+            pages += manager->CallsCreate(offset, size, with_data);
+        });
+        return pages;
+    }
+    /// 0.4.6 beta 12: see RegionManager::CallsRelease (regions not made yet hold no `calls`).
+    s64 CallsRelease(VAddr addr, u64 size, bool all) {
+        s64 pages = 0;
+        IteratePages<false>(addr, size, [&pages, all](RegionManager* manager, u64 offset, size_t size) {
+            std::scoped_lock lk{manager->lock};
+            pages += manager->CallsRelease(offset, size, all);
+        });
+        return pages;
+    }
+
     /// bbport: see RegionManager::ExtendWriteFault.
     void ExtendWriteFault(VAddr window_addr, u64 size) {
         IteratePages<false>(window_addr, size,
