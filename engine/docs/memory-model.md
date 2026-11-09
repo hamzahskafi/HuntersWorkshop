@@ -586,35 +586,48 @@ frames):
   (part 1 removes only those); and that no CPU write into a live GX buffer happens in what beta 9-11's
   runs did not cover (bosses, cutscenes, character creation, online). Part 7 is the net for the last.
 
-**The design:**
+**The design** (as checked; implementation points from the tracker's code):
 
-1. **The pages of the game's GX buffers are watched by the calls, not by protection.** A third page
-   state in `RegionManager`, `calls`: such a page stays writable after an upload
-   (`writeable = cpu | calls`), so an upload protects nothing there. It is set for the pages wholly
-   inside a live GX buffer; a page the buffer shares with other memory stays watched as now. GX's
-   textures (written again at a depth view's creation), YEBIS's and Scaleform's memory and everything
-   else stay watched.
-2. **A creation is a write.** At GX's buffer creator return (the game's thread, `Insert`), the
-   buffer's pages are marked CPU-modified, so the next use uploads what the creation wrote; when it was
-   made with its data, the GPU's older data on its inside pages is dropped (the creation overwrote it).
-3. **A destroy or a release hands the memory back,** for buffers and textures. At the destructor or
-   release (the game's thread), the resource's pages leave `calls` and become CPU-modified (writable),
-   but for pages the GPU wrote, which keep today's handling. Marking pages CPU-modified only costs an
-   upload at their next use, so this part is safe on its own. The next resource's creation copy then
-   takes no fault.
-4. **What still tells a write:** the creations (2), the asset loads (`NoteAssetWrite`, as now), the
-   GPU (as now). Map is not hooked again: it never writes a buffer in place. Beta 8's count of CPU
-   writes on live GX buffers keeps running and stays zero only while it cannot see them, so the
-   safety net is the switch and the tester's eyes.
-5. **Measured:** write faults by site (the creators' share), pages kept writable by the calls,
-   protect calls and pages per minute and in the long-frame breakdown, and the game's data in VRAM
-   that no live GX resource holds (what a later step could hand back: the game's data grew to 1.6 GB
-   in beta 11's run; beta 4's freeing at releases cost 82-201 ms frames, so it is only measured here).
+1. **The pages of the game's GX buffers are watched by the calls, not by protection.**
+   - A third page state in `RegionManager`, `calls`, beside `cpu` (to upload) and `gpu` (the GPU
+     wrote it): protection follows `writeable = cpu | calls`, so an upload protects nothing there.
+   - Set for the 4 KiB pages wholly inside a live GX buffer, at the buffer's creation (part 2). A page
+     the buffer shares with other memory stays watched as now. GX's textures, YEBIS's and Scaleform's
+     memory, the GX region (already untracked) and everything else stay as they are.
+   - The tracker keeps its page state in 4 MiB regions made at the memory's first use, all pages
+     "to upload" and writable: the buffer's regions are made at its creation, so `calls` is there
+     before the first upload (otherwise that upload would protect the pages, as now).
+   - The tracker's regions are never freed, so `calls` is cleared wherever the buffer stops owning the
+     memory: its release (part 3), the game unmapping the memory (`Rasterizer::UnmapMemory`, which
+     already marks it to upload), and a new GX resource made over it (the census, extended to
+     buffers: the newer resource's memory goes back to being watched).
+2. **A creation is a write.** At GX's buffer creator return (the game's thread, `Insert`, after its
+   copy), the buffer's pages are marked to upload (quietly: not counted as the game's write faults)
+   and get `calls`; made with its data, the GPU's older data on its inside pages is dropped (the copy
+   overwrote it). A page still protected then had its copy fault and handled as now.
+3. **A destroy or a release hands the memory back**, for buffers (GX's release, `0x216d690`) and
+   textures (the destructors, already followed): its pages leave `calls` and are marked to upload,
+   which makes them writable, but for pages the GPU wrote, which keep today's handling (a late read
+   of them still gets the GPU's data). Marking a page to upload only costs an upload at its next use,
+   so this part is safe on its own. The next resource's creation copy then takes no fault. It runs
+   on the game's thread, one protection change per run of pages instead of one fault per page.
+4. **What still tells a write:** creations (2), asset and DMA writes (`NoteAssetWrite`, as now), the
+   GPU (as now). Map is not hooked again: it never writes a buffer in place.
+5. **Measured, once a minute:** write faults (the existing sites, and their total), the pages and MiB
+   under `calls`, protection changes on the GPU thread, the census of resources made over a live
+   buffer, and in the long-frame breakdown the protect time as now.
 6. **The switch:** `BB_WATCH_GAME_BUFFERS=1` watches every page as before; safe mode sets it.
-7. **The net:** once a minute, a slice of the live GX buffers kept writable (up to 32 MiB, in turn) is
-   hashed and compared with what was last uploaded; one that changed with no call telling it is
-   counted, described (address, size, the buffer's age) and marked for upload. Beta 8's count stops
-   seeing such writes once the pages are writable; this one keeps looking.
+7. **The net,** for writes no call tells: once a minute it hashes up to 32 MiB of live GX buffers, in
+   turn, skipping pages the GPU wrote, and keeps each hash with a count of the writes told for that
+   buffer (creations and asset writes over it). When a buffer comes round again with the same count
+   and a different hash, the CPU wrote it untold: counted, the first ones described (address, size,
+   age, which pages), and the buffer marked to upload. Beta 8's count stops seeing such writes once
+   the pages are writable; this one keeps looking.
+
+**Expected, and how each is read:** the creators' write faults mostly gone at loads (the fault-site
+lines; how many depends on part 3 covering the memory they land on); the frame after the m34 load
+without its 23-25 ms of protecting (the long-frame breakdown; only if those pages are GX buffers');
+no untold write found by the net (its line).
 
 **Not in beta 12:** uploading buffers during loading screens instead of at their first draw (the
 upload's copying runs on the copy threads; whether the frame after a load still waits for it is read
