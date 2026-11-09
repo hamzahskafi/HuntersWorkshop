@@ -747,18 +747,16 @@ loads mostly gone; the frame after the m34 load without its protect time.
 
 ### Beta 13: beta 12's run, followed up
 
-Depth buffers were this beta's subject until 2026-11-09; the tester dropped both depth items (below).
+Depth buffers were this beta's subject until 2026-11-09; the tester dropped both depth items, and two of beta 12's follow-ups (below).
 
 - **First, the labels** (from beta 12's build, the tester's builder): an end-of-pipe or end-of-shader
   label written through the backing view never reaches a VRAM copy of its page. Each label write
   checks whether its page holds an uploaded copy not marked to upload, and only then marks it (a
   region lookup and a bit test, about 700 a second); how often is counted, in place of the
   "exact writes/s" counter nothing increments today.
-- **From beta 12's run:** the minute report timed part by part and run off the presenting thread
-  (each minute's 26-30 ms frame since beta 5); `liverpool.cpp` left out of the GPU cache's identity
-  (beta 12's change to it recompiled the cache at the start); each write fault counted by what
-  watched its page (the GPU wrote it, an image, a page shared at a buffer's edge, no GX resource), so
-  the create calls' remaining 3,755 faults are explained by measurement.
+- **From beta 12's run:** each write fault counted by what watched its page (the GPU wrote it, an
+  image, a page shared at a buffer's edge, no GX resource), so the create calls' remaining 3,755
+  faults are explained by measurement.
 - **The loading lines name the area** (from beta 12's run: which m34 entry a load was had to be read
   from the files it opened): each `Loading:` line says the map the game opened during it.
 
@@ -770,8 +768,11 @@ Depth buffers were this beta's subject until 2026-11-09; the tester dropped both
   lacked one (404 depth targets under the game's pending clear in 67 minutes of beta 8-12 runs, none
   without). The count stays in the surfaces line.
 
-**Moves on when:** each minute's report frame gone (the report's own timing says what it cost), no
-cache recompile at the second start, the label count read, nothing wrong seen.
+- The minute report off the presenting thread and `liverpool.cpp` out of the GPU cache's identity:
+  not needed (the tester, 2026-11-09). The minute's 26-30 ms frame and a cache recompile whenever
+  `liverpool.cpp` changes stay as they are.
+
+**Moves on when:** the label count and the faults' watchers read, nothing wrong seen.
 
 ### Beta 14: shaders built ahead
 
