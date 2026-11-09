@@ -9,8 +9,8 @@ What comes next, the rules and decisions it works under, and every open item. Up
   them from memory, and reuses dead targets' images; beta 9 (93) leaves the game's targets unwatched
   and hooks YEBIS's and Scaleform's write calls. Beta 10 (94-95) closes beta 9's hole and counted the
   owner rule's decisions: no texture made over a live one, the guesses holding YEBIS's old targets at
-  loads. Beta 11 (96, 2026-11-08) turns the owner rule on; its run was smooth. Beta 12 (97,
-  2026-11-09) watches the game's buffers by their calls; it waits on the tester's run. 0.4.5 was released on 2026-11-07 from beta 13 (`a6b34b8`,
+  loads. Beta 11 (96, 2026-11-08) turns the owner rule on; its run was smooth. Beta 12 (97-98,
+  2026-11-09) watches the game's buffers by their calls: write faults down 76%, nothing stale. 0.4.5 was released on 2026-11-07 from beta 13 (`a6b34b8`,
   engine id 84): the GPU steps, +8.4% at the lamp spot against 0.4.4. 0.4.4 was released on
   2026-11-03 (`cbec5a2`, engine id 64).
 - **Where the work goes:** the branch `claude/awesome-gates-cjba5e`.
@@ -109,17 +109,15 @@ then the game's buffers went before depth (the tester, with beta 11): buffers 12
 | 9 | The game's targets unwatched by default; YEBIS's and Scaleform's write calls hooked; the GPU's earlier writes to a surface's memory measured (`BB_TAKE_EARLIER_WRITES=0` leaves them out); the writer of textures made with their data named; the design note for the owner rule | Built 2026-11-08 (engine id 93). The tester's run read: a clean session, frames in play 28.2 ms or less but two after loads; the writers named. The design check revised the order (beta 10 measures first) and the tester agreed |
 | 10 | Beta 9's hole closed (a texture made with its data marks the images over it written); the census of live textures made over each other; the owner rule counted alongside today's rules without acting; textures made with their data unwatched | Built 2026-11-08 (engine id 94); waits on the tester's run |
 | 11 | Images belong to their textures: an image of a game's texture retired with it (unless a draw used it since), the old guesses kept for the rest; any texture made without data takes the image of its shape it is made over (`BB_IMAGE_OWNERS=0` keeps the old rules) | Built 2026-11-08 (engine id 96). The tester's run read: clean, smooth, textures about 8-11% lower in VRAM and more handed back after loads; the driver's total set by the game's buffers |
-| 12 | The game's buffers by the calls: the pages of the game's GX buffers holding no GPU data watched by their creations and releases, not by protection; every GX resource's memory handed back at its destroy; the engine's own CPU stores told; a sampling net for writes no call tells (`BB_WATCH_GAME_BUFFERS=1` watches as before) | Built 2026-11-09 (engine id 97); waits on the tester's run |
+| 12 | The game's buffers by the calls: the pages of the game's GX buffers holding no GPU data watched by their creations and releases, not by protection; every GX resource's memory handed back at its destroy; the engine's own CPU stores told; a sampling net for writes no call tells (`BB_WATCH_GAME_BUFFERS=1` watches as before) | Built 2026-11-09 (engine ids 97-98). The tester's run read: clean, write faults down 76%, the net found no untold write |
 | 13 | Depth buffers: their compression metadata and pending clears follow the owner; a new depth target starts from the game's clear | Planned |
 | 14 | Shaders built ahead: translated at startup for the variants the game's calls predict, pipelines built during loading screens (moves earlier if beta 8 shows compiles are the bigger stutter) | Planned |
 | Release | Switches settled with the tester, old paths agreed on removed, a small-card run, the docs | Planned |
 
 ### Waiting on the tester
 
-- **0.4.6 beta 12's run:** a normal session with several loading screens (the 3.8 s load into m34
-  among them) and, if possible, a boss, a cutscene, character creation or online play. Read: the
-  `the game's buffers by the calls this minute (beta 12)` line, the write fault sites, the long-frame
-  breakdown after the m34 load. Watch for wrong geometry or animation.
+- **Still open from beta 12:** a run through the 3.8 s load into m34 (its 400 MB buffer frame), and
+  a boss, a cutscene, character creation or online play (what no run has covered yet).
 - **Optional, beta 11's A/B:** the same route twice, as shipped and with `BB_IMAGE_OWNERS=0`, to put
   a number on the VRAM difference the tester saw.
 - **Run C** (the shader cache cleared, the same route), before beta 14 only.

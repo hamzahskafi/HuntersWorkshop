@@ -583,6 +583,22 @@ telling it` lines (the first 12).
 possible a boss, a cutscene, character creation or online play (what beta 9-11's runs did not cover).
 Watch for wrong geometry, stretched or exploding meshes, broken animation.
 
+**The tester's run** (`8bebd58c`, 2026-11-09, about 14 minutes, 14 loading screens, engine id 98; the
+same route as beta 11's `21528c98`, the loading screens within 0.07 s of each other): a clean exit, no
+hitch report (beta 11: three of 25-26 ms), nothing wrong seen.
+
+- **Write faults down 76%:** 5,615 against 22,991; 4.5 a second on average (26.6), at most 75 (376).
+  The create calls' copies: textures 2,268 (10,849, -79%), buffers 1,487 (10,050, -85%). What is left
+  of them lands on memory not handed back (pages shared at a resource's edges, pages the GPU wrote,
+  memory no GX resource held before).
+- **The net found no untold write:** about 60 MiB hashed a minute, 27-463 buffers; up to 224,031 pages
+  (875 MiB) kept writable for the calls. No new resource was made over a live buffer.
+- **Frames:** pacing p99 16.94 ms on average (beta 11: 17.02), 23 frames over 1.5 times the median
+  (27); frames over 33 ms only at the start, after the first load, and one with 58 pipelines built
+  (40.2 ms: beta 14's work). This route has no 3.8 s load into m34, so that frame is not compared.
+- **VRAM** as beta 11 (beta 12 does not change it): images 1,157 MiB on average, the game's data
+  growing to 1.66 GB.
+
 **The design** (2026-11-09):
 
 **What the logs say** (beta 5's Map counts, beta 8-11's fault counts and sites, beta 10-11's long
