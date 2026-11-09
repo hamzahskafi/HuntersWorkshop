@@ -63,7 +63,7 @@ Still the generic model (the gaps the 2026-11-08 research found):
 | Every new image's pages are write-protected (`texture_cache.cpp`, `TrackImage` after `InsertImage`), targets included | About 8 ms of protecting a rebuild, faults when memory is reused | Beta 8 part 4 (measured), beta 9 |
 | Images found by address and shape; a stack of guesses decides whose an image is (retired when something newer is made over it, dead-by-reuse, the 3 s grace, the same-memory hand-over, hashing 32-37 MiB of memory a minute to tell overwritten drawings) | Rebuilt targets mostly miss the hand-over (8-36 kept a minute against about 280 a rebuild); stale images; CPU time | Beta 10 (counted), beta 11 (built) |
 | Every rebuilt target is a new Vulkan image, and the old set waits out the grace | About 4 ms of allocation a rebuild, both sets in VRAM for seconds (YEBIS made 744-775 MiB a minute in beta 7's log) | Beta 8, part 3 |
-| A depth target's first use reads memory; its compression metadata (HTILE) is followed by address | Part of the rebuilds' uploads | Beta 8 part 1, beta 13 |
+| A depth target's first use reads memory; its compression metadata (HTILE) is followed by address | Part of the rebuilds' uploads | Beta 8 part 1; the rest dropped (the tester, 2026-11-09) |
 | The game's buffers are write-protected and re-read by page | Write faults and re-uploads | Beta 12 |
 | Shaders translated at a draw; pipelines a new area needs built in play | Compile stutter with a cold cache | Beta 14 |
 
@@ -145,8 +145,9 @@ contents kept (beta 8, part 2).
 The betas after 9 were renumbered on 2026-11-08 when beta 10 became the measurement before the owner
 rule (the design check below): the owner rule is beta 11, depth buffers 12, the game's buffers 13,
 shaders 14. Then, with beta 11 (the tester's call: the only cost left in beta 10's logs is the game's
-buffers), the game's buffers became 12 and depth buffers 13. Earlier text that named them by their old
-numbers has been brought up to date.
+buffers), the game's buffers became 12 and depth buffers 13. On 2026-11-09 the tester dropped the
+depth items: beta 13 is beta 12's follow-ups. Earlier text that named them by their old numbers has
+been brought up to date.
 
 One log must be able to tell each change apart: every part has its own switch in Extra variables
 that brings back the old behaviour, named in the changelog when built. A beta's switches go at the
@@ -744,7 +745,9 @@ runs. `BB_WATCH_GAME_BUFFERS=1` is the check.
 **Moves on when:** no geometry, animation or texture errors in the tester's runs; write faults at
 loads mostly gone; the frame after the m34 load without its protect time.
 
-### Beta 13: depth buffers
+### Beta 13: beta 12's run, followed up
+
+Depth buffers were this beta's subject until 2026-11-09; the tester dropped both depth items (below).
 
 - **First, the labels** (from beta 12's build, the tester's builder): an end-of-pipe or end-of-shader
   label written through the backing view never reaches a VRAM copy of its page. Each label write
@@ -756,16 +759,19 @@ loads mostly gone; the frame after the m34 load without its protect time.
   (beta 12's change to it recompiled the cache at the start); each write fault counted by what
   watched its page (the GPU wrote it, an image, a page shared at a buffer's edge, no GX resource), so
   the create calls' remaining 3,755 faults are explained by measurement.
-- A depth target's compression metadata (HTILE) and its pending clear follow the owning resource,
-  not the address.
-- A depth target made without data starts from the game's clear. Beta 8's count says how often there
-  was none: never. 404 depth targets started under the game's pending clear in 67 minutes of beta
-  8-12 runs, none without one, so nothing is built for it; the count stays.
 - **The loading lines name the area** (from beta 12's run: which m34 entry a load was had to be read
   from the files it opened): each `Loading:` line says the map the game opened during it.
 
-**Moves on when:** no depth artefacts (shadows, the lamp faces, the scene's depth copies) in the
-tester's runs.
+**Dropped (the tester, 2026-11-09: "not needed"):**
+
+- A depth target's compression metadata (HTILE) and its pending clear following the owning
+  resource, not the address: no artefact and no count ever pointed at it.
+- A depth target made without data starting from the game's clear: beta 8's count says it never
+  lacked one (404 depth targets under the game's pending clear in 67 minutes of beta 8-12 runs, none
+  without). The count stays in the surfaces line.
+
+**Moves on when:** each minute's report frame gone (the report's own timing says what it cost), no
+cache recompile at the second start, the label count read, nothing wrong seen.
 
 ### Beta 14: shaders built ahead
 
@@ -813,6 +819,8 @@ command stream (Lantern's native plan, bbhost's YEBIS path). It builds on 0.4.6,
 - "0.4.6 is the memory model release, so you need to fold the .7 into it": depth buffers and the
   game's buffers are betas 13 and 12 (11 and 12 before the renumberings).
 - "buffers before depth" (2026-11-08, with beta 11): the game's buffers are beta 12, depth beta 13.
+- "Points 1 and 2 aren't needed" (2026-11-09, on beta 13's two depth items): beta 13 is beta 12's
+  follow-ups without depth work.
 - "we haven't made the shader building on game start and in loading": beta 14, measured in beta 8.
 - "prepare the full plan/documentation so that we don't lose on or forget any steps": this document
   and plan.md's register.
