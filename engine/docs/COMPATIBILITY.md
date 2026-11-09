@@ -1,7 +1,7 @@
 # Hardware compatibility rules
 
 Every change is checked against the hardware players actually use before it ships. A change that
-works on the development PC (RTX 5060, Intel CPU, Windows 11) has proven nothing about an AMD card,
+works on Lantern's development PC (RTX 5060, Intel CPU, Windows 11; HW's tester plays on an RTX 3070 Ti) has proven nothing about an AMD card,
 a GTX 10, a laptop iGPU or a 4-thread CPU. 0.9.37 beta 6 (Lantern Engine, which this project
 started from; versions 0.9.x below are Lantern's) shipped a cache fix tested on that one PC: every
 RX 9070 XT player crashed at the start (below, "What went wrong").
