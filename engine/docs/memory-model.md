@@ -873,6 +873,26 @@ expected (56 shaders, 115 keys; 215 compiles in play).
 - So beta 12's last gate stands on the `m33` frame of the first run (287 MB uploaded, 1.5 ms of
   protecting); the exact return (`m34`, the Dream, `m34`) would add the 400 MB case.
 
+**The first runs on the RX 9070 XT** (2026-11-10, beta 13, engine id 99; the tester changed cards
+before the betas ended):
+
+- `d4be8f82` (under a minute, title to the Hunter's Dream) and `0f407d24` (2.5 minutes: the Dream,
+  `m34`, the Dream). AMD's driver 2.0.416, Vulkan 1.4.359, VRAM budget 15,419 MiB. Clean exits, no
+  error, no GPU fault; Mailbox not offered, Fifo used (known on AMD).
+- **The GPU cache started again**, as expected on a GPU of another kind ("Pipeline cache isn't
+  compatible with current system: rebuilding it"); HW ships no catalog, so both runs are cold-cache
+  runs on AMD: run C's question, answered for this card. Pipelines cost about 10-26 ms each to build
+  (beta 12's run on the 3070 Ti, its driver cache warm: about 0.6 ms). The frames that waited for them:
+  2,043 ms during the first load (the loading screen at 26 ms a frame; 86 waits, 2,331 ms), 157-351
+  ms frames at the first area, 484 ms after the `m34` load (54 pipelines, 1,392 ms), 140 ms, and 35-76
+  ms frames in play; 7 hitch reports in the second run, the first with AMD's compiler busy on the
+  pipeline threads, the rest the game's main thread waiting (25-27 ms). Every AMD player's first run,
+  and every player's after a GPU change, looks like this until beta 14.
+- **The memory model runs on AMD as on NVIDIA:** the GX region imported and read in place through a
+  buffer of its own; the net found no untold write; the labels' check 17,900 stores a second.
+- **FSR 4.1.2 runs on RDNA 4** (AMD's SDK, native resolution 1920x1080), 0.51 ms a frame (the 3070
+  Ti's DLSS: 0.94 ms). The GPU busy 3.5 ms a frame at 60 FPS (the 3070 Ti: 5.6 ms).
+
 ### Beta 14: shaders built ahead
 
 - GX's input-layout creation hooked; every shader the game creates at startup translated on

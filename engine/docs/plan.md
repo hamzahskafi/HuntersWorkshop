@@ -155,6 +155,8 @@ found.
 | Whether no CPU write reaches a live GX buffer in what beta 9-11's runs did not cover (bosses, cutscenes, character creation, online) | The check of beta 12's design | Beta 12's sampling net (part 7) and the tester's runs |
 | The engine's own CPU stores for GPU commands (WRITE_DATA, DMA fills and copies, occlusion counts) counted on page faults to tell the buffer cache | Building beta 12, 2026-11-09 | Done in beta 12: each tells it (`NoteEngineStore`); the labels' fallback store too (engine id 98, from the tester's builder) |
 | Labels written through the backing view (the usual path) never reach a VRAM copy of their page: a label inside memory the GPU reads as a buffer would be stale there, before beta 12 too; the "exact writes/s (labels, CPU bytes beside GPU data)" counter is never incremented (`late_vram_writes`) | The tester's builder and the check after it, 2026-11-09 | Done in beta 13 (engine id 99). Its run: 15,000-27,000 stores a second, 17 in 7 minutes over a VRAM copy (marked), none on a page the GPU wrote; the GPU thread's time a draw unchanged |
+| The tester moved to an RX 9070 XT (2026-11-10) before the betas ended: the remaining betas run on AMD; the NVIDIA checks (DLSS, the small-card run's budget on an 8 GB card, beta 14 on NVIDIA) need the RTX 3070 Ti or another NVIDIA tester | The tester's first AMD runs, 2026-11-10 | The release, if the 3070 Ti is at hand; otherwise named as untested on NVIDIA in the release notes |
+| With a cold GPU cache on AMD, frames wait for pipeline builds: 2,043 ms in the first load, 484 ms after the `m34` load, 35-351 ms frames in the first areas (pipelines about 10-26 ms each on AMD's driver) | The tester's first AMD runs (`d4be8f82`, `0f407d24`) | Beta 14, shaders built ahead: these runs are its run C on AMD |
 | Surfaces made at their first draw get their memory then: after a load, 11.8-35.9 ms of allocation in the first frame (beta 13's run: 11 images 14.3 ms after the 4.31 s load; 21 images 11.8 ms after m34; 194 images 35.9 ms after the title) | Beta 13's run, 2026-11-09 | The next beta, if the tester agrees: their images made during the loading screen, at the game's create call |
 | A create call's copy over a page holding a dead resource's GPU writes reads that page back from VRAM first (about 930 readbacks in 7 minutes), for the copy to overwrite it | Beta 13's run | Proposed: the copy told before it runs (its two call sites), so its pages are dropped as the GPU's and made writable; the earlier-writes rule (`BB_TAKE_EARLIER_WRITES`) is untouched, as a creation with data never needs them |
 | YEBIS's CPU writes fault about 2 a second on pages its watched images share (about 20 of 800 land in an image) | Beta 13's run | Kept: small; looked at if YEBIS's updates are hooked differently |
@@ -252,7 +254,7 @@ the PC memory model), fixed, removed, or not the cause in 0.4.4's logs.
   - the fixed-refresh frame lock greying out.
 - **Online: joining another world** (summoned with the Small Resonant Bell, or invading). Hosting
   is checked: two invasions on 2026-11-03.
-- **Untested for want of hardware:** AMD FSR 4.1 on Radeon cards, FSR 2.3.4, HDR output.
+- **Untested for want of hardware:** FSR 2.3.4, HDR output. (AMD FSR 4.1 on Radeon: runs on the tester's RX 9070 XT since 2026-11-10, FSR 4.1.2 at native resolution, 0.51 ms a frame; the picture still to be judged.)
 
 ### Open decisions
 
