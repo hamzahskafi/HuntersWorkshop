@@ -119,6 +119,13 @@ public:
     /// 0.4.6 beta 12: the engine wrote guest memory on the CPU for a GPU command (WRITE_DATA, a DMA
     /// fill or copy, occlusion counts): marked to upload, as a fault on a watched page would have.
     void NoteEngineStore(VAddr addr, u64 size);
+    /// 0.4.6 beta 13 (BB_LABEL_CHECK=0: off): the engine stored through the backing view (a label, an
+    /// occlusion result), which never faults: a page holding an uploaded copy is marked to upload,
+    /// pages the GPU wrote are left. Counted (BbStats::backing_stores*).
+    void NoteBackingStore(VAddr addr, u64 size);
+    /// 0.4.6 beta 13 (the write fault breakdown): this cache's watch on the page at `addr`: 2 the GPU's
+    /// data, 1 an uploaded copy, 0 none (MemoryTracker::PageWatch).
+    [[nodiscard]] u8 PageWatch(VAddr addr) const noexcept;
 
     /// bbport: a guest write fault at `device_addr` was handled; unprotect its neighbourhood.
     void ExtendWriteFault(VAddr device_addr);

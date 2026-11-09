@@ -6106,7 +6106,11 @@ bool Rasterizer::OnWriteFault(VAddr addr, bool assume_locks) {
     // an image: a guest thread writing its constants waited for that (0.6 s with memory short:
     // the frame with it). Images learn of CPU writes through their own page protection only
     // (WatchedPages). BB_FAULT_SKIP_TEXTURES=0: the lock is taken for every fault, as before.
-    if (FaultSkipsTextureCache() && !texture_cache.WatchesPages(addr, size)) {
+    // 0.4.6 beta 13: what watched the page, read before the invalidation clears it (the write fault
+    // breakdown): bits 1 the GPU's data, 2 the buffer cache's uploaded copy, 4 an image, 8 none.
+    const bool image_watch = texture_cache.WatchesPages(addr, size);
+    const u8 buffer_watch = buffer_cache.PageWatch(addr);
+    if (FaultSkipsTextureCache() && !image_watch) {
         if (!IsMapped(addr, size)) {
             return false;
         }
@@ -6115,9 +6119,12 @@ bool Rasterizer::OnWriteFault(VAddr addr, bool assume_locks) {
         return false;
     }
     buffer_cache.ExtendWriteFault(addr);
+    const u32 watched = (buffer_watch == 2 ? 1u : buffer_watch == 1 ? 2u : 0u) | (image_watch ? 4u : 0u);
+    VideoCore::PageManager::NoteFaultWatch(watched != 0 ? watched : 8u);
     // 0.4.6 beta 8 (part 5): the CPU's writes to the game's live GX buffers (beta 12's measurement).
     if (BbEngine::GxResources::Active()) {
         BbEngine::GxResources::NoteBufferCpuWrite(addr, size);
+        BbEngine::GxResources::NoteWriteFault(addr, watched != 0 ? watched : 8u);
     }
     return true;
 }

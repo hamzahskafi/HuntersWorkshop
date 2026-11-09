@@ -119,7 +119,10 @@ inline std::atomic<std::uint64_t> bound_in_place_written_bytes{0};
 /// Command processor writes put into the GPU's VRAM data (no readback); blocks whose GPU data went
 /// back to the game's memory before moving in place; downloads of GPU data (readbacks).
 inline std::atomic<std::uint64_t> gpu_data_updates{0}, copied_back_blocks{0}, readbacks{0};
-inline std::atomic<std::uint64_t> late_vram_writes{0}; ///< labels and the like put into VRAM copies
+/// 0.4.6 beta 13: the engine's stores through the backing view (labels, occlusion results), which
+/// never fault: checked against the buffer cache's VRAM copies; those whose page held an uploaded copy
+/// (then marked to upload); those on a page the GPU wrote (left).
+inline std::atomic<std::uint64_t> backing_stores{0}, backing_stores_marked{0}, backing_stores_gpu{0};
 /// BB_HONEST_LABELS: submissions for fences: at the end of a guest submission with the GPU out of
 /// work, or on its last submission; on the GPU's announcement that it got to its last one; and by
 /// the GPU command thread's safety net (fence work nothing would submit: expected 0).

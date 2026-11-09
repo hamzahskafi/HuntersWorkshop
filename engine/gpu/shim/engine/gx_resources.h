@@ -226,6 +226,11 @@ void SampleBuffers(std::vector<BufferSample>& out, std::uint64_t max_bytes);
 void NoteCallsPages(std::int64_t delta);
 void NoteNet(std::uint64_t buffers, std::uint64_t bytes);
 void NoteUntoldWrite(std::uint64_t address, std::uint64_t bytes, std::uint64_t key);
+// 0.4.6 beta 13: a CPU write fault at `address` and what watched its page (bits as
+// PageManager::NoteFaultWatch: 1 the GPU's data, 2 the buffer cache's uploaded copy, 4 an image, 8
+// none), counted by whose memory it is (none, a live buffer's inside page, a page at a live buffer's
+// edge, a page beside a live resource, a live texture by its owner) for the minute line.
+void NoteWriteFault(std::uint64_t address, unsigned watched);
 // 0.4.6 beta 11 (the owner rule): images handed to a texture of the game's other than YEBIS's made over
 // their memory without data, with their shape; images retired that the old guesses kept, and of them
 // those a new surface took as its Vulkan image.

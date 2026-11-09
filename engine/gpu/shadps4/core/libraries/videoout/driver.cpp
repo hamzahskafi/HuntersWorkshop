@@ -49,6 +49,7 @@ extern "C" uint64_t runtime_heap_growths(void);
 #include "video_core/renderer_vulkan/vk_breadcrumbs.h"
 #include "video_core/vram_policy.h"
 #include "engine/gx_resources.h"
+#include "engine/loading.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
@@ -651,7 +652,15 @@ void VideoOutDriver::Flip(const Request& req) {
         static u64 last_proc_flt, last_copy_ns, last_copy_bytes, last_rf, last_trf, last_twf;
         const u64 rf = BbStats::read_faults.load(), trf = BbStats::t_read_faults.load(),
                   twf = BbStats::t_write_faults.load();
-        if (frame_ms > 40.0 && last_gpu_ns != 0) {
+        // 0.4.6 beta 13: a long frame from 40 ms, from 25 ms in the 2 s after a loading screen (the
+        // frames of 27-32 ms after some loads had no breakdown).
+        const double stall_ms =
+            BbEngine::Loading::EndedWithin(
+                static_cast<u64>(std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count()),
+                2'000'000'000ull)
+                ? 25.0
+                : 40.0;
+        if (frame_ms > stall_ms && last_gpu_ns != 0) {
             std::printf("       fault handlers: %llu read faults %.1f ms, write faults %.1f ms\n",
                         static_cast<unsigned long long>(rf - last_rf), (trf - last_trf) / 1e6,
                         (twf - last_twf) / 1e6);
@@ -685,7 +694,7 @@ void VideoOutDriver::Flip(const Request& req) {
         static u32 last_compiles_total;
         const u64 compile_ns_total = Vulkan::g_bb_compile_ns_total.load();
         const u32 compiles_total = Vulkan::g_bb_compiles_total.load();
-        if (frame_ms > 40.0 && last_gpu_ns != 0) {
+        if (frame_ms > stall_ms && last_gpu_ns != 0) {
             const double frame_compile_ms = (compile_ns_total - last_compile_ns_total) / 1e6;
             std::printf("Stall: %.1f ms frame (%s); GPU thread on CPU %.1f ms; %u pipelines "
                         "built, %.1f ms; %llu images registered, %.1f MB image uploads, %.1f MB "
@@ -715,7 +724,7 @@ void VideoOutDriver::Flip(const Request& req) {
                               BbStats::t_refresh_hash.load(), BbStats::t_refresh_obtain.load(),
                               BbStats::t_refresh_detile.load()};
         const u64 allocs = BbStats::image_allocs.load(), checks = BbStats::image_checks.load();
-        if (frame_ms > 40.0 && last_gpu_ns != 0) {
+        if (frame_ms > stall_ms && last_gpu_ns != 0) {
             std::printf("       ms in: resident %.1f, protect %.1f, image create %.1f, "
                         "image refresh %.1f, staging %.1f, waiting for host copies %.1f\n",
                         (t_now[0] - last_t[0]) / 1e6, (t_now[1] - last_t[1]) / 1e6,
@@ -751,7 +760,7 @@ void VideoOutDriver::Flip(const Request& req) {
         last_rc = rc;
         last_rp = rp;
         last_minflt = minflt;
-        if (frame_ms > 40.0 && last_gpu_ns != 0 && copy_ns > last_copy_ns) {
+        if (frame_ms > stall_ms && last_gpu_ns != 0 && copy_ns > last_copy_ns) {
             std::printf("       guest copies %.1f MB in %.1f thread-ms, %.1f ms on CPU (kernel %.1f ms, "
                         "%llu page faults in large copies) (%.2f GB/s per thread)\n",
                         (copy_bytes - last_copy_bytes) / 1e6, (copy_ns - last_copy_ns) / 1e6,
@@ -971,13 +980,17 @@ void VideoOutDriver::Flip(const Request& req) {
                 const u64 updates = BbStats::gpu_data_updates.exchange(0);
                 const u64 copied_back = BbStats::copied_back_blocks.exchange(0);
                 const u64 readbacks = BbStats::readbacks.exchange(0);
-                const u64 late = BbStats::late_vram_writes.exchange(0);
-                if (updates + copied_back + readbacks + late != 0) {
-                    std::printf("GPU data in VRAM: %.1f command writes/s put into it, %.1f exact writes/s "
-                                "(labels, CPU bytes beside GPU data), %.1f blocks/s copied back, "
-                                "%.1f readbacks/s\n",
-                                updates / window, late / window, copied_back / window,
-                                readbacks / window);
+                // 0.4.6 beta 13: the engine's stores through the backing view (labels, occlusion results)
+                // checked against the VRAM copies (BufferCache::NoteBackingStore).
+                const u64 stores = BbStats::backing_stores.exchange(0);
+                const u64 marked = BbStats::backing_stores_marked.exchange(0);
+                const u64 on_gpu = BbStats::backing_stores_gpu.exchange(0);
+                if (updates + copied_back + readbacks + stores != 0) {
+                    std::printf("GPU data in VRAM: %.1f command writes/s put into it, %.1f blocks/s copied "
+                                "back, %.1f readbacks/s; labels and occlusion results stored %.1f/s, %.1f/s "
+                                "over a VRAM copy (marked to upload), %.1f/s on pages the GPU wrote (beta 13)\n",
+                                updates / window, copied_back / window, readbacks / window, stores / window,
+                                marked / window, on_gpu / window);
                 }
             }
             Libraries::Kernel::ReportEqueueWaits(frames);

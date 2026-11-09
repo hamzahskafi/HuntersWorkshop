@@ -776,11 +776,44 @@ Depth buffers were this beta's subject until 2026-11-09; the tester dropped both
   the second entry into m34 (title, m34, a load elsewhere, the 3.8 s load back), which must be
   without beta 10's 23-25 ms of protecting; that frame also decides whether the game's buffers are
   uploaded during loading screens (no frame in beta 12's run waited for buffer uploads, but that one
-  was not in it). Proposed with it: the long-frame breakdown for frames over 25 ms in the 2 s after
-  a load (it starts at 40 ms; beta 11-12's 27-32 ms frames after 3 of 14 loads have none).
+  was not in it). With it: the long-frame breakdown for frames over 25 ms in the 2 s after a load
+  (it starts at 40 ms; beta 11-12's 27-32 ms frames after 3 of 14 loads have none).
 
 **Moves on when:** the label count and the faults' watchers read, the second m34 entry's frame read,
 nothing wrong seen.
+
+**As built** (2026-11-09, engine id 99; the tester's go-ahead, the 25 ms breakdown with it):
+
+1. **The labels' check** (`BB_LABEL_CHECK=0`: off, as before; safe mode keeps it, a fix of a gap older
+   than beta 12). The end-of-pipe and end-of-shader labels go through `WriteLabel` (`liverpool.cpp`):
+   written through the backing view, the buffer cache is told (`NoteBackingStore`); without one, the
+   fallback store tells it as beta 12 made it. The occlusion results written through the backing view
+   (`vk_occlusion.cpp`) are told the same way. `RegionManager::MarkStoreUploaded` marks to upload
+   only the pages holding an uploaded copy (neither to upload nor the GPU's); pages the GPU wrote are
+   left (an upload would put older bytes over the GPU's) and counted. No region is made (memory no
+   region covers is all to upload already). The log: `GPU data in VRAM:`, in place of the "exact
+   writes/s" nothing incremented: stores a second, those over a VRAM copy, those on pages the GPU
+   wrote.
+2. **Each write fault by what watched its page,** read in `Rasterizer::OnWriteFault` before the
+   invalidation clears it: the GPU's data there (`PageWatch` 2: the fault reads it back first), the
+   buffer cache's uploaded copy (1), an image (`WatchesPages`), nothing. Per fault site, appended to
+   its `Write fault sites` entry (`[watched by ...]`); once a minute, crossed with whose memory it is
+   (memory no live resource holds, a live buffer's inside page, a page at a live buffer's edge, a
+   page beside a live resource, a live texture by its owner): `GX memory, write faults by what watched
+   the page this minute (beta 13)`. A create call's copy faults before its resource is registered,
+   so its memory reads as the previous owner's, or no one's.
+3. **The loading lines name their maps:** the runtime's file layer notes the map folders the game
+   opens (`mNN`, `mNN_NN_NN_NN`; `runtime_file_take_maps`), taken at a load's start and printed at its
+   end: `Loading: ... ; maps opened: m24_00_00_00, ...`.
+4. **The long-frame breakdown from 25 ms in the 2 s after a load** (40 ms otherwise): the `Stall:`
+   lines and the fault handler, copy and protect parts with it (`Loading::EndedWithin`).
+
+Also: a comment beta 12 left above the wrong function in `vk_rasterizer.h` moved back to
+`ReleaseDestroyedTexture`. The label check changes `liverpool.cpp`, so the first start recompiles the
+GPU cache once (beta 12's run: about 130 pipelines then built in play in the first areas).
+
+**Test:** a normal session through the second entry into m34 (title, m34, a load elsewhere, the 3.8 s
+load back into m34), and if possible a boss, a cutscene, character creation or online play.
 
 ### Beta 14: shaders built ahead
 

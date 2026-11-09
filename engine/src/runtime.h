@@ -107,6 +107,9 @@ uintptr_t runtime_services_resolve(const char *name);
 void runtime_file_report(void);
 /* bbport (frame stats): the "Streaming:" line, the loader threads' reads since the last call. */
 void runtime_file_stream_report(void);
+/* 0.4.6 beta 13: the map folders the game opened since the last call ("m34_00_00_00, m24_01_00_00"),
+   cleared; returns the length written. */
+size_t runtime_file_take_maps(char *out, size_t size);
 void runtime_file_configure(const char *app0, const char *user);
 int runtime_file_mount(const char *guest, const char *host);
 void runtime_file_unmount(const char *guest);

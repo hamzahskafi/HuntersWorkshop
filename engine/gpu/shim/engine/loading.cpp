@@ -13,6 +13,9 @@
 #include <chrono>
 #include <cstdio>
 
+// 0.4.6 beta 13: the map folders the game opened since the last call (src/runtime_file.c).
+extern "C" std::size_t runtime_file_take_maps(char* out, std::size_t size);
+
 namespace BbEngine::Loading {
 namespace {
 constexpr std::size_t kNowLoadingRequested = 0x556286b; // u8
@@ -20,6 +23,8 @@ constexpr std::size_t kNowLoadingHelper = 0x553e8b8;    // CSNowLoadingHelper*, 
 constexpr std::size_t kSprjRemo = 0x5540058;            // cutscene player: manager at +8
 std::uint8_t* g_base = nullptr;
 std::atomic<bool> g_up{false};
+// 0.4.6 beta 13: when the last loading screen ended (steady clock, ns; 0: none yet).
+std::atomic<std::uint64_t> g_ended_ns{0};
 using Clock = std::chrono::steady_clock;
 Clock::time_point g_start, g_began;
 std::uint64_t g_frames = 0;
@@ -97,6 +102,10 @@ void Install(std::uint8_t* image) {
 }
 
 bool ScreenUp() { return g_up.load(std::memory_order_relaxed); }
+bool EndedWithin(std::uint64_t now_ns, std::uint64_t window_ns) {
+    const std::uint64_t ended = g_ended_ns.load(std::memory_order_relaxed);
+    return ended != 0 && now_ns >= ended && now_ns - ended < window_ns;
+}
 
 void Tick(std::uint64_t flipper) {
     if (!g_base) return;
@@ -132,6 +141,8 @@ void Tick(std::uint64_t flipper) {
         }
         std::printf("Loading: begins; pacer mode %u, %u vblank(s) a frame, target %.1f ms\n", p.mode, p.vblanks,
                     p.target * 1000.0f);
+        char earlier[8];
+        runtime_file_take_maps(earlier, sizeof(earlier)); // from here on, this load's maps
     } else if (!loading && was) {
         const double seconds = std::chrono::duration<double>(now - g_began).count();
         std::uint64_t remo = 0, man = 0, queued = 0;
@@ -149,10 +160,19 @@ void Tick(std::uint64_t flipper) {
         }
         g_fast_this_load = false;
         const Pace p = PaceOf(flipper);
-        std::printf("Loading: %.2f s, %llu frames (%.1f ms each)%s; pacer mode %u, %u vblank(s), target %.1f ms\n",
+        // 0.4.6 beta 13: the maps the game opened during the load (which entry of an area it was).
+        char maps[160];
+        runtime_file_take_maps(maps, sizeof(maps));
+        std::printf("Loading: %.2f s, %llu frames (%.1f ms each)%s; pacer mode %u, %u vblank(s), target %.1f ms; "
+                    "maps opened: %s\n",
                     seconds, static_cast<unsigned long long>(g_frames),
                     g_frames ? seconds * 1000.0 / static_cast<double>(g_frames) : 0.0,
-                    cutscene ? ", a cutscene follows" : "", p.mode, p.vblanks, p.target * 1000.0f);
+                    cutscene ? ", a cutscene follows" : "", p.mode, p.vblanks, p.target * 1000.0f,
+                    maps[0] ? maps : "none");
+        // 0.4.6 beta 13: the frames of the next 2 s get the long-frame breakdown from 25 ms.
+        g_ended_ns.store(static_cast<std::uint64_t>(
+                             std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count()),
+                         std::memory_order_relaxed);
     }
     if (in_game && !g_seen_world) {
         g_seen_world = true;

@@ -128,16 +128,20 @@ public:
     bool InvalidateMemory(VAddr addr, u64 size, bool assume_locks = false);
     /// bbport: data written into GPU memory by a path we hear of (file reads into it): invalidated.
     void NoteAssetWrite(VAddr addr, u64 size);
-    /// 0.4.5 beta 16 (the game's thread): the game destroyed its texture at [addr, addr + size): its
-    /// images stop watching their pages before the game writes the next texture there.
     /// 0.4.6 beta 12: guest memory this thread wrote for a GPU command (BufferCache::NoteEngineStore).
     void NoteEngineStore(VAddr addr, u64 size) {
         buffer_cache.NoteEngineStore(addr, size);
+    }
+    /// 0.4.6 beta 13: guest memory the engine wrote through the backing view (BufferCache::NoteBackingStore).
+    void NoteBackingStore(VAddr addr, u64 size) {
+        buffer_cache.NoteBackingStore(addr, size);
     }
     /// 0.4.6 beta 12: the game's calls about memory (GxResources::MemoryEvent), on the game's thread.
     void NoteGameMemory(VAddr addr, u64 size, u8 event) {
         buffer_cache.NoteGameMemory(addr, size, event);
     }
+    /// 0.4.5 beta 16 (the game's thread): the game destroyed its texture at [addr, addr + size): its
+    /// images stop watching their pages before the game writes the next texture there.
     void ReleaseDestroyedTexture(VAddr addr, u64 size) {
         texture_cache.ReleaseDestroyed(addr, size);
     }

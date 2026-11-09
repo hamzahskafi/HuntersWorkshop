@@ -508,6 +508,52 @@ static void stream_read_end(int loader,uint64_t start,int64_t n) {
 }
 static int fd_is_loader(int fd) { File *f=get(fd); return f && f->loader; }
 
+/* 0.4.6 beta 13: the map folders the game opened since the last take (what a load brought in), for
+   the Loading line: the folder after "/map/" when it is an area (mNN) or a block of one (mNN_NN_NN_NN). */
+#define MAPS_SEEN 8
+static HostMutex maps_lock=HOST_MUTEX_INIT;
+static char maps_seen[MAPS_SEEN][16];
+static unsigned maps_seen_count;
+static void map_note(const char *guest) {
+    const char *m=strstr(guest,"/map/m");
+    if (!m) return;
+    m+=5;
+    size_t n=0;
+    while (m[n] && m[n]!='/' && n<15) ++n;
+    if (m[n]!='/' || n<3 || m[1]<'0' || m[1]>'9' || m[2]<'0' || m[2]>'9') return;
+    for (size_t i=3;i<n;++i) if (m[i]!='_' && (m[i]<'0' || m[i]>'9')) return;
+    host_lock(&maps_lock);
+    for (unsigned i=0;i<maps_seen_count;++i)
+        if (!strncmp(maps_seen[i],m,n) && maps_seen[i][n]==0) { host_unlock(&maps_lock); return; }
+    if (maps_seen_count<MAPS_SEEN) {
+        memcpy(maps_seen[maps_seen_count],m,n);
+        maps_seen[maps_seen_count][n]=0;
+        ++maps_seen_count;
+    }
+    host_unlock(&maps_lock);
+}
+size_t runtime_file_take_maps(char *out,size_t size) {
+    if (!out || !size) return 0;
+    out[0]=0;
+    size_t used=0;
+    host_lock(&maps_lock);
+    for (unsigned i=0;i<maps_seen_count;++i) {
+        /* An area's folder (mNN) beside one of its blocks says nothing more. */
+        if (strlen(maps_seen[i])==3) {
+            int block=0;
+            for (unsigned j=0;j<maps_seen_count;++j)
+                if (strlen(maps_seen[j])>3 && !strncmp(maps_seen[j],maps_seen[i],3)) block=1;
+            if (block) continue;
+        }
+        const int w=snprintf(out+used,size-used,"%s%s",used ? ", " : "",maps_seen[i]);
+        if (w<0 || (size_t)w>=size-used) { out[used]=0; break; }
+        used+=(size_t)w;
+    }
+    maps_seen_count=0;
+    host_unlock(&maps_lock);
+    return used;
+}
+
 /* All operations return >=0 or -(host errno); wrappers adapt the convention. */
 static int64_t do_open(const char *guest,int flags,int mode) {
     if (game_path(guest) && (flags & (3|0x8|0x200|0x400|0x800))) return -EROFS;
@@ -540,6 +586,7 @@ static int64_t do_open(const char *guest,int flags,int mode) {
     }
     if (!host_fstat(host,&s) && S_ISDIR(s.st_mode)) dir=list_directory(path);
     }
+    if (game_read && !dir) map_note(guest);
     if (loader && !dir) {
         __atomic_add_fetch(&st_opens,1,__ATOMIC_RELAXED);
         __atomic_add_fetch(&st_open_ns,host_monotonic_ns()-open_start,__ATOMIC_RELAXED);

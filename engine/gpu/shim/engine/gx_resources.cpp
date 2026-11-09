@@ -417,6 +417,11 @@ struct Counts {
     std::atomic<std::int64_t> calls_pages{0};
     std::atomic<std::uint64_t> net_buffers{0}, net_bytes{0}, net_untold{0}, net_untold_bytes{0}, told_writes{0};
     std::atomic<int> untold_logged{0};
+    // 0.4.6 beta 13: write faults by what watched the page (the GPU's data, an uploaded copy, an image
+    // alone, nothing) and the memory's place (kFaultPlaces); those an image watched besides the buffer
+    // cache.
+    std::array<std::array<std::atomic<std::uint64_t>, 12>, 4> fault_by{};
+    std::atomic<std::uint64_t> fault_image_too{0};
     std::array<std::atomic<std::uint64_t>, std::size_t(OwnerGuess::kCount)> guesses{}, guess_bytes{};
     struct Made {
         std::uint64_t address, bytes;
@@ -1522,6 +1527,54 @@ void NoteBufferCpuWrite(std::uint64_t address, std::uint64_t bytes) {
     g_counts.buffer_cpu_write_bytes.fetch_add(bytes, std::memory_order_relaxed);
 }
 
+namespace {
+// 0.4.6 beta 13: where a write fault landed (NoteWriteFault): 0 memory no live resource holds, 1 a live
+// buffer's inside page, 2 a page at a live buffer's edge, 3 a page beside a live resource (the address
+// itself in none), 4 on a live texture by its owner (Owner::TextureData on).
+constexpr std::size_t kFaultPlaces = 4 + std::size_t(Owner::kCount) - std::size_t(Owner::TextureData);
+static_assert(kFaultPlaces == 12);
+std::string FaultPlaceName(std::size_t place) {
+    switch (place) {
+    case 0:
+        return "memory no live resource holds";
+    case 1:
+        return "a live buffer's inside page";
+    case 2:
+        return "a page at a live buffer's edge";
+    case 3:
+        return "a page beside a live resource";
+    default:
+        return OwnerName(Owner(place - 4 + std::size_t(Owner::TextureData)));
+    }
+}
+} // namespace
+
+void NoteWriteFault(std::uint64_t address, unsigned watched) {
+    if (!g_active) {
+        return;
+    }
+    const std::uint64_t page = address & ~std::uint64_t(4095), page_end = page + 4096;
+    std::size_t place = 0;
+    {
+        std::scoped_lock lock{g_mutex};
+        if (const Entry* t = Covering(g_texture_at, address, address + 1, nullptr)) {
+            const Owner owner = OwnerOf(*t);
+            place = owner >= Owner::TextureData && owner < Owner::kCount
+                        ? 4 + std::size_t(owner) - std::size_t(Owner::TextureData)
+                        : 3;
+        } else if (const Entry* b = Covering(g_buffer_at, address, address + 1, nullptr)) {
+            place = b->memory <= page && b->memory + b->bytes >= page_end ? 1 : 2;
+        } else if (Covering(g_texture_at, page, page_end, nullptr) || Covering(g_buffer_at, page, page_end, nullptr)) {
+            place = 3;
+        }
+    }
+    const std::size_t by = (watched & 1u) ? 0 : (watched & 2u) ? 1 : (watched & 4u) ? 2 : 3;
+    g_counts.fault_by[by][place].fetch_add(1, std::memory_order_relaxed);
+    if ((watched & 3u) && (watched & 4u)) {
+        g_counts.fault_image_too.fetch_add(1, std::memory_order_relaxed);
+    }
+}
+
 void NotePool(PoolEvent event, std::uint64_t bytes) {
     const std::size_t i = std::min<std::size_t>(std::size_t(event), std::size_t(PoolEvent::kCount) - 1);
     g_counts.pool[i].fetch_add(1, std::memory_order_relaxed);
@@ -2330,6 +2383,32 @@ void LogMinute() {
                  (unsigned long long)take(g_counts.told_writes), (unsigned long long)take(g_counts.net_buffers),
                  Mib(take(g_counts.net_bytes)), (unsigned long long)take(g_counts.net_untold),
                  Mib(take(g_counts.net_untold_bytes)));
+    }
+    {
+        // 0.4.6 beta 13: the write faults by what watched the page and whose memory it is.
+        static constexpr const char* kBy[] = {"the GPU's data", "an uploaded copy", "an image", "nothing"};
+        std::vector<std::pair<std::uint64_t, std::string>> cells;
+        std::uint64_t total = 0;
+        for (std::size_t by = 0; by < g_counts.fault_by.size(); ++by) {
+            for (std::size_t place = 0; place < g_counts.fault_by[by].size(); ++place) {
+                const std::uint64_t n = take(g_counts.fault_by[by][place]);
+                if (n != 0) {
+                    total += n;
+                    cells.emplace_back(n, std::string(kBy[by]) + " on " + FaultPlaceName(place));
+                }
+            }
+        }
+        const std::uint64_t image_too = take(g_counts.fault_image_too);
+        if (total != 0) {
+            std::sort(cells.begin(), cells.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+            std::string out;
+            for (const auto& [n, what] : cells) {
+                out += (out.empty() ? "" : "; ") + what + " " + std::to_string(n);
+            }
+            host_log("GX memory, write faults by what watched the page this minute (beta 13): %llu; %s; an image "
+                     "watched the page besides the buffer cache %llu",
+                     (unsigned long long)total, out.c_str(), (unsigned long long)image_too);
+        }
     }
     host_log("GX memory, owners this minute (beta 10): new textures over a live texture's memory, at its base: %s; "
              "partly: %s; images marked written by a creation with data over them %llu (%.0f MiB), live surfaces "

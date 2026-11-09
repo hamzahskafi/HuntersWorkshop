@@ -66,6 +66,9 @@ struct FaultSite {
     std::atomic<u64> caller{0};
     std::atomic<u64> count{0};
     std::atomic<u64> last_address{0};
+    /// 0.4.6 beta 13: what watched the faulting pages (PageManager::NoteFaultWatch): the GPU's data,
+    /// the buffer cache's uploaded copy, an image (also), none of them.
+    std::array<std::atomic<u64>, 4> watched{};
 };
 std::array<FaultSite, 512> fault_sites;
 std::atomic<u64> fault_sites_dropped{0};
@@ -219,17 +222,45 @@ void PageManager::NoteImageFault(VAddr image_address, u64 image_size, u32 width,
     }
 }
 
+void PageManager::NoteFaultWatch(u32 watched) {
+    if (current_fault_rip == 0) {
+        return; // fault sites not collected (BB_FRAME_STATS, BB_FAULT_SITES)
+    }
+    const u64 key = current_fault_rip;
+    for (u64 i = 0, slot = (key * 0x9E3779B97F4A7C15ull) >> 55; i < fault_sites.size(); ++i) {
+        auto& site = fault_sites[(slot + i) % fault_sites.size()];
+        const u64 rip = site.rip.load(std::memory_order_relaxed);
+        if (rip == 0) {
+            return;
+        }
+        if (rip != key) {
+            continue;
+        }
+        for (u32 k = 0; k < site.watched.size(); ++k) {
+            if (watched & (1u << k)) {
+                site.watched[k].fetch_add(1, std::memory_order_relaxed);
+            }
+        }
+        return;
+    }
+}
+
 void PageManager::ReportFaultSites() {
     struct Row {
         u64 rip, caller, count, address;
+        std::array<u64, 4> watched;
     };
     std::array<Row, 512> rows{};
     std::size_t n = 0;
     u64 total = 0;
     for (auto& site : fault_sites) {
         const u64 count = site.count.exchange(0, std::memory_order_relaxed);
+        std::array<u64, 4> watched{};
+        for (u32 k = 0; k < watched.size(); ++k) {
+            watched[k] = site.watched[k].exchange(0, std::memory_order_relaxed);
+        }
         if (count != 0) {
-            rows[n++] = {site.rip.load(), site.caller.load(), count, site.last_address.load()};
+            rows[n++] = {site.rip.load(), site.caller.load(), count, site.last_address.load(), watched};
             total += count;
         }
     }
@@ -244,6 +275,20 @@ void PageManager::ReportFaultSites() {
                     SiteName(rows[i].rip).c_str(), (unsigned long long)rows[i].caller,
                     (unsigned long long)rows[i].count, (unsigned long long)rows[i].address,
                     BbGxRing::Contains(rows[i].address, 1) ? " (GX range allocator)" : "");
+        // 0.4.6 beta 13: what watched those pages.
+        static constexpr const char* kWatched[] = {"the GPU's data", "an uploaded copy", "an image",
+                                                   "nothing"};
+        bool open = false;
+        for (u32 k = 0; k < 4; ++k) {
+            if (rows[i].watched[k] != 0) {
+                std::printf("%s%s %llu", open ? ", " : " [watched by ", kWatched[k],
+                            (unsigned long long)rows[i].watched[k]);
+                open = true;
+            }
+        }
+        if (open) {
+            std::printf("]");
+        }
     }
     std::printf("\n");
 }

@@ -2273,6 +2273,29 @@ void BufferCache::NoteEngineStore(VAddr addr, u64 size) {
     }
 }
 
+void BufferCache::NoteBackingStore(VAddr addr, u64 size) {
+    // BB_LABEL_CHECK=0: as before beta 13, such stores never reach the buffer cache.
+    static const bool on = [] {
+        const char* env = std::getenv("BB_LABEL_CHECK");
+        return !(env && env[0] == '0');
+    }();
+    if (!on || size == 0) {
+        return;
+    }
+    BbStats::backing_stores.fetch_add(1, std::memory_order_relaxed);
+    const auto [marked, gpu_pages] = memory_tracker->MarkStoreUploaded(addr, size);
+    if (marked != 0) {
+        BbStats::backing_stores_marked.fetch_add(1, std::memory_order_relaxed);
+    }
+    if (gpu_pages != 0) {
+        BbStats::backing_stores_gpu.fetch_add(1, std::memory_order_relaxed);
+    }
+}
+
+u8 BufferCache::PageWatch(VAddr addr) const noexcept {
+    return memory_tracker->PageWatch(addr);
+}
+
 void BufferCache::ProcessCallsEvents() {
     if (!calls_waiting.load(std::memory_order_acquire)) {
         return;

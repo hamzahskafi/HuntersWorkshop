@@ -125,6 +125,27 @@ public:
             manager->MarkToUploadButGpu(offset, size);
         });
     }
+    /// 0.4.6 beta 13 (diagnostics): see RegionManager::PageWatch; 0 where no region was made.
+    u8 PageWatch(VAddr addr) const noexcept {
+        const std::size_t index = addr >> TRACKER_HIGHER_PAGE_BITS;
+        if (index >= top_tier.size()) {
+            return 0;
+        }
+        const RegionManager* manager = top_tier[index];
+        return manager ? manager->PageWatch(addr & TRACKER_HIGHER_PAGE_MASK) : 0;
+    }
+    /// 0.4.6 beta 13: see RegionManager::MarkStoreUploaded; {pages marked, pages the GPU wrote}. Any
+    /// thread: no region is made here (memory no region covers is all to upload already).
+    std::pair<u32, u32> MarkStoreUploaded(VAddr addr, u64 size) {
+        u32 marked = 0, gpu_pages = 0;
+        IteratePages<false>(addr, size, [&](RegionManager* manager, u64 offset, size_t size) {
+            std::scoped_lock lk{manager->lock};
+            const auto [m, g] = manager->MarkStoreUploaded(offset, size);
+            marked += m;
+            gpu_pages += g;
+        });
+        return {marked, gpu_pages};
+    }
     /// 0.4.6 beta 12: see RegionManager::CallsCreate; makes the regions (the thread that uploads only).
     s64 CallsCreate(VAddr addr, u64 size, bool with_data) {
         s64 pages = 0;

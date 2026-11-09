@@ -243,6 +243,17 @@ The tester's call on beta 4's logs: one beta with the whole design and the loggi
 - `BB_WATCH_GAME_BUFFERS=1` in Extra variables watches the game's buffers as before; safe mode does
   too.
 
+## Beta 12's run, followed up (beta 13)
+
+- **Fence labels reach the GPU's copy of their memory.** A label the engine writes for the game (the
+  GPU saying it finished some work) went into the game's memory only; if the GPU kept a copy of that
+  memory as a buffer, the copy kept the old value. Such a page is now uploaded again before the GPU
+  next reads it, and the log counts how often that happens. `BB_LABEL_CHECK=0` in Extra variables
+  turns it off.
+- **The log says more about loads and write faults:** each `Loading:` line names the maps the game
+  opened during it; each write fault is counted by what was watching its page; frames over 25 ms in
+  the 2 seconds after a loading screen get the long-frame breakdown that frames over 40 ms always had.
+
 ## Diagnostics
 
 - **The "Building shaders" note** shows when a frame was late while shaders were being

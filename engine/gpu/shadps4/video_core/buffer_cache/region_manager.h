@@ -254,6 +254,37 @@ public:
         cpu |= range & ~gpu;
         ApplyWriteProtection();
     }
+    /// 0.4.6 beta 13: the engine stored at [offset, offset + size) through the backing view (a label),
+    /// which never faults: its pages holding an uploaded copy (neither to upload nor the GPU's) are
+    /// marked to upload, as a fault would have marked them. Returns the pages marked and the pages the
+    /// GPU wrote there (left as they are: an upload would put older bytes over the GPU's).
+    std::pair<u32, u32> MarkStoreUploaded(u64 offset, u64 size) {
+        const auto [start, end] = Span(offset, size, false);
+        if (start >= end) {
+            return {0, 0};
+        }
+        RegionBits range{};
+        range.SetRange(start, end);
+        const RegionBits uploaded = range & ~cpu & ~gpu;
+        const u32 gpu_pages = static_cast<u32>(CountPages(range & gpu));
+        if (!uploaded.Any()) {
+            return {0, gpu_pages};
+        }
+        cpu |= uploaded;
+        ApplyWriteProtection();
+        return {static_cast<u32>(CountPages(uploaded)), gpu_pages};
+    }
+    /// 0.4.6 beta 13 (diagnostics, the write fault breakdown): this cache's watch on the page at
+    /// `offset`: 2 the GPU's data (a write faults to read it back first), 1 an uploaded copy, 0 none (a
+    /// page to upload is writable). Read without the lock: the faulting thread may hold it.
+    u8 PageWatch(u64 offset) const noexcept {
+        const size_t page = std::min<size_t>(SanitizeAddress(offset) / TRACKER_BYTES_PER_PAGE,
+                                             NUM_PAGES_PER_REGION - 1);
+        if (gpu.Get(page)) {
+            return 2;
+        }
+        return cpu.Get(page) ? 0 : 1;
+    }
     /// A GX buffer made at [offset, offset + size): marked to upload (MarkToUploadButGpu), and its inside
     /// pages kept writable. Made with its data, the GPU's older data on its inside pages is dropped (the
     /// creation's copy overwrote it). Returns how many pages became `calls`.

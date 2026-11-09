@@ -539,18 +539,27 @@ void StoreLabelTold(void* address, u64 value, u32 num_bytes) {
     }
 }
 
+// 0.4.6 beta 13: a label written through the backing view (the usual path) never faults, so a VRAM copy
+// of its page kept the old bytes; the buffer cache is told (BufferCache::NoteBackingStore), or the
+// fallback store when there is no backing view.
+void WriteLabel(void* address, u64 value, u32 num_bytes) {
+    auto* memory = Core::Memory::Instance();
+    if (!memory->TryWriteBacking(address, &value, num_bytes)) {
+        StoreLabelTold(address, value, num_bytes);
+    } else if (auto* rasterizer = memory->GetRasterizer()) {
+        rasterizer->NoteBackingStore(reinterpret_cast<VAddr>(address), num_bytes);
+    }
+}
+
 void SignalEop(const PM4CmdEventWriteEop& eop, u64 seq) {
     eop.SignalFence(
         [seq](void* address, u64 data, u32 num_bytes) {
-            auto* memory = Core::Memory::Instance();
             BbFreeCheck::Check(reinterpret_cast<u64>(address), num_bytes, &data, BbFreeCheck::Eop,
                                seq);
             BbFreeCheck::NoteFenceWriting(reinterpret_cast<u64>(address));
             BbWriteLog::Note(reinterpret_cast<u64>(address), &data, num_bytes, BbWriteLog::Fence);
             const auto write_start = std::chrono::steady_clock::now();
-            if (!memory->TryWriteBacking(address, &data, num_bytes)) {
-                StoreLabelTold(address, data, num_bytes);
-            }
+            WriteLabel(address, data, num_bytes);
             BbStats::eop_written.fetch_add(1, std::memory_order_relaxed);
             BbFreeCheck::NoteFenceWritten(
                 reinterpret_cast<u64>(address),
@@ -777,13 +786,10 @@ void RunZpassDump(Vulkan::Rasterizer& rasterizer, const u8* data) {
 }
 
 void WriteEosLabel(void* address, u64 value, u32 num_bytes) {
-    auto* memory = Core::Memory::Instance();
     BbFreeCheck::Check(reinterpret_cast<u64>(address), num_bytes, &value, BbFreeCheck::Eos);
     BbFreeCheck::NoteFenceWriting(reinterpret_cast<u64>(address));
     BbWriteLog::Note(reinterpret_cast<u64>(address), &value, num_bytes, BbWriteLog::Fence);
-    if (!memory->TryWriteBacking(address, &value, num_bytes)) {
-        StoreLabelTold(address, value, num_bytes);
-    }
+    WriteLabel(address, value, num_bytes);
     BbFreeCheck::NoteFenceWritten(reinterpret_cast<u64>(address));
 }
 

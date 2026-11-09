@@ -412,6 +412,10 @@ bool Occlusion::Shared::WriteBlock(const Pending& dump) {
             return false;
         }
     }
+    // 0.4.6 beta 13: a VRAM copy of the block's page gets the new results (no fault told it).
+    if (auto* rasterizer = memory->GetRasterizer()) {
+        rasterizer->NoteBackingStore(dump.va, 16ull * (dump.pipes - 1) + 8);
+    }
     ++written_dumps;
     if (written.size() > 262144) {
         written.clear();

@@ -40,6 +40,9 @@ public:
     /// code writes textures).
     static void NoteImageFault(VAddr image_address, u64 image_size, u32 width, u32 height,
                                u32 format, u32 tiling);
+    /// 0.4.6 beta 13: what watched the page of the write fault this thread handles (bits: 1 the GPU's
+    /// data, 2 the buffer cache's uploaded copy, 4 an image, 8 none), for its fault site's line.
+    static void NoteFaultWatch(u32 watched);
 
     /// Register a range of mapped gpu memory.
     void OnGpuMap(VAddr address, size_t size);
