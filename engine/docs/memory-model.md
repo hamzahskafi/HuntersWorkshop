@@ -893,19 +893,155 @@ before the betas ended):
 - **FSR 4.1.2 runs on RDNA 4** (AMD's SDK, native resolution 1920x1080), 0.51 ms a frame (the 3070
   Ti's DLSS: 0.94 ms). The GPU busy 3.5 ms a frame at 60 FPS (the 3070 Ti: 5.6 ms).
 
-### Beta 14: shaders built ahead
+### Beta 14: the area's first frames made ready before they are drawn
 
-- GX's input-layout creation hooked; every shader the game creates at startup translated on
-  background threads for the variants its vertex formats and the targets predict.
-- The pipelines an area needs built during its loading screen.
-- The exact design from beta 8's shader numbers and run C.
-- `pipeline_compiles.md`'s "Remaining (not done)" items are looked at with it: catalog coverage, the
-  warm-up's state rebuilt on the main thread, a profile change emptying the cache, the scene-curve
-  cache folder, AMD and Intel catalogs.
-- Independent of betas 9 to 13: it moves earlier if beta 8's numbers make compiles the bigger
-  stutter.
+Designed 2026-11-10 from beta 13's runs (the RTX 3070 Ti's `64b52c0d`, `b4244009` and `e4fc8e33`;
+the RX 9070 XT's `d4be8f82` and `0f407d24`) and checked against the code. The roadmap's beta 14 was
+shaders built ahead; the tester added the loading-screen work to it (2026-11-10). It is built after
+the tester's go-ahead. Each part has its own switch.
 
-**Moves on when:** with a cold cache, no compile stutter on run C's route.
+**What the frames after a load still wait for.** The loading screen hides its own frames: beta 13's
+61.1 ms frame with 194 surfaces was one of them, during the first load.
+
+| After the load | Frame | What it waited for | Part |
+|---|---|---|---|
+| `m33` (3070 Ti) | 45.2 ms | 287 MB of the game's buffers uploaded, and 23.0 ms of sparse binds reserving their VRAM | 2 |
+| `m34`, its first visit (9070 XT) | 141.7 ms, then 483.9 ms | 48, then 54 new pipelines (458 and 1,392 ms of compiling on 4 threads); 147 MB of buffers | 1, 2 |
+| `m34` (3070 Ti) | 36.1 ms | 21 surfaces' memory allocated (11.8 ms); 38 pipelines (beta 12's recompile) | 3 |
+| the 4.31 s load (3070 Ti) | 27.1 ms | 11 surfaces' memory allocated (14.3 ms: about 1.3 ms each for the ones of 4 MiB or more, which get memory of their own) | 3 |
+| during loading screens | (hidden) | the create calls' copies: 1,595 write faults in 7 minutes, about 930 of them reading a page back from VRAM first | 4 |
+
+In beta 13's first minute the game made 2,520 GX buffers with their data (281 MiB), about the
+287 MB the `m33` frame uploaded. On AMD a surface's memory costs little (50 in 1.9 ms after
+`m34`), so part 3 is for NVIDIA's cost: its counts can be checked on AMD, its time only on NVIDIA.
+
+**Part 1: compile bursts on more threads** (`BB_PIPELINE_BURST=0`: 4 threads, as before)
+
+- **Today:** new pipelines compile on a third of the hardware threads, at most 4 (`BB_PIPELINE_THREADS`,
+  Lantern's rule): 4 on the tester's 20-thread i5-14600KF. A new area's first frames bring 40-100
+  at once. At AMD's 10-26 ms each, 54 of them held a frame for 484 ms.
+- **Burst threads beside the 4,** up to half the hardware threads in all (at most 12; 10 on the
+  tester's CPU, 4 on an 8-thread one). They are started with the others but take a job only while
+  jobs wait unstarted behind the standing threads, at below-normal priority so the game's own
+  threads keep their cores. One new pipeline in play compiles as it does now.
+- **Unchanged:** a thread that needs a pipeline nobody has started compiles it itself
+  (`BB_PIPELINE_TAKE`); scene geometry is left out for up to a second (`BB_SKIP_UNCOMPILED`).
+- **Measured per burst** (from 4 jobs waiting until the queue is empty): pipelines, wall time,
+  compile time summed, threads used. The sum divided by the wall time shows whether the driver
+  compiles in parallel. NVIDIA's did at the warm-up: 601 pipelines in 13.9 s on 1 thread, 3.1 s on 8.
+- **Expected:** a burst's wall time down by up to the thread ratio (2.5 times on the tester's CPU)
+  where the driver compiles in parallel.
+- **Risk:** CPU time the game's threads want in the same frames, limited by the priority and by
+  bursts only.
+
+**Part 2: the game's buffers made during a loading screen, uploaded during it** (`BB_LOAD_UPLOAD=0`:
+uploaded at their first draw, as before)
+
+- **The source:** the registry's `BufferMadeWithData` (beta 12's memory event, on the game's thread,
+  after the creation's copy) while `Loading::ScreenUp()`: the range is queued. A release removes it.
+- **The work:** on the draw recording thread, once a frame, where `BB_PREUPLOAD` runs:
+  - each queued range gets its VRAM (`EnsureResident`: the sparse binds) and its upload
+    (`SynchronizeMemory`, the same pair as `Preupload`'s mode 2, for these ranges only);
+  - up to `BB_LOAD_UPLOAD_MB` (64) a frame while the loading screen is up, then 16 a frame for
+    2 s after it, then the rest of the queue is dropped;
+  - a range a draw has already used costs a lookup (nothing is left to upload).
+- **The room for it:** loading screens draw 104-259 frames of 16.6 ms each. 287 MB takes 5 of
+  them at 64 MB a frame.
+- **Not touched:** the GX region (read in place, beta 9 of 0.4.4) and textures (built in their
+  create call, beta 4).
+- **Expected:** the frame after `m33` without its 287 MB and 23 ms of sparse binds. Part 5's line
+  says what the first frames still uploaded.
+- **Risks:**
+  - The VRAM is taken a few seconds earlier, for buffers the area then uses. With the VRAM manager
+    on, its comfortable line still decides.
+  - A CPU write between a buffer's creation and its first draw that no call tells would be missed
+    for longer. Beta 12's net found none in any run, and today's first upload assumes the same
+    from then on.
+
+**Part 3: surfaces' memory made during the loading screen** (`BB_READY_SURFACES=0`: allocated at
+their first draw, as before)
+
+- **Why surfaces after a load allocate:** they are the ones beta 8's dead-target pool had no image
+  for (the register's row: their shape's donor is still in the GPU's hands).
+- **Learned shapes:** the shapes allocated without a donor in the 2 s after each load are counted.
+  A shape is format, type, size, mips, layers, samples, colour or depth. The count kept per shape is
+  the largest seen after one load.
+- **Made ahead:** during the next loading screen, from its 30th frame (after YEBIS's rebuild at its
+  start), a background thread makes ready images of those shapes. Each is the Vulkan image and its
+  memory, made as `PrepareCreated` makes a texture's image on the game's thread. Limits: the count
+  per shape, `BB_READY_SURFACES_MB` (256) in all, and only while VRAM is comfortable.
+- **Taken:** a new surface with no dead image of its shape takes a ready one of its shape, as beta
+  8's pool takes a dead target's (`t_adopt_image`, only when the creation info is equal; otherwise
+  it allocates as now). Ready images not taken 3 s after the load are freed.
+- **The session's first load** has nothing learned. Its surfaces are made during its own loading
+  screen anyway (beta 13: 194 in 35.9 ms, hidden).
+- **Why not at the game's create call:** a target's image takes its shape from the draw that writes
+  it, which is why beta 7 makes only sampled textures at creation. YEBIS's set after a load is
+  created after the screen ends, a frame before its first draw.
+- **Expected:** the 11.8 and 14.3 ms gone from those frames on NVIDIA.
+- **Risks:** up to 256 MiB more VRAM for a few seconds at loads; a wrong guess costs an
+  allocation and its freeing.
+
+**Part 4: the create calls tell the engine before they copy** (`BB_COPY_NOTICE=0`: the copy faults,
+as before)
+
+- **The sites (1.09):** both creators copy the caller's data with the game's `memcpy`
+  (`0x261a1b0`), each from one call site:
+  - CreateBuffer's helper `0x216d420`, at `0x216d5ea`: destination `r14`, source `[rbx]`, size
+    `[r12]`;
+  - CreateTexture's helper `0x2171d60`, at `0x2171fea`: destination `r13`, source `[r14]`, size
+    `[rbp-0xd0]`.
+- **A cave at each site** in place of the three argument loads and the call (15 and 18 bytes,
+  compared with 1.09's before placing, as the hit cap's cave). It loads the arguments, calls the
+  engine with the destination and size, calls the `memcpy`, and jumps back.
+- **The engine, on the game's thread:**
+  - For the pages wholly inside the copy: the GPU's older data is dropped without reading it back
+    (the copy overwrites every byte), and uploaded copies are marked to upload. Both become
+    writable. This is what `CallsCreate` does to the inside pages after the creation today.
+  - Images watching those pages are told once for the range, which each page's fault does now.
+  - The first and last page keep their watch: other bytes share them.
+- **Expected:** the create calls' faults (1,098 and 497 in beta 13's 7 minutes) down to their edge
+  pages, the about 930 readbacks gone, and the creators' time in loading screens with them.
+- **Risk:** small. The cave runs on every creation with data (2,520 buffers a minute at a load):
+  one call into the engine each, and a lookup when no page is watched.
+
+**Part 5: what each load's first frames still did** (always on, one line per load, 2 s after it
+ends), for example:
+
+    Loading: the 2 s after m33_00_00_00: frames over 25 ms 1 (worst 45.2 ms); the game's buffers made during the screen 287 MB, uploaded during it 287 MB, at their first draw 0 MB; sparse binds during the screen 22.1 ms, after it 0.4 ms; surfaces ready 21 (94 MiB), taken 19, allocated at their draw 2 (1.3 ms), freed untaken 2; pipelines 48 new, compiled 1,392 ms over 0.31 s on up to 10 threads, waits 40 (longest 132 ms); create-call copies told 2,611, pages dropped without a readback 410
+
+**Not in beta 14: pipelines for areas this PC has never drawn.** The roadmap planned to build an
+area's pipelines during its loading screen from the game's calls. The research says it cannot:
+
+- **A pipeline** is a vertex shader, a pixel shader and the draw's state: vertex formats, target
+  formats, blending, depth (the key, `GraphicsPipelineKey`). The game creates all its shaders at
+  startup (13,277) and pairs them only at the draw.
+- **What the game gives at a loading screen:** input layouts (646 in the first load). Each is one
+  vertex shader with its vertex formats, not its pixel shader, its targets or its blending.
+- **Translating the predicted variants at startup** saves little. In the second AMD run's `m34`
+  minute, 228 shaders took 411 ms to translate; one frame's compiles took 1,392 ms. A translated
+  variant still needs the pairing.
+- **What this PC has drawn** is in its GPU cache, built at the start: the second AMD run built 220
+  of 224 in 0.2 s. Tagging keys by area would change nothing. A cold cache therefore means areas
+  this PC has never drawn: a first install, another kind of GPU, or a profile change.
+- **For those, keys can only come from another PC: a catalog.** Two pieces of work use the lab's
+  catalog seeding (`pipeline_compiles.md`) and go together after beta 14:
+  - whether HW ships catalogs of its own, the tester's parked decision;
+  - keeping a cache's states and keys over a profile change.
+- **`pipeline_compiles.md`'s "Remaining (not done)",** looked at:
+  - catalog coverage, the profile change, the scene-curve folder, and AMD and Intel catalogs are
+    all that catalog work;
+  - the warm-up's state rebuilt on the main thread costs 0.1 s now: not needed.
+
+**Moves on when** (changed with the tester's agreement, as the old goal needs keys from elsewhere):
+compile bursts shorter by the burst threads' factor where the driver compiles in parallel, and the
+frames after loads without parts 2 to 4's work.
+
+**The run** (on the 9070 XT):
+
+1. The usual route with loads (the Dream, `m34`, `m33` or `m23`): part 5's line for each load.
+2. New ground, or the cache cleared, for the bursts.
+3. Part 3's time, on the 3070 Ti if it is at hand (the NVIDIA checks' row).
 
 ### The 0.4.6 release
 
