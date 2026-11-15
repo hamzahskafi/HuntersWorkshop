@@ -65,7 +65,7 @@ Still the generic model (the gaps the 2026-11-08 research found):
 | Every rebuilt target is a new Vulkan image, and the old set waits out the grace | About 4 ms of allocation a rebuild, both sets in VRAM for seconds (YEBIS made 744-775 MiB a minute in beta 7's log) | Beta 8, part 3 |
 | A depth target's first use reads memory; its compression metadata (HTILE) is followed by address | Part of the rebuilds' uploads | Beta 8 part 1; the rest dropped (the tester, 2026-11-09) |
 | The game's buffers are write-protected and re-read by page | Write faults and re-uploads | Beta 12 |
-| Shaders translated at a draw; pipelines a new area needs built in play | Compile stutter with a cold cache | Beta 14 |
+| Shaders translated at a draw; pipelines a new area needs built in play | Compile stutter with a cold cache | Beta 15 |
 
 ## The research of 2026-11-08
 
@@ -146,8 +146,9 @@ The betas after 9 were renumbered on 2026-11-08 when beta 10 became the measurem
 rule (the design check below): the owner rule is beta 11, depth buffers 12, the game's buffers 13,
 shaders 14. Then, with beta 11 (the tester's call: the only cost left in beta 10's logs is the game's
 buffers), the game's buffers became 12 and depth buffers 13. On 2026-11-09 the tester dropped the
-depth items: beta 13 is beta 12's follow-ups. Earlier text that named them by their old numbers has
-been brought up to date.
+depth items: beta 13 is beta 12's follow-ups. On 2026-11-15 The Hunter's Dream's online update took
+beta 14 (the tester's call): the memory work's beta 14 is beta 15. Earlier text that named them by
+their old numbers has been brought up to date.
 
 One log must be able to tell each change apart: every part has its own switch in Extra variables
 that brings back the old behaviour, named in the changelog when built. A beta's switches go at the
@@ -204,7 +205,7 @@ Built 2026-11-08 (engine id 92). Safe mode turns parts 1 and 3 off.
 - **Run A:** a normal session with loading screens and area crossings (the crossing that stalled
   in beta 7's log), switches as shipped.
 - **Run B:** the same route with part 4's switch on.
-- **Run C** (any time before beta 14): the shader cache cleared, the same route.
+- **Run C** (any time before beta 15): the shader cache cleared, the same route.
 
 **Moves on when:**
 
@@ -368,7 +369,7 @@ loading screens (a load's 425 MB of buffer uploads).
 94): a clean exit, the same picture. No new texture over a live one; the owner rule would hand over
 27 dead images draws took and refuse 1; copies through memory up to 3,600 a minute, none to an owned
 image; 0-140 images a minute marked written by a creation with data, 4 live surfaces kept. Frames in
-play 28.4 ms or less, but one of 37.7 ms with 42 pipelines built on a first visit (beta 14's work).
+play 28.4 ms or less, but one of 37.7 ms with 42 pipelines built on a first visit (beta 15's work).
 
 - **The frame after the 3.8 s load into m34 (both runs: 44.1 and 48.6 ms):** about 400 MB of the game's
   buffers uploaded and about 100,000 pages write-protected in that one frame, 23-25 ms of it in the
@@ -887,17 +888,23 @@ before the betas ended):
   ms frames at the first area, 484 ms after the `m34` load (54 pipelines, 1,392 ms), 140 ms, and 35-76
   ms frames in play; 7 hitch reports in the second run, the first with AMD's compiler busy on the
   pipeline threads, the rest the game's main thread waiting (25-27 ms). Every AMD player's first run,
-  and every player's after a GPU change, looks like this until beta 14.
+  and every player's after a GPU change, looks like this until beta 15.
 - **The memory model runs on AMD as on NVIDIA:** the GX region imported and read in place through a
   buffer of its own; the net found no untold write; the labels' check 17,900 stores a second.
 - **FSR 4.1.2 runs on RDNA 4** (AMD's SDK, native resolution 1920x1080), 0.51 ms a frame (the 3070
   Ti's DLSS: 0.94 ms). The GPU busy 3.5 ms a frame at 60 FPS (the 3070 Ti: 5.6 ms).
 
-### Beta 14: the area's first frames made ready before they are drawn
+### Beta 14: The Hunter's Dream's update
+
+The online update The Hunter's Dream's 0.2.31 change needs (co-op, invasions and PvP with
+updated players), designed 2026-11-15 in [online-update.md](online-update.md). It took this number
+from the memory work, which is beta 15 below.
+
+### Beta 15: work moved into the loading screen
 
 Designed 2026-11-10 from beta 13's runs (the RTX 3070 Ti's `64b52c0d`, `b4244009` and `e4fc8e33`;
-the RX 9070 XT's `d4be8f82` and `0f407d24`) and checked against the code. The roadmap's beta 14 was
-shaders built ahead; the tester added the loading-screen work to it (2026-11-10). It is built after
+the RX 9070 XT's `d4be8f82` and `0f407d24`) and checked against the code, as beta 14 (beta 15 since
+the online update took that number, 2026-11-15). The roadmap's beta for it was shaders built ahead; the tester added the loading-screen work to it (2026-11-10). It is built after
 the tester's go-ahead. Each part has its own switch.
 
 **What the frames after a load still wait for.** The loading screen hides its own frames: beta 13's
@@ -1010,7 +1017,7 @@ ends), for example:
 
     Loading: the 2 s after m33_00_00_00: frames over 25 ms 1 (worst 45.2 ms); the game's buffers made during the screen 287 MB, uploaded during it 287 MB, at their first draw 0 MB; sparse binds during the screen 22.1 ms, after it 0.4 ms; surfaces ready 21 (94 MiB), taken 19, allocated at their draw 2 (1.3 ms), freed untaken 2; pipelines 48 new, compiled 1,392 ms over 0.31 s on up to 10 threads, waits 40 (longest 132 ms); create-call copies told 2,611, pages dropped without a readback 410
 
-**Not in beta 14: pipelines for areas this PC has never drawn.** The roadmap planned to build an
+**Not in beta 15: pipelines for areas this PC has never drawn.** The roadmap planned to build an
 area's pipelines during its loading screen from the game's calls. The research says it cannot:
 
 - **A pipeline** is a vertex shader, a pixel shader and the draw's state: vertex formats, target
@@ -1025,7 +1032,7 @@ area's pipelines during its loading screen from the game's calls. The research s
   of 224 in 0.2 s. Tagging keys by area would change nothing. A cold cache therefore means areas
   this PC has never drawn: a first install, another kind of GPU, or a profile change.
 - **For those, keys can only come from another PC: a catalog.** Two pieces of work use the lab's
-  catalog seeding (`pipeline_compiles.md`) and go together after beta 14:
+  catalog seeding (`pipeline_compiles.md`) and go together after beta 15:
   - whether HW ships catalogs of its own, the tester's parked decision;
   - keeping a cache's states and keys over a profile change.
 - **`pipeline_compiles.md`'s "Remaining (not done)",** looked at:
@@ -1077,6 +1084,6 @@ command stream (Lantern's native plan, bbhost's YEBIS path). It builds on 0.4.6,
 - "buffers before depth" (2026-11-08, with beta 11): the game's buffers are beta 12, depth beta 13.
 - "Points 1 and 2 aren't needed" (2026-11-09, on beta 13's two depth items): beta 13 is beta 12's
   follow-ups without depth work.
-- "we haven't made the shader building on game start and in loading": beta 14, measured in beta 8.
+- "we haven't made the shader building on game start and in loading": beta 15, measured in beta 8.
 - "prepare the full plan/documentation so that we don't lose on or forget any steps": this document
   and plan.md's register.
