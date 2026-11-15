@@ -341,8 +341,11 @@ bbhost names itself `bbhost/<version>`.
 - One constant in the launcher (`GameEnvironment`) and one in `HuntersDream.DeviceName`, ready to
   become `HuntersWorkshop/<version>` and `Hunter's Workshop on <PC>`.
 - They change only once The Hunter's Dream's team says yes.
-- Beta 14 ships with the current name unless that answer comes before it is built.
-- Asking is the tester's (a message to their team).
+- **Decided (the tester, 2026-11-15):** beta 14 keeps the current name; the team is not asked yet.
+- **bbhost's own name (`bbhost/<version>`) is not used.** It would present HW as The Hunter's
+  Dream's own client. Their logs and counts would put HW's players and HW's bugs under bbhost's
+  versions, and any rule the server applies by bbhost version would apply to HW on the strength of
+  a version it does not run. Nothing requires it: the server works with any name.
 
 ## 7. Shipping
 
