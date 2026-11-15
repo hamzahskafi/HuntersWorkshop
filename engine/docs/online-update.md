@@ -58,14 +58,15 @@ after 30 s. HW's P2P port reads and sends at most 2 KB: a larger packet from an 
 
 ### Needed to play with updated players
 
-1. **NpSignaling from bbhost, unchanged.** bbhost's `src/hle/np_signaling.cpp` at `a317321`
-   copied into `gpu/bbnet/vendor/bbhost/` with a README naming the commit and its SHA-256, built
-   with a few headers of our own that give it what it calls: the dispatcher (`DispatchAfter`), the
-   peer table (`PeersGet`, `PeersFindOnline`, `PeersSetConn`, `PeersProvisional`), the server's
-   resolve, our online id, the game's callback (`CallGuest`), the log, and the P2P port's sender.
-   HW has every one of these already. `thd_np.cpp` loses its own NpSignaling and registers
-   bbhost's seven functions. Copied whole rather than rewritten: it is the exact code bbhost players
-   run, and a later bbhost fix is a copy again.
+1. **NpSignaling ported from bbhost into `thd_np.cpp`**, as the rest of `thd/` was: bbhost's
+   `src/hle/np_signaling.cpp` at `a317321` (unchanged since 0.2.31) function for function, with
+   its states, message kinds, byte layout, 500 ms step and 30 s limit as they are, and its names
+   kept in comments so a later bbhost change maps line to line. It calls our dispatcher, peer
+   table, server resolve, online id and `CallGuest` directly. `thd_np.cpp` loses its timer-based
+   NpSignaling. (Revised 2026-11-15 from copying the file unchanged behind an adapter, as Lantern
+   did: the rest of `thd/` is ported by hand anyway, #217's change spans three files of which only
+   this one could be copied, and an adapter would put a second set of names and a conversion layer
+   of about 240 lines in the backend.)
 2. **Matching2 on the handshake** (#217's `np_matching2.cpp` changes, into `thd_matching2.cpp`):
    room links up per member when its handshake is (`transport_up`), dead with it (`transport_dead`);
    the status read from the handshake; create, join and each member joining start the handshake to
@@ -116,8 +117,11 @@ say yes; until then the name stays. The tester's call (it is a message to their 
 
 - **Here:** the changed files build; tests of our own for the compares, the sanitize copy and the
   datagram pieces (bbhost's cases: one- and two-byte vports, a longer chunk alone, bytes that are
-  not chunks sent whole, the 65,507-byte limit), and two NpSignalings greeting each other through
-  a loopback harness (both activate, one activates, a Close, the 30 s timeout).
+  not chunks sent whole, the 65,507-byte limit), and the greeting against bbhost's own code: a test
+  builds bbhost's `np_signaling.cpp` unchanged (test only, never shipped) and runs it and our port
+  as two players through a loopback (each activating first, both at once, a Close, a peer that
+  never answers and its 30 s timeout, packets lost and resent), so the port is checked against the
+  code updated players run, not against itself.
 - **The tester's runs** (`BB_THD_TRACE=1` also turns on bbhost's handshake trace): co-op as host and
   as guest with a bbhost v0.2.35 player, with a Lantern 0.9.42 player and with another HW player;
   an invasion; a player leaving mid-session; a summon that fails (the 30 s timeout said in the log).
@@ -128,4 +132,4 @@ say yes; until then the name stays. The tester's call (it is a message to their 
   switch: the old way cannot connect to updated players.
 - **0.4.5 stable:** the online backend has not changed since 0.4.4, so the same change applies to
   0.4.5 as it is: a 0.4.5 hotfix with only this is possible, if the tester wants one.
-- **Credits:** `licenses/SHADPS4-NETWORK.md` and `thd.h` name the bbhost commit taken.
+- **Credits:** `licenses/SHADPS4-NETWORK.md` and `thd.h` name the bbhost commit ported; the test's copy of bbhost's file carries its notice.
