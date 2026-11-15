@@ -43,6 +43,8 @@ features are in [archive/](archive/README.md) (was `history/`).
 - [upscaler.md](upscaler.md): the upscalers (TAA, DLSS, AMD FSR through AMD's FSR SDK), where they run
   and their inputs.
 - [hdr-scene-path.md](hdr-scene-path.md): the plan for HDR from the scene (the next HDR mode).
+- [online-update.md](online-update.md): The Hunter's Dream's 0.2.31 update (the games' greeting,
+  from bbhost): what changed, why HW breaks, and the plan.
 
 ## Frame rate
 
