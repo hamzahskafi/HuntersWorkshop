@@ -3,8 +3,12 @@
 // kernel's vport header as bbhost writes it ([ff][c3][src][dst] for one-byte vports), the relay of
 // The Hunter's Dream ([fb]['R'|'r'] framing through its STUN port), STUN Binding with the relay
 // HELLO, and hole punching. Adapted from droogie/bbhost src/hle/net.cpp and src/net/stun.cpp
-// (566184a), its poll path.
+// (566184a), its poll path. 0.4.6 beta 14: datagrams up to 65,507 bytes, the game's large ones sent
+// as pieces (thd_p2p_split.h), and NpSignaling's greetings in and out (thd_signaling.h), as bbhost
+// v0.2.35 (e74e3ce, a317321).
 #include "thd_internal.h"
+#include "thd_p2p_split.h"
+#include "thd_signaling.h"
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -209,27 +213,41 @@ bool trace_now(int& count) { return Trace() || ++count <= 64; }
 
 // P2P datagrams in both directions, logged once a minute while they flow (the per-datagram trace
 // stops after 64): a co-op desync log then says whether datagrams were lost or failed to send.
+// Since 0.4.6 beta 14 also how many went as pieces, and the largest on the wire each way since the
+// last line.
 struct P2pCounts {
     std::atomic<std::uint64_t> sent{0}, sent_bytes{0}, send_failed{0}, received{0}, received_bytes{0};
+    std::atomic<std::uint64_t> split{0};
+    std::atomic<std::size_t> largest_out{0}, largest_in{0};
 };
 P2pCounts g_p2p_counts;
+
+void atomic_max(std::atomic<std::size_t>& a, std::size_t v) {
+    std::size_t was = a.load(std::memory_order_relaxed);
+    while (v > was && !a.compare_exchange_weak(was, v, std::memory_order_relaxed)) {
+    }
+}
 
 void p2p_counts_log() {
     using clock = std::chrono::steady_clock;
     static clock::time_point last = clock::now();
-    static std::uint64_t was[5] = {};
+    static std::uint64_t was[6] = {};
     const clock::time_point now = clock::now();
     if (now - last < std::chrono::seconds(60)) return;
-    const std::uint64_t is[5] = {g_p2p_counts.sent.load(), g_p2p_counts.sent_bytes.load(),
+    const std::uint64_t is[6] = {g_p2p_counts.sent.load(),     g_p2p_counts.sent_bytes.load(),
                                  g_p2p_counts.send_failed.load(), g_p2p_counts.received.load(),
-                                 g_p2p_counts.received_bytes.load()};
+                                 g_p2p_counts.received_bytes.load(), g_p2p_counts.split.load()};
     const double seconds = std::chrono::duration<double>(now - last).count();
     last = now;
+    const std::size_t out = g_p2p_counts.largest_out.exchange(0, std::memory_order_relaxed);
+    const std::size_t in = g_p2p_counts.largest_in.exchange(0, std::memory_order_relaxed);
     if (is[0] == was[0] && is[3] == was[3]) return;
-    Log("net: last %.0f s: sent %llu datagrams (%llu KiB, %llu failed), received %llu (%llu KiB)", seconds,
-        static_cast<unsigned long long>(is[0] - was[0]), static_cast<unsigned long long>((is[1] - was[1]) / 1024),
-        static_cast<unsigned long long>(is[2] - was[2]), static_cast<unsigned long long>(is[3] - was[3]),
-        static_cast<unsigned long long>((is[4] - was[4]) / 1024));
+    Log("net: last %.0f s: sent %llu datagrams (%llu KiB, %llu failed, %llu as pieces, largest %zu B), "
+        "received %llu (%llu KiB, largest %zu B)",
+        seconds, static_cast<unsigned long long>(is[0] - was[0]),
+        static_cast<unsigned long long>((is[1] - was[1]) / 1024), static_cast<unsigned long long>(is[2] - was[2]),
+        static_cast<unsigned long long>(is[5] - was[5]), out, static_cast<unsigned long long>(is[3] - was[3]),
+        static_cast<unsigned long long>((is[4] - was[4]) / 1024), in);
     std::memcpy(was, is, sizeof(was));
 }
 
@@ -345,8 +363,9 @@ static_assert(sizeof(SceSockaddrIn) == 16);
 // The PS4 kernel's header on every P2P datagram: [0xff][flags][src vport][dst vport], one-byte
 // vports with flag 0x40 (Bloodborne's are 40 and 30), two-byte ones without, four more bytes when
 // flag 0x20 adds a comid. What bbhost players send and read.
+// The header written on the way out is P2pSplit::P2pHeader.
 constexpr std::uint8_t kP2pMagic = 0xff;
-constexpr std::uint8_t kP2pFlagP2p = 0x80, kP2pFlagByteVports = 0x40, kP2pFlagComid = 0x20, kP2pType = 0x03;
+constexpr std::uint8_t kP2pFlagByteVports = 0x40, kP2pFlagComid = 0x20;
 
 struct Datagram {
     std::vector<std::uint8_t> data;
@@ -384,7 +403,7 @@ constexpr std::uint8_t kProbe[8] = {0xfe, 'b', 'b', 'h', 'p', 0, 0, 0};
 // ports leaves framed for the STUN port, [0xfb]['R'][token][port], and comes back from it framed
 // [0xfb]['r'][source port]. The game sees none of it: its peers stay server:port both ways.
 constexpr std::uint8_t kRelayMagic = 0xfb, kRelayToServer = 'R', kRelayToClient = 'r';
-constexpr std::size_t kRelayHeader = 12;
+constexpr std::size_t kRelayHeader = P2pSplit::kRelayHeader;
 struct RelayLink {
     std::mutex mu;
     bool on = false;
@@ -457,15 +476,19 @@ std::size_t p2p_header(const std::uint8_t* d, std::size_t n, std::uint16_t* src,
 }
 
 void p2p_reader(std::shared_ptr<UdpPort> port) {
-    std::uint8_t buf[2048];
+    // Any UDP datagram: the game's lower layer batches its frames into datagrams well past 2 KB (5 KB
+    // seen on a warp), and an older client sends them whole (bbhost v0.2.35).
+    std::vector<std::uint8_t> store(P2pSplit::kMaxDatagram);
+    std::uint8_t* const buf = store.data();
     int logs = 0;
     while (!port->stop.load(std::memory_order_relaxed)) {
         p2p_counts_log();
         if (sock_poll(port->fd, POLLIN, 200) <= 0) continue;
         sockaddr_in sa{};
         socklen_type sl = sizeof(sa);
-        ssize_type n = sock_recvfrom(port->fd, buf, sizeof(buf), true, &sa, &sl);
+        ssize_type n = sock_recvfrom(port->fd, buf, store.size(), true, &sa, &sl);
         if (n < 0) continue;
+        const std::size_t wire = static_cast<std::size_t>(n);
         if (n >= 4 && buf[0] == kRelayMagic && buf[1] == kRelayToClient && from_relay_server(sa)) {
             // A relay delivery: the owner of that relay port's datagram, known as server:port.
             const std::uint16_t from_vport = static_cast<std::uint16_t>((buf[2] << 8) | buf[3]);
@@ -476,7 +499,22 @@ void p2p_reader(std::shared_ptr<UdpPort> port) {
         std::uint16_t src = 0, dst = 0;
         const std::size_t hdr = p2p_header(buf, static_cast<std::size_t>(n), &src, &dst);
         if (!hdr) {
-            // A peer's hole-punch probe or the STUN server's answer: neither is the game's.
+            // A peer's greeting, a hole-punch probe or the STUN server's answer: none is the game's.
+            if (Signaling::IsSignal(buf, static_cast<std::size_t>(n))) {
+                // NpSignaling's handshake (thd_signaling.h), on the dispatcher. It shows the path
+                // open as a probe does.
+                {
+                    std::lock_guard lk(port->mu);
+                    port->heard[source_key(sa.sin_addr.s_addr, sa.sin_port)] = std::chrono::steady_clock::now();
+                }
+                std::vector<std::uint8_t> pkt(buf, buf + n);
+                const std::uint32_t from_addr = sa.sin_addr.s_addr;
+                const std::uint16_t from_port = sa.sin_port;
+                DispatchAfter(0, Prio::Signaling, [pkt = std::move(pkt), from_addr, from_port] {
+                    SignalingControl(pkt.data(), pkt.size(), from_addr, from_port);
+                });
+                continue;
+            }
             if (n >= 8 && std::memcmp(buf, kProbe, 5) == 0) {
                 std::lock_guard lk(port->mu);
                 port->heard[source_key(sa.sin_addr.s_addr, sa.sin_port)] = std::chrono::steady_clock::now();
@@ -520,6 +558,7 @@ void p2p_reader(std::shared_ptr<UdpPort> port) {
         dg.vport = src;
         g_p2p_counts.received.fetch_add(1, std::memory_order_relaxed);
         g_p2p_counts.received_bytes.fetch_add(dg.data.size(), std::memory_order_relaxed);
+        atomic_max(g_p2p_counts.largest_in, wire);
         if (trace_now(logs)) {
             char ip[32];
             write_ipv4(ip, sizeof(ip), sa.sin_addr.s_addr);
@@ -653,65 +692,78 @@ int dgram_recv(int s, void* buf, std::uint64_t len, int flags, SceSockaddrIn* fr
     return static_cast<int>(n);
 }
 
+// Sends one datagram, with the P2P header in front on a P2P socket. One of the game's of more than
+// 1,200 bytes leaves as pieces of whole chunks, each behind its own headers (thd_p2p_split.h). The
+// game hears of it as one: its length once a piece has left, an error only when none has (bbhost
+// v0.2.35's dgram_send).
 int dgram_send(int s, const void* buf, std::uint64_t len, int flags, const SceSockaddrIn* to) {
     NetSock sock;
     if (!sock_state(s, &sock)) return net_err(EBADF);
     const sockfd_t fd = sock.port ? sock.port->fd : sock.fd;
     if (!sock_ok(fd)) return static_cast<int>(len);
     if (!to) return net_err(EINVAL);
-    std::uint8_t pkt[2048];
-    std::size_t hdr = 0;
-    const std::uint16_t dst_vport = bswap16(to->vport);
-    if (sock.p2p) {
-        pkt[0] = kP2pMagic;
-        if (sock.vport < 256 && dst_vport < 256) {
-            pkt[1] = kP2pFlagP2p | kP2pFlagByteVports | kP2pType;
-            pkt[2] = static_cast<std::uint8_t>(sock.vport);
-            pkt[3] = static_cast<std::uint8_t>(dst_vport);
-            hdr = 4;
-        } else {
-            pkt[1] = kP2pFlagP2p | kP2pType;
-            pkt[2] = static_cast<std::uint8_t>(sock.vport >> 8);
-            pkt[3] = static_cast<std::uint8_t>(sock.vport);
-            pkt[4] = static_cast<std::uint8_t>(dst_vport >> 8);
-            pkt[5] = static_cast<std::uint8_t>(dst_vport);
-            hdr = 6;
-        }
+    if (!buf && len) {
+        g_net_errno = to_freebsd(EFAULT);
+        return net_err(EFAULT);
     }
-    if (hdr + len > sizeof(pkt)) return net_err(EMSGSIZE);
-    if (buf && len) std::memcpy(pkt + hdr, buf, static_cast<std::size_t>(len));
+    std::uint8_t ph[P2pSplit::kMaxP2pHeader] = {}; // the P2P header
+    const std::uint16_t dst_vport = bswap16(to->vport);
+    const std::size_t hdr = sock.p2p ? P2pSplit::P2pHeader(sock.vport, dst_vport, ph) : 0;
+    std::uint8_t relay[kRelayHeader]; // the relay frame's header, when the peer is behind the relay
+    sockaddr_in stun_sa{};
+    const bool relayed = sock.p2p && relay_target(to->addr, to->port, relay + 2, &stun_sa);
+    if (relayed) {
+        relay[0] = kRelayMagic;
+        relay[1] = kRelayToServer;
+        std::memcpy(relay + 10, &to->port, 2); // network order is the frame's big-endian
+    }
     sockaddr_in sa{};
     sa.sin_family = AF_INET;
     sa.sin_port = to->port;
     sa.sin_addr.s_addr = to->addr;
     const bool dontwait = sock.nonblock || (flags & 0x80);
-    ssize_type n;
-    std::uint8_t token[kStunTokenLen];
-    sockaddr_in stun_sa{};
-    if (sock.p2p && relay_target(to->addr, to->port, token, &stun_sa)) {
-        std::uint8_t frame[sizeof(pkt) + kRelayHeader];
-        frame[0] = kRelayMagic;
-        frame[1] = kRelayToServer;
-        std::memcpy(frame + 2, token, kStunTokenLen);
-        std::memcpy(frame + 10, &to->port, 2); // network order is the frame's big-endian
-        std::memcpy(frame + kRelayHeader, pkt, hdr + static_cast<std::size_t>(len));
-        n = sock_sendto(fd, frame, kRelayHeader + hdr + static_cast<std::size_t>(len), dontwait, &stun_sa);
-        if (n >= 0) n -= static_cast<ssize_type>(kRelayHeader);
-    } else {
-        n = sock_sendto(fd, pkt, hdr + static_cast<std::size_t>(len), dontwait, &sa);
+    // One buffer per thread with room in front for the relay header; the pieces' ends.
+    static thread_local std::vector<std::uint8_t> store;
+    static thread_local std::vector<std::size_t> ends;
+    const P2pSplit::Sent r = P2pSplit::SendDatagram(
+        static_cast<const std::uint8_t*>(buf), static_cast<std::size_t>(len), ph, hdr, relayed ? relay : nullptr, sock.p2p, store, ends,
+        [&](const std::uint8_t* data, std::size_t size) {
+            if (sock_sendto(fd, data, size, dontwait, relayed ? &stun_sa : &sa) >= 0) return 0;
+            const int e = sock_errno();
+            return e ? e : EIO;
+        });
+    if (r.too_large) {
+        static std::atomic<bool> told{false};
+        if (!told.exchange(true)) {
+            Log("net: a %llu-byte datagram is larger than %zu B with its headers and was dropped; the game "
+                "resends what it carried (logged once)",
+                static_cast<unsigned long long>(len), P2pSplit::kMaxDatagram);
+        }
+        if (sock.p2p) g_p2p_counts.send_failed.fetch_add(1, std::memory_order_relaxed);
+        g_net_errno = to_freebsd(EMSGSIZE);
+        return net_err(EMSGSIZE);
     }
     if (sock.p2p) {
-        (n < 0 ? g_p2p_counts.send_failed : g_p2p_counts.sent).fetch_add(1, std::memory_order_relaxed);
-        if (n >= 0) g_p2p_counts.sent_bytes.fetch_add(len, std::memory_order_relaxed);
+        (r.sent ? g_p2p_counts.sent : g_p2p_counts.send_failed).fetch_add(1, std::memory_order_relaxed);
+        if (r.sent) {
+            g_p2p_counts.sent_bytes.fetch_add(len, std::memory_order_relaxed);
+            if (r.pieces > 1) g_p2p_counts.split.fetch_add(1, std::memory_order_relaxed);
+            atomic_max(g_p2p_counts.largest_out, r.largest);
+        }
     }
     static int logs = 0;
     if (trace_now(logs)) {
         char ip[32];
         write_ipv4(ip, sizeof(ip), to->addr);
-        Log("net: send %d -> %s:%u vport %u->%u: %llu bytes -> %lld", s, ip, bswap16(to->port), sock.vport,
-            dst_vport, static_cast<unsigned long long>(len), static_cast<long long>(n));
+        Log("net: send %d -> %s:%u vport %u->%u: %llu bytes in %zu of %zu datagrams%s%s", s, ip,
+            bswap16(to->port), sock.vport, dst_vport, static_cast<unsigned long long>(len), r.sent, r.pieces,
+            relayed ? " (relay)" : "", r.error ? " (a send failed)" : "");
     }
-    if (n < 0) return sock_errno() == EAGAIN ? net_again() : net_fail();
+    if (!r.sent) {
+        if (r.error == EAGAIN) return net_again();
+        g_net_errno = to_freebsd(r.error);
+        return net_err(r.error);
+    }
     return static_cast<int>(len);
 }
 
@@ -1218,6 +1270,35 @@ void P2pPunch(const char* label, std::uint32_t addr, std::uint16_t port_host, st
         Log("net: punch %s %s:%u: %d probes, %s", name.c_str(), ip, bswap16(targets[0].sin_port), sent,
             heard ? "peer heard" : "nothing heard");
     }).detach();
+}
+
+void P2pSignalSend(std::uint32_t addr, std::uint16_t port_host, const std::uint8_t* data, std::size_t len) {
+    std::shared_ptr<UdpPort> port;
+    {
+        std::lock_guard lk(g_net_mu);
+        auto it = g_p2p_ports.find(static_cast<std::uint16_t>(P2pPort()));
+        if (it != g_p2p_ports.end()) port = it->second;
+    }
+    constexpr std::size_t kMaxSignal = 512;
+    if (!port || !addr || !port_host || !data || len > kMaxSignal) return;
+    const std::uint16_t port_nbo = bswap16(port_host);
+    std::uint8_t token[kStunTokenLen];
+    sockaddr_in stun_sa{};
+    if (relay_target(addr, port_nbo, token, &stun_sa)) {
+        std::uint8_t frame[kRelayHeader + kMaxSignal];
+        frame[0] = kRelayMagic;
+        frame[1] = kRelayToServer;
+        std::memcpy(frame + 2, token, kStunTokenLen);
+        std::memcpy(frame + 10, &port_nbo, 2); // network order is the frame's big-endian
+        std::memcpy(frame + kRelayHeader, data, len);
+        (void)sock_sendto(port->fd, frame, kRelayHeader + len, true, &stun_sa);
+        return;
+    }
+    sockaddr_in to{};
+    to.sin_family = AF_INET;
+    to.sin_addr.s_addr = addr;
+    to.sin_port = port_nbo;
+    (void)sock_sendto(port->fd, data, len, true, &to);
 }
 
 std::string DetectLanAddress(const std::string& host) {

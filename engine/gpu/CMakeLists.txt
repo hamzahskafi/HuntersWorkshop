@@ -413,6 +413,19 @@ add_executable(crash-guards-test EXCLUDE_FROM_ALL ../tests/test_crash_guards.cpp
     shim/engine/engine_hooks.cpp)
 target_compile_options(crash-guards-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(crash-guards-test PRIVATE shim shim/engine)
+# The Hunter's Dream backend (0.4.6 beta 14): the NpId compares and the character name's sanitize;
+# how the P2P port sends the game's datagrams (pieces, headers, the relay's framing, the limit);
+# NpSignaling's handshake against bbhost's own np_signaling.cpp (test-only, tests/third_party/bbhost).
+add_executable(thd-np-util-test EXCLUDE_FROM_ALL ../tests/test_thd_np_util.cpp)
+target_compile_options(thd-np-util-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(thd-np-util-test PRIVATE ..)
+add_executable(thd-p2p-split-test EXCLUDE_FROM_ALL ../tests/test_thd_p2p_split.cpp)
+target_compile_options(thd-p2p-split-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(thd-p2p-split-test PRIVATE ..)
+add_executable(thd-signaling-test EXCLUDE_FROM_ALL ../tests/test_thd_signaling.cpp bbnet/thd/thd_signaling.cpp
+    ../tests/third_party/bbhost/np_signaling.cpp)
+target_compile_options(thd-signaling-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(thd-signaling-test PRIVATE .. ../tests/third_party/bbhost/shim)
 # Local game-derived native menu assets. No game data is embedded in this tool.
 find_package(ZLIB REQUIRED)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS

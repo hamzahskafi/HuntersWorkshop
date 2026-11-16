@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // The Hunter's Dream backend, the engine's online play. BB_NET_BACKEND=thd (online_pool=huntersdream)
-// answers the game's NP, NetCtl and sceNet imports with droogie/bbhost's (566184a; see
+// answers the game's NP, NetCtl and sceNet imports with droogie/bbhost's (566184a; since 0.4.6 beta
+// 14 its signaling, P2P port and NP utilities follow v0.2.35, a317321; see
 // licenses/SHADPS4-NETWORK.md): matching and signaling over The Hunter's Dream's session service, its
 // STUN and relay, the PS4 P2P framing bbhost players use, and WebAPI answered here. The game's own
 // HTTP stays shadPS4's sceHttp, with the account token and ruleset added. Offline nothing here runs.

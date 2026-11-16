@@ -13,6 +13,11 @@ the server's changes to bbhost alone.
 no sign-in display in the launcher (it would delay opening the game, and the game says it itself
 once part 6 reports the sign-in refused). Part 6 below is revised to that.
 
+**Built (2026-11-16), as 0.4.6 beta 14:** parts 1-5, with the checks of section 5, all passing here
+(the handshake against bbhost's own code in 14 cases, each run three ways). Parts 6-9 are not built:
+they wait for the discussion. What the code does differently from this design is said where it
+does (3.4: a null buffer with a length is EFAULT, as the console's `sendto` answers).
+
 **The goal:** HW players co-op, invade and duel with players on bbhost 0.2.31 or later, on Lantern
 0.9.42 or later, and on this HW, as reliably as bbhost players do with each other. Nothing else in
 online play changes for them. The game itself is untouched: its own code runs as before.
@@ -191,7 +196,9 @@ bbhost #217's `np_matching2.cpp` changes, merged into HW's file:
     relay's when relayed;
   - bytes that are not whole chunks sent whole;
   - the call returns the datagram's length once a piece has left, and an error only when none has;
-  - a datagram too large for UDP returns EMSGSIZE with the game's errno set, logged once.
+  - a datagram too large for UDP returns EMSGSIZE with the game's errno set, logged once;
+  - (as built) a null buffer with a length returns EFAULT with the game's errno set: bbhost would
+    send whatever its buffer held.
 - **The split rule** is a pure function in `thd_p2p_split.h` (bbhost's `chunk_split`), so it is
   tested on its own.
 - **The port's counts** (the existing minute line) add: datagrams sent as pieces, and the largest
@@ -287,24 +294,29 @@ Ghosts, messages and bloodstains work with everyone either way.
     bytes that are not chunks sent whole, a cut chunk, the 65,507-byte limit), and the pieces' bytes
     and headers through a loopback socket, direct and in the relay's framing. These are bbhost's
     `net_p2p_test` cases.
-  - `thd-sign-in-test`: bbhost's `sign_in_check_test` answers (valid, refused on 200 and 401, a 404,
-    a 429, a 5xx, not JSON, no ResKind, no OnlineId).
+  - `thd-sign-in-test` (with part 6, not built): bbhost's `sign_in_check_test` answers (valid,
+    refused on 200 and 401, a 404, a 429, a 5xx, not JSON, no ResKind, no OnlineId).
 - **The handshake against bbhost's own code** (`thd-signaling-test`):
   - bbhost's `np_signaling.cpp` at `a317321` kept unchanged in `tests/third_party/bbhost/` with its
     notice. It is built only into the test, with a few test-only headers, and never shipped.
   - It runs as one player and our port as the other, through an in-memory network with a fake
     clock.
-  - The cases:
+  - The cases (as built, 14):
     - each side activating first, and both at once;
     - only the peer activating (PEER_ACTIVATED);
-    - a deactivate (Close) and a second one (CONN_NOT_FOUND);
-    - a peer that never answers (DEAD at 30 s);
-    - 30% of datagrams lost and reordered (still up, by the resends);
-    - an address learned late from the server;
-    - the room's DEAD and ESTABLISHED (0x5101, 0x5102) per member.
-  - The same cases run with our port on both sides.
-  - Each case checks the events, their order and their error codes, against what bbhost's side
-    sees.
+    - a deactivate (Close) and a second one (CONN_NOT_FOUND); a deactivate that reaches the peer
+      before its side is up (DEAD, terminated by peer);
+    - a peer that never answers (DEAD at 30 s); no address for 30 s;
+    - 30% of datagrams lost and the rest reordered (still up, by the resends);
+    - an address learned late from the server; an address from the room after a join;
+    - Matching2's view per member: the link up, a game connection on it, a member leaving, one that
+      never answers (its DEAD at 30 s), a stop; the peer closing.
+  - Each runs three ways: bbhost's code as A and our port as B, our port as both, our port as A and
+    bbhost's code as B. Everything each player shows is recorded (the game's events and the calls'
+    answers, Matching2's hooks, the peer table's writes, every datagram with its time) and the three
+    records must be the same, to the millisecond. Each case also checks what the game must see.
+  - Run against four deliberate breaks of our port (no ActivationAck, the resend timer off by
+    100 ms, a wrong DEAD error, no MUTUAL_ACTIVATED), the test fails each.
 - `tests/test_online.py` and the switch-group checks, as for every beta.
 
 **The tester's runs** (with `BB_THD_TRACE=1`):

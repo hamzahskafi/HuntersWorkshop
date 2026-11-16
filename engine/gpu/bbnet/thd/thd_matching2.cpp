@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // The Hunter's Dream backend: sceNpMatching2 over its session service. Adapted from droogie/bbhost
-// src/hle/np_matching2.cpp (566184a). The timings and their order are
-// the co-op contract bbhost found the game needs.
+// src/hle/np_matching2.cpp (566184a), its signaling from a317321 (#217: a member's ESTABLISHED and
+// DEAD from the handshake between games, thd_signaling.cpp). The timings and their order are the
+// co-op contract bbhost found the game needs.
 #include "thd_internal.h"
 
 #include <algorithm>
@@ -10,8 +11,10 @@
 #include <condition_variable>
 #include <cstddef>
 #include <cstring>
+#include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <thread>
 #include <vector>
 
@@ -153,6 +156,16 @@ struct M2 {
     unsigned leave_req = 0;
     RequestOptParam leave_opt{};
     std::vector<std::unique_ptr<Held>> held;
+    // 0.4.6 beta 14 (bbhost #217). Players left at our LeaveRoom whose NpSignaling connection the game
+    // still has open: their DEAD goes out when the game closes it, as shadPS4's StopMatching2 leaves
+    // such a transport up (online id -> room, member).
+    std::map<std::string, std::pair<std::uint64_t, std::uint16_t>> dead_on_close;
+    // Members whose ESTABLISHED (0x5102) went out: once their transport has been up a second
+    // (Matching2TransportUp).
+    std::set<std::uint16_t> m2_established;
+    // Members whose DEAD went out when their connection closed (Matching2TransportDead): our
+    // LeaveRoom does not send it again.
+    std::set<std::uint16_t> m2_dead_sent;
 };
 M2 g;
 
@@ -212,9 +225,6 @@ void fire_signaling(std::uint16_t member, std::uint16_t event, int error, std::u
               static_cast<std::int64_t>(member), static_cast<std::int64_t>(event), static_cast<std::int64_t>(error),
               g.sig_arg);
 }
-void fire_signaling(std::uint16_t member, std::uint16_t event, int error) {
-    fire_signaling(member, event, error, g.room_id);
-}
 
 // The room's real members (provisional 0xff00+ entries are the same people, resolved earlier).
 std::vector<Peer> room_peers() {
@@ -225,14 +235,12 @@ std::vector<Peer> room_peers() {
     return v;
 }
 
-// ESTABLISHED for every member, self included, before the game's signaling poll.
-void schedule_established_for_all(int delay_ms) {
-    std::vector<std::uint16_t> ids;
-    for (const Peer& p : room_peers()) ids.push_back(p.member_id);
-    ids.push_back(g.member_id);
-    DispatchAfter(delay_ms, Prio::Signaling, [ids] {
-        for (std::uint16_t m : ids) fire_signaling(m, kEvSignalingEstablished, 0);
-    });
+// 0.4.6 beta 14: the handshake to every other member (shadPS4's StartMatching2, bbhost #217); each
+// member's ESTABLISHED follows its own handshake (Matching2TransportUp). Until beta 13, ESTABLISHED
+// for every member, self included, on a timer 500-800 ms after the create or join: players on bbhost
+// 0.2.31 and later wait for the handshake and dropped ours after 30 s.
+void connect_signaling_for_all() {
+    for (const Peer& p : room_peers()) SignalingM2Connect(p.online_id);
 }
 // DEAD for each member first, then the room event.
 void schedule_dead(const std::vector<std::uint16_t>& ids, int error, std::uint64_t room_id, int delay_ms) {
@@ -313,9 +321,12 @@ void forget_room_locked() {
     g.room_id = 0;
     g.owner_id = 0;
     g.max_slot = 0;
+    g.m2_established.clear();
+    g.m2_dead_sent.clear();
     PeersClear();
     RoomClear();
-    SignalingReset();
+    // NpSignaling's connections are the game's: it closes them itself (shadPS4's StopMatching2 leaves
+    // a transport with one up; bbhost #217).
 }
 
 // ---- leaves owed to the server
@@ -389,8 +400,19 @@ void end_session_locked(const char* why) {
     if (!g.in_room && !g.leave_pending) return;
     Log("np: session over (%s): room %llu", why, static_cast<unsigned long long>(g.room_id));
     owe_leave_locked();
+    // DEAD for every member, but those whose DEAD already went out with their connection, and those
+    // whose NpSignaling connection the game still holds: theirs when the game closes it
+    // (Matching2PeerClosed; bbhost #217). The others' handshakes stop.
     std::vector<std::uint16_t> ids;
-    for (const Peer& p : room_peers()) ids.push_back(p.member_id);
+    for (const Peer& p : room_peers()) {
+        if (g.m2_dead_sent.count(p.member_id)) continue;
+        if (SignalingLive(p.online_id)) {
+            g.dead_on_close[p.online_id] = {g.room_id, p.member_id};
+        } else {
+            ids.push_back(p.member_id);
+            SignalingM2Stop(p.online_id);
+        }
+    }
     schedule_dead(ids, kErrTerminatedByMyself, g.room_id, 0);
     if (g.leave_pending) {
         const unsigned req = g.leave_req;
@@ -536,10 +558,7 @@ void on_server_event(const Json& ev) {
             }
             c.run();
         });
-        DispatchAfter(800, Prio::Signaling, [mid] {
-            fire_signaling(mid, kEvSignalingEstablished, 0);
-            fire_signaling(g.member_id, kEvSignalingEstablished, 0);
-        });
+        SignalingM2Connect(p.online_id); // its ESTABLISHED follows the handshake (0.4.6 beta 14)
         return;
     }
     if (name == "room_member_left") {
@@ -556,6 +575,7 @@ void on_server_event(const Json& ev) {
         Log("np: member %u (%s) left (%s)", mid, p.online_id.c_str(), reason.c_str());
         // DEAD for that member, then MEMBER_LEFT; the room stays ours.
         schedule_dead({mid}, kErrTerminatedByPeer, g.room_id, 0);
+        g.m2_established.erase(mid);
         DispatchAfter(100, Prio::RoomEvent, [p, cause] {
             M2Call c;
             {
@@ -774,7 +794,7 @@ s32 PS4_SYSV_ABI m2_create_join_room(unsigned ctx, const std::uint8_t* reqp, con
         });
         if (!error) {
             std::lock_guard lk2(g.mu);
-            schedule_established_for_all(800);
+            connect_signaling_for_all();
         }
     });
     return 0;
@@ -829,7 +849,7 @@ s32 PS4_SYSV_ABI m2_join_room(unsigned ctx, const std::uint8_t* reqp, const Requ
         });
         if (!error) {
             std::lock_guard lk2(g.mu);
-            schedule_established_for_all(500);
+            connect_signaling_for_all();
         }
     });
     return 0;
@@ -850,14 +870,26 @@ s32 PS4_SYSV_ABI m2_leave_room(unsigned ctx, const void*, const RequestOptParam*
 }
 
 // (ctx, roomId, memberId, status*, SceNetInAddr*, SceInPort_t*)
+// 0.4.6 beta 14 (bbhost #217): the member's transport: 0 none, 1 in its handshake (or its ESTABLISHED
+// not out yet), 2 up, with its address; it was 2 for any member whose address was known.
 s32 PS4_SYSV_ABI m2_signaling_get_connection_status(unsigned ctx, std::uint64_t, std::uint16_t member, int* status,
                                                     std::uint32_t* addr, std::uint16_t* port) {
     if (ctx != g.ctx_id) return kErrContext;
     Peer p;
-    const bool known = PeersGet(member, &p) && p.addr != 0;
-    if (status) *status = known ? 2 : 0;
-    if (addr) *addr = known ? p.addr : 0;
-    if (port) *port = known ? static_cast<std::uint16_t>((p.port << 8) | (p.port >> 8)) : 0;
+    int st = 0;
+    if (PeersGet(member, &p)) {
+        bool sent = false;
+        {
+            std::lock_guard lk(g.mu);
+            sent = g.m2_established.count(member) != 0;
+        }
+        const int transport = SignalingTransportStatus(p.online_id);
+        st = transport == 0 ? 0 : sent && transport == 2 ? 2 : 1;
+    }
+    if (status) *status = st;
+    if (addr) *addr = st == 2 ? p.addr : 0;
+    if (port) *port = st == 2 ? static_cast<std::uint16_t>((p.port << 8) | (p.port >> 8)) : 0;
+    if (Trace()) Log("np: SignalingGetConnectionStatus member %u -> %d", member, st);
     return 0;
 }
 
@@ -942,6 +974,67 @@ s32 PS4_SYSV_ABI m2_unused(unsigned, const void*, const RequestOptParam*, unsign
 }
 
 } // namespace
+
+// 0.4.6 beta 14 (bbhost #217): NpSignaling's side of Matching2, from the dispatcher.
+
+namespace {
+// The room member with that online id, in the room we are in.
+bool room_member_locked(const std::string& online_id, std::uint16_t* member) {
+    if (!g.in_room) return false;
+    for (const Peer& p : room_peers()) {
+        if (p.online_id == online_id) {
+            *member = p.member_id;
+            return true;
+        }
+    }
+    return false;
+}
+} // namespace
+
+// The member's transport has been up a second: its ESTABLISHED (0x5102), once.
+void Matching2TransportUp(const std::string& online_id) {
+    std::uint16_t member = 0;
+    std::uint64_t room = 0;
+    {
+        std::lock_guard lk(g.mu);
+        if (!room_member_locked(online_id, &member) || !member || g.m2_established.count(member)) return;
+        if (SignalingTransportStatus(online_id) != 2) return;
+        g.m2_established.insert(member);
+        room = g.room_id;
+    }
+    if (Trace()) Log("np: room link to member %u (%s) up", member, online_id.c_str());
+    fire_signaling(member, kEvSignalingEstablished, 0, room);
+}
+
+// The member's handshake gave up, or its connection closed: its DEAD (0x5101), once.
+void Matching2TransportDead(const std::string& online_id, int error) {
+    std::uint16_t member = 0;
+    std::uint64_t room = 0;
+    {
+        std::lock_guard lk(g.mu);
+        if (!room_member_locked(online_id, &member) || !member || g.m2_dead_sent.count(member)) return;
+        g.m2_dead_sent.insert(member);
+        g.m2_established.erase(member);
+        room = g.room_id;
+    }
+    if (Trace()) Log("np: room link to member %u (%s) dead (0x%x)", member, online_id.c_str(), static_cast<unsigned>(error));
+    fire_signaling(member, kEvSignalingDead, error, room);
+}
+
+// The game closed its NpSignaling connection to a player our LeaveRoom left: the DEAD it kept.
+void Matching2PeerClosed(const std::string& online_id) {
+    std::uint64_t room = 0;
+    std::uint16_t member = 0;
+    {
+        std::lock_guard lk(g.mu);
+        const auto it = g.dead_on_close.find(online_id);
+        if (it == g.dead_on_close.end()) return;
+        room = it->second.first;
+        member = it->second.second;
+        g.dead_on_close.erase(it);
+    }
+    DispatchAfter(0, Prio::Signaling, [room, member] { fire_signaling(member, kEvSignalingDead, kErrTerminatedByMyself, room); });
+}
 
 void RegisterMatching2(Core::Loader::SymbolsResolver* sym) {
 #define M2(nid, fn) LIB_FUNCTION(nid, "libSceNpMatching2", 1, "libSceNpMatching2", fn)

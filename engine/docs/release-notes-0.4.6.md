@@ -254,6 +254,29 @@ The tester's call on beta 4's logs: one beta with the whole design and the loggi
   opened during it; each write fault is counted by what was watching its page; frames over 25 ms in
   the 2 seconds after a loading screen get the long-frame breakdown that frames over 40 ms always had.
 
+## Online: The Hunter's Dream's update (beta 14)
+
+The Hunter's Dream changed its server on 2026-11-10: co-op, invasions and PvP now need the
+connection handshake bbhost 0.2.31 brought in. Without it, an updated player's game gave up on a
+Hunter's Workshop player after 30 seconds. This beta speaks it, ported from bbhost 0.2.35:
+
+- **Games greet each other before playing together**, as the console's games did through the PSN
+  servers: each side confirms the other is there and answering before the game is told the
+  connection is up, and a player who never answers is dropped after 30 seconds as the game expects.
+- **The room's links come up from that greeting**, a second after it, for each member on its own;
+  a member leaving or dropping ends that member's link alone.
+- **Large game messages arrive whole.** The game's busy moments (a big fight, a warp) send
+  messages of several KB, and those were cut at 2 KB. They are now received up to the largest size
+  the network carries, and sent in pieces that each fit one network frame, so routers that drop
+  oversized messages no longer lose them.
+- **Character names show to other players** with Player Name Display set to Name: they went out
+  blank.
+- **The same player is no longer taken for two**, which could leave the game keeping a second
+  connection to someone already there.
+
+Nothing changes offline or for messages, bloodstains and ghosts. `BB_ONLINE_PAUSED=1` in Extra
+variables still keeps the game offline.
+
 ## Diagnostics
 
 - **The "Building shaders" note** shows when a frame was late while shaders were being
