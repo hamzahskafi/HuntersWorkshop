@@ -9,6 +9,10 @@ that was beta 14 is beta 15 now ([memory-model.md](memory-model.md)).
 0.9.42 is not the source: it copied bbhost's code as it stood, and The Hunter's Dream's team gave
 the server's changes to bbhost alone.
 
+**The tester's review (2026-11-16):** parts 1-5 agreed; parts 6-9 to be discussed; no 0.4.5 hotfix;
+no sign-in display in the launcher (it would delay opening the game, and the game says it itself
+once part 6 reports the sign-in refused). Part 6 below is revised to that.
+
 **The goal:** HW players co-op, invade and duel with players on bbhost 0.2.31 or later, on Lantern
 0.9.42 or later, and on this HW, as reliably as bbhost players do with each other. Nothing else in
 online play changes for them. The game itself is untouched: its own code runs as before.
@@ -89,7 +93,7 @@ bbhost's NpSignaling has not changed since 0.2.31: there is no later fix to it t
 **bbhost's behaviour since our base, taken with it:**
 
 6. **The sign-in check**, and a refused sign-in keeping the game offline (`thd_session.cpp`, new
-   `thd_sign_in.h`, the HTTP hook, the overlay).
+   `thd_sign_in.h`, the HTTP hook).
 7. **One event poll in flight; keepalives by generation** (`thd_session.cpp`).
 
 **HW's own, in the same change:**
@@ -207,34 +211,31 @@ In `thd_np_util.h`, pure functions:
   library's invalid argument, `0x80550704`.
 - `sceNpScoreCensorComment` (`2b3TI0mDYiI`) keeps answering 0.
 
-### 3.6 Part 6: the sign-in check
+### 3.6 Part 6: the sign-in check (to discuss; revised 2026-11-16)
 
-**When:** at `Initialize`, on a thread of its own, the engine posts `{Token}` to `/auth/whoami`,
-5 s at most.
+**Today:** the launcher's "Signed in as NAME" is what the PC has saved, never checked with the
+server. When the server refuses that sign-in (an expired or revoked token), HW notes it in the log
+and slows its poller, but `sceNpGetState` still reports signed in. So the game goes online, every
+request it makes is refused all session, and nothing tells the player why.
 
-**Reading the answer** (`thd_sign_in.h`, bbhost's `sign_in_check.h` rules):
+**Proposed, as small as it can be:**
+- **The game is told the truth:** while the server refuses the sign-in, `SignedIn()` answers no, so
+  `sceNpGetState` reports signed out. The game then shows its own "not signed in" and "Starting
+  game in offline mode" dialogs, as bbhost found (`2602c3c`). No note of ours, no launcher change.
+- **The game's own requests count too:** a 401 carrying `{ResKind, Message}` marks the sign-in
+  refused, as the NP requests already do.
+- **Optionally, an early answer:** at `Initialize`, on a thread of its own and without waiting for
+  it, the engine asks `/auth/whoami` once (5 s at most), so a refused sign-in is known before the
+  game's own online login. The game's start is not delayed by it. Its answers are read by bbhost's
+  rules (`thd_sign_in.h`):
 
 | The answer | Verdict |
 |---|---|
 | ResKind 0 with an OnlineId | valid (logged with the name the server knows) |
-| ResKind non-zero on a 200 or a 401 | refused (the server's Message) |
+| ResKind non-zero on a 200 or a 401 | refused (the server's Message, in the log) |
 | no answer, 404, 429, 5xx, not JSON, ResKind 0 without an OnlineId | no verdict: nothing changes |
 
-**While the sign-in is refused:**
-- **The game plays offline.** `SignedIn()` answers no, so `sceNpGetState` reports signed out and
-  the game offers offline play. Today it reports signed in and every request is refused all
-  session.
-- **The game's own requests count too.** A 401 there carrying `{ResKind, Message}` marks the
-  sign-in refused (a hook in the HTTP library, as the NP requests already do).
-- **The player is told once.** A note over the game for 15 s, drawn as the "Building shaders"
-  note is:
-  - "Sign-in expired: sign in again on the launcher's Online page";
-  - with no sign-in at all, "Online play needs a sign-in: the launcher's Online page";
-  - a ban in the server's own words.
-- **The poller asks once a minute**, as now.
-
-**The launcher's Online page** showing the state (signed in, expired, not checked, with a Retry) is
-a UI change: written up separately for the tester first, not part of this beta unless agreed.
+- **Not proposed any more:** the 15 s note over the game, and the launcher's sign-in state.
 
 ### 3.7 Part 7: one poll in flight
 
@@ -354,8 +355,7 @@ bbhost names itself `bbhost/<version>`.
 - **No switch for parts 1-5:** the old way cannot connect to updated players.
   - Parts 6-9 follow bbhost or only log, so they need none either.
   - `BB_ONLINE_PAUSED=1` already keeps the game offline if something goes wrong.
-- **0.4.5 stable:** the backend has not changed since 0.4.4, so the same change applies to 0.4.5
-  as it is. A 0.4.5 hotfix with only parts 1-5 (and 8) is possible, if the tester wants one.
+- **0.4.5 stable:** no hotfix (the tester, 2026-11-16).
 
 ## 8. Risks
 
@@ -374,4 +374,4 @@ bbhost names itself `bbhost/<version>`.
   website's test, which the server keeps for the account as bbhost's.
 - **Matching Regions starting at Worldwide, the play log every 30 s, Full Phantom HP:** game
   changes, not the server's.
-- **The launcher's sign-in state:** part 6's note, written up for the tester.
+- **The launcher's sign-in state:** not wanted (the tester, 2026-11-16).
