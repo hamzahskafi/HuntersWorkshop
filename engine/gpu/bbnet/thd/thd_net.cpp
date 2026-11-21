@@ -219,6 +219,9 @@ struct P2pCounts {
     std::atomic<std::uint64_t> sent{0}, sent_bytes{0}, send_failed{0}, received{0}, received_bytes{0};
     std::atomic<std::uint64_t> split{0};
     std::atomic<std::size_t> largest_out{0}, largest_in{0};
+    // The same since the session's line last took them (part 9).
+    std::atomic<std::uint64_t> session_split{0};
+    std::atomic<std::size_t> session_largest_out{0}, session_largest_in{0};
 };
 P2pCounts g_p2p_counts;
 
@@ -559,10 +562,10 @@ void p2p_reader(std::shared_ptr<UdpPort> port) {
         g_p2p_counts.received.fetch_add(1, std::memory_order_relaxed);
         g_p2p_counts.received_bytes.fetch_add(dg.data.size(), std::memory_order_relaxed);
         atomic_max(g_p2p_counts.largest_in, wire);
+        atomic_max(g_p2p_counts.session_largest_in, wire);
         if (trace_now(logs)) {
-            char ip[32];
-            write_ipv4(ip, sizeof(ip), sa.sin_addr.s_addr);
-            Log("net: recv %d <- %s:%u vport %u->%u: %zu bytes%s", q->sock, ip, bswap16(sa.sin_port), src,
+            const std::string ip = MaskedIpv4(sa.sin_addr.s_addr); // part 8: the log shows two parts
+            Log("net: recv %d <- %s:%u vport %u->%u: %zu bytes%s", q->sock, ip.c_str(), bswap16(sa.sin_port), src,
                 dst, dg.data.size(), hdr ? (forwarded ? " (forwarded)" : "") : " (no p2p header)");
         }
         {
@@ -747,15 +750,18 @@ int dgram_send(int s, const void* buf, std::uint64_t len, int flags, const SceSo
         (r.sent ? g_p2p_counts.sent : g_p2p_counts.send_failed).fetch_add(1, std::memory_order_relaxed);
         if (r.sent) {
             g_p2p_counts.sent_bytes.fetch_add(len, std::memory_order_relaxed);
-            if (r.pieces > 1) g_p2p_counts.split.fetch_add(1, std::memory_order_relaxed);
+            if (r.pieces > 1) {
+                g_p2p_counts.split.fetch_add(1, std::memory_order_relaxed);
+                g_p2p_counts.session_split.fetch_add(1, std::memory_order_relaxed);
+            }
             atomic_max(g_p2p_counts.largest_out, r.largest);
+            atomic_max(g_p2p_counts.session_largest_out, r.largest);
         }
     }
     static int logs = 0;
     if (trace_now(logs)) {
-        char ip[32];
-        write_ipv4(ip, sizeof(ip), to->addr);
-        Log("net: send %d -> %s:%u vport %u->%u: %llu bytes in %zu of %zu datagrams%s%s", s, ip,
+        const std::string ip = MaskedIpv4(to->addr);
+        Log("net: send %d -> %s:%u vport %u->%u: %llu bytes in %zu of %zu datagrams%s%s", s, ip.c_str(),
             bswap16(to->port), sock.vport, dst_vport, static_cast<unsigned long long>(len), r.sent, r.pieces,
             relayed ? " (relay)" : "", r.error ? " (a send failed)" : "");
     }
@@ -1265,11 +1271,24 @@ void P2pPunch(const char* label, std::uint32_t addr, std::uint16_t port_host, st
             }
             if (heard) break;
         }
-        char ip[32];
-        write_ipv4(ip, sizeof(ip), targets[0].sin_addr.s_addr);
-        Log("net: punch %s %s:%u: %d probes, %s", name.c_str(), ip, bswap16(targets[0].sin_port), sent,
+        const std::string ip = MaskedIpv4(targets[0].sin_addr.s_addr);
+        Log("net: punch %s %s:%u: %d probes, %s", name.c_str(), ip.c_str(), bswap16(targets[0].sin_port), sent,
             heard ? "peer heard" : "nothing heard");
     }).detach();
+}
+
+bool P2pRelayed(std::uint32_t addr, std::uint16_t port_host) {
+    std::uint8_t token[kStunTokenLen];
+    sockaddr_in stun_sa{};
+    return addr && port_host && relay_target(addr, bswap16(port_host), token, &stun_sa);
+}
+
+P2pSession P2pTakeSession() {
+    P2pSession s;
+    s.split = g_p2p_counts.session_split.exchange(0, std::memory_order_relaxed);
+    s.largest_out = g_p2p_counts.session_largest_out.exchange(0, std::memory_order_relaxed);
+    s.largest_in = g_p2p_counts.session_largest_in.exchange(0, std::memory_order_relaxed);
+    return s;
 }
 
 void P2pSignalSend(std::uint32_t addr, std::uint16_t port_host, const std::uint8_t* data, std::size_t len) {

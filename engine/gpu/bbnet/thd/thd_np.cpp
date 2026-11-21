@@ -70,6 +70,8 @@ Signaling& Sig() {
         e.m2_dead = [](const std::string& online_id, int error) { Matching2TransportDead(online_id, error); };
         e.m2_closed = [](const std::string& online_id) { Matching2PeerClosed(online_id); };
         e.log = [](const char* line) { Log("%s", line); };
+        e.now_ms = [] { return NowMs(); };
+        e.relayed = [](std::uint32_t addr, std::uint16_t port) { return P2pRelayed(addr, port); };
         e.trace = Trace();
         return e;
     }());
@@ -100,8 +102,11 @@ s32 PS4_SYSV_ABI np_ok() { return 0; }
 s32 PS4_SYSV_ABI np_register_cb(void*, void*) { return 0; }
 s32 PS4_SYSV_ABI np_get_state(int, int* state) {
     if (!state) return kNpErrInvalidArg;
-    // Signed out without an account: the game plays offline rather than under a made-up name.
-    *state = SignedIn() ? 2 : 1;
+    // Signed out without an account: the game plays offline rather than under a made-up name. And
+    // signed out while the server refuses the account's sign-in (0.4.6 beta 14, bbhost 2602c3c): the
+    // game then shows its own "not signed in" and offline dialogs instead of going online to be refused
+    // all session.
+    *state = SignedIn() && !Refused() ? 2 : 1;
     return 0;
 }
 s32 PS4_SYSV_ABI np_online_id(int, void* id) {
@@ -294,6 +299,60 @@ s32 PS4_SYSV_ABI webapi_parse_npid(const char* json, void* npid) {
 }
 
 } // namespace
+
+// 0.4.6 beta 14 part 9: what the links did since the last line, in one line. A timeout says whether
+// the peer never answered (an older client, or no route to it) or answered without finishing (the
+// network between the two), the rest what the tester's runs and a player's report need first.
+void OnlineSessionReport(const char* when) {
+    const Signaling::Stats st = Sig().TakeStats();
+    const P2pSession p2p = P2pTakeSession();
+    if (!st.Any() && !p2p.split && !p2p.largest_out && !p2p.largest_in) return;
+    std::string links;
+    char part[192];
+    const auto add = [&links](const char* text) {
+        if (!links.empty()) links += ", ";
+        links += text;
+    };
+    if (st.up) {
+        if (st.handshake_min_ms == st.handshake_max_ms) {
+            std::snprintf(part, sizeof(part), "%d up (handshake %d ms)", st.up, st.handshake_min_ms);
+        } else {
+            std::snprintf(part, sizeof(part), "%d up (handshake %d-%d ms)", st.up, st.handshake_min_ms,
+                          st.handshake_max_ms);
+        }
+        add(part);
+    }
+    if (st.timed_out_silent) {
+        std::snprintf(part, sizeof(part),
+                      "%d timed out after 30 s (the peer never answered: an older client, or no route)",
+                      st.timed_out_silent);
+        add(part);
+    }
+    if (st.timed_out_partial) {
+        std::snprintf(part, sizeof(part),
+                      "%d timed out after 30 s (the peer answered but the handshake did not finish: the network)",
+                      st.timed_out_partial);
+        add(part);
+    }
+    if (st.no_address) {
+        std::snprintf(part, sizeof(part), "%d with no address in 30 s (the server did not know the player)",
+                      st.no_address);
+        add(part);
+    }
+    if (st.closed_by_peer) {
+        std::snprintf(part, sizeof(part), "%d closed by the peer", st.closed_by_peer);
+        add(part);
+    }
+    if (st.closed_by_us) {
+        std::snprintf(part, sizeof(part), "%d by us", st.closed_by_us);
+        add(part);
+    }
+    if (links.empty()) links = "none";
+    Log("Online: links this session (%s): %s; through the relay %d; datagrams sent as pieces %llu, largest %u bytes "
+        "out, %u in",
+        when, links.c_str(), st.relayed, static_cast<unsigned long long>(p2p.split),
+        static_cast<unsigned>(p2p.largest_out), static_cast<unsigned>(p2p.largest_in));
+}
 
 void SignalingPeerKnown(std::uint16_t member_id) { Sig().PeerKnown(member_id); }
 void SignalingPeerDead(const std::string& online_id) { Sig().PeerDead(online_id); }

@@ -32,7 +32,10 @@ Since 0.4.6 beta 14 these parts follow bbhost v0.2.35
 (`src/hle/np_signaling.cpp`, bbhost #217) ported as `thd_signaling.h/.cpp`, Matching2 on it
 (`src/hle/np_matching2.cpp`), the P2P port's greetings, datagram size and pieces
 (`src/hle/net.cpp`, `e74e3ce`; `thd_net.cpp`, `thd_p2p_split.h`), and the NpId compares and the
-score library's sanitize call (`src/hle/system.cpp`, `src/hle/np_score.h`; `thd_np_util.h`).
+score library's sanitize call (`src/hle/system.cpp`, `src/hle/np_score.h`; `thd_np_util.h`), the
+sign-in check's reading and a refused sign-in reported to the game (`src/net/sign_in_check.h`,
+`2602c3c`; `thd_sign_in.h`), and the event poller's generations (`src/net/poll_pacing.h`, `2e40749`;
+`thd_poll_gate.h`).
 bbhost's `np_signaling.cpp` at that commit is also kept unchanged in
 `tests/third_party/bbhost/` with bbhost's additional permission (`LICENSE-EXCEPTION`), built only
 into the test that runs it against the port and never shipped.

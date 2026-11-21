@@ -34,6 +34,7 @@
 // Close             PEER_DEACTIVATED when it is a deactivate and the transport is established, else
 //                   DEAD (terminated by peer)
 #include "thd_signaling.h"
+#include "thd_addr_text.h"
 
 #include <algorithm>
 #include <chrono>
@@ -270,6 +271,7 @@ void Signaling::SendHandshakeLocked(Transport& t) {
     case State::Inactive: t.state = State::SendingOffer; [[fallthrough]];
     default: kind = kOffer; break;
     }
+    if (t.started_ms < 0 && t.addr && t.port) t.started_ms = NowMs(); // part 9
     SendLocked(t, kind, kDeactivate, nonce);
 }
 
@@ -298,6 +300,7 @@ void Signaling::Step(unsigned tid) {
                 Log("np: transport %u to %s: handshake not done in %d s: DEAD (timeout)", tid, t.online_id.c_str(),
                     kGiveUpMs / 1000);
                 const std::string who = t.online_id;
+                ++(t.heard ? stats_.timed_out_partial : stats_.timed_out_silent); // part 9
                 CloseTransportDeadLocked(tid, kErrTimeout, events); // erases the transport
                 env_.dispatch(0, [this, who] {
                     if (env_.m2_dead) env_.m2_dead(who, kM2ErrTimeout);
@@ -322,6 +325,7 @@ void Signaling::EstablishLocked(unsigned tid, bool peer_activated_hint, std::vec
     if (!t.established_fired) {
         t.state = State::Established;
         t.established_fired = true;
+        NoteUpLocked(t);
         SendLocked(t, kEstablishedMsg);
         SetPeerStatusLocked(tid, 2);
         const std::string who = t.online_id;
@@ -420,13 +424,13 @@ void Signaling::Activation(unsigned conn_id) {
                 c.member_id = p.member_id;
                 t.addr = addr;
                 t.port = port;
-                Log("np: conn %u to %s resolved %u.%u.%u.%u:%u", conn_id, peer.c_str(), addr & 0xff, (addr >> 8) & 0xff,
-                    (addr >> 16) & 0xff, addr >> 24, port);
+                Log("np: conn %u to %s resolved %s:%u", conn_id, peer.c_str(), MaskedIpv4(addr).c_str(), port);
             } else if (!t.addr) {
                 c.resolve_waited_ms += kStepMs;
                 if (c.resolve_waited_ms >= kGiveUpMs) {
                     Log("np: conn %u to %s: no address in %d s (%s): DEAD (timeout)", conn_id, peer.c_str(),
                         kGiveUpMs / 1000, error.c_str());
+                    ++stats_.no_address; // part 9
                     CloseConnDeadLocked(conn_id, kErrTimeout, events);
                 } else {
                     env_.dispatch(kStepMs, [this, conn_id] { Activation(conn_id); });
@@ -553,6 +557,7 @@ int Signaling::Deactivate(unsigned ctx, unsigned conn) {
         peer = c.online_id;
         const auto tr = tr_.find(c.transport);
         if (tr != tr_.end() && tr->second.state == State::Established && !c.dead) SendLocked(tr->second, kClose, kDeactivate);
+        ++stats_.closed_by_us; // part 9
         CloseConnDeadLocked(conn, kErrTerminatedByMyself, events);
     }
     if (env_.m2_closed) env_.m2_closed(peer);
@@ -606,6 +611,12 @@ void Signaling::Control(const std::uint8_t* data, std::size_t len, std::uint32_t
     {
         std::lock_guard lk(mu_);
         unsigned tid = FindTransportLocked(from);
+        // Part 9: the peer has answered on this link; its handshake time counts from first contact.
+        const auto heard = [this](Transport& t) {
+            t.heard = true;
+            if (t.started_ms < 0) t.started_ms = NowMs();
+        };
+        if (tid) heard(tr_[tid]);
         switch (kind) {
         case kActivationRequest: {
             // The peer's game activated its connection to us.
@@ -689,6 +700,7 @@ void Signaling::Control(const std::uint8_t* data, std::size_t len, std::uint32_t
             if (reason == kDeactivate && cid && tr_[tid].state == State::Established) {
                 events.emplace_back(conn_[cid].ctx, cid, kEvPeerDeactivated, 0);
             } else {
+                ++stats_.closed_by_peer; // part 9: the link closes (a deactivate on one that stays up does not)
                 if (cid) CloseConnDeadLocked(cid, kErrTerminatedByPeer, events);
                 else tr_[tid].state = State::Inactive;
                 QueueM2Dead(from, kM2ErrTerminatedByPeer);
@@ -697,6 +709,9 @@ void Signaling::Control(const std::uint8_t* data, std::size_t len, std::uint32_t
         }
         default:
             break;
+        }
+        if (!tid) {
+            if (const unsigned made = FindTransportLocked(from)) heard(tr_[made]); // made by this datagram
         }
     }
     FireAll(events);
@@ -772,8 +787,32 @@ void Signaling::PeerDead(const std::string& online_id) {
         std::lock_guard lk(mu_);
         if (const unsigned tid = FindTransportLocked(online_id)) CloseTransportDeadLocked(tid, kErrTerminatedByPeer, events);
         while (const unsigned cid = FindConnLocked(online_id)) CloseConnDeadLocked(cid, kErrTerminatedByPeer, events);
+        if (!events.empty()) ++stats_.closed_by_peer; // part 9
     }
     QueueAll(std::move(events));
+}
+
+// ---- 0.4.6 beta 14 part 9: the session's line
+
+std::int64_t Signaling::NowMs() const {
+    if (env_.now_ms) return env_.now_ms();
+    return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
+
+void Signaling::NoteUpLocked(const Transport& t) {
+    const int ms = t.started_ms >= 0 ? static_cast<int>(NowMs() - t.started_ms) : 0;
+    if (!stats_.up || ms < stats_.handshake_min_ms) stats_.handshake_min_ms = ms;
+    if (!stats_.up || ms > stats_.handshake_max_ms) stats_.handshake_max_ms = ms;
+    ++stats_.up;
+    if (env_.relayed && env_.relayed(t.addr, t.port)) ++stats_.relayed;
+}
+
+Signaling::Stats Signaling::TakeStats() {
+    std::lock_guard lk(mu_);
+    const Stats s = stats_;
+    stats_ = Stats{};
+    return s;
 }
 
 void Signaling::Reset() {

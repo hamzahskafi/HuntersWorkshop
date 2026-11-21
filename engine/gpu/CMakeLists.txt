@@ -426,6 +426,19 @@ add_executable(thd-signaling-test EXCLUDE_FROM_ALL ../tests/test_thd_signaling.c
     ../tests/third_party/bbhost/np_signaling.cpp)
 target_compile_options(thd-signaling-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(thd-signaling-test PRIVATE .. ../tests/third_party/bbhost/shim)
+# Beta 14 parts 6-8: the account service's verdict on the sign-in (bbhost's sign_in_check_test cases);
+# the event poller's generations and one poll out; addresses as the log prints them.
+add_executable(thd-sign-in-test EXCLUDE_FROM_ALL ../tests/test_thd_sign_in.cpp)
+target_compile_options(thd-sign-in-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(thd-sign-in-test PRIVATE ..)
+target_link_libraries(thd-sign-in-test PRIVATE nlohmann_json::nlohmann_json)
+add_executable(thd-poll-gate-test EXCLUDE_FROM_ALL ../tests/test_thd_poll_gate.cpp)
+target_compile_options(thd-poll-gate-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(thd-poll-gate-test PRIVATE ..)
+target_link_libraries(thd-poll-gate-test PRIVATE Threads::Threads)
+add_executable(thd-addr-text-test EXCLUDE_FROM_ALL ../tests/test_thd_addr_text.cpp)
+target_compile_options(thd-addr-text-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(thd-addr-text-test PRIVATE ..)
 # Local game-derived native menu assets. No game data is embedded in this tool.
 find_package(ZLIB REQUIRED)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS

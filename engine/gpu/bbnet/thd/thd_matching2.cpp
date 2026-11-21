@@ -421,6 +421,9 @@ void end_session_locked(const char* why) {
         DispatchAfter(300, Prio::Request, [req, opt] { fire_request(opt.cbFunc, opt.cbFuncArg, req, kEvLeaveRoom, 0, nullptr); });
     }
     forget_room_locked();
+    // 0.4.6 beta 14 part 9: the room's links in one line, a second on so the closes around the
+    // game's leave are in it.
+    DispatchAfter(1000, Prio::RoomEvent, [] { OnlineSessionReport("room left"); });
 }
 
 // The server ended our membership: the game hears KICKEDOUT or ROOM_DESTROYED after a DEAD per
@@ -430,6 +433,7 @@ void room_gone_locked(std::uint16_t event, std::uint8_t cause, const std::uint8_
     if (!g.in_room) return;
     const std::uint64_t room = g.room_id;
     Log("np: room %llu gone (%s): the game hears 0x%x", static_cast<unsigned long long>(room), why.c_str(), event);
+    DispatchAfter(1000, Prio::RoomEvent, [] { OnlineSessionReport("room gone"); }); // part 9
     std::vector<std::uint16_t> ids;
     for (const Peer& p : room_peers()) {
         ids.push_back(p.member_id);
@@ -1079,6 +1083,7 @@ std::shared_ptr<ExitLeave> g_exit_leave;
 } // namespace
 
 void ExitBegin(int timeout_ms) {
+    OnlineSessionReport("at exit"); // part 9: the links since the last line
     auto state = std::make_shared<ExitLeave>();
     state->deadline_ms = NowMs() + timeout_ms;
     g_exit_leave = state;

@@ -14,9 +14,14 @@ no sign-in display in the launcher (it would delay opening the game, and the gam
 once part 6 reports the sign-in refused). Part 6 below is revised to that.
 
 **Built (2026-11-16), as 0.4.6 beta 14:** parts 1-5, with the checks of section 5, all passing here
-(the handshake against bbhost's own code in 14 cases, each run three ways). Parts 6-9 are not built:
-they wait for the discussion. What the code does differently from this design is said where it
-does (3.4: a null buffer with a length is EFAULT, as the console's `sendto` answers).
+(the handshake against bbhost's own code in 14 cases, each run three ways). What the code does
+differently from this design is said where it does (3.4: a null buffer with a length is EFAULT, as
+the console's `sendto` answers).
+
+**Parts 6-9 (2026-11-21):** the tester chose all four after the discussion, part 8 included (the
+relay is on by default, so most players' logs hold no player's address; masking costs little). Built
+into beta 14 (engine id 101), each with its test; the handshake test has 15 cases now and checks the
+counters of part 9. As built: 3.6 to 3.9 below.
 
 **The goal:** HW players co-op, invade and duel with players on bbhost 0.2.31 or later, on Lantern
 0.9.42 or later, and on this HW, as reliably as bbhost players do with each other. Nothing else in
@@ -218,7 +223,7 @@ In `thd_np_util.h`, pure functions:
   library's invalid argument, `0x80550704`.
 - `sceNpScoreCensorComment` (`2b3TI0mDYiI`) keeps answering 0.
 
-### 3.6 Part 6: the sign-in check (to discuss; revised 2026-11-16)
+### 3.6 Part 6: the sign-in check (built 2026-11-21, with the early answer)
 
 **Today:** the launcher's "Signed in as NAME" is what the PC has saved, never checked with the
 server. When the server refuses that sign-in (an expired or revoked token), HW notes it in the log
@@ -244,7 +249,14 @@ request it makes is refused all session, and nothing tells the player why.
 
 - **Not proposed any more:** the 15 s note over the game, and the launcher's sign-in state.
 
-### 3.7 Part 7: one poll in flight
+**As built:** `np_get_state` answers signed out while `Refused()`; the game's own 401s reach the
+backend from the sceHttp worker (`bbthd_game_reply`, read by `thd_sign_in.h`'s `GameReplyRefuses`);
+the early answer runs at `Initialize` on a detached thread, and a valid one clears an earlier refusal
+(bbhost's rule). The refusal's log line now says the game is told it is signed out and plays offline.
+`thd-sign-in-test` holds the reading to bbhost's `sign_in_check_test` (the parts HW uses: not the
+connection test or relay switch, which only bbhost's setup window shows) and the game-reply rule.
+
+### 3.7 Part 7: one poll in flight (built 2026-11-21)
 
 - A stopped poller's held poll is given up (the client stopped).
 - A new poller's first poll waits for it, so two never run at once.
@@ -253,7 +265,15 @@ request it makes is refused all session, and nothing tells the player why.
 
 This is the rest of bbhost's `2e40749`; HW has its long polling already.
 
-### 3.8 Part 8: addresses in the log
+**As built:** bbhost's `Gate` as `thd_poll_gate.h` (generations, one turn at a time, sleeps that a
+stop ends), each poller with its own cursor, the keepalive under the same generation. A stop cuts the
+held poll short with httplib's `Client::stop()` (bbhost abandons it from libcurl's progress callback;
+httplib has none while a request waits): the client is registered under a lock only while its
+request is out, and a request whose generation has ended never goes out, so a stop either cuts it or
+it does not leave. `thd-poll-gate-test` runs the gate with threads (one poll out across a stop and a
+start, an ended generation getting no turn, the keepalive's sleep ending at once).
+
+### 3.8 Part 8: addresses in the log (built 2026-11-21)
 
 - **Today:** HW's online lines print other players' and the PC's public addresses whole. Testers
   post logs in public.
@@ -261,7 +281,12 @@ This is the rest of bbhost's `2e40749`; HW has its long polling already.
   address from a public one, and the relay's from a peer's.
 - One helper in `thd_internal.h`, used by every line in `thd/`, the new ones included.
 
-### 3.9 Part 9: the session's line
+**As built:** `thd_addr_text.h` (`MaskedIpv4`, `MaskedEndpoint`, included by `thd_internal.h` and
+`thd_signaling.cpp`) in the P2P port's send, receive and punch lines, the STUN lines, and the
+signaling's resolved address. Host names are left as they are. The game's own `inet_ntop` and what
+goes to the server are untouched. `thd-addr-text-test`.
+
+### 3.9 Part 9: the session's line (built 2026-11-21)
 
 When a room ends (and at exit), one line:
 
@@ -270,6 +295,20 @@ When a room ends (and at exit), one line:
 - A timeout says the peer never answered at all, or answered without completing. That tells an
   older client from a network problem.
 - `BB_THD_TRACE=1` adds a line per greeting message, as bbhost's `BBHOST_NP_TRACE`.
+
+**As built:** counters in the signaling class (`Signaling::Stats`, taken and reset by each line):
+links up and their handshake times (from the first greeting either way to up), relayed links,
+timeouts split into "never answered" and "answered but did not finish", no address in 30 s, closed
+by the peer (a Close that ends the link, or the peer leaving the room; a deactivate that leaves the
+link up does not count), closed by us. The P2P port adds the datagrams sent as pieces and the largest
+each way since the last line. The line comes a second after a room ends (so the closes around the
+game's leave are in it), when the server ends the room, and at exit; nothing when there was nothing.
+It reads, for example:
+
+    Online: links this session (room left): 1 up (handshake 80 ms), 1 by us; through the relay 1; datagrams sent as pieces 12, largest 1243 bytes out, 1211 in
+
+The counters change nothing on the wire: the handshake test's three-way comparison still holds, and
+its cases check them.
 
 ## 4. Who connects with whom
 
@@ -294,19 +333,21 @@ Ghosts, messages and bloodstains work with everyone either way.
     bytes that are not chunks sent whole, a cut chunk, the 65,507-byte limit), and the pieces' bytes
     and headers through a loopback socket, direct and in the relay's framing. These are bbhost's
     `net_p2p_test` cases.
-  - `thd-sign-in-test` (with part 6, not built): bbhost's `sign_in_check_test` answers (valid,
-    refused on 200 and 401, a 404, a 429, a 5xx, not JSON, no ResKind, no OnlineId).
+  - `thd-sign-in-test` (part 6): bbhost's `sign_in_check_test` answers (valid,
+    refused on 200 and 401, a 404, a 429, a 5xx, not JSON, no ResKind, no OnlineId), and the game's
+    own 401s.
+  - `thd-poll-gate-test` (part 7) and `thd-addr-text-test` (part 8).
 - **The handshake against bbhost's own code** (`thd-signaling-test`):
   - bbhost's `np_signaling.cpp` at `a317321` kept unchanged in `tests/third_party/bbhost/` with its
     notice. It is built only into the test, with a few test-only headers, and never shipped.
   - It runs as one player and our port as the other, through an in-memory network with a fake
     clock.
-  - The cases (as built, 14):
+  - The cases (as built, 15):
     - each side activating first, and both at once;
     - only the peer activating (PEER_ACTIVATED);
     - a deactivate (Close) and a second one (CONN_NOT_FOUND); a deactivate that reaches the peer
       before its side is up (DEAD, terminated by peer);
-    - a peer that never answers (DEAD at 30 s); no address for 30 s;
+    - a peer that never answers (DEAD at 30 s); one that answers, then goes quiet; no address for 30 s;
     - 30% of datagrams lost and the rest reordered (still up, by the resends);
     - an address learned late from the server; an address from the room after a join;
     - Matching2's view per member: the link up, a game connection on it, a member leaving, one that

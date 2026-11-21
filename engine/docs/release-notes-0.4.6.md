@@ -274,6 +274,21 @@ Hunter's Workshop player after 30 seconds. This beta speaks it, ported from bbho
 - **The same player is no longer taken for two**, which could leave the game keeping a second
   connection to someone already there.
 
+- **An expired sign-in no longer breaks online play silently.** When The Hunter's Dream no longer
+  accepts the sign-in saved on the launcher's Online page (it expired, or this PC was signed out
+  elsewhere), the game is told it is signed out: it shows its own "not signed in" message and plays
+  offline, instead of going online and being refused all session. The engine checks the sign-in once
+  at the start, in the background, without delaying the game. Sign in again on the launcher's Online
+  page to play online.
+- **News from the server (invites, players joining or leaving) can no longer land in the wrong
+  session** when online play stops and starts again within seconds: only one request waits for it
+  at a time, and one left over from the old session gives its news back instead of acting on it.
+- **Logs no longer show internet addresses in full**, only their first half (`203.0.x.x`), so they
+  can be shared safely.
+- **One line in the log per session** says how each connection went: how many came up and how fast,
+  which timed out and why (the other player never answered, or answered but the network did not let
+  the connection finish), and which were closed by whom.
+
 Nothing changes offline or for messages, bloodstains and ghosts. `BB_ONLINE_PAUSED=1` in Extra
 variables still keeps the game offline.
 

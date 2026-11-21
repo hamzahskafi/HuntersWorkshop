@@ -55,6 +55,10 @@ public:
         std::function<void(const char* line)> log;
         // The first connection id's draw (std::random_device when unset).
         std::function<unsigned()> random;
+        // 0.4.6 beta 14 part 9, the session's line (Stats): a clock in milliseconds (steady_clock
+        // when unset), and whether a peer's address is the server's relay (never when unset).
+        std::function<std::int64_t()> now_ms;
+        std::function<bool(std::uint32_t addr, std::uint16_t port)> relayed;
         bool trace = false; // BB_THD_TRACE=1 (bbhost's BBHOST_NP_TRACE)
     };
 
@@ -75,6 +79,24 @@ public:
     }
 
     explicit Signaling(Env env);
+
+    // 0.4.6 beta 14 part 9: what the links did since the last TakeStats, for the session's line. Only
+    // counted: nothing here changes what is sent or fired.
+    struct Stats {
+        int up = 0;                // links up (each player's transport, once)
+        int handshake_min_ms = 0;  // their handshakes, from the first greeting either way to up
+        int handshake_max_ms = 0;
+        int relayed = 0;           // of them, through the server's relay
+        int timed_out_silent = 0;  // handshakes given up after 30 s: the peer never answered
+        int timed_out_partial = 0; // the peer answered, but the handshake did not finish
+        int no_address = 0;        // no address for the peer within 30 s (the server did not know it)
+        int closed_by_peer = 0;    // closed by the other player (its Close that ends the link, or it left the room)
+        int closed_by_us = 0;      // closed by this game (its deactivate)
+        bool Any() const {
+            return up || timed_out_silent || timed_out_partial || no_address || closed_by_peer || closed_by_us;
+        }
+    };
+    Stats TakeStats();
 
     // The game's calls (sceNpSignaling*).
     int Initialize();
@@ -117,6 +139,8 @@ private:
         bool established_fired = false;
         bool stepping = false; // the resend timer is running
         int waited_ms = 0;     // handshake time so far
+        std::int64_t started_ms = -1; // part 9: the first greeting sent or heard
+        bool heard = false;           // part 9: the peer has sent something on it
     };
     struct Conn {
         unsigned ctx = 0;
@@ -154,6 +178,8 @@ private:
     void CloseTransportDeadLocked(unsigned tid, int error, std::vector<Event>& events);
     void Activation(unsigned conn_id);
     static int StatusOf(const Transport& t);
+    std::int64_t NowMs() const;
+    void NoteUpLocked(const Transport& t);
 
     Env env_;
     std::mutex mu_;
@@ -163,6 +189,7 @@ private:
     unsigned next_ctx_ = 1;
     unsigned next_tr_ = 1;
     unsigned conn_seed_ = 0; // 0 until the first connection: then a random start
+    Stats stats_;
 };
 
 } // namespace BbThd

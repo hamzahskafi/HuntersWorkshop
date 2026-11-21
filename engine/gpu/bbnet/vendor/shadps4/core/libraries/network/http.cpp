@@ -369,6 +369,7 @@ static const HostOverrideState& GetHostOverrideState() {
 // bbport: The Hunter's Dream backend (gpu/bbnet/thd).
 extern "C" bool bbthd_enabled();
 extern "C" void bbthd_add_game_headers(std::vector<std::pair<std::string, std::string>>* headers);
+extern "C" void bbthd_game_reply(int status, const unsigned char* body, std::size_t len);
 
 bool ApplyHostOverride(std::string& scheme, std::string& host, u16& port, bool& is_secure) {
     const auto& state = GetHostOverrideState();
@@ -1796,6 +1797,11 @@ int PS4_SYSV_ABI sceHttpSendRequest(int reqId, const void* postData, u64 size) {
             worker_errno = ORBIS_HTTP_ERROR_RESOLVER_ENODNS;
         } else {
             worker_errno = RunRealHttpRequest(plan, local_res, success_event_bits);
+            // bbport: a 401 from The Hunter's Dream in its account service's words is the server
+            // refusing this PC's sign-in (gpu/bbnet/thd, 0.4.6 beta 14).
+            if (worker_errno == 0 && local_res.status_code == 401 && bbthd_enabled()) {
+                bbthd_game_reply(local_res.status_code, local_res.body.data(), local_res.body.size());
+            }
         }
 
         std::lock_guard<std::mutex> lock(g_state.m_mutex);

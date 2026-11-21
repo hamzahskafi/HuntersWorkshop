@@ -105,6 +105,7 @@ struct Player {
     std::uint16_t port = 3658;
     bool bbhost = false;
     bool offline = false; // sends nothing and hears nothing: a peer that never answers
+    std::int64_t mute_from_ms = -1; // from then on what it sends is lost (it answered, then went quiet)
     std::unique_ptr<Signaling> sig;
     unsigned ctx = 0;
     std::map<std::uint16_t, TPeer> peers;
@@ -223,7 +224,8 @@ void Player::Send(std::uint32_t to_addr, std::uint16_t to_port, const std::uint8
         from_id.assign(reinterpret_cast<const char*>(data + 6), strnlen(reinterpret_cast<const char*>(data + 6), 16));
         to_id.assign(reinterpret_cast<const char*>(data + 22), strnlen(reinterpret_cast<const char*>(data + 22), 16));
     }
-    bool lost = offline || !to || to->offline || len != Signaling::kPacketLen || !Signaling::IsSignal(data, len);
+    bool lost = offline || !to || to->offline || len != Signaling::kPacketLen || !Signaling::IsSignal(data, len) ||
+                (mute_from_ms >= 0 && W.clock.now >= mute_from_ms);
     int latency = 20;
     if (!lost && W.loss_pct) {
         lost = static_cast<int>(W.rng() % 100) < W.loss_pct;
@@ -381,6 +383,7 @@ void Player::Init() {
     e.m2_closed = [this](const std::string& who) { Note("matching2: peer closed " + who); };
     e.log = [this](const char* line) { log.push_back(line); };
     e.random = [] { return 0x4001u * 1234u; };
+    e.now_ms = [this] { return w->clock.now; };
     sig = std::make_unique<Signaling>(std::move(e));
     sig->Initialize();
     const int rc = sig->CreateContext(reinterpret_cast<void*>(&BbGameCallback), this, &ctx);
@@ -460,6 +463,7 @@ struct Result {
     std::vector<std::string> a, b, wire;
     std::vector<Player::Ev> a_events, b_events;
     std::vector<std::string> a_log, b_log;
+    Signaling::Stats a_stats, b_stats; // our port's counters for the session's line (part 9)
 };
 
 enum class Who { Bbhost, Port };
@@ -491,7 +495,9 @@ Result RunCase(const Case& c, Who wa, Who wb) {
     W.a.Init();
     W.b.Init();
     c.run(W);
-    Result r{W.a.trace, W.b.trace, W.wire, W.a.events, W.b.events, W.a.log, W.b.log};
+    Result r{W.a.trace, W.b.trace, W.wire, W.a.events, W.b.events, W.a.log, W.b.log, {}, {}};
+    if (W.a.sig) r.a_stats = W.a.sig->TakeStats();
+    if (W.b.sig) r.b_stats = W.b.sig->TakeStats();
     W.a.Term();
     W.b.Term();
     W.clock.q.clear();
@@ -591,6 +597,11 @@ std::vector<Case> Cases() {
                       CHECK(Count(r.a_events, kEvDead) == 0 && Count(r.b_events, kEvDead) == 0);
                       CHECK(Saw(r.a, "-> 0x0: 2 0200000a:4a0e")); // status 2, B's address, port 3658 (network order)
                       CHECK(Saw(r.a, "matching2: transport up HunterB"));
+                      // Part 9: A's handshake from its Offer at 0 to its CheckAck at 80 ms; B's from A's
+                      // first greeting at 20 ms to its own check round's end at 560 ms.
+                      CHECK(r.a_stats.up == 1 && r.a_stats.handshake_min_ms == 80 && r.a_stats.handshake_max_ms == 80);
+                      CHECK(r.b_stats.up == 1 && r.b_stats.handshake_min_ms == 540);
+                      CHECK(!r.a_stats.timed_out_silent && !r.a_stats.closed_by_peer && !r.a_stats.closed_by_us);
                   }});
     cs.push_back({"B activates first, A later", Room,
                   [](World& W) {
@@ -646,6 +657,8 @@ std::vector<Case> Cases() {
                       CHECK(Saw(r.a, Fmt("-> 0x%08x", static_cast<unsigned>(kErrConnNotFound))));
                       CHECK(Saw(r.a, "matching2: peer closed HunterB"));
                       CHECK(Saw(r.a, "matching2: transport dead HunterB error 0x80550e18"));
+                      // Part 9: B's link stays up after A's deactivate (PEER_DEACTIVATED): not closed.
+                      CHECK(r.a_stats.closed_by_us == 1 && r.b_stats.closed_by_peer == 0);
                   }});
     cs.push_back({"a peer that never answers", [](World& W) {
                       Room(W);
@@ -664,6 +677,19 @@ std::vector<Case> Cases() {
                       CHECK(Saw(r.a, "transport status HunterB -> 1"));
                       CHECK(Saw(r.a, "transport status HunterB -> 0"));
                       CHECK(Saw(r.a, "matching2: transport dead HunterB error 0x80550e11"));
+                      CHECK(r.a_stats.timed_out_silent == 1 && r.a_stats.timed_out_partial == 0 && !r.a_stats.up);
+                  }});
+    cs.push_back({"a peer that answers, then goes quiet", [](World& W) {
+                      Room(W);
+                      W.b.mute_from_ms = 30; // its ActivationAck and Accept at 20 ms arrive; nothing after
+                  },
+                  [](World& W) {
+                      W.a.Activate(W.b.name);
+                      W.clock.RunUntil(35000);
+                  },
+                  [](const Result& r) {
+                      CHECK(Has(r.a_events, kEvDead, kErrTimeout));
+                      CHECK(r.a_stats.timed_out_partial == 1 && r.a_stats.timed_out_silent == 0); // part 9
                   }});
     cs.push_back({"30% of datagrams lost, the rest reordered", [](World& W) {
                       Room(W);
@@ -712,7 +738,10 @@ std::vector<Case> Cases() {
                       W.a.Activate(W.b.name);
                       W.clock.RunUntil(32000);
                   },
-                  [](const Result& r) { CHECK(Has(r.a_events, kEvDead, kErrTimeout)); }});
+                  [](const Result& r) {
+                      CHECK(Has(r.a_events, kEvDead, kErrTimeout));
+                      CHECK(r.a_stats.no_address == 1 && !r.a_stats.timed_out_silent); // part 9
+                  }});
     cs.push_back({"the room's members: up, a game connection on it, a member leaving", Room,
                   [](World& W) {
                       W.a.M2Connect(W.b.name);
@@ -771,6 +800,7 @@ std::vector<Case> Cases() {
                       CHECK(Has(r.b_events, kEvDead, kErrTerminatedByPeer));
                       CHECK(!Has(r.b_events, kEvPeerDeactivated));
                       CHECK(Saw(r.b, "matching2: transport dead HunterA error 0x80550e10"));
+                      CHECK(r.b_stats.closed_by_peer == 1 && r.a_stats.closed_by_us == 1); // part 9
                   }});
     cs.push_back({"the peer closes (terminate)", Room,
                   [](World& W) {
@@ -789,6 +819,9 @@ std::vector<Case> Cases() {
                       CHECK(Has(r.b_events, kEvDead, kErrTerminatedByMyself));
                       CHECK(Has(r.a_events, kEvPeerDeactivated));
                       CHECK(Has(r.a_events, kEvDead, kErrTerminatedByPeer));
+                      // Part 9: one link closed by the peer (its deactivate left the link up; leaving the room
+                      // closed it), one by B.
+                      CHECK(r.a_stats.closed_by_peer == 1 && r.b_stats.closed_by_us == 1);
                   }});
     return cs;
 }
