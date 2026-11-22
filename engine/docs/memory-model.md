@@ -922,24 +922,67 @@ In beta 13's first minute the game made 2,520 GX buffers with their data (281 Mi
 287 MB the `m33` frame uploaded. On AMD a surface's memory costs little (50 in 1.9 ms after
 `m34`), so part 3 is for NVIDIA's cost: its counts can be checked on AMD, its time only on NVIDIA.
 
-**Part 1: compile bursts on more threads** (`BB_PIPELINE_BURST=0`: 4 threads, as before)
+**Part 1: compile bursts sized and placed by a CPU plan** (revised with the tester, 2026-11-22;
+`BB_PIPELINE_BURST=0`: the 4 threads only, as before)
 
-- **Today:** new pipelines compile on a third of the hardware threads, at most 4 (`BB_PIPELINE_THREADS`,
-  Lantern's rule): 4 on the tester's 20-thread i5-14600KF. A new area's first frames bring 40-100
-  at once. At AMD's 10-26 ms each, 54 of them held a frame for 484 ms.
-- **Burst threads beside the 4,** up to half the hardware threads in all (at most 12; 10 on the
-  tester's CPU, 4 on an 8-thread one). They are started with the others but take a job only while
-  jobs wait unstarted behind the standing threads, at below-normal priority so the game's own
-  threads keep their cores. One new pipeline in play compiles as it does now.
+The first design gave bursts half the logical processors (at most 12). The tester asked for one
+that accounts for the game's own threads and for different processors: "20 logical processors"
+is 6 performance cores with two threads each plus 8 efficiency cores on the tester's i5-14600KF,
+and something else on a Ryzen or a Steam Deck.
+
+- **What the game runs** (beta 14's hitch report, 2026-11-22): the main loop and `GXRenderThread`;
+  pools made for the PS4's 6-7 cores (cloth 6, characters 6, Havok 5, GX workers 5, a job pool 9;
+  audio, file loading); and HW's render chain above normal priority (the GPU command thread, draw
+  recording, its look-ahead, 3 Vulkan recording threads). A heavy frame wants about 10-12 logical
+  processors' worth of them.
+- **Today:** every helper pool is a fixed fraction of the logical processors (compiles a third,
+  at most 4; draw preparation a quarter to 3/8; copies a quarter; the start-up build all but one,
+  at most 8). Nothing knows a core's type or its shared threads, and nothing steers a thread.
+
+**The CPU plan** (a module of its own, `cpu_plan.h/.cpp`; in beta 15 it sizes the compile bursts
+and the start-up build only; the other pools keep their rules until the logs show its numbers):
+
+1. **The layout, read at start** (Windows `GetSystemCpuSetInformation`; Linux `/sys` topology):
+   for each logical processor its physical core, the other threads sharing that core, its
+   efficiency class (performance or efficiency core on hybrid CPUs) and its cache group. One line:
+   `CPU: 14 cores, 20 logical: 6 performance (2 threads each), 8 efficiency; 1 cache group`.
+2. **The spare capacity, measured once a second** (Windows `NtQuerySystemInformation`'s
+   per-processor idle time, one call; Linux `/proc/stat`). It counts everything running, other
+   programs included. Per physical core: the share of the second in which all its threads were idle
+   (a thread beside a busy one is not counted as spare: it would slow that one). Parked cores
+   (Windows' core parking, the two-chiplet X3D parts) are left out. Kept: the busiest of the last
+   5 seconds, per efficiency class.
+3. **Burst threads** (created at start, idle until needed): they take a job only while jobs wait
+   that the 4 standing threads have not started, and only as many as the plan allows at that moment:
+   the spare cores less one, at most 8. On a CPU with efficiency cores they count only the
+   efficiency cores' spare and are steered to those cores (Windows CPU sets, a preference, not a
+   lock; `BB_CPU_SETS=0` turns it off), leaving the performance cores to the game and the render
+   chain. Everywhere they run at below-normal priority. The standing 4 are unchanged (a single new
+   pipeline's wait stays on a full-speed core). `BB_PIPELINE_BURST=N`: N burst threads whatever the
+   plan says.
+4. **The start-up build** (the cached pipelines before the game starts, nothing else running):
+   all logical processors but one, at most 16 (was 8). Its line already gives its time.
+5. **Measured:** per burst (from 4 jobs waiting until the queue is empty) the pipelines, the wall
+   time, the compile time summed, the threads used and what the plan allowed; once a minute the
+   spare capacity by class. Part 5's line sums the bursts of each load.
+
+| CPU | Spare in heavy frames (to be measured) | Bursts |
+|---|---|---|
+| i5-14600KF (6 performance × 2 threads, 8 efficiency) | most of the 8 efficiency cores | up to 7, on the efficiency cores |
+| 8 cores × 2 threads (7800X3D) | the cores the game leaves wholly idle | a few |
+| 6 cores × 2 threads (5600) | about 1 | 0-1 |
+| 4 cores × 2 threads (Steam Deck, i3) | none | none |
+| two chiplets (7950X3D) | the second chiplet when Windows leaves it unparked | its spare |
+
 - **Unchanged:** a thread that needs a pipeline nobody has started compiles it itself
   (`BB_PIPELINE_TAKE`); scene geometry is left out for up to a second (`BB_SKIP_UNCOMPILED`).
-- **Measured per burst** (from 4 jobs waiting until the queue is empty): pipelines, wall time,
-  compile time summed, threads used. The sum divided by the wall time shows whether the driver
-  compiles in parallel. NVIDIA's did at the warm-up: 601 pipelines in 13.9 s on 1 thread, 3.1 s on 8.
-- **Expected:** a burst's wall time down by up to the thread ratio (2.5 times on the tester's CPU)
-  where the driver compiles in parallel.
-- **Risk:** CPU time the game's threads want in the same frames, limited by the priority and by
-  bursts only.
+- **Expected:** a burst's wall time down by up to the ratio of threads where the driver compiles in
+  parallel (AMD's built about 3 at once on 4 threads in `m34`'s 484 ms frame; NVIDIA's warm-up
+  601 pipelines in 13.9 s on 1 thread, 3.1 s on 8).
+- **Not addressed:** one new pipeline a draw waits for (beta 14's run: 54.5 and 61.6 ms for
+  effects or post-processing draws, which cannot be left out). One pipeline is one thread's work.
+- **Risk:** small. Burst threads work only during a backlog, below normal priority, within measured
+  spare capacity; on the hybrid CPUs on efficiency cores.
 
 **Part 2: the game's buffers made during a loading screen, uploaded during it** (`BB_LOAD_UPLOAD=0`:
 uploaded at their first draw, as before)
