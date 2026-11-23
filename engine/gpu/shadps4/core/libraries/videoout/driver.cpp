@@ -47,8 +47,10 @@ extern "C" uint64_t runtime_heap_growths(void);
 #include "video_core/amdgpu/liverpool.h"
 #include "video_core/renderer_vulkan/pipeline_compile_queue.h"
 #include "video_core/renderer_vulkan/vk_breadcrumbs.h"
+#include "video_core/load_work.h"
 #include "video_core/vram_policy.h"
 #include "engine/gx_resources.h"
+#include "engine/frame_window.h"
 #include "engine/loading.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
@@ -612,6 +614,8 @@ void VideoOutDriver::Flip(const Request& req) {
             std::chrono::duration<double, std::milli>(flip_time - load_last).count();
         load_last = flip_time;
         NoteShaderStutter(flip_ms);
+        BbEngine::Frames::NoteFlip(flip_ms); // 0.4.6 beta 15: compile bursts, each load's first frames
+        VideoCore::LoadWork::OnFlip();       // 0.4.6 beta 15: the load clock (parts 3 and 5)
         ++load_flips;
         load_slow += flip_ms > 33.0;
         load_worst_ms = std::max(load_worst_ms, flip_ms);

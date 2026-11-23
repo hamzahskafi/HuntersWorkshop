@@ -902,7 +902,7 @@ from the memory work, which is beta 15 below.
 
 ### Beta 15: work moved into the loading screen
 
-Designed 2026-11-10 from beta 13's runs (the RTX 3070 Ti's `64b52c0d`, `b4244009` and `e4fc8e33`;
+Built 2026-11-23 (engine id 102). Designed 2026-11-10 from beta 13's runs (the RTX 3070 Ti's `64b52c0d`, `b4244009` and `e4fc8e33`;
 the RX 9070 XT's `d4be8f82` and `0f407d24`) and checked against the code, as beta 14 (beta 15 since
 the online update took that number, 2026-11-15). The roadmap's beta for it was shaders built ahead; the tester added the loading-screen work to it (2026-11-10). It is built after
 the tester's go-ahead. Each part has its own switch.
@@ -922,67 +922,98 @@ In beta 13's first minute the game made 2,520 GX buffers with their data (281 Mi
 287 MB the `m33` frame uploaded. On AMD a surface's memory costs little (50 in 1.9 ms after
 `m34`), so part 3 is for NVIDIA's cost: its counts can be checked on AMD, its time only on NVIDIA.
 
-**Part 1: compile bursts sized and placed by a CPU plan** (revised with the tester, 2026-11-22;
+**Part 1: compile bursts on spare processor time** (revised with the tester, 2026-11-22 and 23;
 `BB_PIPELINE_BURST=0`: the 4 threads only, as before)
 
 The first design gave bursts half the logical processors (at most 12). The tester asked for one
 that accounts for the game's own threads and for different processors: "20 logical processors"
 is 6 performance cores with two threads each plus 8 efficiency cores on the tester's i5-14600KF,
-and something else on a Ryzen or a Steam Deck.
+and something else on a Ryzen or a Steam Deck. A second draft measured each core's idle time once
+a second; the tester asked whether the system does that already. It does, and much better: the
+scheduler gives a free logical processor to a waiting thread within microseconds and takes it back
+as quickly, where a reading once a second is out of date by the time it is used. So nothing is
+measured. HW tells the system what the burst threads are and leaves the moment-to-moment choice
+to it.
 
 - **What the game runs** (beta 14's hitch report, 2026-11-22): the main loop and `GXRenderThread`;
   pools made for the PS4's 6-7 cores (cloth 6, characters 6, Havok 5, GX workers 5, a job pool 9;
-  audio, file loading); and HW's render chain above normal priority (the GPU command thread, draw
-  recording, its look-ahead, 3 Vulkan recording threads). A heavy frame wants about 10-12 logical
-  processors' worth of them.
-- **Today:** every helper pool is a fixed fraction of the logical processors (compiles a third,
-  at most 4; draw preparation a quarter to 3/8; copies a quarter; the start-up build all but one,
-  at most 8). Nothing knows a core's type or its shared threads, and nothing steers a thread.
+  audio, file loading), all at normal priority; and HW's render chain above normal priority (the
+  GPU command thread, draw recording, its look-ahead, 3 Vulkan recording threads).
+- **Today:** the 4 compile threads run at normal priority, the same as the game's dozens of
+  threads, so the system shares time evenly between them. More of them at normal priority would
+  take time from the game.
 
-**The CPU plan** (a module of its own, `cpu_plan.h/.cpp`; in beta 15 it sizes the compile bursts
-and the start-up build only; the other pools keep their rules until the logs show its numbers):
+**What the system cannot know, and what HW tells it:**
 
-1. **The layout, read at start** (Windows `GetSystemCpuSetInformation`; Linux `/sys` topology):
-   for each logical processor its physical core, the other threads sharing that core, its
-   efficiency class (performance or efficiency core on hybrid CPUs) and its cache group. One line:
-   `CPU: 14 cores, 20 logical: 6 performance (2 threads each), 8 efficiency; 1 cache group`.
-2. **The spare capacity, measured once a second** (Windows `NtQuerySystemInformation`'s
-   per-processor idle time, one call; Linux `/proc/stat`). It counts everything running, other
-   programs included. Per physical core: the share of the second in which all its threads were idle
-   (a thread beside a busy one is not counted as spare: it would slow that one). Parked cores
-   (Windows' core parking, the two-chiplet X3D parts) are left out. Kept: the busiest of the last
-   5 seconds, per efficiency class.
-3. **Burst threads** (created at start, idle until needed): they take a job only while jobs wait
-   that the 4 standing threads have not started, and only as many as the plan allows at that moment:
-   the spare cores less one, at most 8. On a CPU with efficiency cores they count only the
-   efficiency cores' spare and are steered to those cores (Windows CPU sets, a preference, not a
-   lock; `BB_CPU_SETS=0` turns it off), leaving the performance cores to the game and the render
-   chain. Everywhere they run at below-normal priority. The standing 4 are unchanged (a single new
-   pipeline's wait stays on a full-speed core). `BB_PIPELINE_BURST=N`: N burst threads whatever the
-   plan says.
-4. **The start-up build** (the cached pipelines before the game starts, nothing else running):
-   all logical processors but one, at most 16 (was 8). Its line already gives its time.
-5. **Measured:** per burst (from 4 jobs waiting until the queue is empty) the pipelines, the wall
-   time, the compile time summed, the threads used and what the plan allowed; once a minute the
-   spare capacity by class. Part 5's line sums the bursts of each load.
+1. **That burst threads are spare work.** They run at idle priority (`THREAD_PRIORITY_IDLE`, as
+   draw preparation already does): the system runs them only on a logical processor nothing else
+   wants at that moment.
+2. **That a frame waits on them.** A draw that needs a pipeline nobody has started compiles it
+   itself (`BB_PIPELINE_TAKE`, unchanged). A pipeline a burst thread has started cannot be taken,
+   and the system does not know the frame depends on it (Windows lifts a starved thread only after
+   about 4 seconds). A frame can also wait on them less directly: for a driver lock a burst thread
+   holds while it compiles (the pipelines share one Vulkan pipeline cache), or for a standing
+   thread held up that way. So while any thread waits for a pipeline or compiles one it took, every
+   burst thread running a job is raised to that thread's priority (at least normal) until its job is
+   done. And a burst thread is at idle priority only for the compile itself: it takes and finishes
+   its jobs at the queue at normal priority, so it is never preempted holding the queue's lock.
+3. **Shared cores.** The system fills wholly idle cores first; once every core has a thread, a
+   burst thread runs on the second half of a core the game is using and slows that game thread.
+   Priority cannot prevent it (they run on different logical processors). So all compile threads
+   together are at most the physical cores. On a CPU with efficiency cores (no second half on
+   those), the burst threads are kept on the efficiency cores (Windows CPU sets; `BB_CPU_SETS=0`:
+   anywhere). Windows would not place them there itself: it chooses performance or efficiency
+   cores by how important the program is (a game in front gets performance cores), not by a
+   thread's priority.
 
-| CPU | Spare in heavy frames (to be measured) | Bursts |
+**The layout, read once at start** (`shim/bbport_cpu_layout.h/.cpp`, Windows
+`GetSystemCpuSetInformation`, within the process's affinity): each logical processor's core and
+efficiency class. One line:
+
+    CPU: 14 cores, 20 logical: 6 performance (2 threads each), 8 efficiency; compile threads 4, burst threads 8 on the efficiency cores, idle priority
+
+**Burst threads** (`BB_PIPELINE_BURST`), created at start and asleep until needed:
+
+- They take a pipeline only while more are waiting than the standing threads asleep will take,
+  and compile it at idle priority, raised while a frame waits (above).
+- How many: with efficiency cores, one per efficiency core; otherwise the physical cores less the
+  standing threads; at most 8. `BB_PIPELINE_BURST=N` forces N (at most 16).
+- **Under Wine (Linux, Proton):** none by default. Wine applies thread priorities only where Linux
+  lets a program raise its priority again (a system limit, or a permission on wineserver), which
+  most installs do not set; without it, idle priority does nothing and the burst threads would
+  compete with the game as equals. The line says so, and `BB_PIPELINE_BURST=N` still forces them.
+
+| CPU | Standing | Burst threads |
 |---|---|---|
-| i5-14600KF (6 performance × 2 threads, 8 efficiency) | most of the 8 efficiency cores | up to 7, on the efficiency cores |
-| 8 cores × 2 threads (7800X3D) | the cores the game leaves wholly idle | a few |
-| 6 cores × 2 threads (5600) | about 1 | 0-1 |
-| 4 cores × 2 threads (Steam Deck, i3) | none | none |
-| two chiplets (7950X3D) | the second chiplet when Windows leaves it unparked | its spare |
+| 4 cores × 2 threads | 2 | 2 (none under Proton, as on a Steam Deck) |
+| 6 cores × 2 threads (5600) | 4 | 2 |
+| 8 cores × 2 threads (7800X3D) | 4 | 4 |
+| 16 cores × 2 threads (7950X3D) | 4 | 8 |
+| i5-14600KF (6 performance × 2, 8 efficiency) | 4 | 8, on the efficiency cores |
+| 8 performance × 2, 12 efficiency (i7-14700K) | 4 | 8, on the efficiency cores |
 
-- **Unchanged:** a thread that needs a pipeline nobody has started compiles it itself
-  (`BB_PIPELINE_TAKE`); scene geometry is left out for up to a second (`BB_SKIP_UNCOMPILED`).
+**The start-up build** (the cached pipelines before the game starts): all logical processors but
+one, at most 16 (was 8). Its line already gives its time.
+
+**Measured:** a line per burst of 8 pipelines or more (every burst from the detailed log level),
+from a burst thread's first job until the queue is empty and none runs one: the pipelines, its wall
+time, the compile time summed, the burst threads that took any and their pipelines, the ones waiting
+draws took, the raises, and the frames over 25 ms during it:
+
+    Pipelines: a backlog of 52 compiled in 0.31 s (1392 ms of compiling): burst threads 6 of 8 took 23, waiting draws took 2, burst threads raised for a waiting draw 3 times; frames over 25 ms during it 1 of 19 (worst 45.2 ms)
+
+Part 5's line sums the bursts of each load.
+
+- **Unchanged:** the 4 standing threads (a single new pipeline's wait stays on a full-speed
+  thread); scene geometry left out for up to a second (`BB_SKIP_UNCOMPILED`); the other pools keep
+  their rules until the logs show the bursts' numbers.
 - **Expected:** a burst's wall time down by up to the ratio of threads where the driver compiles in
   parallel (AMD's built about 3 at once on 4 threads in `m34`'s 484 ms frame; NVIDIA's warm-up
   601 pipelines in 13.9 s on 1 thread, 3.1 s on 8).
 - **Not addressed:** one new pipeline a draw waits for (beta 14's run: 54.5 and 61.6 ms for
   effects or post-processing draws, which cannot be left out). One pipeline is one thread's work.
-- **Risk:** small. Burst threads work only during a backlog, below normal priority, within measured
-  spare capacity; on the hybrid CPUs on efficiency cores.
+- **Risk:** small. Burst threads work only during a backlog, on time nothing else wants; on hybrid
+  CPUs on the efficiency cores.
 
 **Part 2: the game's buffers made during a loading screen, uploaded during it** (`BB_LOAD_UPLOAD=0`:
 uploaded at their first draw, as before)
@@ -1056,9 +1087,35 @@ as before)
   one call into the engine each, and a lookup when no page is watched.
 
 **Part 5: what each load's first frames still did** (always on, one line per load, 2 s after it
-ends), for example:
+ends; `video_core/load_work.cpp`, the load clock at each flip, which also runs part 3's making at
+the screen's 30th frame and its freeing 3 s after), for example:
 
-    Loading: the 2 s after m33_00_00_00: frames over 25 ms 1 (worst 45.2 ms); the game's buffers made during the screen 287 MB, uploaded during it 287 MB, at their first draw 0 MB; sparse binds during the screen 22.1 ms, after it 0.4 ms; surfaces ready 21 (94 MiB), taken 19, allocated at their draw 2 (1.3 ms), freed untaken 2; pipelines 48 new, compiled 1,392 ms over 0.31 s on up to 10 threads, waits 40 (longest 132 ms); create-call copies told 2,611, pages dropped without a readback 410
+    Loading: the 2.0 s after m33_00_00_00: frames over 25 ms 1 of 120 (worst 45.2 ms); the game's buffers made during the screen 287.0 MB: uploaded ahead 280.1 MB, already uploaded by a draw 5.2 MB, released unused 1.7 MB, left to their draw 0.0 MB; buffer uploads at draws after it 0.3 MB; sparse binds during the screen 22.1 ms, after it 0.4 ms; surfaces ready 21 (94 MiB), taken 19, allocated at their draw 2 (1.3 ms); pipelines 48 compiled (1392 ms of compiling), waits 40 (132.0 ms, longest 54.5 ms), bursts 1 (0.31 s) on up to 10 threads; create-call copies told 2611, pages dropped without a readback 410, made writable 1288
+
+- Surfaces made but not taken are the ready count less the taken (freed 3 s after the load).
+- "left to their draw": made during the screen and neither uploaded ahead, used by a draw first nor
+  released by the 2 s mark; a "(VRAM not comfortable for N frames)" says why, when it applies.
+- A load that begins within 2 s of the last one's end writes the last one's line at once.
+
+**As built (2026-11-23):**
+
+- Part 1: `shim/bbport_cpu_layout.h/.cpp` (the layout and the count), `pipeline_compile_queue.h`
+  (the backlog rule, the raises, the bursts), `vk_graphics_pipeline.cpp` (the threads),
+  `Pipeline::WaitReady` (the raise); the start-up build's cap in `vk_pipeline_serialization.cpp`.
+  `tests/test_pipeline_burst.cpp` (layouts, backlog, one burst across jobs, raises, 3,000 jobs on 6
+  threads with takers) fails on each of 6 deliberate breaks.
+- Part 2: `BufferCache::NoteLoadUpload` (queued on the game's thread from the registry's memory
+  events, a release takes its queued buffers out) and `BufferCache::LoadUpload` (beside
+  `Preupload`, once a frame on the draw recording thread; in pieces within a 4 MiB region).
+- Part 3: `texture_cache/ready_surfaces.h/.cpp`; `TextureCache::FindImage` lets the Image
+  constructor take one (`t_ready_take`) and learns the shapes allocated at their draw.
+- Part 4: `shim/engine/copy_cave.h` (the caves, placed by `GxResources::Install` with `Divert`
+  only when both sites match 1.09), `Rasterizer::NoteCopyComing`, `RegionManager::CopyComing`.
+  `tests/test_copy_cave.cpp` runs both caves for real (x86-64): the notice first with the
+  destination and size, then the game's copy with its own arguments, the stack aligned for both,
+  and back where the game goes on; it fails on each of 5 deliberate breaks.
+- Safe mode turns all four off (`BB_PIPELINE_BURST=0 BB_LOAD_UPLOAD=0 BB_READY_SURFACES=0
+  BB_COPY_NOTICE=0`).
 
 **Not in beta 15: pipelines for areas this PC has never drawn.** The roadmap planned to build an
 area's pipelines during its loading screen from the game's calls. The research says it cannot:

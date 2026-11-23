@@ -33,6 +33,7 @@
 #include "video_core/renderer_vulkan/vk_runtime.h"
 #include "video_core/renderer_vulkan/vk_scene_resolution.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
+#include "video_core/load_work.h"
 #include "video_core/vram_policy.h"
 #include "video_core/texture_cache/texture_cache.h"
 
@@ -2238,6 +2239,60 @@ u64 SteadyNs() {
 }
 } // namespace
 
+namespace {
+// 0.4.6 beta 15 part 2 (BB_LOAD_UPLOAD=0: off).
+bool LoadUploadEnabled() {
+    static const bool on = [] {
+        const char* env = std::getenv("BB_LOAD_UPLOAD");
+        return !(env && env[0] == '0');
+    }();
+    return on;
+}
+u64 LoadUploadBudget(bool screen_up) {
+    static const u64 during = [] {
+        const char* env = std::getenv("BB_LOAD_UPLOAD_MB");
+        return (env && env[0] ? std::strtoull(env, nullptr, 10) : 64ull) << 20;
+    }();
+    return screen_up ? during : 16ull << 20;
+}
+} // namespace
+
+void BufferCache::NoteLoadUpload(VAddr addr, u64 size, BbEngine::GxResources::MemoryEvent e) {
+    using BbEngine::GxResources::MemoryEvent;
+    if (!LoadUploadEnabled()) {
+        return;
+    }
+    if (e == MemoryEvent::BufferMadeWithData) {
+        // The GX region is read in place: nothing to upload there.
+        if (!BbEngine::Loading::ScreenUp() || GxOverlaps(addr, size)) {
+            return;
+        }
+        std::scoped_lock lk{load_upload_mutex};
+        auto [it, added] = load_upload_ranges.try_emplace(addr, size);
+        if (!added) {
+            it->second = std::max(it->second, size);
+        }
+        LoadWork::counters.made_bytes.fetch_add(size, std::memory_order_relaxed);
+    } else if (e == MemoryEvent::BufferGone) {
+        std::scoped_lock lk{load_upload_mutex};
+        if (load_upload_ranges.empty()) {
+            return;
+        }
+        // Queued buffers inside the released range: the game is done with them before any upload.
+        auto it = load_upload_ranges.lower_bound(addr);
+        if (it != load_upload_ranges.begin()) {
+            const auto prev = std::prev(it);
+            if (prev->first + prev->second > addr) {
+                it = prev;
+            }
+        }
+        while (it != load_upload_ranges.end() && it->first < addr + size) {
+            LoadWork::counters.released_bytes.fetch_add(it->second, std::memory_order_relaxed);
+            it = load_upload_ranges.erase(it);
+        }
+    }
+}
+
 void BufferCache::NoteGameMemory(VAddr addr, u64 size, u8 event) {
     using BbEngine::GxResources::MemoryEvent;
     if (!GameBuffersByCalls() || size == 0) {
@@ -2247,6 +2302,7 @@ void BufferCache::NoteGameMemory(VAddr addr, u64 size, u8 event) {
     // resource's creation copy takes no fault there). Regions not made yet are all to upload already.
     memory_tracker->MarkToUploadButGpu(addr, size);
     const auto e = MemoryEvent(event);
+    NoteLoadUpload(addr, size, e);
     if (e == MemoryEvent::TextureGone) {
         return; // textures are not watched by the calls
     }
@@ -2256,6 +2312,10 @@ void BufferCache::NoteGameMemory(VAddr addr, u64 size, u8 event) {
     std::scoped_lock lk{calls_mutex};
     calls_events.push_back({addr, size, op, e == MemoryEvent::BufferMadeWithData});
     calls_waiting.store(true, std::memory_order_release);
+}
+
+std::pair<u32, u32> BufferCache::CopyComing(VAddr addr, u64 size) {
+    return memory_tracker->CopyComing(addr, size);
 }
 
 void BufferCache::NoteGameMemoryUnmapped(VAddr addr, u64 size) {
@@ -3146,6 +3206,65 @@ void BufferCache::Preupload(u64 budget) {
     BbStats::preupload_bytes.fetch_add(
         BbStats::buffer_upload_bytes.load(std::memory_order_relaxed) - uploaded_before,
         std::memory_order_relaxed);
+}
+
+void BufferCache::LoadUpload() {
+    if (!LoadUploadEnabled()) {
+        return;
+    }
+    const bool up = BbEngine::Loading::ScreenUp();
+    std::vector<std::pair<VAddr, u64>> take;
+    {
+        std::scoped_lock lk{load_upload_mutex};
+        if (load_upload_ranges.empty()) {
+            return;
+        }
+        if (!up && !BbEngine::Loading::EndedWithin(SteadyNs(), 2'000'000'000ull)) {
+            // 2 s after the load: what is left uploads at its first draw, as before.
+            u64 left = 0;
+            for (const auto& [at, bytes] : load_upload_ranges) {
+                left += bytes;
+            }
+            load_upload_ranges.clear();
+            LoadWork::counters.dropped_bytes.fetch_add(left, std::memory_order_relaxed);
+            return;
+        }
+        // With the VRAM manager on, its comfortable line decides (they wait, or go at their draw).
+        if (!VramPolicy::Off() && !VramPolicy::Comfortable()) {
+            LoadWork::counters.frames_held.fetch_add(1, std::memory_order_relaxed);
+            return;
+        }
+        const u64 budget = LoadUploadBudget(up);
+        u64 taken = 0;
+        for (auto it = load_upload_ranges.begin(); it != load_upload_ranges.end() && taken < budget;) {
+            taken += it->second;
+            take.emplace_back(it->first, it->second);
+            it = load_upload_ranges.erase(it);
+        }
+    }
+    BB_SECTION(Preupload);
+    for (const auto& [addr, size] : take) {
+        const u64 before = BbStats::buffer_upload_bytes.load(std::memory_order_relaxed);
+        // In pieces within a 4 MiB region (an arena request spans at most two arena pages).
+        for (VAddr at = addr; at < addr + size;) {
+            const VAddr region = at & ~(TRACKER_HIGHER_PAGE_SIZE - 1);
+            const VAddr stop = std::min<VAddr>(addr + size, region + TRACKER_HIGHER_PAGE_SIZE);
+            const u64 first_block = at >> block_shift;
+            const u64 last_block = (stop - 1) >> block_shift;
+            const auto* arena = GetArena(first_block, last_block);
+            EnsureResident(arena, first_block, last_block);
+            SynchronizeMemory(arena, at, static_cast<u32>(stop - at), false, false);
+            at = stop;
+        }
+        const u64 copied = BbStats::buffer_upload_bytes.load(std::memory_order_relaxed) - before;
+        if (copied != 0) {
+            LoadWork::counters.ahead_bytes.fetch_add(size, std::memory_order_relaxed);
+            LoadWork::counters.ahead_copied.fetch_add(copied, std::memory_order_relaxed);
+        } else {
+            // Nothing left to upload: a draw used it first.
+            LoadWork::counters.drawn_bytes.fetch_add(size, std::memory_order_relaxed);
+        }
+    }
 }
 
 void BufferCache::SubmitPendingArenaBinds(Vulkan::SubmitInfo& info) {

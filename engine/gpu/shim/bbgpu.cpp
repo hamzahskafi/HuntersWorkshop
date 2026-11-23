@@ -179,6 +179,12 @@ void MemoryManager::SetRasterizer(Vulkan::Rasterizer* rasterizer_) {
                 rasterizer->NoteGameMemory(address, size, static_cast<u8>(event));
             }
         });
+    // 0.4.6 beta 15 part 4: a create call's copy of its data, told before it runs (the game's thread).
+    BbEngine::GxResources::SetCopyHook([](std::uint64_t address, std::uint64_t size) {
+        if (auto* rasterizer = Memory::Instance()->GetRasterizer()) {
+            rasterizer->NoteCopyComing(address, size);
+        }
+    });
         // 0.4.6 beta 4: a texture the game created with its data (the game's thread, inside its create).
     BbEngine::GxResources::SetCreatedHook([](const BbEngine::GxResources::Ahead& job) {
         if (auto* rasterizer = Memory::Instance()->GetRasterizer()) {

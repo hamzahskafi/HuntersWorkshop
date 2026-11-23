@@ -311,6 +311,29 @@ public:
         ApplyWriteProtection();
         return added;
     }
+    /// 0.4.6 beta 15 part 4: a create call is about to copy over [offset, offset + size), whole pages
+    /// (the copy writes every byte of them): the GPU's older data there is dropped without a readback
+    /// and the pages are to upload, so writable, as a write fault on each would have left them (less
+    /// its readback). Returns {pages whose GPU data was dropped, pages made writable}.
+    std::pair<u32, u32> CopyComing(u64 offset, u64 size) {
+        const auto [start, end] = Span(offset, size, true);
+        if (start >= end) {
+            return {0, 0};
+        }
+        RegionBits inner{};
+        inner.SetRange(start, end);
+        const RegionBits dropped = gpu & inner;
+        const RegionBits watched = inner & ~cpu & ~calls;
+        if (dropped.Any()) {
+            gpu &= ~inner;
+            if (EmulatorSettings.GetReadbacksMode() != GpuReadbacksMode::Disabled) {
+                UpdateProtection<false, true>();
+            }
+        }
+        cpu |= inner;
+        ApplyWriteProtection();
+        return {static_cast<u32>(CountPages(dropped)), static_cast<u32>(CountPages(watched))};
+    }
     /// The buffer no longer owns [offset, offset + size) (released, unmapped, or something newer made
     /// over it): its pages (`all`: every page in range, else the inside ones) leave `calls`, and the
     /// range is marked to upload but for pages the GPU wrote. Returns how many pages left `calls`.

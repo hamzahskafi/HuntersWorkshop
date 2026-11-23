@@ -27,7 +27,7 @@ namespace BloodborneLauncher.Core
         public static string ReleasesPage => $"https://github.com/{Repository}/releases";
 
         /// <summary>The engine build this launcher is made for (package.json "engine").</summary>
-        public const string EngineId = "hunters-workshop-101";
+        public const string EngineId = "hunters-workshop-102";
 
         public const string ExeName = "Hunters Workshop.exe";
         private const string PackageFile = "package.json";

@@ -12,6 +12,8 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <mutex>
+#include <string>
 
 // 0.4.6 beta 13: the map folders the game opened since the last call (src/runtime_file.c).
 extern "C" std::size_t runtime_file_take_maps(char* out, std::size_t size);
@@ -25,6 +27,11 @@ std::uint8_t* g_base = nullptr;
 std::atomic<bool> g_up{false};
 // 0.4.6 beta 13: when the last loading screen ended (steady clock, ns; 0: none yet).
 std::atomic<std::uint64_t> g_ended_ns{0};
+// 0.4.6 beta 15: the latest load's number and frames (Current), and the maps it opened (LastMaps).
+std::atomic<std::uint32_t> g_load{0};
+std::atomic<std::uint64_t> g_frames_up{0};
+std::mutex g_maps_mutex;
+std::string g_maps;
 using Clock = std::chrono::steady_clock;
 Clock::time_point g_start, g_began;
 std::uint64_t g_frames = 0;
@@ -102,6 +109,18 @@ void Install(std::uint8_t* image) {
 }
 
 bool ScreenUp() { return g_up.load(std::memory_order_relaxed); }
+Status Current() {
+    Status s;
+    s.load = g_load.load(std::memory_order_acquire);
+    s.up = g_up.load(std::memory_order_acquire);
+    s.frames = g_frames_up.load(std::memory_order_relaxed);
+    s.ended_ns = s.up ? 0 : g_ended_ns.load(std::memory_order_acquire);
+    return s;
+}
+std::string LastMaps() {
+    std::scoped_lock lock{g_maps_mutex};
+    return g_maps;
+}
 bool EndedWithin(std::uint64_t now_ns, std::uint64_t window_ns) {
     const std::uint64_t ended = g_ended_ns.load(std::memory_order_relaxed);
     return ended != 0 && now_ns >= ended && now_ns - ended < window_ns;
@@ -118,7 +137,13 @@ void Tick(std::uint64_t flipper) {
     const bool loading = requested && !in_game;
     const auto now = Clock::now();
     ++g_frames;
-    const bool was = g_up.exchange(loading, std::memory_order_relaxed);
+    if (loading && !g_up.load(std::memory_order_relaxed)) {
+        g_frames_up.store(0, std::memory_order_relaxed);
+        g_load.fetch_add(1, std::memory_order_release); // a new load, before it shows as up
+    } else if (loading) {
+        g_frames_up.fetch_add(1, std::memory_order_relaxed);
+    }
+    const bool was = g_up.exchange(loading, std::memory_order_acq_rel);
     if (g_fast_allowed) {
         bool cutscene = false;
         if (loading) {
@@ -163,6 +188,10 @@ void Tick(std::uint64_t flipper) {
         // 0.4.6 beta 13: the maps the game opened during the load (which entry of an area it was).
         char maps[160];
         runtime_file_take_maps(maps, sizeof(maps));
+        {
+            std::scoped_lock lock{g_maps_mutex};
+            g_maps = maps[0] ? maps : "";
+        }
         std::printf("Loading: %.2f s, %llu frames (%.1f ms each)%s; pacer mode %u, %u vblank(s), target %.1f ms; "
                     "maps opened: %s\n",
                     seconds, static_cast<unsigned long long>(g_frames),

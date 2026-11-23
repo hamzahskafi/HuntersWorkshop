@@ -439,6 +439,18 @@ target_link_libraries(thd-poll-gate-test PRIVATE Threads::Threads)
 add_executable(thd-addr-text-test EXCLUDE_FROM_ALL ../tests/test_thd_addr_text.cpp)
 target_compile_options(thd-addr-text-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(thd-addr-text-test PRIVATE ..)
+# 0.4.6 beta 15 part 1: compile bursts (the burst threads' count from the CPU's layout; the queue's
+# backlog rule, raise-on-wait and burst accounting with real threads).
+add_executable(pipeline-burst-test EXCLUDE_FROM_ALL ../tests/test_pipeline_burst.cpp)
+target_compile_options(pipeline-burst-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(pipeline-burst-test PRIVATE shim shadps4)
+target_link_libraries(pipeline-burst-test PRIVATE Threads::Threads)
+# 0.4.6 beta 15 part 4: the create calls' copy caves, run for real (x86-64, mmap: not on Windows).
+if (NOT WIN32)
+    add_executable(copy-cave-test EXCLUDE_FROM_ALL ../tests/test_copy_cave.cpp)
+    target_compile_options(copy-cave-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+    target_include_directories(copy-cave-test PRIVATE ..)
+endif()
 # Local game-derived native menu assets. No game data is embedded in this tool.
 find_package(ZLIB REQUIRED)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS

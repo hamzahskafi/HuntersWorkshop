@@ -45,6 +45,7 @@
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
 #include "video_core/renderer_vulkan/vk_pipeline_serialization.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
+#include "video_core/load_work.h"
 #include "video_core/renderer_vulkan/vk_gpu_profiler.h"
 #include "bbport_threads.h"
 #include "video_core/renderer_vulkan/vk_runtime.h"
@@ -2135,6 +2136,8 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
             return (env ? std::strtoull(env, nullptr, 10) : 16ull) << 20;
         }();
         buffer_cache.Preupload(budget);
+        // 0.4.6 beta 15 part 2: the game's buffers made during a loading screen, uploaded during it.
+        buffer_cache.LoadUpload();
     }
     const auto& regs = Regs();
     // bbport: the pass copying a finished frame to a display buffer; the previous draw's
@@ -6085,6 +6088,28 @@ void Rasterizer::NoteAssetWrite(VAddr addr, u64 size) {
     InvalidateMemory(addr, size);
     // 0.4.6 beta 12: a write told over live GX buffers (beta 12's net does not count it as untold).
     BbEngine::GxResources::NoteToldWrite(addr, size);
+}
+
+void Rasterizer::NoteCopyComing(VAddr addr, u64 size) {
+    using VideoCore::PageManager;
+    const VAddr first = PageManager::GetPageAddr(addr) == addr ? addr : PageManager::GetNextPageAddr(addr);
+    const VAddr last = PageManager::GetPageAddr(addr + size);
+    auto& c = VideoCore::LoadWork::counters;
+    c.copies_told.fetch_add(1, std::memory_order_relaxed);
+    if (first >= last) {
+        return; // within a page or two: their faults as before
+    }
+    const VideoCore::InvalidateReason reason{"create call's copy"};
+    DrainDrawPipe(); // as a fault does before the caches change
+    if (!IsMapped(first, last - first)) {
+        return;
+    }
+    const auto [dropped, writable] = buffer_cache.CopyComing(first, last - first);
+    if (texture_cache.WatchesPages(first, last - first)) {
+        texture_cache.InvalidateMemory(first, last - first);
+    }
+    c.pages_dropped.fetch_add(dropped, std::memory_order_relaxed);
+    c.pages_writable.fetch_add(writable, std::memory_order_relaxed);
 }
 
 bool Rasterizer::FaultSkipsTextureCache() {

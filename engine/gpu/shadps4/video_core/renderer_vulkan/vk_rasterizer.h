@@ -128,6 +128,10 @@ public:
     bool InvalidateMemory(VAddr addr, u64 size, bool assume_locks = false);
     /// bbport: data written into GPU memory by a path we hear of (file reads into it): invalidated.
     void NoteAssetWrite(VAddr addr, u64 size);
+    /// 0.4.6 beta 15 part 4 (BB_COPY_NOTICE): a create call of the game's copies `size` bytes to
+    /// `addr` next (the game's thread, before the copy): its whole pages are made writable without a
+    /// readback, the images watching them told once; the first and last page keep their watch.
+    void NoteCopyComing(VAddr addr, u64 size);
     /// 0.4.6 beta 12: guest memory this thread wrote for a GPU command (BufferCache::NoteEngineStore).
     void NoteEngineStore(VAddr addr, u64 size) {
         buffer_cache.NoteEngineStore(addr, size);

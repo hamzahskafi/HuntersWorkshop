@@ -27,6 +27,7 @@
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/texture_cache/host_compatibility.h"
 #include "video_core/texture_cache/overlap_diagnostics.h"
+#include "video_core/texture_cache/ready_surfaces.h"
 #include "video_core/texture_cache/texture_cache.h"
 #include "video_core/texture_cache/tile_manager.h"
 #include "video_core/vram_policy.h"
@@ -133,6 +134,7 @@ TextureCache::TextureCache(const Vulkan::Instance& instance_, Vulkan::Scheduler&
       tile_manager{instance, scheduler, runtime, buffer_cache.GetStreamBuffer()},
       readback_linear_images{EmulatorSettings.IsReadbackLinearImagesEnabled()} {
 
+    ReadySurfaces::Init(instance.GetDevice(), instance.GetAllocator()); // 0.4.6 beta 15 part 3
     u32 max_samplers = instance.GetMaxSamplerAllocationCount();
     trigger_gc_samplers = max_samplers * 3 / 4;
     pressure_gc_samplers = max_samplers * 7 / 8;
@@ -1306,10 +1308,11 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
         // had its old image handed over (beta 7) before any is given to another address.
         ImageId donor_id{};
         UniqueImage donated{};
-        if (DeadTargetPool() && EmptySurfaces() && BbEngine::GxResources::Following() &&
-            BbEngine::GxResources::SurfaceAt(info.guest_address,
-                                             info.guest_address + std::max<u64>(info.guest_size, 1))
-                .found) {
+        const bool surface = DeadTargetPool() && EmptySurfaces() && BbEngine::GxResources::Following() &&
+                             BbEngine::GxResources::SurfaceAt(info.guest_address,
+                                                              info.guest_address + std::max<u64>(info.guest_size, 1))
+                                 .found;
+        if (surface) {
             if (BbEngine::GxResources::DestroyedWaiting() || BbEngine::GxResources::CreatedWaiting()) {
                 ProcessGxDestroyed();
                 ProcessGxCreated();
@@ -1322,8 +1325,26 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
                 BbEngine::GxResources::NotePool(BbEngine::GxResources::PoolEvent::NoShape, 0);
             }
         }
+        // 0.4.6 beta 15 part 3: with no dead image of its shape, one made during the loading screen.
+        t_ready_take = surface && ReadySurfaces::Enabled();
+        t_ready_taken = false;
+        const auto made_at = std::chrono::steady_clock::now();
         image_id = slot_images.insert(instance, runtime, slot_image_views, info);
         t_adopt_image = nullptr;
+        t_ready_take = false;
+        if (surface && !t_ready_taken && !(donor_id && !donated.image)) {
+            // Allocated at its draw: counted, and its shape learned in the 2 s after a load.
+            const auto now = std::chrono::steady_clock::now();
+            const auto& made = slot_images[image_id].backing->image;
+            if (made) {
+                ReadySurfaces::NoteAllocated(
+                    made.image_ci, made.size_bytes,
+                    u64(std::chrono::duration_cast<std::chrono::nanoseconds>(now - made_at).count()),
+                    BbEngine::Loading::EndedWithin(
+                        u64(std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count()),
+                        2'000'000'000ull));
+            }
+        }
         if (donor_id) {
             Image& donor = slot_images[donor_id];
             if (donated.image) {

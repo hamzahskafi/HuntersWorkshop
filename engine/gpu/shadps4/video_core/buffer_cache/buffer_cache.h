@@ -114,6 +114,12 @@ public:
     /// the game's thread: the range is marked to upload now (but for pages the GPU wrote), and a
     /// buffer's pages enter or leave the calls' watch on the uploading thread (ProcessCallsEvents).
     void NoteGameMemory(VAddr addr, u64 size, u8 event);
+    /// 0.4.6 beta 15 part 4: a create call copies over [addr, addr + size) next, whole pages (the
+    /// game's thread): see MemoryTracker::CopyComing. {pages dropped without a readback, made writable}.
+    std::pair<u32, u32> CopyComing(VAddr addr, u64 size);
+    /// 0.4.6 beta 15 part 2: a buffer made with data during a loading screen is queued for
+    /// LoadUpload; one released takes the queued ones inside it out.
+    void NoteLoadUpload(VAddr addr, u64 size, BbEngine::GxResources::MemoryEvent e);
     /// 0.4.6 beta 12: memory the game unmapped leaves the calls' watch.
     void NoteGameMemoryUnmapped(VAddr addr, u64 size);
     /// 0.4.6 beta 12: the engine wrote guest memory on the CPU for a GPU command (WRITE_DATA, a DMA
@@ -216,6 +222,11 @@ public:
     /// bbport (BB_PREUPLOAD): uploads up to `budget` bytes of that memory which the CPU changed and
     /// then left alone for a few frames into the arena, ahead of its use (draw recording thread).
     void Preupload(u64 budget);
+    /// 0.4.6 beta 15 part 2 (BB_LOAD_UPLOAD=0: off): the game's buffers made with data while a
+    /// loading screen is up (NoteGameMemory queues them) get their VRAM and their upload during it,
+    /// once a frame on the draw recording thread: up to BB_LOAD_UPLOAD_MB (64) a frame while the
+    /// screen is up, 16 a frame for 2 s after it, then the rest is left to their first draw.
+    void LoadUpload();
     /// bbport (BB_GPU_WRITE_TWINS): forgets the twins of unmapped guest memory.
     void DropTwins(VAddr addr, u64 size);
 
@@ -425,6 +436,8 @@ private:
     std::map<VAddr, VAddr> preupload_ranges; ///< start -> end of pre-uploaded guest memory
     VAddr preupload_cursor = 0;
     u64 preupload_first_bytes = 0, preupload_again_bytes = 0; ///< BB_FRAME_STATS report
+    std::mutex load_upload_mutex;            ///< 0.4.6 beta 15 part 2: queued on the game's threads
+    std::map<VAddr, u64> load_upload_ranges; ///< start -> size, uploaded by LoadUpload
     Vulkan::Semaphore memory_semaphore;
 
     struct Backing : public Interval {

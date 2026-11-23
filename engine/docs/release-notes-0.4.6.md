@@ -292,6 +292,36 @@ Hunter's Workshop player after 30 seconds. This beta speaks it, ported from bbho
 Nothing changes offline or for messages, bloodstains and ghosts. `BB_ONLINE_PAUSED=1` in Extra
 variables still keeps the game offline.
 
+## Work moved into the loading screen (beta 15)
+
+The first frames after a load still waited for work the loading screen could have hidden. This beta
+moves it there:
+
+- **New shaders build faster entering an area, without taking time from the game.** When shaders
+  pile up (a first visit), extra build threads join in. They run only on processor time nothing
+  else wants: Windows hands it out and takes it back at once, so the game's own threads always come
+  first. On processors with performance and efficiency cores (Intel 12th to 14th generation and
+  later) they are kept on the efficiency cores, leaving the fast cores to the game. While a frame
+  waits on a shader, the threads building them get full priority until they finish. The log's
+  `CPU:` line at the start shows the processor and how many it allows. The cached shaders built at
+  the start use up to 16 threads (was 8). Under Linux (Proton) the extra threads stay off: Wine
+  passes thread priorities on only where Linux is set up to allow it, and without that they would
+  compete with the game. `BB_PIPELINE_BURST=0` turns them off; `BB_PIPELINE_BURST=N` sets how many.
+- **The game's data made during a loading screen is uploaded during it**, not at the first frame
+  after (up to 287 MB in one frame before). `BB_LOAD_UPLOAD=0` turns this off.
+- **Surfaces the first frames make are ready in advance (mostly NVIDIA).** The engine learns which
+  surfaces each load's first frames make and prepares their memory during the next loading screen,
+  up to 256 MiB and only while there is room in VRAM; what is not used is freed 3 seconds after.
+  `BB_READY_SURFACES=0` turns this off.
+- **Fewer slow memory faults while loading.** The game's create calls now tell the engine before they
+  copy their data, so the memory is prepared once for the whole copy instead of faulting page by page
+  (about 1,600 faults and 930 reads back from VRAM per 7 minutes of loads). `BB_COPY_NOTICE=0` turns
+  this off.
+- **One line per load** in the log, 2 seconds after it ends, says what the first frames still did:
+  slow frames, uploads, surfaces, shaders and the create calls' copies.
+
+Safe mode turns all four off.
+
 ## Diagnostics
 
 - **The "Building shaders" note** shows when a frame was late while shaders were being

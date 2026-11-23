@@ -146,6 +146,18 @@ public:
         });
         return {marked, gpu_pages};
     }
+    /// 0.4.6 beta 15 part 4: see RegionManager::CopyComing ([addr, addr + size) whole pages). Any
+    /// thread: no region is made here (memory no region covers is all to upload already).
+    std::pair<u32, u32> CopyComing(VAddr addr, u64 size) {
+        u32 dropped = 0, writable = 0;
+        IteratePages<false>(addr, size, [&](RegionManager* manager, u64 offset, size_t size) {
+            std::scoped_lock lk{manager->lock};
+            const auto [d, w] = manager->CopyComing(offset, size);
+            dropped += d;
+            writable += w;
+        });
+        return {dropped, writable};
+    }
     /// 0.4.6 beta 12: see RegionManager::CallsCreate; makes the regions (the thread that uploads only).
     s64 CallsCreate(VAddr addr, u64 size, bool with_data) {
         s64 pages = 0;

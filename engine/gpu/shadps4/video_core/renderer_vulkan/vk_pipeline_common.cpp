@@ -44,6 +44,9 @@ void Pipeline::WaitReady() const noexcept {
         return;
     }
     const auto start = std::chrono::steady_clock::now();
+    // 0.4.6 beta 15 part 1: burst threads at idle priority running a job are raised while this
+    // thread waits or compiles: it may wait for one of them, or for a driver lock one holds.
+    RaisePipelineBursts();
     // bbport: still queued (the compile threads busy with the pipelines before it): compiled
     // here, instead of waiting for them first and then for this one.
     if (auto job = TakePipelineJob(this)) {
@@ -106,10 +109,11 @@ void LogPipelineCompileMode(const Instance& instance, bool late_binds_possible) 
                            .graphicsPipelineLibraryFastLinking;
     }
     const u64 budget_ms = SkipUncompiledBudgetNs() / 1'000'000;
-    std::printf("Pipelines: new ones compiled on %u threads; draws of one still compiling: scene "
+    std::printf("Pipelines: new ones compiled on %u threads (and %u burst threads in a backlog); draws of "
+                "one still compiling: scene "
                 "geometry %s, other draws %s (BB_SKIP_UNCOMPILED, BB_LATE_PIPELINE_BIND); graphics "
                 "pipeline library %s, not used\n",
-                PipelineCompileThreads(),
+                PipelineCompileThreads(), PipelineBurstThreads(),
                 budget_ms ? fmt::format("left out for up to {} ms", budget_ms).c_str() : "waits",
                 late_binds_possible && LatePipelineBindEnabled()
                     ? "bind it on the recording threads (they wait for it)"

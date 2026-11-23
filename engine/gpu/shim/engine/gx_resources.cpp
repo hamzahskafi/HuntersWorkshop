@@ -20,6 +20,7 @@
 //              textures).
 // 1D textures have no creator of their own (GX builds their holder inline): not counted.
 #include "gx_resources.h"
+#include "copy_cave.h"
 #include "engine_hooks.h"
 #include "engine_state.h"
 #include "loading.h"
@@ -223,6 +224,7 @@ std::uint8_t* g_return_stub = nullptr;
 bool g_active = false, g_follow = false;
 std::atomic<DestroyedHook> g_destroyed_hook{nullptr};
 std::atomic<MemoryHook> g_memory_hook{nullptr}; // 0.4.6 beta 12
+std::atomic<CopyHook> g_copy_hook{nullptr};     // 0.4.6 beta 15 part 4
 std::uint64_t g_sample_cursor = 0;            // SampleBuffers' place (under g_mutex)
 std::atomic<CreatedHook> g_created_hook{nullptr};
 std::atomic<std::uint64_t> g_live_texture_bytes{0};
@@ -1199,6 +1201,10 @@ double Mib(std::uint64_t bytes) {
 }
 } // namespace
 
+namespace {
+__attribute__((sysv_abi)) void CopyNotice(std::uint64_t destination, std::uint64_t size); // 0.4.6 beta 15 part 4
+} // namespace
+
 bool Install(std::uint8_t* image, std::size_t size) {
     if (const char* env = std::getenv("BB_GX_RESOURCES"); env && env[0] == '0') {
         return false;
@@ -1263,6 +1269,30 @@ bool Install(std::uint8_t* image, std::size_t size) {
     }
     Commit(hooks);
     g_active = true;
+    // 0.4.6 beta 15 part 4: the create calls' copies told first (BB_COPY_NOTICE=0: off).
+    if (const char* env = std::getenv("BB_COPY_NOTICE"); g_follow && !(env && env[0] == '0')) {
+        Hook caves[2];
+        bool placed = true;
+        for (int i = 0; i < 2 && placed; ++i) {
+            const CopySite& site = kCopySites[i];
+            std::uint8_t code[64];
+            const std::size_t length = CopyCave(i, reinterpret_cast<std::uint64_t>(image),
+                                                reinterpret_cast<std::uint64_t>(&CopyNotice), code);
+            placed = site.back - site.at == site.size &&
+                     Divert(caves[i], image, size, site.at, std::span<const std::uint8_t>(site.bytes, site.size),
+                            std::span<const std::uint8_t>(code, length));
+        }
+        if (placed) {
+            Commit(caves);
+            host_log("GX resources: the create calls tell the caches before they copy their data "
+                     "(BB_COPY_NOTICE=0: off)");
+        } else {
+            for (auto& cave : caves) {
+                Discard(cave);
+            }
+            host_log("GX resources: the create calls' copies differ from 1.09: not told before");
+        }
+    }
     host_log(g_follow ? "GX resources: the caches follow the game's resources, YEBIS's and Scaleform's textures "
                         "among them: a texture created with its data is prepared in the game's create call and "
                         "registered at the next submission; an image is freed when the game destroys its texture, "
@@ -1781,6 +1811,20 @@ void SetDestroyedHook(DestroyedHook hook) {
 void SetMemoryHook(MemoryHook hook) {
     g_memory_hook.store(hook, std::memory_order_release);
 }
+
+void SetCopyHook(CopyHook hook) {
+    g_copy_hook.store(hook, std::memory_order_release);
+}
+
+namespace {
+// Reached by the caves just before the copy (sysv_abi: rbx, rbp and r12-r15, which the caves keep the
+// copy's arguments in, are kept).
+__attribute__((sysv_abi)) void CopyNotice(std::uint64_t destination, std::uint64_t size) {
+    if (const CopyHook hook = g_copy_hook.load(std::memory_order_acquire); hook && size != 0) {
+        hook(destination, size);
+    }
+}
+} // namespace
 
 void NoteToldWrite(std::uint64_t address, std::uint64_t bytes) {
     if (!g_active || bytes == 0 || !g_memory_hook.load(std::memory_order_relaxed)) {

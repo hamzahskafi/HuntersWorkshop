@@ -212,6 +212,13 @@ void NoteDeadImageTaken(bool destroyed, bool hand_over, bool refuse, std::uint64
 enum class MemoryEvent : std::uint8_t { BufferMade, BufferMadeWithData, BufferGone, TextureGone, Covered };
 using MemoryHook = void (*)(std::uint64_t address, std::uint64_t size, MemoryEvent event);
 void SetMemoryHook(MemoryHook hook);
+// 0.4.6 beta 15 part 4 (BB_COPY_NOTICE=0: off; docs/memory-model.md, beta 15 part 4): the creators copy
+// the caller's data with the game's memcpy (0x261a1b0), CreateBuffer's helper at 0x216d5ea and
+// CreateTexture's at 0x2171fea. A cave at each tells the hook the destination and size first, on the
+// game's thread, then makes the copy: its pages need not fault one by one.
+using CopyHook = void (*)(std::uint64_t address, std::uint64_t size);
+void SetCopyHook(CopyHook hook);
+// The caves: copy_cave.h.
 // A write the engine was told of (an asset or DMA write) over live GX buffers' memory: counted on them
 // for the buffer cache's net (SampleBuffers).
 void NoteToldWrite(std::uint64_t address, std::uint64_t bytes);

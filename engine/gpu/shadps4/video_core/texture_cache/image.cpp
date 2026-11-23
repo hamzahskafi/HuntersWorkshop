@@ -12,6 +12,7 @@
 #include "video_core/renderer_vulkan/vk_runtime.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/texture_cache/blit_helper.h"
+#include "video_core/texture_cache/ready_surfaces.h"
 #include "video_core/texture_cache/image.h"
 
 #include <vk_mem_alloc.h>
@@ -286,6 +287,9 @@ Image::Image(const Vulkan::Instance& instance, Vulkan::Runtime& runtime_,
         // Its contents are no one's: it starts in the undefined layout (backing->state) and is cleared
         // or filled at its first use as a new image is.
         backing->image = std::move(*t_adopt_image);
+    } else if (t_ready_take && ReadySurfaces::Take(image_ci, backing->image)) {
+        // 0.4.6 beta 15 part 3: an image of its shape made during the loading screen; never used.
+        t_ready_taken = true;
     } else {
         backing->image = UniqueImage{instance.GetDevice(), instance.GetAllocator()};
         if (!backing->image.Create(image_ci, may_fail)) {

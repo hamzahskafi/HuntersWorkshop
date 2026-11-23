@@ -181,6 +181,27 @@ void MakeCritical(bool bulk) {
     }
 }
 
+void* SelfHandle() {
+    HANDLE handle = nullptr;
+    if (!DuplicateHandle(GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &handle,
+                         THREAD_SET_LIMITED_INFORMATION | THREAD_QUERY_LIMITED_INFORMATION, FALSE, 0)) {
+        return nullptr;
+    }
+    return handle;
+}
+
+int CurrentPriority() {
+    return GetThreadPriority(GetCurrentThread());
+}
+
+bool SetPriority(void* thread, int priority) {
+    return thread && SetThreadPriority(static_cast<HANDLE>(thread), priority);
+}
+
+void MakeNormal() {
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_NORMAL);
+}
+
 unsigned CapSpinUs(unsigned wanted) {
     return SpinLimitUs(Raising() && Available() < 16 ? std::min(wanted, 50u) : wanted);
 }

@@ -716,7 +716,9 @@ void PipelineCache::WarmUp() {
     }
     warmup_jobs = nullptr;
     const auto rebuilt_at = std::chrono::steady_clock::now();
-    u32 threads = std::clamp<u32>(BbThreads::Available() > 1 ? BbThreads::Available() - 1 : 1, 1, 8);
+    // 0.4.6 beta 15 part 1: all logical processors but one, at most 16 (was 8): nothing else runs
+    // before the game starts.
+    u32 threads = std::clamp<u32>(BbThreads::Available() > 1 ? BbThreads::Available() - 1 : 1, 1, 16);
     if (const char* env = std::getenv("BB_WARMUP_THREADS"); env && env[0]) {
         threads = std::clamp(std::atoi(env), 1, 32);
     }
