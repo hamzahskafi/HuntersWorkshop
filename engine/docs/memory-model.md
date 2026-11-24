@@ -1182,32 +1182,66 @@ into the game (maps `m24_01`, `m27`, `m32`), about 3 minutes of play, a clean ex
   and 1,512 times (beta 13: 460 in 7 minutes, about 2 a second; now 8-10 a second, "an image on a
   page beside a live resource"), their handlers' time 0.0-1.2 ms a frame (a register row).
 
-### Beta 16: textures follow their calls (to research and design)
+### Beta 16: textures follow their calls (designed 2026-11-24, for the tester's review)
 
 The rule this release ends with that is not met for textures: "pages are write-protected only
-where no call tells". Since beta 9 the game's targets, its surfaces and the textures it makes with
-their data are unwatched; YEBIS's CPU-updated textures, Scaleform's planes, GX textures made
-without data and images over no game resource are still watched by page protection. YEBIS's
-updates and Scaleform's unmaps are hooked and tell the texture cache after the write (beta 9).
+where no call tells". Since beta 9-10 the game's targets, its surfaces and the GX textures made with
+their data are unwatched; YEBIS's textures (but its surfaces), Scaleform's planes, GX textures made
+without data and images over no game resource are still watched by page protection.
 
-**Checked 2026-11-24, before designing:** the writes that fault in beta 15's runs are not YEBIS's
-updates. The writer at `+0xc21ef2` (through the host's memcpy) wrote 500-720 times a minute in the
-second and third minutes, when YEBIS's update call ran 0 times (all 87 updates were in the first
-minute, at the load). It writes into small images (256x1, 16x16, 1x1, format 37, at
-`0x105ef69d00`, `0x105ef74900`, `0x105efe7d00`) and into data beside them; the minute lines class
-the faults as "an image on a page beside a live resource", so those images sit on memory no
-registered resource holds (no creator of the game's that HW hooks made them, or none is known for
-them). So no call tells these writes today, and unwatching would miss them: the tables would go
-stale. The engine-follows-the-calls answer is to find the call: what the code at `+0xc21ef2`
-updates, who made those textures, and whether a call around them can tell the writes (then they are
-unwatched as their siblings are). That needs the 1.09 executable (the environment was rebuilt).
+**What faults, found in the 1.09 executable (2026-11-24):**
 
-Research questions: the function at `+0xc21ef2` and its callers (YEBIS's parameter or table
-update, or the game's); the creator of the images over no game resource (a 1D creator, a YEBIS path
-not hooked, the game's own heap); which images are still watched, by kind; Scaleform's planes (their
-writes told by the unmap hook: 20-23 a minute, the faults on them 5-10 a minute) as the case that can
-be unwatched now; a sampling net for unwatched textures. The design comes to the tester before
-anything is built (`plan.md`, the track, phase B).
+- The writer at `+0xc21ef2` (and `+0xc223f9`, `+0xc233c1`, the two others in beta 15's fault lines) is
+  YEBIS's `CTextureUtil::DrawRectGPU_Effect_XY_TEX2D1` (`0xc21b90`) and its siblings (`0xc21fd0`,
+  `0xc22f70`; six functions in all use the same buffer): for each post-processing pass it maps YEBIS's
+  shared vertex buffer (`MapSharedVertexBuffer`, `m_pGPUSharedVertexBuffer` at `+0x21770`), copies a
+  quad's vertices in, unmaps it and draws a strip. These are vertex writes, not texture writes.
+- The buffer's Map (`IGPUBuffer::Map`, `0xc6ebd0`) with DISCARD turns to the next of its copies and
+  maps it through YEBIS's device (`0x11d92c0`, hooked since beta 9 but counted for textures only).
+  The buffer is YEBIS's own, not a GX buffer: the fault lines class its writes "beside a live
+  resource".
+- `CTextureUtil::InitializeDevice` (`0xc1ec60`) creates, one after the other, YEBIS's utility textures
+  (`FullColorDitherMatrix`, `Spectrum`, `FilmGrain`, `RadiusGaussianFade`, the analyzer's) and its
+  shared vertex and index buffers, the border index buffer and the heat-shimmer particles' buffers:
+  small allocations packed side by side. So the small textures' pages hold the vertex buffer's copies
+  too, and the texture cache watches those pages for the textures. Each vertex write faults (8-12 a
+  second in beta 15's runs, the texture cache's lock taken on the game's thread each time) and marks
+  the textures possibly written; their next use re-checks them and protects the pages again.
+- YEBIS's textures made with data are static or written only through YEBIS's own calls (its update
+  call, told since beta 9; its Map and Unmap, hooked): nothing needs their pages watched, as for GX's
+  textures made with data since beta 10.
+
+**Parts, each with its switch:**
+
+1. **YEBIS's textures made with their data unwatched** (`BB_WATCH_YEBIS_TEXTURES=1`: watched as before),
+   as GX's are since beta 10; their writes through YEBIS's update call are already told. With no image
+   watching those pages, the vertex writes no longer fault.
+2. **Scaleform's planes unwatched** (`BB_WATCH_SCALEFORM=1`: watched as before): the UI writes them
+   between Scaleform's map and unmap, and the unmap is told since beta 9 (20-23 a minute in beta 15's
+   runs, against 5-10 faults a minute on them).
+3. **The texture net** (`BB_TEXTURE_NET=0`: off), as beta 12's for buffers: a slice a second, the
+   unwatched textures the CPU fills (GX's and YEBIS's made with data, Scaleform's planes) hashed in
+   turn; a change no call told marks the image written and is counted, the first few named. It is the
+   check that parts 1 and 2 (and beta 10's rule) miss nothing.
+4. **What still faults, named** (always on): each minute, the images still watched by kind (count,
+   MiB); faults on images by the image's kind, whether a resource of the game's starts at the image
+   and lives, its bytes against the image's; and YEBIS's buffer maps counted, so the shared vertex
+   buffer's writes can be told apart from any other writer.
+
+**Not in beta 16:** the images over no game resource (34 a minute made at draws in beta 15's runs,
+some in YEBIS's memory: 256x256 and 128x128 textures a YEBIS creator HW does not hook may make, its
+shared texture pool for one): part 4 names them; a creator found is hooked in a later beta.
+GX textures made without data and not drawn by the GPU (9 a minute) stay watched: no call tells
+their fill.
+
+**Gate:** the faults "an image on a page beside a live resource" and "an image on a Scaleform
+texture" near zero; the net finding nothing; no difference to see (YEBIS's dither, grain, spectrum
+and fade tables, the UI); frame times unchanged or better.
+
+**The runs (with beta 15's, phase A):** (1) as built: the usual route with a second load, the heavy
+scene on Uncapped, a stop in the pause menu; (2) the same with `BB_LOAD_UPLOAD=0 BB_COPY_NOTICE=0
+BB_WATCH_YEBIS_TEXTURES=1 BB_WATCH_SCALEFORM=1` (beta 15's A/B and beta 16's before); (3) online
+with other players. Beta 16 changes no file of the GPU cache's identity: the cache stays warm.
 
 ### Beta 17: shaders and pipelines (to research and design)
 
