@@ -1182,6 +1182,33 @@ into the game (maps `m24_01`, `m27`, `m32`), about 3 minutes of play, a clean ex
   and 1,512 times (beta 13: 460 in 7 minutes, about 2 a second; now 8-10 a second, "an image on a
   page beside a live resource"), their handlers' time 0.0-1.2 ms a frame (a register row).
 
+### Beta 16: textures follow their calls (to research and design)
+
+The rule this release ends with that is not met for textures: "pages are write-protected only
+where no call tells". Since beta 9 the game's targets, its surfaces and the textures it makes with
+their data are unwatched; YEBIS's CPU-updated textures, Scaleform's planes, GX textures made
+without data and images over no game resource are still watched by page protection, though YEBIS's
+updates and Scaleform's unmaps are hooked and tell the texture cache after the write (beta 9).
+Beta 15's runs show the cost: YEBIS's writes at `+0xc21ef2` (through the host's memcpy) fault 8-12
+times a second on the same two pages (`0x105f002xxx`, `0x105efe7xxx`), into its 256x1, 16x16 and
+1x1 textures and into its data beside them; each fault takes the texture cache's lock on the game's
+thread. Research questions: which images are still watched, by kind; which code writes each, and
+whether `+0xc21ef2` runs inside YEBIS's update call; what a sampling net for unwatched textures
+costs. The design comes to the tester before anything is built (`plan.md`, the track, phase B).
+
+### Beta 17: shaders and pipelines (to research and design)
+
+The rule not met: "shaders are translated when the game creates them, pipelines built during
+loading screens, not at a draw in play". The game's calls cannot predict an area's pipelines
+(beta 15's research), but the translation can leave the GPU thread: beta 15's cold run translated
+478 ms of shaders there in its first minute (vertex 121, pixel 127, compute 21), a 220.8 ms frame
+after its load; warm runs 36-46 ms a minute in new places. Research questions: moving translation
+into the compile jobs (the program cache's lock, per-thread translator pools, the shader information
+a draw needs before its pipeline exists, draws that cannot be left out); the GPU cache's identity
+narrowed to what the cache stores, so an engine update that changes no stored format keeps the
+players' caches (beta 15 reset the tester's with a thread count); the catalog decision; optionally
+AMD's pipeline library for the single pipelines a frame waits for (`plan.md`, the track, phase C).
+
 ### The 0.4.6 release
 
 - **Switches:** each beta's switches, and `BB_COPY_HOLD` and `BB_COPY_MERGE` (kept through 0.4.5
