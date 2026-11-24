@@ -919,8 +919,12 @@ the tester's go-ahead. Each part has its own switch.
 | during loading screens | (hidden) | the create calls' copies: 1,595 write faults in 7 minutes, about 930 of them reading a page back from VRAM first | 4 |
 
 In beta 13's first minute the game made 2,520 GX buffers with their data (281 MiB), about the
-287 MB the `m33` frame uploaded. On AMD a surface's memory costs little (50 in 1.9 ms after
-`m34`), so part 3 is for NVIDIA's cost: its counts can be checked on AMD, its time only on NVIDIA.
+287 MB the `m33` frame uploaded. On the RX 9070 XT a surface's memory costs little (50 in 1.9 ms
+after `m34`), on the RTX 3070 Ti about 1.3 ms for each of 4 MiB or more. Which part of the difference
+is the driver and which the card (its 8 GB, against 16) one card of each cannot say (the tester,
+2026-11-24, takes it for the cards' difference, not the vendor's); allocating is the driver's and
+the system's work on the CPU, not the GPU's. So part 3's counts can be checked on the 9070 XT, its
+time on a card where allocating is slow.
 
 **Part 1: compile bursts on spare processor time** (revised with the tester, 2026-11-22 and 23;
 `BB_PIPELINE_BURST=0`: the 4 threads only, as before)

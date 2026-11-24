@@ -309,7 +309,8 @@ moves it there:
   compete with the game. `BB_PIPELINE_BURST=0` turns them off; `BB_PIPELINE_BURST=N` sets how many.
 - **The game's data made during a loading screen is uploaded during it**, not at the first frame
   after (up to 287 MB in one frame before). `BB_LOAD_UPLOAD=0` turns this off.
-- **Surfaces the first frames make are ready in advance (mostly NVIDIA).** The engine learns which
+- **Surfaces the first frames make are ready in advance** (it matters most where making them is
+  slow: 11-14 ms of a frame on the tester's RTX 3070 Ti, about 2 ms on the RX 9070 XT). The engine learns which
   surfaces each load's first frames make and prepares their memory during the next loading screen,
   up to 256 MiB and only while there is room in VRAM; what is not used is freed 3 seconds after.
   `BB_READY_SURFACES=0` turns this off.
