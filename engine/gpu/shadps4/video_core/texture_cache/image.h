@@ -239,6 +239,11 @@ public:
     /// beta 10): its pages were left unwatched (the game's calls tell its writes); its track range is
     /// bookkeeping only.
     bool calls_watch = false;
+    /// 0.4.6 beta 16: the resource at its memory was made with its data (registration), and how many
+    /// times the cache marked it (possibly) written: the texture net counts a change of its memory with no
+    /// mark since its last look as a write no call told.
+    bool gx_with_data = false;
+    u32 cpu_marks = 0;
     ImageId depth_id{};
     u64 depth_uid{};
     u64 image_uid{};

@@ -402,6 +402,14 @@ struct Counts {
     // events queued and dropped; CPU writes on textures made with data logged with their code.
     std::atomic<std::uint64_t> yebis_updates{0}, yebis_update_surfaces{0}, yebis_maps{0}, yebis_unmaps{0},
         sf_unmaps{0}, written_events{0}, written_dropped{0}, data_writes_logged{0};
+    // 0.4.6 beta 16: YEBIS's Maps of its own buffers (the shared vertex buffer's, each post-processing pass);
+    // write faults on images by [owner][inside the image], those whose image reaches past its resource; the
+    // texture net's passes and what it found; the last census of watched images.
+    std::atomic<std::uint64_t> yebis_buffer_maps{0};
+    std::array<std::array<std::atomic<std::uint64_t>, 2>, std::size_t(Owner::kCount)> image_faults{};
+    std::atomic<std::uint64_t> image_faults_past{0};
+    std::atomic<std::uint64_t> tnet_images{0}, tnet_bytes{0}, tnet_untold{0}, tnet_untold_bytes{0};
+    std::atomic<int> tnet_named{0};
     // 0.4.6 beta 10: new textures made over a live texture's memory, at its base or partly, by [the live
     // one's owner kind][the new one's]; images marked written by a creation with data; dead images a draw
     // took (after a destroy / after something newer), of them the owner rule's hand-overs and refusals.
@@ -1033,6 +1041,10 @@ GUEST_ABI std::int64_t YebisUpdateEntry(std::uint64_t, const std::uint64_t* save
 GUEST_ABI std::int64_t YebisMapEntry(std::uint64_t, const std::uint64_t* saved) {
     if (YebisRegistered(saved[4])) {
         g_counts.yebis_maps.fetch_add(1, std::memory_order_relaxed);
+    } else if (saved[4]) {
+        // 0.4.6 beta 16: one of its own buffers (IGPUBuffer::Map, 0xc6ebd0): the shared vertex buffer's quads
+        // for each post-processing pass (CTextureUtil::DrawRectGPU_*), its index and particle buffers.
+        g_counts.yebis_buffer_maps.fetch_add(1, std::memory_order_relaxed);
     }
     return 0;
 }
@@ -1476,6 +1488,61 @@ Owner Classify(std::uint64_t begin, std::uint64_t end, bool* at_start) {
         return OwnerOf(*e);
     }
     return Owner::None;
+}
+
+Resource Describe(std::uint64_t begin, std::uint64_t end) {
+    Resource r;
+    if (!g_active || begin >= end) {
+        return r;
+    }
+    std::scoped_lock lock{g_mutex};
+    const Entry* e = Covering(g_texture_at, begin, end, &r.at_start);
+    if (!e) {
+        e = Covering(g_buffer_at, begin, end, &r.at_start);
+    }
+    if (e) {
+        r.owner = OwnerOf(*e);
+        r.with_data = e->initial;
+        r.memory = e->memory;
+        r.bytes = e->bytes;
+    }
+    return r;
+}
+
+void NoteImageWatchFault(Owner owner, bool inside, bool past_resource) {
+    const std::size_t o = std::min<std::size_t>(std::size_t(owner), std::size_t(Owner::kCount) - 1);
+    g_counts.image_faults[o][inside ? 1 : 0].fetch_add(1, std::memory_order_relaxed);
+    if (past_resource) {
+        g_counts.image_faults_past.fetch_add(1, std::memory_order_relaxed);
+    }
+}
+
+namespace {
+std::mutex g_census_mutex;
+WatchCensus g_census;
+bool g_census_new = false;
+} // namespace
+
+void NoteWatchCensus(const WatchCensus& census) {
+    std::scoped_lock lock{g_census_mutex};
+    g_census = census;
+    g_census_new = true;
+}
+
+void NoteTextureNet(std::uint64_t images, std::uint64_t bytes) {
+    g_counts.tnet_images.fetch_add(images, std::memory_order_relaxed);
+    g_counts.tnet_bytes.fetch_add(bytes, std::memory_order_relaxed);
+}
+
+void NoteTextureUntold(Owner owner, std::uint64_t memory, std::uint64_t bytes, std::uint32_t width,
+                       std::uint32_t height) {
+    g_counts.tnet_untold.fetch_add(1, std::memory_order_relaxed);
+    g_counts.tnet_untold_bytes.fetch_add(bytes, std::memory_order_relaxed);
+    if (g_counts.tnet_named.fetch_add(1, std::memory_order_relaxed) < 8) {
+        host_log("GX memory: the texture net found a CPU write no call told: %s at %#llx, %ux%u, %llu bytes "
+                 "(the image is marked written)",
+                 OwnerName(owner), (unsigned long long)memory, width, height, (unsigned long long)bytes);
+    }
 }
 
 Surface SurfaceAt(std::uint64_t begin, std::uint64_t end) {
@@ -2453,6 +2520,49 @@ void LogMinute() {
                      "watched the page besides the buffer cache %llu",
                      (unsigned long long)total, out.c_str(), (unsigned long long)image_too);
         }
+    }
+    {
+        // 0.4.6 beta 16: the images still watched by page protection, the faults on images by the image's
+        // kind, YEBIS's buffer maps, and the texture net.
+        WatchCensus census;
+        bool have_census = false;
+        {
+            std::scoped_lock lock{g_census_mutex};
+            census = g_census;
+            have_census = g_census_new;
+            g_census_new = false;
+        }
+        std::string watched, by_calls, faults;
+        for (std::size_t o = 0; o < std::size_t(Owner::kCount); ++o) {
+            char part[160];
+            if (have_census && census.watched[o] != 0) {
+                std::snprintf(part, sizeof(part), "%s%s %llu (%.0f MiB)", watched.empty() ? "" : ", ",
+                              OwnerName(Owner(o)), (unsigned long long)census.watched[o], Mib(census.watched_bytes[o]));
+                watched += part;
+            }
+            if (have_census && census.by_calls[o] != 0) {
+                std::snprintf(part, sizeof(part), "%s%s %llu (%.0f MiB)", by_calls.empty() ? "" : ", ",
+                              OwnerName(Owner(o)), (unsigned long long)census.by_calls[o],
+                              Mib(census.by_calls_bytes[o]));
+                by_calls += part;
+            }
+            const std::uint64_t inside = take(g_counts.image_faults[o][1]), beside = take(g_counts.image_faults[o][0]);
+            if (inside + beside != 0) {
+                std::snprintf(part, sizeof(part), "%s%s %llu (%llu inside it)", faults.empty() ? "" : ", ",
+                              OwnerName(Owner(o)), (unsigned long long)(inside + beside), (unsigned long long)inside);
+                faults += part;
+            }
+        }
+        host_log("GX memory, textures by their calls this minute (beta 16): images watched by page protection: %s; "
+                 "left to the calls: %s; write faults on images by the image's resource: %s (an image reaching past "
+                 "its resource's bytes %llu); YEBIS's maps of its own buffers %llu; the texture net: %llu images "
+                 "hashed (%.0f MiB), CPU writes found that no call told %llu (%.0f MiB)",
+                 have_census ? (watched.empty() ? "none" : watched.c_str()) : "not counted yet",
+                 have_census ? (by_calls.empty() ? "none" : by_calls.c_str()) : "not counted yet",
+                 faults.empty() ? "none" : faults.c_str(), (unsigned long long)take(g_counts.image_faults_past),
+                 (unsigned long long)take(g_counts.yebis_buffer_maps), (unsigned long long)take(g_counts.tnet_images),
+                 Mib(take(g_counts.tnet_bytes)), (unsigned long long)take(g_counts.tnet_untold),
+                 Mib(take(g_counts.tnet_untold_bytes)));
     }
     host_log("GX memory, owners this minute (beta 10): new textures over a live texture's memory, at its base: %s; "
              "partly: %s; images marked written by a creation with data over them %llu (%.0f MiB), live surfaces "

@@ -30,6 +30,7 @@
 #include "video_core/texture_cache/ready_surfaces.h"
 #include "video_core/texture_cache/texture_cache.h"
 #include "video_core/texture_cache/tile_manager.h"
+#include "video_core/texture_cache/watch_rules.h"
 #include "video_core/vram_policy.h"
 
 namespace VideoCore {
@@ -250,7 +251,7 @@ bool DeadTargetPool() {
 // made with their data are not either (beta 9's run: their CPU writes are the create call's own copy, told
 // by the created event, ProcessGxCreated, and asset loads, told by Rasterizer::NoteAssetWrite).
 // BB_WATCH_GAME_TEXTURES=1 watches every image as before; =0 is the default; =targets is beta 9's.
-enum class Unwatch { None, Targets, TargetsAndData };
+using Unwatch = WatchRules::Unwatch;
 Unwatch UnwatchKinds() {
     static const Unwatch kinds = [] {
         const char* env = std::getenv("BB_WATCH_GAME_TEXTURES");
@@ -260,6 +261,33 @@ Unwatch UnwatchKinds() {
         return env && std::strcmp(env, "targets") == 0 ? Unwatch::Targets : Unwatch::TargetsAndData;
     }();
     return kinds;
+}
+// 0.4.6 beta 16 (watch_rules.h): YEBIS's textures made with their data (BB_WATCH_YEBIS_TEXTURES=1: watched
+// as before) and Scaleform's planes (BB_WATCH_SCALEFORM=1) left to their calls too; the texture net
+// (BB_TEXTURE_NET=0: off) checks the images left to the calls that the CPU fills.
+const WatchRules::Settings& WatchSettings() {
+    static const WatchRules::Settings settings = [] {
+        const auto on = [](const char* name) {
+            const char* env = std::getenv(name);
+            return env && env[0] == '1';
+        };
+        WatchRules::Settings s;
+        s.kinds = UnwatchKinds();
+        s.watch_yebis = on("BB_WATCH_YEBIS_TEXTURES");
+        s.watch_scaleform = on("BB_WATCH_SCALEFORM");
+        return s;
+    }();
+    return settings;
+}
+bool TextureNetEnabled() {
+    static const bool on = [] {
+        const char* env = std::getenv("BB_TEXTURE_NET");
+        return !(env && env[0] == '0');
+    }();
+    return on;
+}
+WatchRules::Image WatchView(const Image& image) {
+    return {BbEngine::GxResources::Owner(image.gx_owner), image.gx_whole, image.surface_ns != 0, image.gx_with_data};
 }
 // 0.4.6 beta 11 (BB_IMAGE_OWNERS=0: off; on by default, off in safe mode): the owner rule. An image of a
 // texture of the game's (one starting where the image does, OwnedImage) is retired when that texture is
@@ -574,7 +602,7 @@ bool TextureCache::LandStore(PendingStore& store, bool from_collector) {
         }
         Image& other = slot_images[other_id];
         RefreshTrace::Mark(other, "CPU dirty (image stored)", store.address, store.size);
-        other.flags |= ImageFlagBits::CpuDirty;
+        other.flags |= ImageFlagBits::CpuDirty; ++other.cpu_marks; // 0.4.6 beta 16: the texture net's "told"
         UntrackImage(other_id);
     }
     return true;
@@ -738,7 +766,7 @@ void TextureCache::MarkAsMaybeDirty(ImageId image_id, Image& image) {
                                                    bytes.size());
         image.hash = GuestMemoryHash(bytes.data(), bytes.size());
     }
-    image.flags |= ImageFlagBits::MaybeCpuDirty;
+    image.flags |= ImageFlagBits::MaybeCpuDirty; ++image.cpu_marks; // 0.4.6 beta 16: the texture net's "told"
     UntrackImage(image_id);
 }
 
@@ -749,6 +777,17 @@ void TextureCache::InvalidateMemory(VAddr addr, size_t size) {
     ForEachImageInRegion(pages_start, pages_end - pages_start, [&](ImageId image_id, Image& image) {
         const auto image_begin = image.info.guest_address;
         const auto image_end = image.info.guest_address + image.info.guest_size;
+        // 0.4.6 beta 16 part 4: a write fault, by the images watching its page: their resource's kind,
+        // whether the write landed in the image, whether the image reaches past that resource's bytes.
+        if (t_write_fault && image.IsTracked() && !image.calls_watch) {
+            bool past = false;
+            if (image.gx_whole) {
+                const auto r = BbEngine::GxResources::Describe(image_begin, image_begin + 1);
+                past = r.bytes != 0 && r.memory == image_begin && image.info.guest_size > r.bytes;
+            }
+            BbEngine::GxResources::NoteImageWatchFault(BbEngine::GxResources::Owner(image.gx_owner),
+                                                       image.Overlaps(addr, size), past);
+        }
         if (image.store_pending) {
             // Beta 14: a store into these pages is under way (BeginStore): it lands first, then
             // the game's write goes on top, as with a store done on the spot.
@@ -802,7 +841,7 @@ void TextureCache::InvalidateMemory(VAddr addr, size_t size) {
             if (False(image.flags & ImageFlagBits::CpuDirty) && garbage_candidates.size() < 16384) {
                 garbage_candidates.emplace_back(image_id, image.image_uid);
             }
-            image.flags |= ImageFlagBits::CpuDirty;
+            image.flags |= ImageFlagBits::CpuDirty; ++image.cpu_marks; // 0.4.6 beta 16: the texture net's "told"
             PageManager::NoteImageFault(image.info.guest_address, image.info.guest_size,
                                         image.info.size.width, image.info.size.height,
                                         u32(image.info.pixel_format), u32(image.info.tile_mode));
@@ -857,7 +896,7 @@ void TextureCache::ReleaseDestroyed(VAddr addr, size_t size) {
         if (False(image.flags & ImageFlagBits::CpuDirty) && garbage_candidates.size() < 16384) {
             garbage_candidates.emplace_back(image_id, image.image_uid);
         }
-        image.flags |= ImageFlagBits::CpuDirty;
+        image.flags |= ImageFlagBits::CpuDirty; ++image.cpu_marks; // 0.4.6 beta 16: the texture net's "told"
         UntrackImage(image_id);
     });
 }
@@ -1818,10 +1857,11 @@ void TextureCache::RegisterImage(ImageId image_id) {
     if (BbEngine::GxResources::Active()) {
         const VAddr begin = image.info.guest_address;
         const VAddr end = begin + std::max<u64>(image.info.guest_size, 1);
-        bool at_start = false;
-        const auto owner = BbEngine::GxResources::Classify(begin, end, &at_start);
+        const auto described = BbEngine::GxResources::Describe(begin, end);
+        const auto owner = described.owner;
         image.gx_owner = u8(owner);
-        image.gx_whole = at_start;
+        image.gx_whole = described.at_start;
+        image.gx_with_data = described.with_data; // 0.4.6 beta 16
         if (EmptySurfaces()) {
             if (const auto surface = BbEngine::GxResources::SurfaceAt(begin, end); surface.found) {
                 image.surface_ns = surface.ns;
@@ -1920,14 +1960,10 @@ void TextureCache::TrackImage(ImageId image_id) {
         // Re-track the whole image
         image.track_addr = image_begin;
         image.track_addr_end = image_end;
-        // 0.4.6 beta 8 (part 4; UnwatchKinds): a texture of the game's whose writes its calls tell (made
-        // with its data, a target, a surface) is not write-protected; its range is kept.
-        using BbEngine::GxResources::Owner;
-        const Owner owner = Owner(image.gx_owner);
-        const Unwatch kinds = UnwatchKinds();
-        if (kinds != Unwatch::None && image.gx_whole &&
-            (image.surface_ns != 0 || owner == Owner::RenderTarget || owner == Owner::DepthTarget ||
-             (kinds == Unwatch::TargetsAndData && owner == Owner::TextureData))) {
+        // 0.4.6 beta 8 (part 4; watch_rules.h): a texture of the game's whose writes its calls tell (made
+        // with its data, a target, a surface; beta 16: YEBIS's made with data, Scaleform's planes) is not
+        // write-protected; its range is kept.
+        if (WatchRules::ByCalls(WatchView(image), WatchSettings())) {
             image.calls_watch = true;
             BbEngine::GxResources::NoteUnwatched(1, image.backing ? image.GetHostImageSize() : 0);
             return;
@@ -2087,6 +2123,11 @@ void TextureCache::GarbageCollectImages() {
         FreeDeadImages(gc_second);
     }
     if (new_second) {
+        // 0.4.6 beta 16 part 3: after the told writes (ProcessWritten), so that a write a call told this
+        // second is not taken for one no call told.
+        if (TextureNetEnabled() && BbEngine::GxResources::Following()) {
+            TextureNet();
+        }
         if (second - minute_second >= 60) {
             minute_second = second;
             ClassifyForMinute(second);
@@ -2201,7 +2242,7 @@ void TextureCache::ProcessGxDestroyed() {
                     if (False(image.flags & ImageFlagBits::CpuDirty) && garbage_candidates.size() < 16384) {
                         garbage_candidates.emplace_back(image_id, image.image_uid);
                     }
-                    image.flags |= ImageFlagBits::CpuDirty;
+                    image.flags |= ImageFlagBits::CpuDirty; ++image.cpu_marks; // 0.4.6 beta 16: the texture net's "told"
                 }
                 // Beta 16: freed once the GPU is done with it (FreeDeadImages).
                 if (BbEngine::GxResources::Following() && dead_images.size() < 65536) {
@@ -2263,7 +2304,7 @@ void TextureCache::ProcessGxCreated() {
                     if (False(image.flags & ImageFlagBits::CpuDirty) && garbage_candidates.size() < 16384) {
                         garbage_candidates.emplace_back(image_id, image.image_uid); // unused from now: garbage
                     }
-                    image.flags |= ImageFlagBits::CpuDirty;
+                    image.flags |= ImageFlagBits::CpuDirty; ++image.cpu_marks; // 0.4.6 beta 16: the texture net's "told"
                     image.mip_hashes_current = false;
                     image.surface_ns = 0;
                     ++written;
@@ -2303,6 +2344,8 @@ void TextureCache::ProcessGxCreated() {
                     image.gx_owner = made.owner;
                     image.gx_whole = true;
                 }
+                // 0.4.6 beta 16: a hand-over is to a texture made without its data (watch_rules.h).
+                image.gx_with_data = false;
                 if (yebis) {
                     ++kept;
                     kept_bytes += image.backing ? image.GetHostImageSize() : 0;
@@ -2360,7 +2403,7 @@ void TextureCache::ProcessWritten() {
             // Written by the CPU through the game's own call: its next use takes the memory (by its
             // hashes when the GPU drew it too); no longer a surface whose writes only the GPU makes.
             RefreshTrace::Mark(image, "CPU written through its call", written.memory, written.bytes);
-            image.flags |= ImageFlagBits::CpuDirty;
+            image.flags |= ImageFlagBits::CpuDirty; ++image.cpu_marks; // 0.4.6 beta 16: the texture net's "told"
             image.mip_hashes_current = false;
             image.surface_ns = 0;
         });
@@ -2699,8 +2742,7 @@ void TextureCache::BuildAhead() {
             image.track_addr = image.guest_begin;
             image.track_addr_end = image.guest_end;
             // 0.4.6 beta 8 (part 4): a texture made with its data, unwatched as TrackImage leaves it.
-            if (UnwatchKinds() == Unwatch::TargetsAndData && image.gx_whole &&
-                BbEngine::GxResources::Owner(image.gx_owner) == BbEngine::GxResources::Owner::TextureData) {
+            if (WatchRules::ByCalls(WatchView(image), WatchSettings())) {
                 image.calls_watch = true;
                 BbEngine::GxResources::NoteUnwatched(1, image.backing ? image.GetHostImageSize() : 0);
             } else {
@@ -2962,9 +3004,16 @@ void TextureCache::ClassifyForMinute(u64 second) {
         bool at_start;
     };
     std::array<Largest, 5> largest{};
+    // 0.4.6 beta 16 part 4: the images whose writes page protection watches, and those left to the calls.
+    BbEngine::GxResources::WatchCensus census;
     lru_cache.ForEachItemBelow(gc_tick, [&](ImageId image_id) {
         const Image& image = slot_images[image_id];
         const u64 bytes = image.backing ? image.GetHostImageSize() : 0;
+        if (image.track_addr != 0 && image.track_addr_end != 0) {
+            const size_t o = std::min<size_t>(image.gx_owner, size_t(Owner::kCount) - 1);
+            ++(image.calls_watch ? census.by_calls : census.watched)[o];
+            (image.calls_watch ? census.by_calls_bytes : census.watched_bytes)[o] += image.info.guest_size;
+        }
         if (UsedSince(image, second, 10)) {
             in_use += bytes;
         } else if (image.SafeToDownload()) {
@@ -3027,6 +3076,111 @@ void TextureCache::ClassifyForMinute(u64 second) {
     }
     BbEngine::GxResources::NoteStaleByOwner(stale_bytes, stale_images, stale_gpu, described.c_str());
     BbEngine::GxResources::NoteDeadInVram(dead, dead_bytes);
+    BbEngine::GxResources::NoteWatchCensus(census);
+}
+
+namespace {
+// 0.4.6 beta 16 part 3: an image the texture net checks now: left to the calls, filled by the CPU, not drawn
+// by the GPU (its memory is then not what the image holds), no store under way, and at most 8 MiB.
+constexpr u64 NetLargest = 8ull << 20;
+bool NetCandidate(const Image& image) {
+    return image.calls_watch && True(image.flags & ImageFlagBits::Registered) &&
+           False(image.flags & ImageFlagBits::GpuModified) && !image.store_pending &&
+           image.info.guest_size != 0 && image.info.guest_size <= NetLargest &&
+           WatchRules::NetChecks(WatchView(image), WatchSettings());
+}
+} // namespace
+
+void TextureCache::TextureNet() {
+    // About 2 MiB hashed a second (one image of up to 8 MiB at most past it): a round over a few hundred
+    // MiB of such images takes minutes. It is a net under the calls, not the way writes are learnt.
+    constexpr u64 Budget = 2ull << 20;
+    u64 hashed = 0, images = 0;
+    // Last second's suspects first, now that the writes told since have been taken (ProcessWritten).
+    net_suspects_next.clear();
+    std::swap(net_suspects, net_suspects_next);
+    for (const auto& [image_id, uid] : net_suspects_next) {
+        if (const u64 bytes = NetLook(image_id, uid); bytes != 0) {
+            hashed += bytes;
+            ++images;
+        }
+    }
+    if (net_cursor >= net_list.size()) {
+        // A new round: the images checked now, and what was seen of them kept for those only.
+        net_list.clear();
+        net_cursor = 0;
+        std::unordered_map<u64, NetSeen> kept;
+        lru_cache.ForEachItemBelow(gc_tick, [&](ImageId image_id) {
+            const Image& image = slot_images[image_id];
+            if (NetCandidate(image)) {
+                net_list.emplace_back(image_id, image.image_uid);
+                if (const auto it = net_seen.find(image.image_uid); it != net_seen.end()) {
+                    kept.emplace(*it);
+                }
+            }
+            return false;
+        });
+        net_seen = std::move(kept);
+    }
+    while (net_cursor < net_list.size() && hashed < Budget) {
+        const auto [image_id, uid] = net_list[net_cursor++];
+        if (const auto it = net_seen.find(uid); it != net_seen.end() && it->second.suspect) {
+            continue; // looked at again next second
+        }
+        if (const u64 bytes = NetLook(image_id, uid); bytes != 0) {
+            hashed += bytes;
+            ++images;
+        }
+    }
+    BbEngine::GxResources::NoteTextureNet(images, hashed);
+}
+
+u64 TextureCache::NetLook(ImageId image_id, u64 uid) {
+    if (!slot_images.is_allocated(image_id) || slot_images[image_id].image_uid != uid) {
+        net_seen.erase(uid);
+        return 0; // gone
+    }
+    Image& image = slot_images[image_id];
+    if (!NetCandidate(image)) {
+        net_seen.erase(uid);
+        return 0;
+    }
+    // Copied out first, as MarkAsMaybeDirty does: a read of a page the buffer cache protects would fault
+    // on this thread with the cache's lock held.
+    const u64 size = image.info.guest_size;
+    net_scratch.resize(size);
+    Core::Memory::Instance()->CopySparseMemory(image.info.guest_address, net_scratch.data(), size);
+    const u64 hash = GuestMemoryHash(net_scratch.data(), size);
+    const auto [seen, first] = net_seen.try_emplace(uid, NetSeen{hash, image.cpu_marks});
+    if (first) {
+        return size;
+    }
+    // Marked since (told), or waiting for a refresh already.
+    constexpr u32 Marked = u32(ImageFlagBits::MaybeCpuDirty) | u32(ImageFlagBits::CpuDirty);
+    const bool marked = seen->second.marks != image.cpu_marks || (u32(image.flags) & Marked) != 0;
+    switch (WatchRules::Judge(seen->second.hash != hash, marked, seen->second.suspect)) {
+    case WatchRules::NetLook::Record:
+        break;
+    case WatchRules::NetLook::Suspect:
+        // Changed with no mark yet: the call telling it may not have been taken. Kept as seen before the
+        // change, looked at again next second.
+        seen->second.suspect = true;
+        net_suspects.emplace_back(image_id, uid);
+        return size;
+    case WatchRules::NetLook::Untold:
+        // Still no mark a second later: a write no call told. Its next use takes the memory, as for a
+        // told one.
+        RefreshTrace::Mark(image, "CPU write no call told (the texture net)", image.info.guest_address, size);
+        image.flags |= ImageFlagBits::CpuDirty;
+        ++image.cpu_marks;
+        image.mip_hashes_current = false;
+        BbEngine::GxResources::NoteTextureUntold(BbEngine::GxResources::Owner(image.gx_owner),
+                                                 image.info.guest_address, size, image.info.size.width,
+                                                 image.info.size.height);
+        break;
+    }
+    seen->second = {hash, image.cpu_marks, false};
+    return size;
 }
 
 void TextureCache::GarbageCollectSamplers() {

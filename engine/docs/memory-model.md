@@ -1182,7 +1182,10 @@ into the game (maps `m24_01`, `m27`, `m32`), about 3 minutes of play, a clean ex
   and 1,512 times (beta 13: 460 in 7 minutes, about 2 a second; now 8-10 a second, "an image on a
   page beside a live resource"), their handlers' time 0.0-1.2 ms a frame (a register row).
 
-### Beta 16: textures follow their calls (designed 2026-11-24, for the tester's review)
+### Beta 16: textures follow their calls
+
+Built 2026-11-24 (engine id 103). Designed the same day from the 1.09 executable and beta 15's first
+runs; the tester's go-ahead on the design below.
 
 The rule this release ends with that is not met for textures: "pages are write-protected only
 where no call tells". Since beta 9-10 the game's targets, its surfaces and the GX textures made with
@@ -1242,6 +1245,41 @@ and fade tables, the UI); frame times unchanged or better.
 scene on Uncapped, a stop in the pause menu; (2) the same with `BB_LOAD_UPLOAD=0 BB_COPY_NOTICE=0
 BB_WATCH_YEBIS_TEXTURES=1 BB_WATCH_SCALEFORM=1` (beta 15's A/B and beta 16's before); (3) online
 with other players. Beta 16 changes no file of the GPU cache's identity: the cache stays warm.
+
+**As built (2026-11-24):**
+
+- Parts 1-2: the rule is `texture_cache/watch_rules.h` (`WatchRules::ByCalls`, beta 8-10's rule with
+  YEBIS's textures made with their data and Scaleform's planes added), used by `TrackImage` and the
+  build-ahead's unwatch. The registry's `Describe` gives an image's resource at registration with
+  whether it was made with its data (`Image::gx_with_data`). Safe mode needs nothing new: its
+  `BB_WATCH_GAME_TEXTURES=1` watches every image, and the net then checks none.
+- Part 3: `TextureCache::TextureNet`, once a second after the told writes are taken
+  (`ProcessWritten`), about 2 MiB a second (one image of up to 8 MiB at most past it; larger images,
+  those the GPU drew and those being stored are left out). Each image is copied out of the game's
+  memory first, as the possibly-written check does: a page the buffer cache protects would otherwise
+  fault on this thread with the cache's lock held. An image counts as written by no call when its
+  memory hashes differently from the net's last look and the cache marked it no time in between
+  (`Image::cpu_marks`, counted at every place the cache marks an image written). The calls that tell
+  come after the write (YEBIS's update and unmap, Scaleform's unmap), so such a change is first a
+  suspect, looked at again the next second once the told writes are taken (`WatchRules::Judge`);
+  still unmarked then, it is marked written and counted, the first 8 named in the log. The list is
+  rebuilt at each round's end. A write made
+  before the net's first look at an image is not seen (the image was uploaded from memory just
+  before, at its creation).
+- Part 4: `Rasterizer::OnWriteFault` flags its invalidation (`t_write_fault`), and
+  `TextureCache::InvalidateMemory` counts each image still watching the faulting page by its
+  resource's kind, whether the write landed in it, and whether it reaches past its resource's bytes;
+  `ClassifyForMinute` counts the images watched and those left to the calls; YEBIS's maps of its own
+  buffers are counted in its Map hook. One minute line: "GX memory, textures by their calls this
+  minute (beta 16)".
+- `tests/test_watch_rules.cpp`: every owner kind with and without its data, surface or not, at the
+  resource's start or not, under each setting; the net only within what is left to the calls; the
+  net's verdict on a look. It fails on each of 10 deliberate breaks.
+- Found while building: beta 15's `pipeline-burst-test` had a start-up race. When its burst thread
+  went to sleep before its standing thread, the first job was a backlog of its own and went to the
+  burst thread, so no burst ended within the test's window (failing every time on a 4-processor
+  machine). The queue was right; the test now starts the burst thread once the first job runs, and
+  still fails when a burst's wall time counts the wait before it.
 
 ### Beta 17: shaders and pipelines (to research and design)
 

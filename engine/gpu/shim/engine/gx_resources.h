@@ -95,6 +95,29 @@ enum class Owner : std::uint8_t {
 const char* OwnerName(Owner owner);
 // `at_start`: whether the resource begins where the range does.
 Owner Classify(std::uint64_t begin, std::uint64_t end, bool* at_start = nullptr);
+// 0.4.6 beta 16: the live resource over [begin, end) as Classify finds it, with whether the game made it
+// with its data (YEBIS's and Scaleform's as GX's), its memory and its bytes.
+struct Resource {
+    Owner owner = Owner::None;
+    bool at_start = false, with_data = false;
+    std::uint64_t memory = 0, bytes = 0;
+};
+Resource Describe(std::uint64_t begin, std::uint64_t end);
+// 0.4.6 beta 16 part 4: a write fault on an image's pages (the texture cache, the faulting thread): the
+// image's owner kind, whether the write landed inside the image, and whether the image reaches past the
+// bytes of the resource starting at it.
+void NoteImageWatchFault(Owner owner, bool inside, bool past_resource);
+// The texture cache's images by owner kind, once a minute: watched by page protection, and left to the
+// calls (count and bytes each).
+struct WatchCensus {
+    std::array<std::uint64_t, std::size_t(Owner::kCount)> watched{}, watched_bytes{}, by_calls{}, by_calls_bytes{};
+};
+void NoteWatchCensus(const WatchCensus& census);
+// Part 3, the texture net: images hashed in its slice of the second, and a change no call told (the
+// image marked written).
+void NoteTextureNet(std::uint64_t images, std::uint64_t bytes);
+void NoteTextureUntold(Owner owner, std::uint64_t memory, std::uint64_t bytes, std::uint32_t width,
+                       std::uint32_t height);
 // An image made at a draw (not prepared ahead), by its owner; running totals for the hitch reports.
 void NoteDrawMade(Owner owner, std::uint64_t bytes);
 std::uint64_t DrawMadeTotal(Owner owner);

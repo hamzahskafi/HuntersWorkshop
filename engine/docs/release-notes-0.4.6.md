@@ -323,6 +323,27 @@ moves it there:
 
 Safe mode turns all four off.
 
+## Textures follow the game's calls (beta 16)
+
+The last of the game's memory still watched by page protection was some of its textures: each write
+near one stopped the game's thread for a moment while the engine checked it. Now:
+
+- **YEBIS's post-processing no longer stops the game 8-12 times a second.** For every
+  post-processing pass YEBIS writes a few vertices into a buffer that sits beside its small built-in
+  textures (dither, film grain, colour spectrum, fade). Because those textures were watched, every
+  one of those writes was caught and checked. They are made with their data and changed only through
+  YEBIS's own calls, which the engine already follows, so they are no longer watched.
+  `BB_WATCH_YEBIS_TEXTURES=1` in Extra variables watches them as before.
+- **The UI's texture planes** (Scaleform's) are no longer watched either: Scaleform tells the engine
+  when it has finished writing one. `BB_WATCH_SCALEFORM=1` watches them as before.
+- **A safety net:** once a second the engine checks a slice of the textures it no longer watches
+  (about 2 MB a second). If one changed without the game's calls saying so, and still nothing has
+  said so a second later, the engine updates it and notes it in the log. It should find nothing. `BB_TEXTURE_NET=0` turns it off.
+- **One line a minute in the log** says which textures are still watched, which write faults remain
+  and on what, and what the net found.
+
+Safe mode watches every texture, as before.
+
 ## Diagnostics
 
 - **The "Building shaders" note** shows when a frame was late while shaders were being

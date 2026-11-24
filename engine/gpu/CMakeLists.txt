@@ -445,6 +445,11 @@ add_executable(pipeline-burst-test EXCLUDE_FROM_ALL ../tests/test_pipeline_burst
 target_compile_options(pipeline-burst-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(pipeline-burst-test PRIVATE shim shadps4)
 target_link_libraries(pipeline-burst-test PRIVATE Threads::Threads)
+# 0.4.6 beta 16 parts 1-3: which images are left to the game's calls, under each setting, and which of
+# those the texture net checks.
+add_executable(watch-rules-test EXCLUDE_FROM_ALL ../tests/test_watch_rules.cpp)
+target_compile_options(watch-rules-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(watch-rules-test PRIVATE shim shadps4)
 # 0.4.6 beta 15 part 4: the create calls' copy caves, run for real (x86-64, mmap: not on Windows).
 if (NOT WIN32)
     add_executable(copy-cave-test EXCLUDE_FROM_ALL ../tests/test_copy_cave.cpp)

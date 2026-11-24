@@ -283,7 +283,7 @@ void OneBurst() {
 // one (beta 15's first runs: 6 short bursts reported as 52 s).
 void IdleBeforeBurst() {
     PipelineJobQueue q;
-    std::atomic<int> release_a{0};
+    std::atomic<int> release_a{0}, a_running{0}, c_pushed{0};
     std::optional<PipelineJobQueue::Burst> ended;
     std::mutex ended_mutex;
     std::atomic<bool> stop{false};
@@ -294,6 +294,14 @@ void IdleBeforeBurst() {
             q.Done(-1, 1, Now());
         }
     });
+    // Job a on the standing thread before the burst thread starts (beta 16: with the burst thread
+    // asleep first, a was a backlog of its own and went to it; no burst ended in the window).
+    int a = 0, b = 0, c = 0;
+    q.Push(&a, [&] {
+        a_running = 1;
+        while (!release_a) std::this_thread::sleep_for(1ms);
+    });
+    while (!a_running) std::this_thread::sleep_for(1ms);
     std::thread burst([&] {
         while (!stop) {
             auto job = q.PopBurst(0);
@@ -304,11 +312,11 @@ void IdleBeforeBurst() {
             }
         }
     });
-    int a = 0, b = 0, c = 0;
-    q.Push(&a, [&] { while (!release_a) std::this_thread::sleep_for(1ms); });
     std::this_thread::sleep_for(300ms); // the burst thread asleep all this while
-    q.Push(&b, [] {});
+    // b holds the burst open until c is queued: one burst of both, whichever thread is quicker.
+    q.Push(&b, [&] { while (!c_pushed) std::this_thread::sleep_for(1ms); });
     q.Push(&c, [] {});
+    c_pushed = 1;
     std::this_thread::sleep_for(50ms);
     {
         std::scoped_lock lk{ended_mutex};

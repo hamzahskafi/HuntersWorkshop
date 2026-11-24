@@ -59,6 +59,10 @@ struct InvalidateReason {
     }
 };
 
+/// 0.4.6 beta 16 part 4: set by Rasterizer::OnWriteFault around its invalidation, so that the images
+/// still watching the faulting page are counted by their resource's kind (InvalidateMemory).
+inline thread_local bool t_write_fault = false;
+
 class TextureCache {
     using ImageIds = boost::container::small_vector<ImageId, 16>;
 
@@ -541,6 +545,24 @@ private:
     void ExecutePlan();
     /// Beta 15 (once a minute): what the images are, for the VRAM manager's line.
     void ClassifyForMinute(u64 second);
+    /// 0.4.6 beta 16 part 3, the texture net: once a second, a slice of the images left to the calls
+    /// (WatchRules::NetChecks) hashed from their memory. A change with no mark since its last look is a
+    /// suspect (the call telling it may come after the write: YEBIS's update and unmap, Scaleform's
+    /// unmap), looked at again the next second; still no mark then, it is a write no call told and the
+    /// image is marked written. The list (id, uid) is rebuilt at each round's end; what each image
+    /// hashed to and its marks then, by uid.
+    void TextureNet();
+    struct NetSeen {
+        u64 hash;
+        u32 marks;
+        bool suspect = false;
+    };
+    /// One image's look (TextureNet): its bytes hashed, or 0 when it was not hashed.
+    u64 NetLook(ImageId image_id, u64 uid);
+    std::vector<std::pair<ImageId, u64>> net_list, net_suspects, net_suspects_next;
+    size_t net_cursor = 0;
+    std::unordered_map<u64, NetSeen> net_seen;
+    std::vector<u8> net_scratch;
     /// Beta 15: an image the collector frees: remembered 5 minutes (refaults); its bytes, and of them
     /// what goes back to the driver at once (memory of its own).
     void NoteCollected(const Image& image, u64 second, VramPolicy::Freed kind);

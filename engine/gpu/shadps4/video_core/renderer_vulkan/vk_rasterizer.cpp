@@ -6140,8 +6140,14 @@ bool Rasterizer::OnWriteFault(VAddr addr, bool assume_locks) {
             return false;
         }
         buffer_cache.InvalidateMemory(addr, size, assume_locks);
-    } else if (!InvalidateMemory(addr, size, assume_locks)) {
-        return false;
+    } else {
+        // 0.4.6 beta 16 part 4: the images watching this page are counted by their resource's kind.
+        VideoCore::t_write_fault = true;
+        const bool handled = InvalidateMemory(addr, size, assume_locks);
+        VideoCore::t_write_fault = false;
+        if (!handled) {
+            return false;
+        }
     }
     buffer_cache.ExtendWriteFault(addr);
     const u32 watched = (buffer_watch == 2 ? 1u : buffer_watch == 1 ? 2u : 0u) | (image_watch ? 4u : 0u);
