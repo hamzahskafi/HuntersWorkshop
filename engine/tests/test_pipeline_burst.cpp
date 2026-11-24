@@ -115,9 +115,7 @@ void Layouts() {
 }
 
 std::uint64_t Now() {
-    return static_cast<std::uint64_t>(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch())
-            .count());
+    return PipelineJobQueue::SteadyNs();
 }
 
 std::atomic<int> g_begins{0}, g_ends{0};
@@ -160,7 +158,7 @@ void Backlog() {
     std::thread burst([&] {
         for (;;) {
             bool started = false;
-            auto job = q.PopBurst(0, Now(), &started);
+            auto job = q.PopBurst(0, &started);
             job();
             if (stop) {
                 return;
@@ -249,7 +247,7 @@ void OneBurst() {
     });
     std::thread burst([&] {
         while (!stop) {
-            auto job = q.PopBurst(0, Now());
+            auto job = q.PopBurst(0);
             job();
             note(q.Done(0, 1, Now()));
         }
@@ -271,6 +269,51 @@ void OneBurst() {
         std::scoped_lock lk{ended_mutex};
         check(ended && ended->burst_jobs == 3 && ended->jobs == 3 && ended->burst_threads == 1,
               "the burst's three jobs, all the burst thread's");
+    }
+    release_a = 1;
+    stop = true;
+    for (int i = 0; i < 4; ++i) {
+        q.Push(nullptr, [] {});
+    }
+    standing.join();
+    burst.join();
+}
+
+// A burst's wall time starts at its first job, not when its burst thread went to sleep waiting for
+// one (beta 15's first runs: 6 short bursts reported as 52 s).
+void IdleBeforeBurst() {
+    PipelineJobQueue q;
+    std::atomic<int> release_a{0};
+    std::optional<PipelineJobQueue::Burst> ended;
+    std::mutex ended_mutex;
+    std::atomic<bool> stop{false};
+    std::thread standing([&] {
+        while (!stop) {
+            auto job = q.Pop();
+            job();
+            q.Done(-1, 1, Now());
+        }
+    });
+    std::thread burst([&] {
+        while (!stop) {
+            auto job = q.PopBurst(0);
+            job();
+            if (auto b = q.Done(0, 1, Now())) {
+                std::scoped_lock lk{ended_mutex};
+                ended = b;
+            }
+        }
+    });
+    int a = 0, b = 0, c = 0;
+    q.Push(&a, [&] { while (!release_a) std::this_thread::sleep_for(1ms); });
+    std::this_thread::sleep_for(300ms); // the burst thread asleep all this while
+    q.Push(&b, [] {});
+    q.Push(&c, [] {});
+    std::this_thread::sleep_for(50ms);
+    {
+        std::scoped_lock lk{ended_mutex};
+        check(ended && ended->burst_jobs == 2, "the burst's two jobs");
+        check(ended && ended->wall_ns < 150'000'000ull, "its wall time without the burst thread's sleep before it");
     }
     release_a = 1;
     stop = true;
@@ -308,7 +351,7 @@ void Stress() {
     for (int i = 0; i < Bursts; ++i) {
         threads.emplace_back([&, i] {
             while (!stop) {
-                auto job = q.PopBurst(static_cast<unsigned>(i), Now());
+                auto job = q.PopBurst(static_cast<unsigned>(i));
                 (void)q.RaisedTo(static_cast<unsigned>(i));
                 job();
                 note(q.Done(i, 1, Now()));
@@ -354,6 +397,7 @@ int main() {
     Layouts();
     Backlog();
     OneBurst();
+    IdleBeforeBurst();
     Stress();
     if (g_fail) {
         std::printf("pipeline-burst-test: %d failed\n", g_fail);

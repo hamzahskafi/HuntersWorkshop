@@ -131,6 +131,8 @@ then the game's buffers went before depth (the tester, with beta 11): buffers 12
 - **Optional, beta 11's A/B:** the same route twice, as shipped and with `BB_IMAGE_OWNERS=0`, to put
   a number on the VRAM difference the tester saw.
 - **Run C** (the shader cache cleared, the same route), before beta 15 only.
+- **Beta 15, part 3:** a run with a second load (the Dream and back, or a lantern): the first runs
+  (2026-11-24) each had one load, so nothing was learned before it and no surface was made ahead.
 
 ## The register: every open item
 
@@ -209,6 +211,8 @@ found.
 | eFMann's smoothness leads ([archive/hitches-2026-10.md](archive/hitches-2026-10.md)) | Plan step 3, "Later" | Only if stutter after loads remains after 0.4.6 |
 | A flicker at two area crossings: post-processing effects off and on for a split second | The tester, 2026-11-08 | Not the memory work: there in 0.4.4 and 0.4.5, and in beta 8 with `BB_EMPTY_SURFACES=0`, `BB_TARGET_POOL=0` or `BB_GX_FOLLOW=0` (log `8d281c42`). Likely the game's own reset of its post-processing when YEBIS rebuilds; parked until a PS4 recording of those spots shows otherwise |
 | A hitch when a controller connects at startup (the UI changes its button prompts; possibly a YEBIS rebuild) | The tester, 2026-11-08: "something for later if I ever even bother with it" | Low priority; beta 8's rebuild logging may show whether it is a rebuild |
+| A first visit with the cache cleared: the GPU thread builds the pipelines' shaders itself (beta 15's cold run: a 220.8 ms frame after the load, 185 pipelines, 323.6 ms of shader and pipeline work on the GPU thread); burst threads compile only what is queued after that | Beta 15's first runs, 2026-11-24 (`b53c92dc`) | A one-time cost per new build or cleared cache; looked at if new ground still stalls with the cache warm (translation off the GPU thread is the lead) |
+| YEBIS's own CPU writes (`+0xc21ef2`) fault 8-10 times a second on pages beside a live resource an image watches (beta 13: about 2) | Beta 15's first runs, 2026-11-24 | Not beta 15's parts (play, not loads); handlers 0.0-1.2 ms a frame. A run with `BB_COPY_NOTICE=0` would rule part 4 out; looked at if the count or its time grows |
 | The tombstones in a graveyard do not look right to the tester | The tester, 2026-11-08 (beta 10's second run) | Not the memory work: the same in 0.4.5. Looked at only with a screenshot and the place, or a PS4 comparison |
 
 ### Performance, after 0.4.6

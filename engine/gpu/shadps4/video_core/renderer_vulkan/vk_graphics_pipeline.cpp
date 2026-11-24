@@ -104,9 +104,7 @@ public:
     std::atomic<u32> burst_threads_most{0};
 
     static u64 NowNs() {
-        return u64(std::chrono::duration_cast<std::chrono::nanoseconds>(
-                       std::chrono::steady_clock::now().time_since_epoch())
-                       .count());
+        return PipelineJobQueue::SteadyNs();
     }
 
     /// A job ended after `ns` on burst thread `burst_index` (-1: another thread).
@@ -173,7 +171,7 @@ private:
                 burst_handles[i] = BbThreads::SelfHandle();
                 for (;;) {
                     // At normal priority while at the queue (its lock), idle for the compile.
-                    auto job = queue.PopBurst(i, NowNs());
+                    auto job = queue.PopBurst(i);
                     BbThreads::MakeBackground();
                     if (const auto to = queue.RaisedTo(i)) {
                         BbThreads::SetPriority(burst_handles[i], *to); // raised before the lowering

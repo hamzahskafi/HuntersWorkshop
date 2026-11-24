@@ -1150,6 +1150,34 @@ frames after loads without parts 2 to 4's work.
 2. New ground, or the cache cleared, for the bursts.
 3. Part 3's time, on the 3070 Ti if it is at hand (the NVIDIA checks' row).
 
+**The first runs (2026-11-24, the tester's `b53c92dc` with the cache mostly cleared by a new
+build, 33 pipelines cached at the start, then `85f5c043` with 240):** each one load, from the title
+into the game (maps `m24_01`, `m27`, `m32`), about 3 minutes of play, a clean exit.
+
+- **Part 1:** the `CPU:` line read the i5-14600KF right (14 cores: 6 performance with two threads,
+  8 efficiency; 8 burst threads on the efficiency cores; the CPU sets were accepted). With the cache
+  cold the load's window compiled 176 pipelines in 976 ms of compiling (5.5 ms each on AMD): the 4
+  standing threads mostly kept up, and the 6 bursts each had under 8 pipelines, at most 2 burst
+  threads in one (so no burst line). Warm: 2 pipelines, no burst. The bursts' wall time read 52 s:
+  a bug, the burst's start taken before its thread slept waiting for work; fixed the same day
+  (`IdleBeforeBurst` in the test). The cold run's worst frame after the load, 220.8 ms, was the GPU
+  thread building 185 pipelines itself (323.6 ms of shader and pipeline work on it), which no burst
+  thread does (a register row).
+- **Part 2:** 849.3 MB of the game's buffers made during the screen, all uploaded during it; 37.1
+  and 28.2 MB uploaded at draws in the 2 s after; sparse binds 5.6 and 9.1 ms during the screen, 0.5
+  and 0.7 ms after (beta 13: 23 ms in the frame after `m33`). Warm: 3 frames over 25 ms of 339 in the
+  2 s after, worst 49.4 ms, the GPU thread idle in it (the game's side, after YEBIS's rebuild).
+- **Part 3:** nothing learned before a session's only load, so nothing made; that load's 82 surfaces
+  allocated at their draw (8.5 and 6.3 ms on AMD) are learned. Needs a run with a second load.
+- **Part 4:** 4,321 copies told per load. No fault on a live buffer's inside page in any minute
+  line; the GPU's-data faults 6 and 12 in the first minute, 4 and 2 pages dropped without a
+  readback. What the copies still fault is their edge pages, as designed: 77 and 181 from
+  CreateTexture's (`+0x2166210`), 15 and 118 from CreateBuffer's (`+0x2165e2e`) over the sessions
+  (beta 11's run: 10,849 and 10,050).
+- **Not beta 15's:** YEBIS's own CPU writes (`+0xc21ef2`, through the host's memcpy) faulted 1,089
+  and 1,512 times (beta 13: 460 in 7 minutes, about 2 a second; now 8-10 a second, "an image on a
+  page beside a live resource"), their handlers' time 0.0-1.2 ms a frame (a register row).
+
 ### The 0.4.6 release
 
 - **Switches:** each beta's switches, and `BB_COPY_HOLD` and `BB_COPY_MERGE` (kept through 0.4.5

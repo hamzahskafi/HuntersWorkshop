@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <atomic>
 #include <bit>
+#include <chrono>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
@@ -87,10 +88,17 @@ public:
         return job;
     }
 
+    /// The steady clock in ns (Done's `now_ns` is read from it too).
+    static std::uint64_t SteadyNs() {
+        return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                              std::chrono::steady_clock::now().time_since_epoch())
+                                              .count());
+    }
+
     /// Burst thread `index` (below kMaxBurstThreads): the oldest job once there is a backlog
-    /// (waits for one). `now_ns`: the steady clock, for the burst's wall time; `started`: this job
-    /// began a burst.
-    Job PopBurst(unsigned index, std::uint64_t now_ns, bool* started = nullptr) {
+    /// (waits for one). `started`: this job began a burst, whose wall time starts now, after the
+    /// wait (0.4.6 beta 15's first runs counted the wait in it: 6 bursts of 52 s).
+    Job PopBurst(unsigned index, bool* started = nullptr) {
         std::unique_lock lk{mutex};
         ++idle_burst;
         burst_cv.wait(lk, [this] { return Backlog(); });
@@ -100,7 +108,7 @@ public:
         if (!burst_on) {
             burst_on = true;
             burst = {};
-            burst_start_ns = now_ns;
+            burst_start_ns = SteadyNs();
             burst_threads_used = 0;
             if (started) {
                 *started = true;
