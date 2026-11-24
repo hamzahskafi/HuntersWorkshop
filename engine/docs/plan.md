@@ -252,6 +252,14 @@ the PC memory model), fixed, removed, or not the cause in 0.4.4's logs.
 - The features bbport 0.7 noted that HW has not taken: GT-VBAO, the shader recipe pack (to be
   converted to HW's cache inputs), video skipping, invert mouse X ([community-fixes.md](community-fixes.md),
   "bbport 0.7, reviewed").
+- A smaller FFmpeg (raised by the builder session at the tester's request, 2026-11-24; not beta
+  16): the Windows packages bundle MSYS2's CLANG64 FFmpeg, built with GPL encoders (x264, x265,
+  xvidcore, lame, SVT-AV1, rav1e and more) and their libraries, a good share of the 110 DLLs in
+  `engine/out` (beta 15's standalone is about 200 MB zipped). The engine only decodes (avplayer:
+  `avformat_open_input`, `avcodec_find_decoder`, swscale, swresample). A decode-only build
+  (`--disable-encoders --disable-gpl`, only the decoders and demuxers the game's videos need) would
+  shrink the package and make FFmpeg LGPL. No licence action needed meanwhile: the engine is GPL
+  and its source public, and `licenses/msys2/PACKAGES.txt` lists every bundled package.
 
 ### Checks not made
 
