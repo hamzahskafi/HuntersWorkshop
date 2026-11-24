@@ -94,9 +94,12 @@ The sections after this one are the record of the work from the first frame anal
   up (Balanced: 23 phases, not 24); the log says so when they differ. The engine's rule until the context
   is ready.
 - **AMD FSR's checks (0.4.6 beta 16):** `BB_AMD_FSR_DEBUG=1` turns on AMD's API checks (its findings in
-  the log as `Upscaler: AMD FSR warning`); `BB_AMD_FSR_DEBUG_VIEW=1` shows AMD's debug view in place of
-  the picture. The debug view is now allowed when the context is made
-  (`FFX_UPSCALE_ENABLE_DEBUG_VISUALIZATION`): before, the dispatch flag alone drew nothing. When the
+  the log as `Upscaler: AMD FSR warning`). AMD's debug view in place of the picture: the in-game menu's
+  "Show AMD FSR's own view (debug)" under Motion vectors (AMD FSR only, not saved, beside the engine's
+  own motion vector view) or `BB_AMD_FSR_DEBUG_VIEW=1`. The view must be allowed when the context is made
+  (`FFX_UPSCALE_ENABLE_DEBUG_VISUALIZATION`, more GPU memory): the context is made again in the
+  background when it is turned on or off (part of `AmdFsr`'s key, as the version is). Before, the
+  dispatch flag alone drew nothing. When the
   context is made, the log names the inputs the running version says it needs and uses if given
   (AMD's resource requirements query), and its GPU memory.
 - **Checked against AMD's API (2026-11-24, the tester's question; `ffx_upscale.h`, SDK 2.4):** the inputs

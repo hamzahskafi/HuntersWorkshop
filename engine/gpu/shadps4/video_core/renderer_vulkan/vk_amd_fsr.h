@@ -41,10 +41,12 @@ public:
     /// Starts making the context for an output size and its inputs on a worker thread (making it
     /// builds the upscaler's shaders: seconds the first time); nothing when one is made or being made
     /// for them. `version`: "auto" (the newest AMD's SDK runs here) or a version AMD lists for this GPU
-    /// by its name (BbSettings::FsrVersionMatch; 0.4.4 beta 27c, was FSR 3.1 or not).
-    void Prepare(u32 output_width, u32 output_height, bool hdr, const std::string& version);
+    /// by its name (BbSettings::FsrVersionMatch; 0.4.4 beta 27c, was FSR 3.1 or not). `debug_view`: AMD's
+    /// debug view allowed and drawn (0.4.6 beta 16: the menu's row or BB_AMD_FSR_DEBUG_VIEW=1).
+    void Prepare(u32 output_width, u32 output_height, bool hdr, const std::string& version, bool debug_view);
     /// A context for these is made: Record can run.
-    [[nodiscard]] bool Ready(u32 output_width, u32 output_height, bool hdr, const std::string& version) const;
+    [[nodiscard]] bool Ready(u32 output_width, u32 output_height, bool hdr, const std::string& version,
+                             bool debug_view) const;
     /// A context is being made on the worker thread.
     [[nodiscard]] bool Preparing() const noexcept;
 

@@ -1239,6 +1239,22 @@ void MaskSection() {
             "Движущийся предмет без синего и без красного/зелёного апскейлер считает "
             "неподвижным, отсюда шлейф."));
     }
+    // 0.4.6 beta 16 (the tester): AMD's own debug view, as BB_AMD_FSR_DEBUG_VIEW=1 gives it. AMD FSR only.
+    if (s.upscaler == BbSettings::UpscalerFsr || Searching()) {
+        if (const char* label = Item("Show AMD FSR's own view (debug)", "Показать собственный вид AMD FSR (отладка)")) {
+            bool show_amd = s.debug_view == BbSettings::DebugAmdFsr;
+            if (ImGui::Checkbox(label, &show_amd)) {
+                s.debug_view = show_amd ? BbSettings::DebugAmdFsr : BbSettings::DebugNone;
+            }
+            Hint(BbSettings::MenuText(
+                "AMD's diagnostic view in place of the picture: how FSR reads the motion vectors, where it "
+                "finds newly uncovered areas and how much it trusts its history. Turning it on or off "
+                "restarts FSR in the background (the picture at full size for a moment). Not saved.",
+                "Диагностический вид AMD вместо картинки: как FSR читает векторы движения, где находит "
+                "открывшиеся области и насколько доверяет накопленной истории. Включение и выключение "
+                "перезапускает FSR в фоне (картинка на миг в полном размере). Не сохраняется."));
+        }
+    }
     ImGui::EndDisabled(); // upscaler off
 }
 

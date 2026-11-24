@@ -382,6 +382,15 @@ bool TemporalUpscaler::FsrBuilding() const {
     return fsr_building;
 }
 
+/// 0.4.6 beta 16: AMD FSR's own debug view: the menu's row (not saved) or BB_AMD_FSR_DEBUG_VIEW=1.
+static bool AmdFsrDebugView() {
+    static const bool env = [] {
+        const char* value = std::getenv("BB_AMD_FSR_DEBUG_VIEW");
+        return value && value[0] == '1';
+    }();
+    return env || BbSettings::Get().debug_view == BbSettings::DebugAmdFsr;
+}
+
 void TemporalUpscaler::PrepareFsr() {
     const auto& settings = BbSettings::Get();
     fsr_building = false;
@@ -396,8 +405,9 @@ void TemporalUpscaler::PrepareFsr() {
     // third-party resolution patch; RecordFrameUpscaler), until the output changes.
     const u32 ow = fsr_width ? fsr_width : target_width, oh = fsr_height ? fsr_height : target_height;
     const std::string version = BbSettings::FsrVersion();
-    if (!amd_fsr->Ready(ow, oh, hdr, version)) {
-        amd_fsr->Prepare(ow, oh, hdr, version);
+    const bool debug_view = AmdFsrDebugView();
+    if (!amd_fsr->Ready(ow, oh, hdr, version, debug_view)) {
+        amd_fsr->Prepare(ow, oh, hdr, version, debug_view);
         fsr_building = !amd_fsr->Fatal();
     }
 }
@@ -2620,7 +2630,7 @@ bool TemporalUpscaler::RecordFrameUpscaler(vk::CommandBuffer cmdbuf, UpscaleInpu
     if (!use_dlss && reactive && reactive_image) {
         frame.reactive = {vk::Image(reactive_image), *reactive_view, w, h, vk::Format::eR8Unorm};
     }
-    if (!use_dlss && !amd_fsr->Ready(ow, oh, hdr, BbSettings::FsrVersion())) {
+    if (!use_dlss && !amd_fsr->Ready(ow, oh, hdr, BbSettings::FsrVersion(), AmdFsrDebugView())) {
         // A frame of another size than the context was made for (a third-party resolution patch
         // renders the scene larger than the output): made again for it, the scene at full size
         // meanwhile (PrepareFsr, Active).

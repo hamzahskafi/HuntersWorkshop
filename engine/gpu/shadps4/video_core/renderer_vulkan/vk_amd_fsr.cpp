@@ -130,15 +130,6 @@ bool Fsr31Name(const std::string& name) {
     return false;
 }
 
-/// BB_AMD_FSR_DEBUG_VIEW=1: AMD's debug view in place of the picture (its inputs and its own state).
-bool DebugView() {
-    static const bool on = [] {
-        const char* env = std::getenv("BB_AMD_FSR_DEBUG_VIEW");
-        return env && env[0] == '1';
-    }();
-    return on;
-}
-
 /// The inputs named by AMD's resource bits (FfxApiQueryResourceIdentifiers).
 std::string InputNames(uint64_t bits) {
     static constexpr std::pair<uint64_t, const char*> kNames[] = {
@@ -183,6 +174,7 @@ struct AmdFsr::Impl {
         u32 width{}, height{};
         bool hdr{};
         std::string version = "auto"; ///< fsr_version: "auto" or a version's name
+        bool debug_view{}; ///< 0.4.6 beta 16: AMD's debug view allowed and drawn (the menu, BB_AMD_FSR_DEBUG_VIEW)
         bool operator==(const Key&) const = default;
     } made{}, wanted{};
     std::string provider_name;
@@ -345,9 +337,9 @@ struct AmdFsr::Impl {
         if (debug) {
             desc.flags |= FFX_UPSCALE_ENABLE_DEBUG_CHECKING;
         }
-        // 0.4.6 beta 16: AMD's debug view (BB_AMD_FSR_DEBUG_VIEW=1) must be allowed when the context is made;
-        // the dispatch flag alone drew nothing.
-        if (DebugView()) {
+        // 0.4.6 beta 16: AMD's debug view (the menu, BB_AMD_FSR_DEBUG_VIEW=1) must be allowed when the context
+        // is made; the dispatch flag alone drew nothing. It takes more memory: only while it is shown.
+        if (key.debug_view) {
             desc.flags |= FFX_UPSCALE_ENABLE_DEBUG_VISUALIZATION;
         }
         desc.maxRenderSize = {key.width, key.height};
@@ -462,10 +454,11 @@ struct AmdFsr::Impl {
         DestroyContextNow(false);
         wanted = key;
         preparing = true;
-        std::printf("Upscaler: AMD FSR building its shaders in the background (output %ux%u, %s%s); "
+        std::printf("Upscaler: AMD FSR building its shaders in the background (output %ux%u, %s%s%s); "
                     "the scene at full size meanwhile\n",
                     key.width, key.height, key.hdr ? "HDR scene" : "linear frame",
-                    key.version == "auto" ? "" : (", FSR " + key.version + " asked for").c_str());
+                    key.version == "auto" ? "" : (", FSR " + key.version + " asked for").c_str(),
+                    key.debug_view ? ", AMD's debug view" : "");
         prep = std::thread([this, key] {
             const auto start = std::chrono::steady_clock::now();
             created_ok = CreateContextNow(key);
@@ -640,7 +633,7 @@ struct AmdFsr::Impl {
         d.cameraFar = f.far_plane;
         d.cameraFovAngleVertical = f.vertical_fov;
         d.viewSpaceToMetersFactor = 1.0f;
-        d.flags = DebugView() ? FFX_UPSCALE_FLAG_DRAW_DEBUG_VIEW : 0u;
+        d.flags = made.debug_view ? FFX_UPSCALE_FLAG_DRAW_DEBUG_VIEW : 0u;
         Transition(f.cmdbuf, f, true);
         const auto result = dispatch(&context, &d.header);
         Transition(f.cmdbuf, f, false);
@@ -664,13 +657,13 @@ bool AmdFsr::Probe() {
     return impl->Probe();
 }
 
-void AmdFsr::Prepare(u32 ow, u32 oh, bool hdr, const std::string& version) {
+void AmdFsr::Prepare(u32 ow, u32 oh, bool hdr, const std::string& version, bool debug_view) {
     impl->Settle();
-    impl->Prepare({ow, oh, hdr, BbSettings::FsrVersionKey(version)});
+    impl->Prepare({ow, oh, hdr, BbSettings::FsrVersionKey(version), debug_view});
 }
 
-bool AmdFsr::Ready(u32 ow, u32 oh, bool hdr, const std::string& version) const {
-    return impl->Ready({ow, oh, hdr, BbSettings::FsrVersionKey(version)});
+bool AmdFsr::Ready(u32 ow, u32 oh, bool hdr, const std::string& version, bool debug_view) const {
+    return impl->Ready({ow, oh, hdr, BbSettings::FsrVersionKey(version), debug_view});
 }
 
 bool AmdFsr::Preparing() const noexcept {
@@ -738,8 +731,8 @@ AmdFsr::~AmdFsr() = default;
 bool AmdFsr::Probe() {
     return false;
 }
-void AmdFsr::Prepare(u32, u32, bool, const std::string&) {}
-bool AmdFsr::Ready(u32, u32, bool, const std::string&) const {
+void AmdFsr::Prepare(u32, u32, bool, const std::string&, bool) {}
+bool AmdFsr::Ready(u32, u32, bool, const std::string&, bool) const {
     return false;
 }
 bool AmdFsr::Preparing() const noexcept {

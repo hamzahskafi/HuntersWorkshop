@@ -347,6 +347,12 @@ Safe mode watches every texture, as before.
 
 ## Diagnostics
 
+- **AMD FSR's own view** (beta 16): "Show AMD FSR's own view (debug)" in the in-game menu, under Motion
+  vectors, replaces the picture with AMD's diagnostic view: how FSR reads the motion vectors, where it
+  finds newly uncovered areas and how much it trusts its history. AMD FSR only; turning it on or off
+  restarts FSR in the background for a moment; not saved. `BB_AMD_FSR_DEBUG=1` in Extra variables turns
+  on AMD's own checks of what the engine gives FSR (any finding in the log).
+
 - **The "Building shaders" note** shows when a frame was late while shaders were being
   prepared, for 2 seconds, rather than once 30 ms of that work had added up: it missed the short
   stutters on a first visit and showed for longer work that made no frame late.

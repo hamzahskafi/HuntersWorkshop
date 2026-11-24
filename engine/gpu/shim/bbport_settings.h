@@ -55,7 +55,9 @@ inline constexpr float RenderScaleMin = 1.0f, RenderScaleMax = 3.0f;
 inline constexpr float MipBiasMin = -2.0f, MipBiasMax = 1.0f;
 /// bbport: where the FPS counter sits (fps_position).
 enum FpsPosition : int { FpsTopRight = 0, FpsTopLeft, FpsBottomRight, FpsBottomLeft, FpsTopCentre, FpsPositionCount };
-enum DebugView : int { DebugNone = 0, DebugReactive = 1, DebugMotion = 2, DebugViewCount };
+/// 0.4.6 beta 16: DebugAmdFsr is AMD's own debug view (AMD FSR only; its context made again with the view
+/// allowed, AmdFsr's key).
+enum DebugView : int { DebugNone = 0, DebugReactive = 1, DebugMotion = 2, DebugAmdFsr = 3, DebugViewCount };
 /// The menu's language, in the Language selector's order (bbport_overlay.cpp).
 enum class MenuLanguage {
     English, Russian, Spanish, PortugueseBrazil, French, German, Italian, Polish, Turkish, ChineseSimplified
