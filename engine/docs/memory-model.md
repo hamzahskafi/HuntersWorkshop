@@ -1187,14 +1187,27 @@ into the game (maps `m24_01`, `m27`, `m32`), about 3 minutes of play, a clean ex
 The rule this release ends with that is not met for textures: "pages are write-protected only
 where no call tells". Since beta 9 the game's targets, its surfaces and the textures it makes with
 their data are unwatched; YEBIS's CPU-updated textures, Scaleform's planes, GX textures made
-without data and images over no game resource are still watched by page protection, though YEBIS's
+without data and images over no game resource are still watched by page protection. YEBIS's
 updates and Scaleform's unmaps are hooked and tell the texture cache after the write (beta 9).
-Beta 15's runs show the cost: YEBIS's writes at `+0xc21ef2` (through the host's memcpy) fault 8-12
-times a second on the same two pages (`0x105f002xxx`, `0x105efe7xxx`), into its 256x1, 16x16 and
-1x1 textures and into its data beside them; each fault takes the texture cache's lock on the game's
-thread. Research questions: which images are still watched, by kind; which code writes each, and
-whether `+0xc21ef2` runs inside YEBIS's update call; what a sampling net for unwatched textures
-costs. The design comes to the tester before anything is built (`plan.md`, the track, phase B).
+
+**Checked 2026-11-24, before designing:** the writes that fault in beta 15's runs are not YEBIS's
+updates. The writer at `+0xc21ef2` (through the host's memcpy) wrote 500-720 times a minute in the
+second and third minutes, when YEBIS's update call ran 0 times (all 87 updates were in the first
+minute, at the load). It writes into small images (256x1, 16x16, 1x1, format 37, at
+`0x105ef69d00`, `0x105ef74900`, `0x105efe7d00`) and into data beside them; the minute lines class
+the faults as "an image on a page beside a live resource", so those images sit on memory no
+registered resource holds (no creator of the game's that HW hooks made them, or none is known for
+them). So no call tells these writes today, and unwatching would miss them: the tables would go
+stale. The engine-follows-the-calls answer is to find the call: what the code at `+0xc21ef2`
+updates, who made those textures, and whether a call around them can tell the writes (then they are
+unwatched as their siblings are). That needs the 1.09 executable (the environment was rebuilt).
+
+Research questions: the function at `+0xc21ef2` and its callers (YEBIS's parameter or table
+update, or the game's); the creator of the images over no game resource (a 1D creator, a YEBIS path
+not hooked, the game's own heap); which images are still watched, by kind; Scaleform's planes (their
+writes told by the unmap hook: 20-23 a minute, the faults on them 5-10 a minute) as the case that can
+be unwatched now; a sampling net for unwatched textures. The design comes to the tester before
+anything is built (`plan.md`, the track, phase B).
 
 ### Beta 17: shaders and pipelines (to research and design)
 

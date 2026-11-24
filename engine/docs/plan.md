@@ -91,7 +91,7 @@ The decisions that still stand. How each was reached is in [archive/plan-0.4.4.m
 | The memory model (0.4.6) | The engine's caches follow the game's own calls (GX, YEBIS, Scaleform): images and buffers belong to the resources the game creates, GPU-owned surfaces never read the game's memory, and writes are learned from the calls; pages are watched only where no call tells (the tester, 2026-11-08). 0.4.6 is that release, depth buffers, the game's buffers and the shaders built ahead included. The roadmap: [memory-model.md](memory-model.md). |
 | The VRAM manager | Off by default since 0.4.6 beta 5 (the tester's call): the game's calls decide. `BB_VRAM_MANAGER=1`, Use less VRAM and safe mode turn it on, its rules unchanged. |
 | The game's GX calls straight to the host GPU | Not planned. Decided after 0.4.6 by profiling how much frame time replaying the command stream takes; done only if that share is worth it, and then one part at a time ([memory-model.md](memory-model.md), "After 0.4.6"). |
-| Test PC | RX 9070 XT since 2026-11-10 (RTX 3070 Ti before), i5-14600KF; the plan said a 60 Hz display, beta 15's logs show a 480 Hz vblank (to confirm); Windows HDR is off. HDR-output items are checked in the code, not in the tester's runs. |
+| Test PC | RX 9070 XT since 2026-11-10 (RTX 3070 Ti before), i5-14600KF, 60 Hz display (the 480 Hz vblank in beta 15's logs is the Uncapped preset, which the tester uses for the heavy test scene); Windows HDR is off. HDR-output items are checked in the code, not in the tester's runs. |
 
 ## Now: 0.4.6, the memory model release
 
@@ -114,7 +114,7 @@ then the game's buffers went before depth (the tester, with beta 11): buffers 12
 | 13 | Beta 12's follow-ups: the labels' check, write faults counted by what watched their page, loading lines naming their area (the depth items, the minute report's move and the GPU cache's identity dropped by the tester, 2026-11-09) | Built 2026-11-09 (engine id 99). The tester's run read: clean; a label over a VRAM copy about every 25 s (fixed), the create calls' faults explained, the frames after loads broken down; the second m34 entry not in the route |
 | 14 | The Hunter's Dream's 0.2.31 update: NpSignaling ported from bbhost v0.2.35 (the games' greeting), Matching2 on it, the P2P port (greetings, 64 KB, pieces over 1,200 bytes), the NpId compares, character names; bbhost's sign-in check and one poll in flight; players' addresses masked in the log; a line per session; tested against bbhost's own code (`online-update.md`) | Designed 2026-11-15. The tester (2026-11-16): parts 1-5 agreed, 6-9 to discuss, no 0.4.5 hotfix, no launcher sign-in display. Parts 1-5 built 2026-11-16 (engine id 100), their tests passing here (the handshake the same as bbhost's own code); parts 6-9 chosen by the tester and built 2026-11-21 (engine id 101): the game told it is signed out while the server refuses the sign-in, one poll out, addresses masked in the log, a line per session. Waits on the tester's runs with updated players |
 | 15 | Work moved into the loading screen (the memory work's beta 14 until 2026-11-15): compile bursts on spare processor time (burst threads at idle priority, raised while a frame waits for theirs, at most one compile thread per physical core, on the efficiency cores where there are any, none under Wine by default; `BB_PIPELINE_BURST`, `BB_CPU_SETS`; the start-up build on all logical processors but one, at most 16), the game's buffers made during a loading screen uploaded during it (`BB_LOAD_UPLOAD`), surfaces' memory made during the loading screen by learned shape (`BB_READY_SURFACES`), the create calls telling the engine before their copy (`BB_COPY_NOTICE`), one line per load on its first frames. Pipelines for areas the PC has never drawn are not buildable from the game's calls: that needs keys from elsewhere (the catalog row) | Designed 2026-11-10 (`memory-model.md`). Discussed with the tester 2026-11-22: all five parts kept (part 3 for cards where making surfaces is slow (the 3070 Ti), though the tester is on the 9070 XT); part 1 redesigned around the game's threads and processor types, CPU sets for HW's burst threads agreed; 2026-11-23: no measuring of spare capacity (the scheduler does it), the system told what the burst threads are instead. Built 2026-11-23 (engine id 102): all five parts, each with its switch, all four off in safe mode |
-| 16 | Textures follow their calls (the memory model's rule 3): the images still watched by page protection counted by kind with what writes them; YEBIS's CPU-updated textures and Scaleform's planes unwatched (their writes told by the calls hooked in beta 9); textures made without data that no CPU writes unwatched; a sampling net for writes no call tells | To research and design (the track, phase B) |
+| 16 | Textures follow their calls (the memory model's rule 3): the writer that faults 8-12 times a second (`+0xc21ef2`, into small tables on memory no registered resource holds, outside YEBIS's update call) found and told by its call, then its textures unwatched; Scaleform's planes unwatched (told by their unmap); the images still watched counted by kind; a sampling net for writes no call tells | To research (needs the 1.09 executable) and design (the track, phase B) |
 | 17 | Shaders and pipelines (rule 5): shader translation off the GPU thread; the GPU cache kept across engine updates that change nothing it stores; the catalog decided | To research and design (the track, phase C) |
 | Release | Switches settled with the tester, old paths agreed on removed, a small-card run, the docs, a release-candidate run | Planned (the track, phase D) |
 
@@ -129,7 +129,8 @@ switch per part, native tests that fail on deliberate breaks, syntax checks on c
 → pushed with its engine id → the tester's named runs → the logs read, every finding a register row
 → the gate decided with the tester. Nothing in the launcher's pages or settings without asking first.
 
-**Phase A: beta 15 closed (runs only, nothing to build).**
+**Phase A: beta 15 closed (runs only, nothing to build; the tester runs them with beta 16's build,
+2026-11-24: beta 15's switches stay).**
 
 1. The usual route with a second load (a lantern, or the Dream and back): part 3 makes and hands out
    surfaces (`surfaces ready N, taken M` above 0 in the second load's line).
@@ -142,19 +143,20 @@ Gate: no new problem; part 3 seen working; the A/B read.
 
 **Phase B: beta 16, textures follow their calls (rule 3).**
 
-- Why: textures are the last of the game's resources still watched by page protection where the
-  game's calls already say what writes them. Its symptom in beta 15's runs: YEBIS's own writes
-  faulting 8-12 times a second on pages its small textures share (`+0xc21ef2`; 256x1, 16x16 and 1x1
-  textures it rewrites, and its data beside them), each fault taking the texture cache's lock on the
-  game's thread.
-- Research first: which images are still watched, by kind (YEBIS's CPU-updated textures, Scaleform's
-  planes, GX textures made without data, images over no game resource); which code writes each; and
-  whether `+0xc21ef2` runs inside YEBIS's update call (hooked since beta 9, which already tells the
-  texture cache after it). The 1.09 executable is needed again here (the environment was rebuilt).
-- Likely parts, each with its switch: the watched images and their writers counted (whether a write
-  came inside a told call); YEBIS's and Scaleform's textures unwatched; textures made without data
-  that no CPU writes unwatched; a sampling net hashing unwatched textures for any write no call tells
-  (as beta 12's for buffers).
+- Why: textures are the last of the game's resources still watched by page protection. Its
+  symptom in beta 15's runs: one writer (`+0xc21ef2`) faulting 8-12 times a second, into small
+  tables (256x1, 16x16, 1x1) and the data beside them, each fault taking the texture cache's lock on
+  the game's thread.
+- Checked 2026-11-24: those writes are not YEBIS's updates (none ran in the minutes they kept
+  coming), and the tables sit on memory no registered resource holds: no call tells them today, so
+  they cannot simply be unwatched (they would go stale). The call that writes them has to be found
+  first. The 1.09 executable is needed again here (the environment was rebuilt).
+- Research first: the function at `+0xc21ef2` and its callers; who creates those tables; which
+  images are still watched, by kind; Scaleform's planes (told by their unmap) as the part that can
+  be unwatched now.
+- Likely parts, each with its switch: the tables' writer hooked and told, then the tables unwatched;
+  Scaleform's planes unwatched; the watched images counted by kind with their writers; a sampling
+  net hashing unwatched textures for any write no call tells (as beta 12's for buffers).
 - Gate: image write faults near zero, the net finding nothing, no visual difference (YEBIS's small
   textures are its tone and exposure tables: a missed write would show in colour or brightness).
 
@@ -248,7 +250,7 @@ found.
 | V-Sync's default, On (latest frame) (Vulkan's Mailbox), is not offered by AMD's driver on the tester's RX 9070 XT (2.0.416): the engine falls back to On (every frame) (FIFO) with a warning only in the log; the launcher and the in-game menu still show the default. Same picture at 60 FPS on a 60 Hz screen (no tearing, the frame rate held to the screen), up to a frame more latency | The tester's first AMD runs, 2026-11-10 | Proposed to the tester (a settings text, so asked first): the log line in plain words, and the launcher and the in-game V-Sync row naming the mode in use when the GPU lacks the one chosen |
 | Surfaces made at their first draw get their memory then: after a load, 11.8-35.9 ms of allocation in the first frame (beta 13's run: 11 images 14.3 ms after the 4.31 s load; 21 images 11.8 ms after m34; 194 images 35.9 ms after the title) | Beta 13's run, 2026-11-09 | Beta 15 part 3 (designed): ready images of the shapes the loads before needed, made during the loading screen and taken at the first draw (not at the create call: a target's shape comes from its draw). On AMD a surface costs little (50 in 1.9 ms): the time is NVIDIA's |
 | A create call's copy over a page holding a dead resource's GPU writes reads that page back from VRAM first (about 930 readbacks in 7 minutes), for the copy to overwrite it | Beta 13's run | Beta 15 part 4 (designed): a cave at each of the two `memcpy` call sites (`0x216d5ea`, `0x2171fea`) tells the engine first; the inside pages' GPU data dropped without a readback, uploaded copies marked, images told once; the earlier-writes rule (`BB_TAKE_EARLIER_WRITES`) is untouched, as a creation with data never needs them |
-| YEBIS's CPU writes fault about 2 a second on pages its watched images share (about 20 of 800 land in an image); in beta 15's runs 8-12 a second (`+0xc21ef2` through the host's memcpy, the same two pages, "an image on a page beside a live resource") | Beta 13's run; beta 15's first runs, 2026-11-24 | Small (handlers 0.0-1.2 ms a frame), but each fault takes the texture cache's lock on the game's thread. Next: a line naming the image watching the page (size, format, kind); if the calls already tell its writes (YEBIS's updates, a creation with data), unwatched as beta 9-10 did for targets and data textures. A run with `BB_COPY_NOTICE=0` rules part 4 out |
+| YEBIS's CPU writes fault about 2 a second on pages its watched images share (about 20 of 800 land in an image); in beta 15's runs 8-12 a second (`+0xc21ef2` through the host's memcpy, the same two pages, "an image on a page beside a live resource") | Beta 13's run; beta 15's first runs, 2026-11-24 | Small (handlers 0.0-1.2 ms a frame), but each fault takes the texture cache's lock on the game's thread. Checked 2026-11-24: not YEBIS's updates (0 in the minutes the writes kept coming), into small tables on memory no registered resource holds: beta 16 finds the call that writes them (needs the 1.09 executable) |
 | Frames of 27-32 ms right after some loading screens (beta 12: 3 of 14, beta 11: 3 of 14, not counting those the minute report made) have no breakdown: the long-frame breakdown starts at 40 ms | Beta 12's run, the plan checked, 2026-11-09 | Built in beta 13; its run: allocating the memory of surfaces made at their first draw (after the 4.31 s load, 14.3 ms for 11 images in a 27.1 ms frame), the buffers' upload and sparse binds (after `m33`), pipelines (the recompile). Rows below |
 | A GPU of another kind (the tester's RX 9070 XT) gives the engine another profile, so its first start empties the GPU cache and everything compiles again in play (`pipeline_compiles.md`: "a profile change still empties the cache"). HW ships no shader catalog to soften it: the catalog seeding (`SeedGpuCache`, `scripts/gpu_cache.py`, the updater's catalog copy) is Lantern's and finds nothing to seed | The plan checked against `start/main.cpp`, 2026-11-09 (corrected: the catalogs are Lantern's, not HW's) | After beta 15, with the catalog decision (beta 15's design): keeping a cache's states and keys over a profile change and shipping catalogs both use the lab's seeding, so they go together. Whether HW ships catalogs of its own (from the tester's caches) is the tester's call; if not, the inert seeding code goes at the release. The tester's 3070 Ti keys went with the swap |
 | The engine's minute report (RAM, VRAM, VRAM manager, GX lines; `LogRam`) runs on the presenting thread and makes that minute's worst frame 25.7-30.1 ms, in every session: every minute in every log of 0.4.6 betas 5-12 (85 of 85), 1 of 36 in betas 3-4; which part costs the 10-13 ms is not known | Beta 12's run read in full, 2026-11-09 | Not done: not needed (the tester, 2026-11-09) |
