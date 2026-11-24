@@ -88,7 +88,26 @@ The sections after this one are the record of the work from the first frame anal
   frame statistics, the resets by cause and the largest turn and move of the other frames.
   `BB_CAMERA_CUT_RESET=0`: logged and counted, the history kept.
 - **Jitter:** a Halton(2,3) pattern of 8 x (output / render)^2 phases (AMD's and NVIDIA's formula);
-  DLSS at least 16 (NVIDIA's checklist; from 0.4.4 beta 25b), so DLAA has 16 instead of 8.
+  DLSS at least 16 (NVIDIA's checklist; from 0.4.4 beta 25b), so DLAA has 16 instead of 8. From 0.4.6
+  beta 16, under AMD FSR the phase count and offsets come from AMD's own queries for the version that
+  runs (`AmdFsr::JitterPhases`, `JitterOffset`): AMD truncates 8 x ratio^2 where the engine's rule rounds
+  up (Balanced: 23 phases, not 24); the log says so when they differ. The engine's rule until the context
+  is ready.
+- **AMD FSR's checks (0.4.6 beta 16):** `BB_AMD_FSR_DEBUG=1` turns on AMD's API checks (its findings in
+  the log as `Upscaler: AMD FSR warning`); `BB_AMD_FSR_DEBUG_VIEW=1` shows AMD's debug view in place of
+  the picture. The debug view is now allowed when the context is made
+  (`FFX_UPSCALE_ENABLE_DEBUG_VISUALIZATION`): before, the dispatch flag alone drew nothing. When the
+  context is made, the log names the inputs the running version says it needs and uses if given
+  (AMD's resource requirements query), and its GPU memory.
+- **Checked against AMD's API (2026-11-24, the tester's question; `ffx_upscale.h`, SDK 2.4):** the inputs
+  match (render-size colour, depth and motion vectors in pixels, previous minus current, without jitter;
+  standard depth with the game's near plane and its far plane, 3000 in its scene constants; reset on
+  camera cuts; dynamic resolution; auto exposure with pre-exposure 1, right at 1080p, where FSR runs
+  before YEBIS applies its exposure). Open: AMD's own checks never run (`BB_AMD_FSR_DEBUG=1`, in the
+  next runs). At outputs other than 1080p FSR runs on the game's finished frame, after its tonemap and
+  post effects, against AMD's order (upscaling before them): the game's post-processing cannot run at
+  another size; kept so (the tester, 2026-11-24: too much work; motion blur is off by default). The
+  reactive mask stays opt-in and the transparency and composition mask is not made: both optional.
 - **Frame generation (not offered since 0.4.4), DLSS's options and the mip bias:**
   [archive/dlss_frame_generation.md](archive/dlss_frame_generation.md).
 

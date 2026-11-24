@@ -319,6 +319,8 @@ private:
     bool resources_taa = false;
     /// 0.4.4 beta 27: AMD FSR (AMD's FSR SDK; Windows); probed once at start.
     std::unique_ptr<AmdFsr> amd_fsr;
+    /// 0.4.6 beta 16: the sizes whose AMD jitter phase count was last logged (it differed from the engine's).
+    std::array<u32, 2> amd_jitter_logged{};
     bool amd_fsr_available = false;
     std::unique_ptr<DlssUpscaler> dlss; ///< NVIDIA devices only
     bool fsr_building = false; ///< AMD FSR's context is being made (PrepareFsr)

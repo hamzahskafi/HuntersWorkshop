@@ -57,6 +57,12 @@ public:
     void Tune(float velocity_factor, float reactiveness_scale, float shading_change_scale,
               float accumulation, float min_disocclusion);
 
+    /// 0.4.6 beta 16: AMD's jitter for the version that runs (its queries, its own rule): the phase count
+    /// for these widths, 0 while no context is ready (the engine's own rule then); the sub-pixel offset of
+    /// `index` (0-based) in a sequence of `phases`.
+    u32 JitterPhases(u32 render_width, u32 output_width);
+    bool JitterOffset(u32 index, u32 phases, float& x, float& y);
+
     /// Why the last call failed, or null.
     [[nodiscard]] const char* Problem() const noexcept;
     /// AMD FSR will not run in this session (its DLLs, this GPU, or a failed dispatch).

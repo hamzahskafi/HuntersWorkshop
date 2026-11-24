@@ -633,10 +633,28 @@ bool TemporalUpscaler::OnFrameStart() {
     // size, which survives the frame boundary (Performance 960 -> 1920 needs 32 phases).
     // 0.4.4 beta 25b: DLSS at least 16 (NVIDIA's checklist; DLAA had 8); FSR and TAA as AMD's.
     const u32 min_phases = upscaler == BbSettings::UpscalerDlss ? Motion::kDlssMinJitterPhases : 8;
-    const u32 phases = Scaled() ? Motion::JitterPhases(render_width, target_width, min_phases)
-        : Motion::JitterPhases(scene_targets.Size().width, 1920, min_phases);
+    const u32 jitter_render = Scaled() ? render_width : scene_targets.Size().width;
+    const u32 jitter_output = Scaled() ? target_width : 1920;
+    u32 phases = Motion::JitterPhases(jitter_render, jitter_output, min_phases);
+    // 0.4.6 beta 16: under AMD FSR, AMD's own jitter for the version that runs (its queries): its phase
+    // count can differ from the rule above (AMD truncates 8 x ratio^2: 23 at Balanced, against 24).
+    const u32 amd_phases = upscaler == BbSettings::UpscalerFsr && amd_fsr
+                               ? amd_fsr->JitterPhases(jitter_render, jitter_output)
+                               : 0;
+    if (amd_phases != 0) {
+        if (amd_phases != phases && (jitter_render != amd_jitter_logged[0] || jitter_output != amd_jitter_logged[1])) {
+            amd_jitter_logged = {jitter_render, jitter_output};
+            std::printf("Upscaler: AMD FSR's jitter for %u -> %u: %u phases (the engine's rule: %u)\n",
+                        jitter_render, jitter_output, amd_phases, phases);
+        }
+        phases = amd_phases;
+    }
     jitter_index = jitter_index % phases + 1;
     jitter = {Halton(jitter_index, 2) - 0.5f, Halton(jitter_index, 3) - 0.5f};
+    // AMD's offset for the same place in the sequence (index - 1: AMD counts from 0 and adds the 1).
+    if (float x = 0.0f, y = 0.0f; amd_phases != 0 && amd_fsr->JitterOffset(jitter_index - 1, phases, x, y)) {
+        jitter = {x, y};
+    }
     return changed;
 }
 
