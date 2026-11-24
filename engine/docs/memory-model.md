@@ -1281,6 +1281,42 @@ with other players. Beta 16 changes no file of the GPU cache's identity: the cac
   machine). The queue was right; the test now starts the burst thread once the first job runs, and
   still fails when a burst's wall time counts the wait before it.
 
+**The first run (2026-11-24, `5dbb0102`, RX 9070 XT, engine id 103; about 12 minutes, five loads):**
+
+- **Part 1 left the faults as they were:** 500-740 a minute on YEBIS's images (8-12 a second, as in
+  beta 15), almost none inside the image (0-3), from the same writer (`+0xc21ef2`, YEBIS's quads) on
+  the same two pages. 2-4 small YEBIS images were still watched: the vertex buffer's pages also hold
+  utility textures YEBIS makes **without** data and fills afterwards (`InitializeDevice`: a create
+  with no data, then a method of its texture object with a buffer; the first minute's 87 YEBIS
+  updates, told since beta 9, fit it, not confirmed from the vtable). The rule left only those made
+  with data to the calls.
+- **The net found nothing** in any minute: 460-1,368 images (74-172 MiB) a minute hashed, no CPU write
+  no call told. Left to the calls at the end: GX's textures made with data 2,754 (434 MiB), YEBIS's
+  134 (209 MiB, most of them likely its targets: 375-557 of the 417-613 YEBIS textures made a minute are), Scaleform's 2 (1 MiB).
+- Still watched: images over no game resource (3-8, 24 MiB; 35-87 faults a minute), GX textures made
+  without data (8-74), a 3D and a 1D texture.
+- YEBIS maps its own buffers 245,000-1,350,000 times a minute at the heavy scene's 190-280 FPS (tens a
+  frame); only those on a watched page fault.
+- Beta 15 in the same run: part 3 ready at the second and later loads (82-185 surfaces, 20-40 taken;
+  the later loads allocated 1-88 at their draw against 82 at the first), part 2 uploading every
+  buffer made during the screen ahead (149-849 MB), part 4 dropping up to 9,909 pages without a
+  readback, the first frames after each load at worst 13.6-28.3 ms, and no 2 s first frame.
+
+**Changed after it (same day, engine id 104; the tester: "I don't mind"):**
+
+- Part 1: every YEBIS texture at its resource's start is left to the calls, made with its data or not
+  (`BB_WATCH_YEBIS_TEXTURES=1` watches them all). Images inside a YEBIS texture stay watched.
+- The texture net in two lanes, each about 2 MiB a second (`WatchRules::NetLane`): YEBIS's and
+  Scaleform's images (few and small: a round in seconds) apart from GX's (minutes); the minute line
+  gives each lane's last round.
+- The hand-over (the builder session's review): an image the calls covered, handed to a texture they
+  do not cover and not drawn by the GPU (a GX texture made with data, then one made without over it,
+  filled by the CPU), is marked written and untracked, so its next use takes the memory and watches
+  its pages; counted in the minute line. Since beta 11 it stayed unwatched.
+- The first 16 images found watching a faulting page are named in the log (kind, at its start or
+  inside, made with data or not, surface, shape), to find any watcher left.
+- `watch-rules-test` with YEBIS's new rule and the lanes; it fails on each of 11 deliberate breaks.
+
 ### Beta 17: shaders and pipelines (to research and design)
 
 The rule not met: "shaders are translated when the game creates them, pipelines built during

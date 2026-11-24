@@ -7,10 +7,14 @@
 //
 //   0.4.6 beta 8-9: surfaces the game made without data for the GPU, render and depth targets.
 //   0.4.6 beta 10: GX textures made with their data (BB_WATCH_GAME_TEXTURES=targets keeps them watched).
-//   0.4.6 beta 16 part 1: YEBIS's textures made with their data (BB_WATCH_YEBIS_TEXTURES=1 keeps them
-//   watched): its utility textures, packed beside its shared vertex buffer, whose quads for every
-//   post-processing pass faulted on their pages. Part 2: Scaleform's planes (BB_WATCH_SCALEFORM=1),
-//   told by Scaleform's unmap.
+//   0.4.6 beta 16 part 1: YEBIS's textures (BB_WATCH_YEBIS_TEXTURES=1 keeps them watched): its utility
+//   textures, packed beside its shared vertex buffer, whose quads for every post-processing pass
+//   faulted on their pages. As first built only those made with their data; the first run showed the
+//   faults going on, on the ones YEBIS makes without data and fills itself (CTextureUtil::InitializeDevice:
+//   a create with no data, then a method of its texture object with a buffer; the first minute's YEBIS
+//   updates, told since beta 9, fit it), so every YEBIS texture: YEBIS writes them through its own calls
+//   or the GPU, and the texture net's first lane looks at them within seconds. Part 2: Scaleform's
+//   planes (BB_WATCH_SCALEFORM=1), told by Scaleform's unmap.
 #pragma once
 
 #include "engine/gx_resources.h"
@@ -50,7 +54,7 @@ inline bool ByCalls(const Image& image, const Settings& s) {
     case Owner::TextureData:
         return true;
     case Owner::Yebis:
-        return image.with_data && !s.watch_yebis;
+        return !s.watch_yebis;
     case Owner::Scaleform:
         return !s.watch_scaleform;
     default:
@@ -67,6 +71,15 @@ inline bool NetChecks(const Image& image, const Settings& s) {
     }
     return image.owner == Owner::TextureData || image.owner == Owner::Yebis || image.owner == Owner::Scaleform;
 }
+
+/// The texture net's lane for an image it checks: 0 the middleware's (YEBIS's and Scaleform's: few,
+/// small, left to the calls in beta 16), 1 the GX textures made with their data (since beta 10). Each
+/// lane goes round on a budget of its own, so the first is looked at within seconds.
+inline unsigned NetLane(BbEngine::GxResources::Owner owner) {
+    using BbEngine::GxResources::Owner;
+    return owner == Owner::Yebis || owner == Owner::Scaleform ? 0 : 1;
+}
+constexpr unsigned kNetLanes = 2;
 
 /// The texture net's look at an image (part 3): whether its memory hashes differently from the last
 /// look, whether the cache marked it (possibly) written since (a call told it), and whether the last

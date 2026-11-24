@@ -28,6 +28,7 @@
 #include "video_core/texture_cache/sampler.h"
 #include "video_core/renderer_vulkan/vk_staging_buffer_pool.h"
 #include "video_core/texture_cache/tile_manager.h"
+#include "video_core/texture_cache/watch_rules.h"
 #include "video_core/texture_cache/watched_pages.h"
 #include "video_core/vram_policy.h"
 #include "engine/gx_resources.h"
@@ -551,16 +552,23 @@ private:
     /// unmap), looked at again the next second; still no mark then, it is a write no call told and the
     /// image is marked written. The list (id, uid) is rebuilt at each round's end; what each image
     /// hashed to and its marks then, by uid.
-    void TextureNet();
+    /// Two lanes (WatchRules::NetLane), each with its list, its place in it and its budget.
+    void TextureNet(u64 second);
     struct NetSeen {
         u64 hash;
         u32 marks;
         bool suspect = false;
+        u8 lane = 0;
+    };
+    struct NetLane {
+        std::vector<std::pair<ImageId, u64>> list;
+        size_t cursor = 0;
+        u64 round_started = 0; ///< the second the round began
     };
     /// One image's look (TextureNet): its bytes hashed, or 0 when it was not hashed.
     u64 NetLook(ImageId image_id, u64 uid);
-    std::vector<std::pair<ImageId, u64>> net_list, net_suspects, net_suspects_next;
-    size_t net_cursor = 0;
+    std::array<NetLane, WatchRules::kNetLanes> net_lanes{};
+    std::vector<std::pair<ImageId, u64>> net_suspects, net_suspects_next;
     std::unordered_map<u64, NetSeen> net_seen;
     std::vector<u8> net_scratch;
     /// Beta 15: an image the collector frees: remembered 5 minutes (refaults); its bytes, and of them

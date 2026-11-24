@@ -105,8 +105,16 @@ struct Resource {
 Resource Describe(std::uint64_t begin, std::uint64_t end);
 // 0.4.6 beta 16 part 4: a write fault on an image's pages (the texture cache, the faulting thread): the
 // image's owner kind, whether the write landed inside the image, and whether the image reaches past the
-// bytes of the resource starting at it.
-void NoteImageWatchFault(Owner owner, bool inside, bool past_resource);
+// bytes of the resource starting at it; the first 16 images of the session are named in the log.
+struct WatchedImage {
+    Owner owner = Owner::None;
+    std::uint64_t fault = 0, memory = 0, bytes = 0;
+    std::uint32_t width = 0, height = 0, format = 0;
+    bool whole = false, with_data = false, surface = false, inside = false, past = false;
+};
+void NoteImageWatchFault(const WatchedImage& image);
+// An image the calls covered, handed to a texture they do not cover and watched again (beta 16).
+void NoteHandOverWatched();
 // The texture cache's images by owner kind, once a minute: watched by page protection, and left to the
 // calls (count and bytes each).
 struct WatchCensus {
@@ -116,6 +124,8 @@ void NoteWatchCensus(const WatchCensus& census);
 // Part 3, the texture net: images hashed in its slice of the second, and a change no call told (the
 // image marked written).
 void NoteTextureNet(std::uint64_t images, std::uint64_t bytes);
+// A lane's round (0 the middleware's, 1 GX's): how long it took, over how many images and bytes.
+void NoteTextureNetRound(unsigned lane, std::uint64_t seconds, std::uint64_t images, std::uint64_t bytes);
 void NoteTextureUntold(Owner owner, std::uint64_t memory, std::uint64_t bytes, std::uint32_t width,
                        std::uint32_t height);
 // An image made at a draw (not prepared ahead), by its owner; running totals for the hitch reports.

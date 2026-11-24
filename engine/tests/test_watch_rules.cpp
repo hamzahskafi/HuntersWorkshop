@@ -50,10 +50,13 @@ int main() {
           "an image inside a texture (not at its start) stays watched");
     check(!ByCalls({Owner::RenderTarget, false, true, false}, beta16), "a target not at its start stays watched");
 
-    // Part 1: YEBIS's textures made with their data; its surfaces as before; BB_WATCH_YEBIS_TEXTURES=1.
+    // Part 1: YEBIS's textures, made with their data or not (its utility textures made without and filled
+    // afterwards faulted on in the first run); BB_WATCH_YEBIS_TEXTURES=1.
     check(ByCalls(Whole(Owner::Yebis, true), beta16), "a YEBIS texture made with its data is left to the calls");
-    check(!ByCalls(Whole(Owner::Yebis, false), beta16), "a YEBIS texture made without its data stays watched");
+    check(ByCalls(Whole(Owner::Yebis, false), beta16), "a YEBIS texture made without its data is left to the calls");
     check(ByCalls(Whole(Owner::Yebis, false, true), beta16), "a YEBIS surface is left to the calls");
+    check(!ByCalls({Owner::Yebis, false, false, true}, beta16), "an image inside a YEBIS texture stays watched");
+    check(!ByCalls(Whole(Owner::Yebis, false), watch_yebis), "BB_WATCH_YEBIS_TEXTURES=1 watches those made without");
     check(!ByCalls(Whole(Owner::Yebis, true), watch_yebis), "BB_WATCH_YEBIS_TEXTURES=1 watches YEBIS's textures");
     check(ByCalls(Whole(Owner::Scaleform), watch_yebis), "BB_WATCH_YEBIS_TEXTURES=1 leaves Scaleform's planes alone");
 
@@ -78,6 +81,7 @@ int main() {
     // Part 3: the net checks what is left to the calls and filled by the CPU, nothing else.
     check(NetChecks(Whole(Owner::TextureData, true), beta16), "the net checks a GX texture made with its data");
     check(NetChecks(Whole(Owner::Yebis, true), beta16), "the net checks a YEBIS texture made with its data");
+    check(NetChecks(Whole(Owner::Yebis, false), beta16), "the net checks a YEBIS texture made without its data");
     check(NetChecks(Whole(Owner::Scaleform), beta16), "the net checks a Scaleform plane");
     check(!NetChecks(Whole(Owner::Yebis, true), watch_yebis), "the net leaves a watched YEBIS texture");
     check(!NetChecks(Whole(Owner::Scaleform), watch_scaleform), "the net leaves a watched Scaleform plane");
@@ -96,6 +100,13 @@ int main() {
                 check(!NetChecks(image, *s) || ByCalls(image, *s), "the net checks only images left to the calls");
             }
         }
+    }
+
+    // The net's lanes: the middleware's (few, small: seconds a round) apart from GX's (minutes).
+    check(NetLane(Owner::Yebis) == 0 && NetLane(Owner::Scaleform) == 0, "YEBIS and Scaleform in the first lane");
+    check(NetLane(Owner::TextureData) == 1, "GX's textures in the second lane");
+    for (int o = 0; o < int(Owner::kCount); ++o) {
+        check(NetLane(Owner(o)) < kNetLanes, "every kind in a lane");
     }
 
     // The net's look: a change is a suspect first (the telling call comes after the write), a write no

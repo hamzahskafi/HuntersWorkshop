@@ -780,13 +780,23 @@ void TextureCache::InvalidateMemory(VAddr addr, size_t size) {
         // 0.4.6 beta 16 part 4: a write fault, by the images watching its page: their resource's kind,
         // whether the write landed in the image, whether the image reaches past that resource's bytes.
         if (t_write_fault && image.IsTracked() && !image.calls_watch) {
-            bool past = false;
+            BbEngine::GxResources::WatchedImage w;
+            w.owner = BbEngine::GxResources::Owner(image.gx_owner);
+            w.fault = addr;
+            w.memory = image_begin;
+            w.bytes = image.info.guest_size;
+            w.width = image.info.size.width;
+            w.height = image.info.size.height;
+            w.format = u32(image.info.pixel_format);
+            w.whole = image.gx_whole;
+            w.with_data = image.gx_with_data;
+            w.surface = image.surface_ns != 0;
+            w.inside = image.Overlaps(addr, size);
             if (image.gx_whole) {
                 const auto r = BbEngine::GxResources::Describe(image_begin, image_begin + 1);
-                past = r.bytes != 0 && r.memory == image_begin && image.info.guest_size > r.bytes;
+                w.past = r.bytes != 0 && r.memory == image_begin && image.info.guest_size > r.bytes;
             }
-            BbEngine::GxResources::NoteImageWatchFault(BbEngine::GxResources::Owner(image.gx_owner),
-                                                       image.Overlaps(addr, size), past);
+            BbEngine::GxResources::NoteImageWatchFault(w);
         }
         if (image.store_pending) {
             // Beta 14: a store into these pages is under way (BeginStore): it lands first, then
@@ -2126,7 +2136,7 @@ void TextureCache::GarbageCollectImages() {
         // 0.4.6 beta 16 part 3: after the told writes (ProcessWritten), so that a write a call told this
         // second is not taken for one no call told.
         if (TextureNetEnabled() && BbEngine::GxResources::Following()) {
-            TextureNet();
+            TextureNet(second);
         }
         if (second - minute_second >= 60) {
             minute_second = second;
@@ -2344,8 +2354,20 @@ void TextureCache::ProcessGxCreated() {
                     image.gx_owner = made.owner;
                     image.gx_whole = true;
                 }
-                // 0.4.6 beta 16: a hand-over is to a texture made without its data (watch_rules.h).
+                // 0.4.6 beta 16: a hand-over is to a texture made without its data (watch_rules.h). An image
+                // the calls covered for its old texture, now one's they do not cover (a GX texture made
+                // without its data, filled by the CPU): marked written and untracked, so that its next use
+                // takes the memory and watches its pages (it stayed unwatched since beta 11). One the GPU
+                // drew keeps beta 11's hand-over: its contents are the new texture's.
                 image.gx_with_data = false;
+                if (image.calls_watch && False(image.flags & ImageFlagBits::GpuModified) &&
+                    !WatchRules::ByCalls(WatchView(image), WatchSettings())) {
+                    image.flags |= ImageFlagBits::CpuDirty;
+                    ++image.cpu_marks;
+                    image.mip_hashes_current = false;
+                    UntrackImage(image_id);
+                    BbEngine::GxResources::NoteHandOverWatched();
+                }
                 if (yebis) {
                     ++kept;
                     kept_bytes += image.backing ? image.GetHostImageSize() : 0;
@@ -3091,9 +3113,10 @@ bool NetCandidate(const Image& image) {
 }
 } // namespace
 
-void TextureCache::TextureNet() {
-    // About 2 MiB hashed a second (one image of up to 8 MiB at most past it): a round over a few hundred
-    // MiB of such images takes minutes. It is a net under the calls, not the way writes are learnt.
+void TextureCache::TextureNet(u64 second) {
+    // Each lane about 2 MiB hashed a second (one image of up to 8 MiB at most past it). The middleware's
+    // images are few and small: a round over them takes seconds. GX's are hundreds of MiB: minutes. It is
+    // a net under the calls, not the way writes are learnt.
     constexpr u64 Budget = 2ull << 20;
     u64 hashed = 0, images = 0;
     // Last second's suspects first, now that the writes told since have been taken (ProcessWritten).
@@ -3105,32 +3128,47 @@ void TextureCache::TextureNet() {
             ++images;
         }
     }
-    if (net_cursor >= net_list.size()) {
-        // A new round: the images checked now, and what was seen of them kept for those only.
-        net_list.clear();
-        net_cursor = 0;
-        std::unordered_map<u64, NetSeen> kept;
-        lru_cache.ForEachItemBelow(gc_tick, [&](ImageId image_id) {
-            const Image& image = slot_images[image_id];
-            if (NetCandidate(image)) {
-                net_list.emplace_back(image_id, image.image_uid);
-                if (const auto it = net_seen.find(image.image_uid); it != net_seen.end()) {
-                    kept.emplace(*it);
+    for (unsigned l = 0; l < net_lanes.size(); ++l) {
+        NetLane& lane = net_lanes[l];
+        if (lane.cursor >= lane.list.size()) {
+            if (lane.round_started != 0 && !lane.list.empty()) {
+                u64 bytes = 0;
+                for (const auto& [image_id, uid] : lane.list) {
+                    if (slot_images.is_allocated(image_id) && slot_images[image_id].image_uid == uid) {
+                        bytes += slot_images[image_id].info.guest_size;
+                    }
                 }
+                BbEngine::GxResources::NoteTextureNetRound(l, second - lane.round_started, lane.list.size(), bytes);
             }
-            return false;
-        });
-        net_seen = std::move(kept);
-    }
-    while (net_cursor < net_list.size() && hashed < Budget) {
-        const auto [image_id, uid] = net_list[net_cursor++];
-        if (const auto it = net_seen.find(uid); it != net_seen.end() && it->second.suspect) {
-            continue; // looked at again next second
+            // A new round: the lane's images now, and what was seen of its images kept for those only.
+            lane.list.clear();
+            lane.cursor = 0;
+            lane.round_started = second;
+            std::unordered_set<u64> uids;
+            lru_cache.ForEachItemBelow(gc_tick, [&](ImageId image_id) {
+                const Image& image = slot_images[image_id];
+                if (NetCandidate(image) && WatchRules::NetLane(BbEngine::GxResources::Owner(image.gx_owner)) == l) {
+                    lane.list.emplace_back(image_id, image.image_uid);
+                    uids.insert(image.image_uid);
+                }
+                return false;
+            });
+            std::erase_if(net_seen, [&](const auto& entry) {
+                return entry.second.lane == l && !uids.contains(entry.first);
+            });
         }
-        if (const u64 bytes = NetLook(image_id, uid); bytes != 0) {
-            hashed += bytes;
-            ++images;
+        u64 lane_hashed = 0;
+        while (lane.cursor < lane.list.size() && lane_hashed < Budget) {
+            const auto [image_id, uid] = lane.list[lane.cursor++];
+            if (const auto it = net_seen.find(uid); it != net_seen.end() && it->second.suspect) {
+                continue; // looked at again next second
+            }
+            if (const u64 bytes = NetLook(image_id, uid); bytes != 0) {
+                lane_hashed += bytes;
+                ++images;
+            }
         }
+        hashed += lane_hashed;
     }
     BbEngine::GxResources::NoteTextureNet(images, hashed);
 }
@@ -3151,7 +3189,8 @@ u64 TextureCache::NetLook(ImageId image_id, u64 uid) {
     net_scratch.resize(size);
     Core::Memory::Instance()->CopySparseMemory(image.info.guest_address, net_scratch.data(), size);
     const u64 hash = GuestMemoryHash(net_scratch.data(), size);
-    const auto [seen, first] = net_seen.try_emplace(uid, NetSeen{hash, image.cpu_marks});
+    const u8 lane = u8(WatchRules::NetLane(BbEngine::GxResources::Owner(image.gx_owner)));
+    const auto [seen, first] = net_seen.try_emplace(uid, NetSeen{hash, image.cpu_marks, false, lane});
     if (first) {
         return size;
     }
@@ -3179,7 +3218,7 @@ u64 TextureCache::NetLook(ImageId image_id, u64 uid) {
                                                  image.info.size.height);
         break;
     }
-    seen->second = {hash, image.cpu_marks, false};
+    seen->second = {hash, image.cpu_marks, false, lane};
     return size;
 }
 

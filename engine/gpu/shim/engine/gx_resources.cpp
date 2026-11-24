@@ -410,6 +410,7 @@ struct Counts {
     std::atomic<std::uint64_t> image_faults_past{0};
     std::atomic<std::uint64_t> tnet_images{0}, tnet_bytes{0}, tnet_untold{0}, tnet_untold_bytes{0};
     std::atomic<int> tnet_named{0};
+    std::atomic<std::uint64_t> handover_watched{0};
     // 0.4.6 beta 10: new textures made over a live texture's memory, at its base or partly, by [the live
     // one's owner kind][the new one's]; images marked written by a creation with data; dead images a draw
     // took (after a destroy / after something newer), of them the owner rule's hand-overs and refusals.
@@ -1509,19 +1510,56 @@ Resource Describe(std::uint64_t begin, std::uint64_t end) {
     return r;
 }
 
-void NoteImageWatchFault(Owner owner, bool inside, bool past_resource) {
-    const std::size_t o = std::min<std::size_t>(std::size_t(owner), std::size_t(Owner::kCount) - 1);
-    g_counts.image_faults[o][inside ? 1 : 0].fetch_add(1, std::memory_order_relaxed);
-    if (past_resource) {
-        g_counts.image_faults_past.fetch_add(1, std::memory_order_relaxed);
-    }
-}
-
 namespace {
 std::mutex g_census_mutex;
 WatchCensus g_census;
 bool g_census_new = false;
+// The images named so far (their memory), and each lane's last round.
+std::array<std::uint64_t, 16> g_named_watchers{};
+std::size_t g_named_watcher_count = 0;
+struct NetRound {
+    bool known = false;
+    std::uint64_t seconds = 0, images = 0, bytes = 0;
+};
+std::array<NetRound, 2> g_net_rounds{};
 } // namespace
+
+void NoteImageWatchFault(const WatchedImage& w) {
+    const std::size_t o = std::min<std::size_t>(std::size_t(w.owner), std::size_t(Owner::kCount) - 1);
+    g_counts.image_faults[o][w.inside ? 1 : 0].fetch_add(1, std::memory_order_relaxed);
+    if (w.past) {
+        g_counts.image_faults_past.fetch_add(1, std::memory_order_relaxed);
+    }
+    {
+        std::scoped_lock lock{g_census_mutex};
+        if (g_named_watcher_count >= g_named_watchers.size()) {
+            return;
+        }
+        for (std::size_t i = 0; i < g_named_watcher_count; ++i) {
+            if (g_named_watchers[i] == w.memory) {
+                return;
+            }
+        }
+        g_named_watchers[g_named_watcher_count++] = w.memory;
+    }
+    host_log("GX memory: a write fault at %#llx on the page of a watched image (beta 16): %s, the image at %#llx "
+             "(%llu bytes, %ux%u, format %u), %s%s%s, the write %s it%s",
+             (unsigned long long)w.fault, OwnerName(w.owner), (unsigned long long)w.memory,
+             (unsigned long long)w.bytes, w.width, w.height, w.format,
+             w.owner == Owner::None ? "over no resource" : (w.whole ? "at its start" : "inside it"),
+             w.owner == Owner::None ? "" : (w.with_data ? ", made with its data" : ", made without its data"),
+             w.surface ? ", a surface" : "", w.inside ? "inside" : "beside",
+             w.past ? ", the image reaching past its resource" : "");
+}
+
+void NoteHandOverWatched() {
+    g_counts.handover_watched.fetch_add(1, std::memory_order_relaxed);
+}
+
+void NoteTextureNetRound(unsigned lane, std::uint64_t seconds, std::uint64_t images, std::uint64_t bytes) {
+    std::scoped_lock lock{g_census_mutex};
+    g_net_rounds[std::min<unsigned>(lane, 1)] = {true, seconds, images, bytes};
+}
 
 void NoteWatchCensus(const WatchCensus& census) {
     std::scoped_lock lock{g_census_mutex};
@@ -2526,11 +2564,25 @@ void LogMinute() {
         // kind, YEBIS's buffer maps, and the texture net.
         WatchCensus census;
         bool have_census = false;
+        std::array<NetRound, 2> rounds;
         {
             std::scoped_lock lock{g_census_mutex};
             census = g_census;
             have_census = g_census_new;
             g_census_new = false;
+            rounds = g_net_rounds;
+        }
+        std::string round_text;
+        for (std::size_t l = 0; l < rounds.size(); ++l) {
+            char part[160];
+            if (rounds[l].known) {
+                std::snprintf(part, sizeof(part), "%s%s %llu s (%llu images, %.0f MiB)", l ? ", " : "",
+                              l ? "GX's" : "YEBIS's and Scaleform's", (unsigned long long)rounds[l].seconds,
+                              (unsigned long long)rounds[l].images, Mib(rounds[l].bytes));
+            } else {
+                std::snprintf(part, sizeof(part), "%s%s not done yet", l ? ", " : "", l ? "GX's" : "YEBIS's and Scaleform's");
+            }
+            round_text += part;
         }
         std::string watched, by_calls, faults;
         for (std::size_t o = 0; o < std::size_t(Owner::kCount); ++o) {
@@ -2555,14 +2607,16 @@ void LogMinute() {
         }
         host_log("GX memory, textures by their calls this minute (beta 16): images watched by page protection: %s; "
                  "left to the calls: %s; write faults on images by the image's resource: %s (an image reaching past "
-                 "its resource's bytes %llu); YEBIS's maps of its own buffers %llu; the texture net: %llu images "
-                 "hashed (%.0f MiB), CPU writes found that no call told %llu (%.0f MiB)",
+                 "its resource's bytes %llu); YEBIS's maps of its own buffers %llu; images handed to a texture the calls do "
+                 "not cover, watched again %llu; the texture net: %llu images hashed (%.0f MiB), CPU writes found "
+                 "that no call told %llu (%.0f MiB); its last round over %s",
                  have_census ? (watched.empty() ? "none" : watched.c_str()) : "not counted yet",
                  have_census ? (by_calls.empty() ? "none" : by_calls.c_str()) : "not counted yet",
                  faults.empty() ? "none" : faults.c_str(), (unsigned long long)take(g_counts.image_faults_past),
-                 (unsigned long long)take(g_counts.yebis_buffer_maps), (unsigned long long)take(g_counts.tnet_images),
-                 Mib(take(g_counts.tnet_bytes)), (unsigned long long)take(g_counts.tnet_untold),
-                 Mib(take(g_counts.tnet_untold_bytes)));
+                 (unsigned long long)take(g_counts.yebis_buffer_maps), (unsigned long long)take(g_counts.handover_watched),
+                 (unsigned long long)take(g_counts.tnet_images), Mib(take(g_counts.tnet_bytes)),
+                 (unsigned long long)take(g_counts.tnet_untold), Mib(take(g_counts.tnet_untold_bytes)),
+                 round_text.c_str());
     }
     host_log("GX memory, owners this minute (beta 10): new textures over a live texture's memory, at its base: %s; "
              "partly: %s; images marked written by a creation with data over them %llu (%.0f MiB), live surfaces "
