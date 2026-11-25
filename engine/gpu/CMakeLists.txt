@@ -303,6 +303,12 @@ if(NOT WIN32)
     target_link_options(bbgpu PRIVATE
         -Wl,--exclude-libs,libavcodec.a:libavformat.a:libavutil.a:libswscale.a:libswresample.a)
 endif()
+# 0.4.6 beta 16: the engine's FFmpeg headers ahead of every other include folder. A system FFmpeg's
+# (MSYS2's beside SDL3's in /clang64/include) would otherwise be compiled against: another version's
+# structures, linked with this version's archives.
+if (ffmpeg_prefix)
+    target_include_directories(bbgpu BEFORE PRIVATE "${ffmpeg_prefix}/include")
+endif()
 # bbport 0.4.4 beta 27: AMD FSR through AMD's FSR SDK 2.4 (vk_amd_fsr.cpp): the AMD FSR API's headers
 # (MIT, third_party/amd-fsr-sdk); AMD's signed DLLs are loaded at run time, not linked.
 target_include_directories(bbgpu PRIVATE third_party/amd-fsr-sdk)

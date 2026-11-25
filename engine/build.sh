@@ -140,6 +140,20 @@ echo "Built $PWD/out/bb-probe"
 # --fsr-versions (0.4.4 beta 27c) reads AMD's FSR API headers (MIT, gpu/third_party/amd-fsr-sdk).
 "$CC" "${cstd[@]}" -O2 -Wall -Wextra -Werror "${includes[@]}" -Igpu/third_party/amd-fsr-sdk tools/gpu_capabilities.c "${libraries[@]}" -o out/bb-gpu-capabilities
 fi
+# 0.4.6 beta 16: the Windows programs carry the engine's own FFmpeg (packaging/build-ffmpeg.sh); one
+# that imports an FFmpeg DLL linked a system FFmpeg instead (about 100 DLLs with it).
+if [[ -n $windows ]]; then
+    objdump=$(command -v llvm-objdump || command -v objdump || true)
+    if [[ -n $objdump ]]; then
+        for program in out/bb-probe.exe out/bb-shader-lab.exe; do
+            [[ -f $program ]] || continue
+            if "$objdump" -p "$program" | grep -i -E 'DLL Name: (av(codec|format|util|device|filter)|sw(scale|resample)|postproc)-[0-9]+\.dll'; then
+                echo "$program imports an FFmpeg DLL: run packaging/build-ffmpeg.sh and build again (README, Build)" >&2
+                exit 1
+            fi
+        done
+    fi
+fi
 # The native start (Windows): boot image, mods, patches, engine assets, then bb-probe. One static
 # program: it runs before bb-probe's DLLs are found, and replaces the Python scripts.
 if [[ -n $windows ]] && [[ ! -f out/bb-start.exe || -n $(find start -newer out/bb-start.exe -print -quit) ]]; then
