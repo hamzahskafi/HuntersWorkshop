@@ -20,6 +20,8 @@ cd "$engine"
 export CC=${CC:-clang} CXX=${CXX:-clang++}
 export PKG_CONFIG_PATH=${PKG_CONFIG_PATH:-/opt/deps/lib/pkgconfig:/opt/deps/share/pkgconfig}
 export CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH:-/opt/deps}
+# The engine's own FFmpeg (setup-ubuntu.sh, packaging/build-ffmpeg.sh): linked into the GPU library.
+export BB_FFMPEG_PREFIX=${BB_FFMPEG_PREFIX:-/opt/deps/ffmpeg}
 export LDFLAGS=${LDFLAGS:--fuse-ld=lld}
 # The profiles in pgo/ come from Windows runs: built without one.
 BB_PGO=${BB_PGO:-off} bash build.sh

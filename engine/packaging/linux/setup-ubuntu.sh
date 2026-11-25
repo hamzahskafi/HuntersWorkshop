@@ -8,6 +8,7 @@
 # shared library shipped. Vulkan, X11/Wayland and OpenSSL 3 come from the player's system.
 set -euo pipefail
 [[ $(id -u) == 0 ]] || { echo 'Run as root (sudo).' >&2; exit 1; }
+here=$(cd -- "$(dirname -- "$0")" && pwd)
 export DEBIAN_FRONTEND=noninteractive
 jobs=${BB_JOBS:-$(nproc)}
 
@@ -90,18 +91,14 @@ if ! built sdl3; then
     rm -rf sdl
     stamp sdl3
 fi
-# FFmpeg: only what the game's movies need (H.264/HEVC video, AAC audio in MP4), no system
-# libraries.
-if ! built ffmpeg; then
-    echo 'deps: FFmpeg n7.1.1'
-    fetch ffmpeg n7.1.1 https://github.com/FFmpeg/FFmpeg.git
-    (cd ffmpeg && ./configure --prefix=/opt/deps --cc=clang --enable-pic --enable-static --disable-shared \
-        --disable-autodetect --disable-programs --disable-doc --disable-network --disable-everything \
-        --disable-avdevice --disable-avfilter --disable-postproc \
-        --enable-decoder=h264,hevc,aac,aac_latm --enable-parser=h264,hevc,aac \
-        --enable-demuxer=mov,mpegts,h264,hevc,aac --enable-protocol=file --enable-swscale \
-        --enable-swresample >/dev/null && make -j"$jobs" >/dev/null && make install >/dev/null)
-    rm -rf ffmpeg
-    stamp ffmpeg
+# FFmpeg: the engine's own, as the Windows build has it (packaging/build-ffmpeg.sh: static, only what
+# the game's movies need, with threads), in /opt/deps/ffmpeg, where packaging/linux/build.sh points the
+# engine. 0.4.6 beta 16: the FFmpeg 7.1.1 earlier setups built into /opt/deps itself is removed.
+BB_FFMPEG_PREFIX=/opt/deps/ffmpeg BB_FFMPEG_CACHE=$work BB_JOBS=$jobs bash "$here/../build-ffmpeg.sh"
+if built ffmpeg; then
+    for lib in avcodec avformat avutil swscale swresample postproc avdevice avfilter; do
+        rm -rf "/opt/deps/lib/lib$lib.a" "/opt/deps/lib/pkgconfig/lib$lib.pc" "/opt/deps/include/lib$lib"
+    done
+    rm -f /opt/deps/.stamp-ffmpeg
 fi
 echo "Linux build environment ready (/opt/deps)"

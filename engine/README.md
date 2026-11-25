@@ -52,13 +52,21 @@ The engine builds in [MSYS2](https://www.msys2.org)'s CLANG64 environment.
 2. Install the toolchain and libraries:
 
    ```sh
-   pacman -S --needed git mingw-w64-clang-x86_64-{clang,lld,libc++,cmake,ninja,pkgconf,python,sdl3,boost,fmt,glslang,spirv-cross,spirv-headers,vulkan-headers,vulkan-loader,vulkan-memory-allocator,xxhash,zydis,robin-map,ffmpeg,nlohmann-json,openssl,zlib,expat}
+   pacman -S --needed git make diffutils xz mingw-w64-clang-x86_64-{clang,lld,libc++,cmake,ninja,pkgconf,python,nasm,sdl3,boost,fmt,glslang,spirv-cross,spirv-headers,vulkan-headers,vulkan-loader,vulkan-memory-allocator,xxhash,zydis,robin-map,nlohmann-json,openssl,zlib,expat}
    ```
 
-3. In this folder, run `bash build.sh`. The programs land in `out/`: `bb-start.exe` (prepares the
+3. Once, in this folder: `bash packaging/build-ffmpeg.sh`. It builds the engine's FFmpeg (FFmpeg 9.1,
+   checked against its published checksum; static, with only what the game's movies need) into
+   `deps/ffmpeg`, in a minute or two. MSYS2's own FFmpeg package is not used (it brought about 100
+   DLLs with it); one left installed does no harm.
+4. In this folder, run `bash build.sh`. The programs land in `out/`: `bb-start.exe` (prepares the
    game and starts it), `bb-probe.exe` (the engine itself), and the tools `bb-engine-assets.exe`,
    `bb-shader-lab.exe` and `bb-gpu-capabilities.exe`. `bb-probe.exe` needs the CLANG64 DLLs it links
-   to (SDL3, FFmpeg, the Vulkan loader, libc++ and their dependencies) next to it.
+   to (SDL3, the Vulkan loader, libc++ and their dependencies) next to it.
+
+A cross build for Windows (clang aimed at `x86_64-w64-windows-gnu` with a CLANG64 sysroot) builds
+the same FFmpeg with `BB_FFMPEG_TARGET=x86_64-w64-windows-gnu` (and `BB_FFMPEG_SYSROOT`); the script
+lists what it reads. `BB_FFMPEG_PREFIX` puts it elsewhere; CMake reads the same variable.
 
 The launcher builds with the .NET 8 SDK, from the repository's root:
 
@@ -69,7 +77,8 @@ dotnet publish launcher/windows/BloodborneLauncher/BloodborneLauncher.csproj -c 
 ### Linux
 
 `build.sh` here builds the engine with clang, CMake, Ninja and the Vulkan and SDL3 headers. On
-Ubuntu 24.04, `packaging/linux/setup-ubuntu.sh` builds the libraries it needs once, and
+Ubuntu 24.04, `packaging/linux/setup-ubuntu.sh` builds the libraries it needs once (FFmpeg through
+`packaging/build-ffmpeg.sh`, as on Windows, into `/opt/deps/ffmpeg`), and
 `packaging/linux/build.sh` makes a Linux package with the cross-platform launcher
 (`../launcher/windows/AvaloniaLauncher`). To run from a checkout:
 `BB_GAME_DIR=/path/to/CUSA03173 ./run.sh`.
@@ -85,7 +94,7 @@ licence). The shader catalogs and the upscalers' files are not kept in this repo
 
 ## Tests and checks
 
-- `build.sh --test`, and the GPU library's tests (`ninja -C out/gpu pc-input-test frame-rate-test camera-rate-test ...`; `camera-wall-test out/eboot.elf` runs the game's own wall-turn code when the prepared executable is there).
+- `build.sh --test`, and the GPU library's tests (`ninja -C out/gpu pc-input-test frame-rate-test camera-rate-test ...`; `camera-wall-test out/eboot.elf` runs the game's own wall-turn code when the prepared executable is there; `movie-decode-test` plays `tests/data/movies` through the engine's FFmpeg).
 - `tools/re/frame_rate_base.py eboot.elf [--check]`: our frame-rate table (start/frame_rate_base.inc) from the 60 FPS++
   list and a 1.09 executable.
 - `tools/re/frame_rate_check.py [eboot.elf]`: the frame-rate corrections' table against the 60 FPS++ list

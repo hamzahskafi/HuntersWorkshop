@@ -200,7 +200,7 @@ Gate: no new problem; part 3 seen working; the A/B read.
 
 **Outside the track:** the VRAM held after closing the game (the tester's Task Manager figures);
 HW's name to The Hunter's Dream (when the team is asked); after 0.4.6: the performance and features
-lists below, a smaller FFmpeg, Linux.
+lists below, Linux. (The smaller FFmpeg was moved up and done, 2026-11-25.)
 
 ### Waiting on the tester
 
@@ -343,14 +343,24 @@ the PC memory model), fixed, removed, or not the cause in 0.4.4's logs.
 - The features bbport 0.7 noted that HW has not taken: GT-VBAO, the shader recipe pack (to be
   converted to HW's cache inputs), video skipping, invert mouse X ([community-fixes.md](community-fixes.md),
   "bbport 0.7, reviewed").
-- A smaller FFmpeg (raised by the builder session at the tester's request, 2026-11-24; not beta
-  16): the Windows packages bundle MSYS2's CLANG64 FFmpeg, built with GPL encoders (x264, x265,
-  xvidcore, lame, SVT-AV1, rav1e and more) and their libraries, a good share of the 110 DLLs in
-  `engine/out` (beta 15's standalone is about 200 MB zipped). The engine only decodes (avplayer:
-  `avformat_open_input`, `avcodec_find_decoder`, swscale, swresample). A decode-only build
-  (`--disable-encoders --disable-gpl`, only the decoders and demuxers the game's videos need) would
-  shrink the package and make FFmpeg LGPL. No licence action needed meanwhile: the engine is GPL
-  and its source public, and `licenses/msys2/PACKAGES.txt` lists every bundled package.
+- **Done (2026-11-25, engine id 105; the tester: "make it optimal"): a smaller FFmpeg.** Raised by the
+  builder session (2026-11-24): the Windows packages bundled MSYS2's CLANG64 FFmpeg, built with GPL
+  encoders and their libraries, 101 of the 110 DLLs in `engine/out` (123.5 of 137.4 MB). Now every
+  package links the engine's own FFmpeg 9.1 (`packaging/build-ffmpeg.sh`; its release tarball pinned
+  by the SHA-256 checked against FFmpeg's signature), static and LGPL-2.1-or-later
+  (`licenses/FFMPEG.txt`), with only what the movie player plays: the MP4 family (the console's
+  AvPlayer: `.mp4`, `.m4v`, `.m3d`, `.m4a`, `.mov`; HLS not implemented), H.264, HEVC and AAC, the file
+  protocol. CMake links its archives by path (a system or MSYS2 FFmpeg is never picked) and Windows
+  requires it. `movie-decode-test` plays synthetic movies in each container and codec by path and
+  through custom I/O, the streams decoded at once on threads of their own; it fails without the HEVC
+  decoder. Found on the way: the Linux FFmpeg (7.1.1, setup-ubuntu.sh) was built without threads
+  (`--disable-autodetect` leaves them out), so its locks and one-time initialisations did nothing
+  while the player runs FFmpeg on three threads: both builds now enable the platform's threads.
+  Its `--disable-postproc` no longer exists in FFmpeg 8 and later; its default full debug
+  information is line tables now, as the engine's; the `-latomic` FFmpeg's configure adds wherever
+  the library exists is left out on x86-64 (native atomics), so the Linux library gains no run-time
+  dependency; and the Linux package shipped FFmpeg with no licence file. To check: the intro and the
+  cutscenes on Windows and Linux (the tester), the Windows DLL set (the builder, about 9 left).
 
 ### Checks not made
 

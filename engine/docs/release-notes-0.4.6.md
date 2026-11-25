@@ -345,6 +345,15 @@ near one stopped the game's thread for a moment while the engine checked it. Now
 
 Safe mode watches every texture, as before.
 
+## A much smaller Windows download (beta 16)
+
+The engine played the game's movies through MSYS2's complete FFmpeg, which came with about 100
+DLLs for video encoders, image formats, network and text libraries the game never uses. It now
+has its own FFmpeg 9.1 built in, with only what the movies need (MP4 files with H.264 or HEVC
+video and AAC sound): the engine folder drops from 110 DLLs (137 MB) to about 9 (14 MB). The intro
+and cutscenes play as before. On Linux, the same build replaces FFmpeg 7.1.1, which had been built
+without thread support although the movie player uses it from three threads.
+
 ## Diagnostics
 
 - **AMD FSR's own view** (beta 16): "Show AMD FSR's own view (debug)" in the in-game menu, under Motion

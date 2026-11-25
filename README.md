@@ -69,6 +69,7 @@ Hunter's Workshop started from [Lantern Engine](https://github.com/Awakenchan/La
 | AMD FSR | [AMD FSR SDK](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK) 2.4: AMD's signed DLLs, used as AMD ships them, and its API headers (MIT) |
 | DLSS | NVIDIA DLSS SDK (the driver's NGX core) |
 | Sound | [LibAtrac9](https://github.com/Thealexbarney/LibAtrac9) |
+| Movies | [FFmpeg](https://ffmpeg.org) 9.1 (LGPL-2.1-or-later), built with only what the game's movies need |
 | In-game menu | [Dear ImGui](https://github.com/ocornut/imgui) |
 | Controller mappings | [SDL_GameControllerDB](https://github.com/mdqinc/SDL_GameControllerDB) |
 | Trophy list | [pyL1nx/bloodborne_pc](https://github.com/pyL1nx/bloodborne_pc) |

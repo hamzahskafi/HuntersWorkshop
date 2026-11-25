@@ -188,7 +188,74 @@ set(COMMON
     shadps4/common/string_util.cpp shadps4/common/thread.cpp shadps4/common/signal_context.cpp
     shim/common/logging/log.cpp)
 file(GLOB AVPLAYER CONFIGURE_DEPENDS shadps4/core/libraries/avplayer/*.cpp)
-pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET libavformat libavcodec libavutil libswscale libswresample)
+# FFmpeg, for the movie player (shadps4/core/libraries/avplayer): 0.4.6 beta 16, the engine's own build,
+# static and trimmed to what the game's movies need (packaging/build-ffmpeg.sh), from BB_FFMPEG_PREFIX
+# (the environment or the cache; ../deps/ffmpeg, where the script installs it, when unset). Its archives
+# are linked by their paths, so a system FFmpeg (MSYS2's, a distribution's) is never picked up instead.
+# Windows requires it: MSYS2's shared FFmpeg brought about 100 DLLs (120 MB) with it. Linux takes it
+# when it is there (the package: /opt/deps/ffmpeg, packaging/linux/setup-ubuntu.sh), a system FFmpeg
+# otherwise.
+# The environment wins over a build folder's cache (packaging/linux/build.sh sets it).
+set(BB_FFMPEG_PREFIX "" CACHE PATH "The engine's FFmpeg (packaging/build-ffmpeg.sh)")
+if (NOT "$ENV{BB_FFMPEG_PREFIX}" STREQUAL "")
+    set(BB_FFMPEG_PREFIX "$ENV{BB_FFMPEG_PREFIX}" CACHE PATH "The engine's FFmpeg (packaging/build-ffmpeg.sh)" FORCE)
+endif()
+set(ffmpeg_prefix "${BB_FFMPEG_PREFIX}")
+if (NOT ffmpeg_prefix AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../deps/ffmpeg/lib/libavcodec.a")
+    set(ffmpeg_prefix "${CMAKE_CURRENT_SOURCE_DIR}/../deps/ffmpeg")
+endif()
+if (ffmpeg_prefix)
+    add_library(bb_ffmpeg INTERFACE IMPORTED)
+    set(ffmpeg_archives)
+    set(ffmpeg_system)
+    # Dependants first: libavformat uses libavcodec, and every one libavutil.
+    foreach(lib avformat avcodec swscale swresample avutil)
+        set(archive "${ffmpeg_prefix}/lib/lib${lib}.a")
+        if (NOT EXISTS "${archive}")
+            message(FATAL_ERROR "${archive} is missing: run packaging/build-ffmpeg.sh (BB_FFMPEG_PREFIX=${ffmpeg_prefix})")
+        endif()
+        list(APPEND ffmpeg_archives "${archive}")
+        # The system libraries it needs, from its pkg-config file (a static build lists them in Libs).
+        file(STRINGS "${ffmpeg_prefix}/lib/pkgconfig/lib${lib}.pc" pc_libs REGEX "^Libs(\\.private)?:")
+        foreach(line IN LISTS pc_libs)
+            string(REGEX MATCHALL "(-l[^ ]+|-pthread)" tokens "${line}")
+            foreach(token IN LISTS tokens)
+                if (token STREQUAL "-pthread")
+                    list(APPEND ffmpeg_system Threads::Threads)
+                    continue()
+                endif()
+                string(SUBSTRING "${token}" 2 -1 name)
+                # FFmpeg's configure tries -latomic first and keeps it wherever the library exists;
+                # x86-64's atomics are native, so it would only add a run-time dependency.
+                if (name MATCHES "^(avformat|avcodec|swscale|swresample|avutil)$" OR
+                    (name STREQUAL "atomic" AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$"))
+                    continue()
+                endif()
+                list(APPEND ffmpeg_system "${name}")
+            endforeach()
+        endforeach()
+    endforeach()
+    list(REMOVE_DUPLICATES ffmpeg_system)
+    if ("Threads::Threads" IN_LIST ffmpeg_system)
+        find_package(Threads REQUIRED)
+    endif()
+    set_target_properties(bb_ffmpeg PROPERTIES
+        INTERFACE_INCLUDE_DIRECTORIES "${ffmpeg_prefix}/include"
+        INTERFACE_LINK_LIBRARIES "${ffmpeg_archives};${ffmpeg_system}")
+    set(ffmpeg_version "")
+    if (EXISTS "${ffmpeg_prefix}/share/hunters-workshop-ffmpeg.txt")
+        file(STRINGS "${ffmpeg_prefix}/share/hunters-workshop-ffmpeg.txt" ffmpeg_version LIMIT_COUNT 1)
+    endif()
+    message(STATUS "FFmpeg: the engine's static build in ${ffmpeg_prefix} (${ffmpeg_version}; system libraries: ${ffmpeg_system})")
+elseif (WIN32)
+    message(FATAL_ERROR "Windows links the engine's own static FFmpeg: run packaging/build-ffmpeg.sh "
+        "(README, Build), or set BB_FFMPEG_PREFIX to where it is installed")
+else()
+    pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET libavformat libavcodec libavutil libswscale libswresample)
+    add_library(bb_ffmpeg INTERFACE IMPORTED)
+    set_target_properties(bb_ffmpeg PROPERTIES INTERFACE_LINK_LIBRARIES PkgConfig::FFMPEG)
+    message(STATUS "FFmpeg: the system's (${FFMPEG_libavcodec_VERSION}); packaging/build-ffmpeg.sh builds the engine's own")
+endif()
 file(GLOB SHIM_SOURCES CONFIGURE_DEPENDS shim/*.cpp shim/*/*.cpp)
 if (WIN32)
     # These optional experiments use Linux SIGTRAP hooks (the libGnm entry hooks,
@@ -240,7 +307,7 @@ endif()
 # (MIT, third_party/amd-fsr-sdk); AMD's signed DLLs are loaded at run time, not linked.
 target_include_directories(bbgpu PRIVATE third_party/amd-fsr-sdk)
 target_link_libraries(bbgpu PUBLIC Vulkan::Headers fmt::fmt Boost::headers magic_enum::magic_enum
-    tsl::robin_map GPUOpen::VulkanMemoryAllocator PkgConfig::XXHASH PkgConfig::SDL3 PkgConfig::FFMPEG miniz::miniz Zydis::Zydis sirit
+    tsl::robin_map GPUOpen::VulkanMemoryAllocator PkgConfig::XXHASH PkgConfig::SDL3 bb_ffmpeg miniz::miniz Zydis::Zydis sirit
     xbyak::xbyak)
 if (WIN32)
     # Windows headers: no min/max macros, no winsock 1 clash; Windows 10+ APIs (SetThreadDescription).
@@ -445,6 +512,14 @@ add_executable(pipeline-burst-test EXCLUDE_FROM_ALL ../tests/test_pipeline_burst
 target_compile_options(pipeline-burst-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(pipeline-burst-test PRIVATE shim shadps4)
 target_link_libraries(pipeline-burst-test PRIVATE Threads::Threads)
+# 0.4.6 beta 16: the engine's FFmpeg plays what the movie player accepts (tests/data/movies: the MP4
+# family, H.264, HEVC 8- and 10-bit, AAC stereo and 5.1; by path and through custom I/O, the streams on
+# threads of their own at once, converted as the player converts them).
+add_executable(movie-decode-test EXCLUDE_FROM_ALL ../tests/test_movie_decode.cpp)
+target_compile_options(movie-decode-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_compile_definitions(movie-decode-test PRIVATE
+    BB_MOVIE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../tests/data/movies")
+target_link_libraries(movie-decode-test PRIVATE bb_ffmpeg Threads::Threads)
 # 0.4.6 beta 16 parts 1-3: which images are left to the game's calls, under each setting, and which of
 # those the texture net checks.
 add_executable(watch-rules-test EXCLUDE_FROM_ALL ../tests/test_watch_rules.cpp)
