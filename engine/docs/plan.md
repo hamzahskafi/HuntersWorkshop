@@ -140,7 +140,11 @@ switch per part, native tests that fail on deliberate breaks, syntax checks on c
    "Checks not made" item).
 4. AMD FSR with AMD's checks on (`BB_AMD_FSR_DEBUG=1`; the tester, 2026-11-24): any
    `Upscaler: AMD FSR warning` line is a finding. Then a short look with `BB_AMD_FSR_DEBUG_VIEW=1`
-   (AMD's debug view in place of the picture; works from the build after `f275ad2`).
+   (AMD's debug view in place of the picture; works from the build after `f275ad2`). **Done
+   2026-11-25:** the checks on in `27b942f1` with no finding under FSR 4.1.2; the menu's "Show AMD
+   FSR's own view" turned on and off in `c2979378`: FSR made again each way (81.0 MiB with the view
+   allowed, 76.5 without; ready in 0.0-0.1 s), its cost unchanged (0.50 ms a frame); one frame of
+   121 ms in the 5 s the view was turned on, none when it was turned off.
 
 Gate: no new problem; part 3 seen working; the A/B read.
 
