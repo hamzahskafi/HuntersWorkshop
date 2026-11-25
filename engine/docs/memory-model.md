@@ -1463,7 +1463,9 @@ established), and once the copy is done the block goes back to the heap, whose b
 beside them: the faults of betas 15 and 16. The allocations were told to the cache 5,261 and 6,926 times
 in those minutes, marking 149 and 1,076 such images (staging blocks taken again), and nothing in the
 minute without a load: YEBIS allocated nothing then. **Frame rate:** the medians of the 5-second reports
-in play on this route are 223.6 (engine id 109), 220.2 (110), 217.5 (111) and 209.6 FPS (112). Run 111
+in play on this route (after the first in-game frame) are 221.3 (engine id 109), 218.8 (110), 216.8 (111)
+and 206.7 FPS (112); the means 218.3, 217.8, 214.4 and 211.9 (corrected 2026-11-25: the medians first
+given here counted the title screen's reports too). Run 111
 had the heap core's hooks, and 112 does no YEBIS work in a minute without a load, so the spread is the
 runs' own, not the hooks'. The 230.4, 231.3 and 226.0 FPS above came from another count and are not
 comparable with these.
@@ -1583,6 +1585,19 @@ allocators and the pool's code against the 1.09 executable; the research sites g
 beta 16 line's pool events and engine stores with the images they marked (pool events around loads,
 none in a minute without one; stores up to about 1,000 a second, few images marked); the net finding no
 write no call told; no "YEBIS rebuild", "YEBIS's allocations" or heap lines; the picture as before.
+
+**Its run (2026-11-25, `ab91610b`, engine id 113, the same route, five loads, clean shutdown):** the pool
+found at start-up; no write fault on an image in it (the faults left were 0-15 a minute on GX textures
+made without their data, all "outside YEBIS's pool", 1 inside an image in four minutes); the net found no
+write no call told, its first lane 1 s a round (55-62 images). YEBIS's takes from its pool: 5,257, 6,926
+and 6,905 in the minutes with loads and none in the one without, marking 1,263-2,549 images (112: 149 and
+1,076, over images of no game resource only; the rule now covers YEBIS's registered textures too, whose
+memory its rebuild after a load gives back and takes again). That cost nothing visible: YEBIS's re-made
+targets still started empty (253-273 a load), its textures filled from memory stayed at 4-10 MiB a minute,
+the 2 s after each load had at most 2 frames over 25 ms (worst 30.1 ms, 50.4 in 112's first load), 5
+stalls in the session against 9. The engine's DMA stores told: 27,106-80,989 a minute, marking no image:
+on this route no store landed on a texture left to the calls (YEBIS's updates here use the copy pass, not
+the DMA). Frame rate in play: mean 213.0, median 203.5 FPS, within the runs' spread above.
 
 ### Beta 17: shaders and pipelines (to research and design)
 
