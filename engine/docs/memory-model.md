@@ -1398,6 +1398,16 @@ with a relative `jb`: it runs re-encoded in the hook's stub (a `jae` over an abs
 target), tested by running such a function both ways (`engine-hooks-test`). If a heap's range holds the
 textures, its first user names the heap; if none does, they come from memory no heap of this kind manages.
 
+**Its run (2026-11-25, `e419b631`, engine id 111, the same route):** 33-37 heaps found. Every faulting texture
+over no game resource lies in one: core `0x102885d618`, managing `0x105d400010`-`0x106d3ffff0` (256 MiB),
+first used by `+0x21d1e96`, inside `0x21d1e40`: the allocator the game hands YEBIS. So they are YEBIS's
+memory after all, from the path the hooks did not cover: YEBIS's third allocation function `0x11e65f0`
+(through the same function pointer; called by all three texture creators' helpers, the device's wrappers
+`0x11d7200` and four methods reached through function pointers). The heap gets 5,000-20,000 calls a minute
+and faults 35-85 times in the minute after a load. The heap core's hooks, though, saw 119-147 million calls a
+minute (the game's main heaps share the core): the run averaged 226.0 FPS against 230.4-231.3 on the same
+route before (a different session length, so only a hint), and they are not to stay on.
+
 ### Beta 17: shaders and pipelines (to research and design)
 
 The rule not met: "shaders are translated when the game creates them, pipelines built during
