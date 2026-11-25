@@ -1388,6 +1388,16 @@ another allocator (the heap core has 21 other callers, other heap classes among 
 beside them, in the gaps between textures, never inside. Write faults in all 188, 82 and 62 in the minutes
 with loads, the rest on the buffer cache's pages.
 
+**Step 1c (engine id 111; the tester: "let's do it"):** every heap of the game's that uses this heap code,
+found once at its first call to the shared core (allocate `0x2085730`, aligned `0x2085a60`, free
+`0x20858a0`; `BB_GAME_HEAP_RANGES=0`: not hooked) and its managed range read from the core (`[core + 8]`
+to `[core + 0x10]`, as the free checks a block): one log line per heap ("a game heap (core ...) manages
+...-..., first used by +..."), each faulting image over no game resource named with the heap whose range
+holds it, and a minute line with the heaps' calls and those faults by heap. The core's allocate begins
+with a relative `jb`: it runs re-encoded in the hook's stub (a `jae` over an absolute jump to the `jb`'s
+target), tested by running such a function both ways (`engine-hooks-test`). If a heap's range holds the
+textures, its first user names the heap; if none does, they come from memory no heap of this kind manages.
+
 ### Beta 17: shaders and pipelines (to research and design)
 
 The rule not met: "shaders are translated when the game creates them, pipelines built during

@@ -198,10 +198,42 @@ int main() {
     BbEngine::Commit(std::span{&displaced, 1});
     assert(BbEngine::Call(reinterpret_cast<std::uint64_t>(image + 0x300), 1,2,3,4,5,6) == 77 && calls == 1);
     BbEngine::Discard(displaced);
+
+    // 0.4.6 beta 16 (gx_resources.cpp, the heap core's allocate): a prologue whose first bytes hold a relative
+    // jb, run re-encoded as jae over an absolute jump to the jb's target. The function: push rbx; xor eax, eax;
+    // cmp [rdi + 0x18], rsi; jb fail; mov r9d, 0x18; then mov rax, r9; pop rbx; ret. fail: mov rax, -1; pop rbx;
+    // ret. Both ways, with the callback seeing the heap (rdi) each time.
+    {
+        std::uint8_t core_site[19] = {0x53, 0x31, 0xc0, 0x48, 0x39, 0x77, 0x18, 0x0f, 0x82, 0, 0, 0, 0,
+                                      0x41, 0xb9, 0x18, 0x00, 0x00, 0x00};
+        const std::int32_t rel = 0x600 - (0x500 + 13); // from the jb's end to fail
+        std::memcpy(core_site + 9, &rel, 4);
+        Put(image + 0x500, core_site, sizeof core_site);
+        const std::uint8_t rest[] = {0x4c, 0x89, 0xc8, 0x5b, 0xc3};                      // mov rax, r9; pop rbx; ret
+        Put(image + 0x500 + sizeof core_site, rest, sizeof rest);
+        const std::uint8_t fail[] = {0x48, 0xc7, 0xc0, 0xff, 0xff, 0xff, 0xff, 0x5b, 0xc3}; // mov rax, -1; pop rbx; ret
+        Put(image + 0x600, fail, sizeof fail);
+        std::uint8_t moved_core[29] = {0x53, 0x31, 0xc0, 0x48, 0x39, 0x77, 0x18, 0x73, 0x0e, 0xff, 0x25, 0, 0, 0, 0};
+        const auto fail_at = reinterpret_cast<std::uint64_t>(image + 0x600);
+        std::memcpy(moved_core + 15, &fail_at, 8);
+        const std::uint8_t mov_r9[6] = {0x41, 0xb9, 0x18, 0x00, 0x00, 0x00};
+        std::memcpy(moved_core + 23, mov_r9, 6);
+        BbEngine::Hook core;
+        calls = 0;
+        assert(BbEngine::PrepareDisplaced(core, image, 4096, 0x500, std::span{core_site, sizeof core_site}, moved_core,
+                                          Observe));
+        BbEngine::Commit(std::span{&core, 1});
+        std::uint64_t heap[4] = {0, 0, 0, 100}; // [heap + 0x18]: the largest block
+        const auto at = reinterpret_cast<std::uint64_t>(image + 0x500);
+        assert(BbEngine::Call(at, heap, 50) == 0x18 && calls == 1 && arguments[0] == reinterpret_cast<std::uint64_t>(heap));
+        assert(BbEngine::Call(at, heap, 200) == -1 && calls == 2);
+        assert(BbEngine::Call(at, heap, 100) == 0x18 && calls == 3); // equal: not below
+        BbEngine::Discard(core);
+    }
 #ifdef _WIN32
     VirtualFree(image, 0, MEM_RELEASE);
 #else
     munmap(image, 4096);
 #endif
-    std::puts("PASS: guest ABI arguments (seven with a stack argument), XMM preservation, return slot, byte/range guards, staged hook installation, the game's function run from a callback, a replaced function, a cave, a redirected tail call, a return stub and a displaced rip-relative prologue");
+    std::puts("PASS: guest ABI arguments (seven with a stack argument), XMM preservation, return slot, byte/range guards, staged hook installation, the game's function run from a callback, a replaced function, a cave, a redirected tail call, a return stub, a displaced rip-relative prologue and a relative jb re-encoded");
 }

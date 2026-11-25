@@ -45,6 +45,10 @@ def gx_sites():
     sites += [(f'game heap allocate {i}', at, code['kHeapAlignedPrologue' if i % 2 else 'kHeapPrologue'])
               for i, at in enumerate(lists['kHeapAllocs'])]
     sites += [(f'game heap free {i}', at, code['kHeapPrologue']) for i, at in enumerate(lists['kHeapFrees'])]
+    at = constants(text)
+    sites += [('heap core allocate', at['kHeapCoreAlloc'], code['kHeapCoreAllocPrologue']),
+              ('heap core allocate aligned', at['kHeapCoreAligned'], code['kHeapCoreAlignedPrologue']),
+              ('heap core free', at['kHeapCoreFree'], code['kHeapCoreFreePrologue'])]
     return sites
 
 
@@ -130,12 +134,20 @@ class GameCodeSites(unittest.TestCase):
 
     def test_the_gx_research_sites_parse(self):
         sites = gx_sites()
-        self.assertEqual(len(sites), 2 + 4 + 2)
+        self.assertEqual(len(sites), 2 + 4 + 2 + 3)
         for name, at, code in sites:
             # Prepare needs at least 14 bytes (the absolute jump) and whole instructions.
             self.assertGreaterEqual(len(code), 14, name)
-            self.assertEqual(code[:4], b'\x55\x48\x89\xe5', name)  # push rbp; mov rbp, rsp
+            if not name.startswith('heap core'):
+                self.assertEqual(code[:4], b'\x55\x48\x89\xe5', name)  # push rbp; mov rbp, rsp
             self.assertTrue(0x1000000 <= at < 0x3000000, name)
+        # The heap core's allocate: its jb (bytes 7-12) goes where the re-encoded prologue jumps.
+        text = GX_RESOURCES.read_text(encoding='utf-8')
+        at, code = constants(text), arrays(text)
+        prologue = code['kHeapCoreAllocPrologue']
+        self.assertEqual(prologue[7:9], b'\x0f\x82')
+        rel, = struct.unpack_from('<i', prologue, 9)
+        self.assertEqual(at['kHeapCoreAlloc'] + 13 + rel, at['kHeapCoreAllocFail'])
 
     def test_the_executable_holds_them(self):
         elf_path = ROOT / 'out/eboot.elf'
