@@ -144,7 +144,12 @@ switch per part, native tests that fail on deliberate breaks, syntax checks on c
    2026-11-25:** the checks on in `27b942f1` with no finding under FSR 4.1.2; the menu's "Show AMD
    FSR's own view" turned on and off in `c2979378`: FSR made again each way (81.0 MiB with the view
    allowed, 76.5 without; ready in 0.0-0.1 s), its cost unchanged (0.50 ms a frame); one frame of
-   121 ms in the 5 s the view was turned on, none when it was turned off.
+   121 ms in the 5 s the view was turned on, none when it was turned off. The view itself (the tester's
+   screenshots, FSR 4.1.2 at Native AA, standing still): motion vectors dark (zero, no jitter in
+   them); the history blend grey on sharp still edges in both scenes, broad purple patches only on
+   the walls and pedestals around candles and lamps (light that flickers every frame), and in a dark
+   room only scattered specks that move from frame to frame (dust particles, which carry no motion
+   vectors, and noise in dark lighting). As AMD describes it working.
 
 Gate: no new problem; part 3 seen working; the A/B read.
 
