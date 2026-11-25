@@ -13,6 +13,7 @@
 #include <cctype>
 #include <cstdio>
 #include <cmath>
+#include <optional>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
@@ -116,9 +117,13 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         v.preset = value == "auto" || value.empty() ? PresetAuto : std::clamp(i, 0, PresetCount - 1);
     } else if (key == "sharpen") {
         v.sharpen = i != 0;
+    } else if (key == "sharpening") {
+        // 0.4.6 beta 16: a percentage of RCAS's maximum.
+        v.sharpening = std::clamp(i, 0, 100);
     } else if (key == "sharpness") {
-        // 0.4.6 beta 16: 0..1, AMD's own range (to 2 until then: above 1 a second pass for FSR).
-        v.sharpness = Clamp(f, 0.0f, 1.0f);
+        // Before it: AMD's sharpness (0-1 in beta 16's first build, 0-2 until then). Load reads it only
+        // where the file has no `sharpening`.
+        v.sharpening = SharpeningFromOld(f);
     } else if (key == "jitter") {
         v.jitter = i != 0;
     } else if (key == "reactive") {
@@ -433,7 +438,8 @@ void Load() {
     }
     if (FILE* file = std::fopen(Path(), "r")) {
         char line[256];
-        bool sharpen_marker = false;
+        bool sharpen_marker = false, have_sharpening = false;
+        std::optional<float> old_sharpness;
         while (std::fgets(line, sizeof(line), file)) {
             std::string text{line};
             text.erase(text.find_last_not_of(" \t\r\n") + 1);
@@ -445,14 +451,25 @@ void Load() {
                 sharpen_marker = true;
                 continue;
             }
+            if (text.compare(0, eq, "sharpness") == 0) {
+                old_sharpness = float(std::atof(text.c_str() + eq + 1));
+                continue;
+            }
+            have_sharpening |= text.compare(0, eq, "sharpening") == 0;
             Set(v, text.substr(0, eq), text.substr(eq + 1));
         }
         std::fclose(file);
         std::printf("Settings: %s\n", Path());
+        // 0.4.6 beta 16: the old strength as a percentage, where the file has no new one (the next
+        // save writes it in its place).
+        if (!have_sharpening && old_sharpness) {
+            v.sharpening = SharpeningFromOld(*old_sharpness);
+        }
         // 0.4.6 beta 16 (the tester): sharpening off by default. A file with the old default
         // untouched (on, at 0.20) has it switched off, any other choice kept; once: the next save
-        // writes the marker, so turning it on at 0.20 again stays.
-        if (!sharpen_marker && v.sharpen && std::fabs(v.sharpness.load() - 0.2f) < 0.001f) {
+        // writes the marker, so turning it on again stays.
+        const bool old_default = !have_sharpening && (!old_sharpness || std::fabs(*old_sharpness - 0.2f) < 0.001f);
+        if (!sharpen_marker && v.sharpen && old_default) {
             v.sharpen = false;
             std::printf("Settings: sharpening off, the new default (this config.ini had the old one "
                         "untouched, on at 0.20); the menu turns it on again\n");
@@ -560,7 +577,7 @@ void Save() {
     put("render_scale", fixed(v.render_scale, 2));
     put("mip_bias", fixed(v.mip_bias, 2));
     put("sharpen", flag(v.sharpen));
-    put("sharpness", fixed(v.sharpness, 2));
+    put("sharpening", std::to_string(std::clamp(v.sharpening.load(), 0, 100)));
     put(kSharpenOffMarker, "1");
     put("jitter", flag(v.jitter));
     put("reactive", flag(v.reactive));
@@ -673,6 +690,10 @@ void Save() {
                 // A renamed key's old line becomes the new one (0.4.4 beta 28).
                 if (key == "fsr4_invert_jitter") {
                     key = "fsr_invert_jitter";
+                }
+                // 0.4.6 beta 16: the old strength's line becomes the percentage's.
+                if (key == "sharpness") {
+                    key = "sharpening";
                 }
                 const auto it = std::find_if(keys.begin(), keys.end(),
                                              [&](const auto& k) { return k.first == key; });

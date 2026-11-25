@@ -1350,6 +1350,17 @@ hooked), each allocation's range and the return address that asked for it kept, 
 Nothing else changes. The next run's lines name the owner; step 2 (follow it, leave its images to the
 calls that write them) is designed from that.
 
+**Its run (2026-11-25, `4bc9ea19`, engine id 106, about 7 minutes, two loads):** write faults 133, 39
+and 99 in three minutes and none in the other four; those on images over no game resource (71, 74)
+only in the minutes after a load. YEBIS's 1D and 3D creators made nothing. The faulting images over
+no game resource lie in no allocation of YEBIS's (35-64 a minute; all 15 named: the 64x1/32x1/16x1,
+256x256, 32x32, 4x4 and 1x1 RGBA8 textures and the 64x64-to-4x4 format-9 chain, each faulting on a
+write beside it), a few in the tiny allocations `0x11ecc30` makes by the thousand after a load (YEBIS's
+frees are not followed: some of those may be memory handed back and reused). So their owner is not
+YEBIS. YEBIS's allocators take their memory through a function pointer (`0x54b9f38`) that the game
+installs through YEBIS's setter `0x11e61f0`: the game's own GPU memory allocator, the next thing to
+follow (`plan.md`).
+
 ### Beta 17: shaders and pipelines (to research and design)
 
 The rule not met: "shaders are translated when the game creates them, pipelines built during

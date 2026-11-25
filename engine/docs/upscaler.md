@@ -62,38 +62,53 @@ The sections after this one are the record of the work from the first frame anal
 - **DLSS's model** (`dlss_preset`): Auto from 0.4.4 beta 27c (NVIDIA's pairing: K for DLAA, Quality and
   Balanced, M for Performance, L for Ultra Performance), was K; J, K, L, M or the DLL's default.
 - **Sharpening** (0.4.6 beta 16, the tester's go-ahead 2026-11-25): `sharpen` (off by default) and
-  `sharpness` (0-1, 0.20 kept for when it is turned on). One pass for every upscaler and TAA, the
-  engine's (`host_shaders/rcas_extra.glsl`, in the merge on the 1080p path, `taa_sharpen.comp`
-  otherwise): AMD's RCAS (FSR 1's `FsrRcasF`, with its noise detection) at AMD's own mapping (FSR
-  2/3's: s runs RCAS at 2 - 2s stops below its maximum; 0 is off), applied in full, on a
-  display-like picture as RCAS is made for (AMD: gamma 2.0): the 1080p path's HDR scene through
-  AMD's reversible tone mapper (`FsrSrtmF`, c / (max(rgb) + 1)) and gamma 2.0, and back after; the
-  scaled path's frame as the game encoded it (AMD FSR's decoded input is encoded again before), or in
-  gamma 2.0 when it is in an sRGB format (its view decodes it). AMD FSR's own RCAS is off
-  (`BB_SHARPEN_FSR_OWN=1`: AMD FSR's instead, for comparison; it works on the light it upscales,
-  linear on the 1080p path). Where AMD's code meets input it was not written for, the engine's
-  differs: exact reciprocals (the approximate one in AMD's resolve is 0.32% low even with nothing
-  to sharpen; through the HDR inverse a pixel at 100 came back at 61); no division by zero (a
-  channel at 0 across the ring is no limit, as AMD's 0 / 0 is on most GPUs); on the HDR scene the
-  result held at twice the brightest of the five pixels plus one, scaled down whole (AMD's
-  ceiling, 1, is infinite light there: where one channel stands out of its ring RCAS lifts it
-  toward 1 and the inverse multiplies the whole pixel, a blue of 0.47 out at 12; grey and tinted
-  edges never reach the cap); a pixel RCAS leaves is returned exactly as read. One log line when
-  the sharpening changes ("Upscaler: sharpening: the engine's RCAS at 0.20 after FSR 4.1.2, on the
-  HDR scene, ..."). Until beta 15 the slider ran 0-2 and meant different things: under AMD FSR its
-  own RCAS up to 1 (on linear light on the 1080p path: about half the sharpening on strong edges,
-  none beside a value above 1) and the engine's pass above 1; under DLSS and TAA the engine's pass
-  blended in at s (so 0.20 was about a fifth of FSR's 0.20), extrapolated above 1. AMD and NVIDIA
-  leave sharpening to the player (NVIDIA retired DLSS's own in 2.5.1; AMD asks for a slider and
-  measures FSR 4 without it). Off by default in the engine, both launchers and the shipped
-  settings; a `config.ini` with the old default untouched (on, at 0.20) is switched off once, any
-  other choice kept (`sharpen_off_046`, written by the engine's and the launcher's saves; the Linux
-  launcher's 0.5 fallback is 0.20). Research for the HDR encoding: once a second one pixel in 16 of
-  the upscaled 1080p scene counted above 1, 2, 4 and 16 (`scene_range.comp`), a line a minute of
-  such frames ("Upscaler: the 1080p scene's light"). Tests: `rcas-test` (the GLSL compiled as C++:
-  the encodings there and back, AMD's RCAS on each against a double-precision copy of AMD's, the
-  cap, 0 as off; fails on each of 14 deliberate breaks), `taa-shader-test` (the shader on a GPU,
-  each encoding), `settings-test` (the switch-off and its marker; fails on 3 deliberate breaks).
+  `sharpening` (a percentage of RCAS's maximum, 0-100%, 50% by default, the tester's choice after
+  the first run; kept for when it is turned on). One pass for every upscaler and TAA, the engine's
+  (`host_shaders/rcas_extra.glsl`): AMD's RCAS (FSR 1's `FsrRcasF`, with its noise detection),
+  applied in full, its lobe scaled by the percentage (linear: 0% none, 100% AMD's maximum; AMD's
+  `FsrRcasCon` takes the same as stops below the maximum, and FSR 2 and 3 map their sharpness s to
+  2 - 2s stops, so 50% is their 0.5 and their weakest, 0, is 25%). On a display-like picture, as
+  RCAS is made for (AMD: gamma 2.0): the 1080p path's HDR scene through AMD's reversible tone mapper
+  (`FsrSrtmF`, c / (max(rgb) + 1)) and gamma 2.0, and back after; the scaled path's frame as the game
+  encoded it (AMD FSR's decoded input is encoded again before), or in gamma 2.0 when it is in an
+  sRGB format (its view decodes it). Where it runs: in the merge on the 1080p path, after AMD FSR,
+  DLSS and TAA alike (TAA's own pass is not run there); on the scaled path in the copy of the output
+  into the UI image (`sharpen_copy.comp`: one pass where there were three, an RGBA32F copy, the
+  sharpening pass and the blit; at 4K about 100 MB of memory traffic a frame instead of 500), an
+  sRGB UI image written through its UNORM twin and encoded in the shader as the blit's conversion
+  did; where the UI image's format has no storage view, in place before the blit as before (the
+  log says which: "Upscaler: the UI image is ..."). A debug view is not sharpened. AMD FSR's own
+  RCAS is off (`BB_SHARPEN_FSR_OWN=1`: AMD FSR's instead, for comparison, at the sharpness the
+  percentage maps to, `FsrSharpness`; FSR 4's own mapping is not published). Where AMD's code meets
+  input it was not written for, the engine's differs: exact reciprocals (the approximate one in
+  AMD's resolve is 0.32% low even with nothing to sharpen; through the HDR inverse a pixel at 100
+  came back at 61); no division by zero (a channel at 0 across the ring is no limit, as AMD's 0 / 0
+  is on most GPUs); on the HDR scene the result held at twice the brightest of the five pixels plus
+  one, scaled down whole (AMD's ceiling, 1, is infinite light there: where one channel stands out
+  of its ring RCAS lifts it toward 1 and the inverse multiplies the whole pixel, a blue of 0.47 out
+  at 12; grey and tinted edges never reach the cap); a pixel RCAS leaves is returned exactly as
+  read. One log line once a change has held for a second ("Upscaler: sharpening: the engine's RCAS
+  at 50% of its maximum after FSR 4.1.2, on the HDR scene, ..."; the first build wrote one a slider
+  step, 1,272 lines in the tester's `4bc9ea19`). Until beta 15 the slider ran 0-2 and meant
+  different things: under AMD FSR its own RCAS up to 1 (on linear light on the 1080p path: about
+  half the sharpening on strong edges, none beside a value above 1) and the engine's pass above 1;
+  under DLSS and TAA the engine's pass blended in at s (so 0.20 was about a fifth of FSR's 0.20),
+  extrapolated above 1. Beta 16's first build took AMD's sharpness s (0-1, 0.20): the tester found
+  0.20 much weaker than FSR 4's own 0.20 before, and cleaner. AMD and NVIDIA leave sharpening to the
+  player (NVIDIA retired DLSS's own in 2.5.1; AMD asks for a slider and measures FSR 4 without it).
+  Off by default in the engine, both launchers and the shipped settings; a `config.ini` with the old
+  default untouched (on, at 0.20) is switched off once, any other choice kept (`sharpen_off_046`,
+  written by the engine's and the launcher's saves); an old `sharpness` becomes `sharpening` (0.20,
+  the old default, 50%; another value the same strength, 100 x 2^(2s - 2); the line replaced in
+  place), the Linux launcher's 0.5 fallback gone with it. The HDR encoding's research: the 1080p
+  scene is almost all below 1 (the tester's `4bc9ea19`: 0.01-0.15% of pixels above 1 a minute, at
+  most 0.29% in a frame, above 4 at most 0.001%, the brightest 2.6-23.3), so the tone mapper matters
+  only for lamps, fire and the moon; the line ("Upscaler: the 1080p scene's light") stays a minute
+  line. Tests: `rcas-test` (the GLSL compiled as C++: the encodings there and back, AMD's RCAS on
+  each against a double-precision copy of AMD's, the strength linear, the cap, 0 as off; fails on
+  each of 14 deliberate breaks and 3 wrong strength mappings), `taa-shader-test` (on a GPU: the
+  passes in each encoding, the copy into an sRGB UI image against the separate pass), `settings-test`
+  (the percentage, the conversion, the switch-off and its marker).
 - **Texture mip bias** (`mip_bias`, -2..+1, live): the scene's texture LOD bias while AMD FSR or DLSS
   runs is log2(render / output) - 1, as both NVIDIA's DLSS guide and AMD's FSR docs ask
   (`mipBias = log2(renderResolution/displayResolution) - 1.0`), plus `mip_bias`. From 0.4.4 beta 27d

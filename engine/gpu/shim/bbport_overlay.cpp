@@ -1047,14 +1047,17 @@ void UpscalerSection() {
     ImGui::Indent();
     if (const char* label = Item("Sharpening strength", "Сила резкости")) {
         ImGui::BeginDisabled(!s.sharpen);
-        Slider(label, s.sharpness, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+        // 0.4.6 beta 16 (the tester): a percentage of RCAS's maximum, 50% by default.
+        int percent = std::clamp(s.sharpening.load(), 0, 100);
+        const bool changed = ImGui::SliderInt(label, &percent, 0, 100, "%d%%", ImGuiSliderFlags_AlwaysClamp);
+        Store(s.sharpening, std::clamp(percent, 0, 100), changed);
         ImGui::EndDisabled();
         char hint[384];
         std::snprintf(hint, sizeof(hint), "%s %s", BbSettings::MenuText("Higher is sharper.", "Чем выше, тем резче."),
-                      BbSettings::MenuText("0.20 is light; high values can halo edges and show grain. Ctrl+click to "
-                                           "type a value.",
-                                           "0.20 — слегка; высокие значения дают ореолы по краям и зерно. Ctrl+щелчок — "
-                                           "ввести значение."));
+                      BbSettings::MenuText("100% is AMD's strongest; high values can halo edges and show grain. "
+                                           "Ctrl+click to type a value.",
+                                           "100% — максимум AMD; высокие значения дают ореолы по краям и зерно. "
+                                           "Ctrl+щелчок — ввести значение."));
         Hint(hint);
     }
     ImGui::Unindent();

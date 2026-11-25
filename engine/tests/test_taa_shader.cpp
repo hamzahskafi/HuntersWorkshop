@@ -14,6 +14,7 @@
 #include "video_core/texture_cache/image.h"
 #include "video_core/host_shaders/taa_comp.h"
 #include "video_core/host_shaders/taa_sharpen_comp.h"
+#include "video_core/host_shaders/sharpen_copy_comp.h"
 #include <vk_mem_alloc.h>
 
 int main(int argc, char** argv) {
@@ -295,5 +296,84 @@ int main(int argc, char** argv) {
     sharpen("flat black",1,0,true,0);
     sharpen("flat HDR",1,8,true,0);
     sharpen("HDR detail",1,8,false,0);
+    // 0.4.6 beta 16: the scaled path's copy into the UI image, sharpened on the way
+    // (sharpen_copy.comp), against the separate pass: an sRGB UI image written through its UNORM
+    // twin, encoded as the blit's conversion did; the output's alpha kept.
+    {
+        sharpen("copy source",0,1,false,2); // images[4]: the input as it is (fp16)
+        VideoCore::UniqueImage ui(device, instance.GetAllocator());
+        ui.Create({.flags=vk::ImageCreateFlagBits::eMutableFormat|vk::ImageCreateFlagBits::eExtendedUsage,
+            .imageType=vk::ImageType::e2D,.format=vk::Format::eR8G8B8A8Srgb,.extent={W,H,1},.mipLevels=1,
+            .arrayLayers=1,.samples=vk::SampleCountFlagBits::e1,.tiling=vk::ImageTiling::eOptimal,
+            .usage=vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eTransferSrc});
+        const vk::ImageViewUsageCreateInfo storage_usage{.usage=vk::ImageUsageFlagBits::eStorage};
+        auto ui_view=device.createImageViewUnique({.pNext=&storage_usage,.image=vk::Image(ui),
+            .viewType=vk::ImageViewType::e2D,.format=vk::Format::eR8G8B8A8Unorm,
+            .subresourceRange={vk::ImageAspectFlagBits::eColor,0,1,0,1}},nullptr,d).value;
+        const vk::PushConstantRange copy_push{vk::ShaderStageFlagBits::eCompute,0,24};
+        auto copy_layout=device.createPipelineLayoutUnique({.setLayoutCount=1,.pSetLayouts=&*sharpen_desc,
+            .pushConstantRangeCount=1,.pPushConstantRanges=&copy_push},nullptr,d).value;
+        auto copy_module=device.createShaderModuleUnique({.codeSize=sizeof(SHARPEN_COPY_COMP),
+            .pCode=SHARPEN_COPY_COMP},nullptr,d).value;
+        auto copy_pipeline=device.createComputePipelineUnique({}, {
+            .stage={.stage=vk::ShaderStageFlagBits::eCompute,.module=*copy_module,.pName="main"},
+            .layout=*copy_layout},nullptr,d).value;
+        const auto copy=[&](float strength,u32 encoding,u32 srgb) {
+            const auto cmd=scheduler.CommandBuffer();
+            const vk::ImageMemoryBarrier2 to_general{.srcStageMask=vk::PipelineStageFlagBits2::eAllCommands,
+                .srcAccessMask=vk::AccessFlagBits2::eNone,.dstStageMask=vk::PipelineStageFlagBits2::eComputeShader,
+                .dstAccessMask=vk::AccessFlagBits2::eShaderStorageWrite,.oldLayout=vk::ImageLayout::eUndefined,
+                .newLayout=vk::ImageLayout::eGeneral,.image=vk::Image(ui),
+                .subresourceRange={vk::ImageAspectFlagBits::eColor,0,1,0,1}};
+            cmd.pipelineBarrier2({.imageMemoryBarrierCount=1,.pImageMemoryBarriers=&to_general},d);
+            barrier(cmd,vk::PipelineStageFlagBits2::eAllCommands,
+                    vk::AccessFlagBits2::eMemoryRead|vk::AccessFlagBits2::eMemoryWrite,
+                    vk::PipelineStageFlagBits2::eComputeShader,
+                    vk::AccessFlagBits2::eShaderStorageRead|vk::AccessFlagBits2::eShaderStorageWrite);
+            const std::array<vk::DescriptorImageInfo,2> ci{{
+                {.imageView=*views[4],.imageLayout=vk::ImageLayout::eGeneral},
+                {.imageView=*ui_view,.imageLayout=vk::ImageLayout::eGeneral}}};
+            std::array<vk::WriteDescriptorSet,2> cw{};
+            for (u32 i=0;i<2;++i) cw[i]={.dstBinding=i,.descriptorCount=1,
+                .descriptorType=vk::DescriptorType::eStorageImage,.pImageInfo=&ci[i]};
+            const struct { float strength; u32 encoding, srgb, width, height, pad; } params{strength,encoding,srgb,W,H,0};
+            cmd.bindPipeline(vk::PipelineBindPoint::eCompute,*copy_pipeline,d);
+            cmd.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute,*copy_layout,0,cw,d);
+            cmd.pushConstants(*copy_layout,vk::ShaderStageFlagBits::eCompute,0,sizeof(params),&params,d);
+            cmd.dispatch((W+7)/8,(H+7)/8,1,d);
+            barrier(cmd,vk::PipelineStageFlagBits2::eComputeShader,vk::AccessFlagBits2::eShaderStorageWrite,
+                    vk::PipelineStageFlagBits2::eTransfer,vk::AccessFlagBits2::eTransferRead);
+            const vk::BufferImageCopy back{.imageSubresource={vk::ImageAspectFlagBits::eColor,0,0,1},
+                .imageExtent={W,H,1}};
+            cmd.copyImageToBuffer(vk::Image(ui),vk::ImageLayout::eGeneral,staging,back,d);
+            barrier(cmd,vk::PipelineStageFlagBits2::eTransfer,vk::AccessFlagBits2::eTransferWrite,
+                    vk::PipelineStageFlagBits2::eHost,vk::AccessFlagBits2::eHostRead);
+            scheduler.Finish();
+            const auto* bytes=static_cast<const unsigned char*>(ai.pMappedData);
+            assert(bytes[center*4+3]==255); // the output's alpha
+            return std::array<int,2>{bytes[center*4],bytes[(center+1)*4]};
+        };
+        const auto srgb_byte=[](float x) {
+            x=std::clamp(x,0.f,1.f);
+            const float e=x<=0.0031308f ? 12.92f*x : 1.055f*std::pow(x,1.f/2.4f)-0.055f;
+            return int(std::lround(255.f*e));
+        };
+        const auto near=[](int got,int want,const char* what) {
+            if (std::abs(got-want)>1) std::fprintf(stderr,"sharpen copy %s: %d expected %d\n",what,got,want);
+            assert(std::abs(got-want)<=1);
+        };
+        auto plain=copy(0,2,0);
+        near(plain[0],int(std::lround(255.f*0.55f)),"as it is, UNORM, centre");
+        near(plain[1],int(std::lround(255.f*0.5f)),"as it is, UNORM, beside");
+        plain=copy(0,2,1);
+        near(plain[0],srgb_byte(0.55f),"as it is, sRGB, centre");
+        near(plain[1],srgb_byte(0.5f),"as it is, sRGB, beside");
+        auto sharp=copy(1,2,0);
+        near(sharp[0],int(std::lround(255.f*maximum)),"sharpened, UNORM, as the separate pass");
+        assert(sharp[1]<int(std::lround(255.f*0.5f))); // the darker side darkened
+        sharp=copy(1,2,1);
+        near(sharp[0],srgb_byte(maximum),"sharpened, sRGB, as the separate pass");
+        std::printf("Sharpen copy: as it is and sharpened, UNORM and sRGB, PASS\n");
+    }
     vmaDestroyBuffer(instance.GetAllocator(),staging,allocation);
 }

@@ -129,11 +129,14 @@ namespace BloodborneLauncher.Views
             IniToggle(SymbolRegular.Eyedropper24, L.T("Sharpening (RCAS)"), null, "sharpen", changed: UpdateUpscaler);
             _sharpenCard = LastRow;
             _sharpenCard.SetTip(L.T("AMD's RCAS. Brings back detail that upscaling softens."));
-            // 0.4.6 beta 16: 0..1, AMD's own range (the engine's sharpening after every upscaler).
-            SliderRow(SymbolRegular.SlideSize24, L.T("Sharpening strength"), null, 0, 1, 0.05,
-                () => ParseDouble(Ini.Get("sharpness"), 0.2), v => Ini.Set("sharpness", Fmt(v)), defaultValue: 0.2);
+            // 0.4.6 beta 16 (the tester): a percentage of RCAS's maximum, 50% by default (the engine's
+            // sharpening after every upscaler).
+            SliderRow(SymbolRegular.SlideSize24, L.T("Sharpening strength"), null, 0, 100, 1,
+                () => ParseDouble(Ini.Get("sharpening"), 50),
+                v => Ini.Set("sharpening", ((int)Math.Round(v)).ToString(System.Globalization.CultureInfo.InvariantCulture)),
+                "0'%'", defaultValue: 50);
             _sharpnessCard = Nest();
-            _sharpnessCard.SetTip(L.T("0.20 is light. High values can halo edges and show grain."));
+            _sharpnessCard.SetTip(L.T("100% is AMD's strongest. High values can halo edges and show grain."));
 
             // The fine settings most players leave alone (27d: two; DLSS's sharper textures folded into the
             // bias, auto exposure as NVIDIA and AMD advise, without a row).

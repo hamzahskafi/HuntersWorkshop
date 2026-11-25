@@ -363,13 +363,15 @@ game's linear light, so it sharpened about half as much on strong edges and not 
 highlights. Now:
 
 - **One sharpening for every upscaler**, the engine's, after AMD FSR, DLSS and TAA alike (AMD FSR's
-  own is turned off): AMD's RCAS, at AMD's own strength scale, on a picture encoded as the eye sees
-  it, which is what RCAS is designed for. Highlights are sharpened as well, and kept from flaring.
-- **The slider runs from 0 to 1**, AMD's range: 0 is off, 1 AMD's strongest. A value above 1 saved
-  before is read as 1.
+  own is turned off): AMD's RCAS on a picture encoded as the eye sees it, which is what RCAS is
+  designed for. Highlights are sharpened as well, and kept from flaring. It costs almost nothing: at
+  1080p it is done in a step that runs anyway, and at other output sizes in the copy of the picture
+  that runs anyway.
+- **The strength is a percentage** of AMD's strongest sharpening: 0% is none, 100% the strongest,
+  50% (the default) half of it. Your old strength is kept as the same strength (the old default,
+  0.20, becomes 50%).
 - **Off by default**, as AMD and NVIDIA leave sharpening to the player. If your settings still had
-  the old default (on, at 0.20), it is switched off once; any other choice you made is kept, and the
-  strength stays at 0.20 for when you turn it on.
+  the old default (on, at 0.20), it is switched off once; any other choice you made is kept.
 - `BB_SHARPEN_FSR_OWN=1` in Extra variables uses AMD FSR's own sharpening instead, for comparison.
 
 The reactive mask's line in the in-game menu now says whether the AMD FSR version running reads the
@@ -386,7 +388,8 @@ mask, by FSR's own answer (FSR 4.1.2 does not), instead of "FSR 4 may".
 - **For the remaining texture write faults** (beta 16): a line a minute names the memory under the
   textures that still fault, and which of YEBIS's functions asked for it, to find their owner in the
   next build. `BB_YEBIS_ALLOCS=0` in Extra variables turns it off. A second line says how much of
-  the 1080p picture is brighter than white, for the sharpening.
+  the 1080p picture is brighter than white, for the sharpening; and a line says how strong the
+  sharpening is and where it runs, once a change has held for a second.
 
 - **The "Building shaders" note** shows when a frame was late while shaders were being
   prepared, for 2 seconds, rather than once 30 ms of that work had added up: it missed the short

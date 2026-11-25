@@ -1443,7 +1443,7 @@
   "Needs an upscaler or TAA": "Wymaga upscalera lub TAA",
   "Higher is sharper": "Wyżej znaczy ostrzej",
   "AMD's RCAS. Brings back detail that upscaling softens.": "RCAS od AMD. Przywraca detale, które skalowanie zmiękcza.",
-  "0.20 is light. High values can halo edges and show grain.": "0.20 to lekko. Wysokie wartości mogą dawać poświaty na krawędziach i ziarno.",
+  "100% is AMD's strongest. High values can halo edges and show grain.": "100% to maksimum AMD. Wysokie wartości mogą dawać poświaty na krawędziach i ziarno.",
   "The game gives no motion for moving characters; this works it out. Off: faster, but moving enemies can trail. After a restart.": "Gra nie podaje ruchu postaci; to go wylicza. Wył.: szybciej, ale poruszający się wrogowie mogą zostawiać smugi. Po restarcie.",
   "0 is what NVIDIA and AMD advise with an upscaler. Below 0 can shimmer.": "0 to wartość zalecana przez NVIDIA i AMD przy upscalerze. Poniżej 0 może migotać.",
   "Off: the sharpest, with jagged edges. The game's own: its PS4 pass, after a restart. TAA: smooth edges, live.": "Wył.: najostrzej, z poszarpanymi krawędziami. Własne gry: jej przebieg z PS4, po restarcie. TAA: gładkie krawędzie, od razu.",

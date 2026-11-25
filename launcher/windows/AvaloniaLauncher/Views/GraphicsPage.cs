@@ -36,9 +36,11 @@ namespace BloodborneLauncher.Views
 
             IniToggle(SymbolRegular.Eyedropper24, L.T("Sharpening (RCAS)"), L.T("Works with every option above, TAA included: turn it up if the picture looks soft"), "sharpen");
             _sharpenCard = (SettingRow)Body.Children[^1];
-            // 0.4.6 beta 16: 0..1, AMD's own range, from the engine's 0.20 (was 0..2 from 0.5).
-            SliderRow(SymbolRegular.SlideSize24, L.T("Sharpening strength"), L.T("0.20 is light. High values can halo edges and show grain."), 0, 1, 0.05,
-                () => ParseDouble(Ini.Get("sharpness"), 0.2), v => Ini.Set("sharpness", Fmt(v)));
+            // 0.4.6 beta 16 (the tester): a percentage of RCAS's maximum, 50% by default, as the engine
+            // (was 0..2 from 0.5).
+            SliderRow(SymbolRegular.SlideSize24, L.T("Sharpening strength"), L.T("100% is AMD's strongest. High values can halo edges and show grain."), 0, 100, 1,
+                () => ParseDouble(Ini.Get("sharpening"), 50),
+                v => Ini.Set("sharpening", ((int)Math.Round(v)).ToString(System.Globalization.CultureInfo.InvariantCulture)), "0'%'");
             _sharpnessCard = (SettingRow)Body.Children[^1];
 
             IniCombo(SymbolRegular.FastForward24, L.T("Frame generation"),

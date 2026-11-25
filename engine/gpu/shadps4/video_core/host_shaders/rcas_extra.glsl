@@ -6,10 +6,11 @@
 // it in a shader: RCAS_SOURCE, the image the colour is read from (imageLoad).
 //
 // AMD's RCAS (FidelityFX FSR 1, fsr/ffx_fsr1.h FsrRcasF with FSR_RCAS_DENOISE): the same noise
-// detection, ring limits and lobe, at AMD's own strength (FSR 2 and 3's mapping of their sharpness
-// s: 2 - 2s stops below the maximum), applied in full (beta 20's blended it by the strength again,
-// so its 0.2 was about a fifth of FSR's 0.2). It differs from AMD's code where that code meets an
-// input it was not written for:
+// detection, ring limits and lobe, applied in full. Its strength is the share of RCAS's maximum lobe
+// (the menu's percentage / 100: 0 none, 1 AMD's maximum, linear between; AMD's FsrRcasCon takes it as
+// stops below the maximum, 2^-stops, and FSR 2 and 3 map their sharpness s to 2 - 2s stops, so 0.5
+// is the same here and there, and FSR's 0 is 0.25). Beta 20's blended RCAS's result by the strength
+// again. It differs from AMD's code where that code meets an input it was not written for:
 //  - It sharpens a display-like picture, as RCAS is made for (AMD: perceptual, gamma 2.0).
 //    `encoding` says what the image holds:
 //      0  the HDR scene (linear light, any range): AMD's reversible tone mapper (FsrSrtmF,
@@ -65,7 +66,7 @@ float RcasChannelLobe(float mn4, float mx4, float e) {
 }
 
 // The centre sharpened against its ring (the pixels above, left, right and below), all as read;
-// `strength` 0..1 (0 or less: the centre as read).
+// `strength` the share of RCAS's maximum, 0..1 (0 or less: the centre as read).
 vec3 RcasSharpen(vec3 above, vec3 left, vec3 centre, vec3 right, vec3 below, float strength,
                  uint encoding) {
     const float s = min(strength, 1.0);
@@ -88,9 +89,8 @@ vec3 RcasSharpen(vec3 above, vec3 left, vec3 centre, vec3 right, vec3 below, flo
     const vec3 mn4 = min(min(b, d), min(f, h)), mx4 = max(max(b, d), max(f, h));
     const float lobes = max(max(RcasChannelLobe(mn4.r, mx4.r, e.r), RcasChannelLobe(mn4.g, mx4.g, e.g)),
                             RcasChannelLobe(mn4.b, mx4.b, e.b));
-    // AMD's FSR_RCAS_LIMIT, its strength (FsrRcasCon: 2^-stops) and its noise removal.
-    const float lobe = max(-(0.25 - 1.0 / 16.0), min(lobes, 0.0)) * exp2(2.0 * s - 2.0) *
-                       (1.0 - 0.5 * noise);
+    // AMD's FSR_RCAS_LIMIT, the strength (FsrRcasCon's 2^-stops) and AMD's noise removal.
+    const float lobe = max(-(0.25 - 1.0 / 16.0), min(lobes, 0.0)) * s * (1.0 - 0.5 * noise);
     if (lobe == 0.0) {
         return centre;
     }
@@ -113,7 +113,8 @@ vec3 RcasLoad(ivec2 p) {
     return clamp(c, vec3(0.0), vec3(65504.0));
 }
 
-// The colour at p sharpened by `strength` (0..1; 0: as read), the image holding `encoding`.
+// The colour at p sharpened by `strength` (the share of RCAS's maximum, 0..1; 0: as read), the image
+// holding `encoding`.
 vec3 ExtraSharpen(ivec2 p, float strength, uint encoding) {
     const vec3 centre = RcasLoad(p);
     if (!(strength > 0.0)) {

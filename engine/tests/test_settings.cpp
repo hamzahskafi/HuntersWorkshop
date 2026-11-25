@@ -52,7 +52,7 @@ int main() {
         auto& v = BbSettings::Get();
         assert(v.upscaler == fresh.upscaler.load() && v.preset == fresh.preset.load() &&
                v.dlss_preset == fresh.dlss_preset.load() && BbSettings::FsrVersion() == "auto");
-        assert(v.sharpen == fresh.sharpen.load() && v.sharpness == fresh.sharpness.load() && v.jitter == fresh.jitter.load());
+        assert(v.sharpen == fresh.sharpen.load() && v.sharpening == fresh.sharpening.load() && v.jitter == fresh.jitter.load());
         assert(v.reactive == fresh.reactive.load() && v.object_motion == fresh.object_motion.load());
         assert(v.reactive_scale == fresh.reactive_scale.load() && v.reactive_threshold == fresh.reactive_threshold.load() &&
                v.reactive_max == fresh.reactive_max.load() && v.debug_view == fresh.debug_view.load());
@@ -507,34 +507,52 @@ int main() {
     assert(!BbSettings::GameAaApplies(true, BbSettings::UpscalerFsr) && !BbSettings::GameAaApplies(true, BbSettings::UpscalerTaa));
     assert(!BbSettings::GameAaApplies(false, BbSettings::UpscalerOff));
     {
-        // 0.4.6 beta 16 (the tester): sharpening off by default; the old default untouched (on, at
-        // 0.20) switched off once, any other choice kept; 0..1.
+        // 0.4.6 beta 16 (the tester): sharpening off by default, its strength a percentage of RCAS's
+        // maximum (50 by default). The old default untouched (on, at 0.20) switched off once and made
+        // 50; any other old strength kept as the same strength; the new key wins over the old.
         const auto load = [&](const char* text) {
             { std::ofstream file(path); file << text; assert(file.good()); }
             BbSettings::Load();
         };
         load("sharpen=1\nsharpness=0.20\n");
-        assert(!s.sharpen && s.sharpness == 0.2f);
+        assert(!s.sharpen && s.sharpening == 50);
         load("sharpness=0.20\nsharpen=1\n");
+        assert(!s.sharpen && s.sharpening == 50);
+        s.sharpening = 7;
+        load("sharpen=1\n"); // an old file without the strength: the old default too
         assert(!s.sharpen);
         load("sharpen=1\nsharpness=0.50\n");
-        assert(s.sharpen && s.sharpness == 0.5f);
+        assert(s.sharpen && s.sharpening == 50); // 2^-1 of the maximum, as beta 16's first build
+        load("sharpen=1\nsharpness=0.73\n");
+        assert(s.sharpen && s.sharpening == 69);
+        load("sharpen=1\nsharpness=1.50\n");
+        assert(s.sharpen && s.sharpening == 100);
+        load("sharpen=1\nsharpness=0\n");
+        assert(s.sharpen && s.sharpening == 0);
         load("sharpen=0\nsharpness=0.20\n");
-        assert(!s.sharpen);
+        assert(!s.sharpen && s.sharpening == 50);
         load("sharpen=1\nsharpness=0.20\nsharpen_off_046=1\n");
-        assert(s.sharpen && s.sharpness == 0.2f);
-        load("sharpen=1\nsharpness=1.50\nsharpen_off_046=1\n");
-        assert(s.sharpen && s.sharpness == 1.0f);
-        // Every save writes the marker: turned on again at 0.20, it stays on.
+        assert(s.sharpen && s.sharpening == 50);
+        load("sharpen=1\nsharpening=35\nsharpness=0.90\n");
+        assert(s.sharpen && s.sharpening == 35);
+        load("sharpen=1\nsharpening=250\n");
+        assert(s.sharpen && s.sharpening == 100);
+        // Every save writes the marker and the percentage in the old line's place: turned on again at
+        // the default, it stays on.
         load("sharpen=1\nsharpness=0.20\n");
         assert(!s.sharpen);
         s.sharpen = true;
         BbSettings::Save();
-        assert(Read(path).find("sharpen=1\nsharpness=0.20\n") == 0);
+        assert(Read(path).find("sharpen=1\nsharpening=50\n") == 0);
+        assert(Read(path).find("sharpness") == std::string::npos);
         assert(Read(path).find("\nsharpen_off_046=1\n") != std::string::npos);
         s.sharpen = false;
         BbSettings::Load();
-        assert(s.sharpen);
+        assert(s.sharpen && s.sharpening == 50);
+        // The old line and the new one both there: one line, the new one's value.
+        load("sharpening=40\nsharpness=0.80\n");
+        BbSettings::Save();
+        assert(Read(path).find("sharpening=40\n") == 0 && Read(path).find("sharpening", 5) == std::string::npos);
     }
     std::filesystem::remove(temporary);
     std::puts("PASS: settings save keeps other keys, menu position");

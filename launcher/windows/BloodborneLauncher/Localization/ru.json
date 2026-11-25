@@ -1443,7 +1443,7 @@
   "Needs an upscaler or TAA": "Нужен апскейлер или TAA",
   "Higher is sharper": "Чем выше, тем резче",
   "AMD's RCAS. Brings back detail that upscaling softens.": "RCAS от AMD. Возвращает детали, которые смягчает апскейлинг.",
-  "0.20 is light. High values can halo edges and show grain.": "0.20 — слегка. Высокие значения дают ореолы по краям и зерно.",
+  "100% is AMD's strongest. High values can halo edges and show grain.": "100% — максимум AMD. Высокие значения дают ореолы по краям и зерно.",
   "The game gives no motion for moving characters; this works it out. Off: faster, but moving enemies can trail. After a restart.": "Игра не даёт движения персонажей; это его вычисляет. Выкл.: быстрее, но движущиеся враги могут оставлять шлейф. После перезапуска.",
   "0 is what NVIDIA and AMD advise with an upscaler. Below 0 can shimmer.": "0 — то, что советуют NVIDIA и AMD с апскейлером. Ниже 0 может мерцать.",
   "Off: the sharpest, with jagged edges. The game's own: its PS4 pass, after a restart. TAA: smooth edges, live.": "Выкл.: резче всего, с лесенками. Собственное игры: её проход с PS4, после перезапуска. TAA: гладкие края, сразу.",

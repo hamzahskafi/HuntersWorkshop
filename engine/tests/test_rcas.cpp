@@ -188,7 +188,7 @@ int main() {
               "above 1: 1");
     }
 
-    // A display-encoded picture: AMD's RCAS, at AMD's mapping (con = 2^-(2 - 2s)), in full.
+    // A display-encoded picture: AMD's RCAS in full, the strength its lobe's share (FsrRcasCon's con).
     std::mt19937 random(16);
     std::uniform_real_distribution<float> unit(0.02f, 0.98f);
     for (int i = 0; i < 20000; ++i) {
@@ -202,7 +202,7 @@ int main() {
             check(Same(got, p[2]), "encoded: 0 is the centre");
             continue;
         }
-        const Rcas want = AmdRcas(p, std::exp2(-(2.0 - 2.0 * s)));
+        const Rcas want = AmdRcas(p, s);
         check(Near(got, vec3(float(want.out[0]), float(want.out[1]), float(want.out[2])), 2e-5f),
               "encoded: AMD's RCAS");
         // Linear 0..1: the same on its square roots, squared after.
@@ -213,7 +213,7 @@ int main() {
         const vec3 got_linear = glsl::RcasSharpen(lin[0], lin[1], lin[2], lin[3], lin[4], s, 1);
         check(Near(got_linear, got * got, 1e-4f), "linear: AMD's RCAS in gamma 2.0");
     }
-    // The strengths: 0.5 is one stop below the maximum, 0.2 1.6; the change grows with the strength.
+    // The strength: the change grows with it, about in proportion (the lobe's share).
     {
         float last = 0;
         for (float s = 0.1f; s <= 1.0f; s += 0.1f) {
@@ -223,7 +223,9 @@ int main() {
         }
         const float half = Sharpen(edge_ring, edge_centre, 0.5f, 2).r - edge_centre.r;
         const float full = Sharpen(edge_ring, edge_centre, 1.0f, 2).r - edge_centre.r;
-        check(half > 0 && half < full, "0.5 between 0 and 1");
+        check(half > 0.4f * full && half < 0.6f * full, "50% about half of 100%");
+        const float tiny = Sharpen(edge_ring, edge_centre, 0.01f, 2).r - edge_centre.r;
+        check(tiny > 0 && tiny < 0.02f * full, "1% about a hundredth: no jump above 0");
     }
     // Where RCAS changes nothing (the centre at white beside a darker ring: AMD's guard), the
     // pixel as read.
