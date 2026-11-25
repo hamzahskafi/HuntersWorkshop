@@ -5974,6 +5974,7 @@ void Rasterizer::FillBuffer(VAddr address, u32 num_bytes, u32 value, bool is_gds
             std::fill(buffer, buffer + (num_bytes / sizeof(u32)), value);
             BbWriteLog::Note(address, buffer, num_bytes, BbWriteLog::Dma);
             buffer_cache.NoteEngineStore(address, num_bytes); // 0.4.6 beta 12
+            texture_cache.NoteEngineStore(address, num_bytes); // 0.4.6 beta 16, YEBIS by its calls
             return;
         }
     }
@@ -6036,6 +6037,9 @@ void Rasterizer::CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, b
             std::memcpy(std::bit_cast<void*>(dst), std::bit_cast<void*>(src), num_bytes);
             BbWriteLog::Note(dst, std::bit_cast<const void*>(dst), num_bytes, BbWriteLog::Dma);
             buffer_cache.NoteEngineStore(dst, num_bytes); // 0.4.6 beta 12
+            // 0.4.6 beta 16 (YEBIS by its calls, part 2): and the texture cache, for the images left to the
+            // calls over it (a watched image faults on this store; one left to the calls would not learn of it).
+            texture_cache.NoteEngineStore(dst, num_bytes);
             return;
         }
     }

@@ -68,10 +68,9 @@ struct Gone {
     // 0.4.6 beta 11: the resource's kind (Owner, created events), and for a GX 2D texture made without
     // its data the shape from its T# (`hand_over` then too: BB_IMAGE_OWNERS, the texture cache).
     std::uint8_t owner = 0;
-    // 0.4.6 beta 16, step 2: YEBIS took this memory in its heap (written events, from its allocators):
-    // only the images over no game resource that step 2 leaves to the calls there are told (their data
-    // is written after the allocation, the heap's header before it: the write page protection caught).
-    bool yebis_heap = false;
+    // 0.4.6 beta 16, YEBIS by its calls: YEBIS took this memory from its pool (written events, from its
+    // allocators, before it fills the memory): only the images in the pool left to the calls are told.
+    bool yebis_pool = false;
 };
 // The textures destroyed since the last call (the texture cache's collector; 0.4.6 beta 4: every
 // pass while DestroyedWaiting, which reads no lock).
@@ -107,19 +106,15 @@ struct Resource {
     std::uint64_t memory = 0, bytes = 0;
 };
 Resource Describe(std::uint64_t begin, std::uint64_t end);
-// 0.4.6 beta 16, step 2: whether [begin, end) lies in YEBIS's heap (the heap in the game's graphics object
-// that the game's allocation callback gives YEBIS its memory from; read from there, 1.09 only), with
-// YEBIS's allocations followed (they tell when YEBIS takes memory there again; BB_YEBIS_ALLOCS=0: never).
-// Every faulting image over no game resource in beta 16's runs lay in it, the heap's bookkeeping and
-// YEBIS's other memory beside it written.
-bool InYebisHeap(std::uint64_t begin, std::uint64_t end);
-// The images such a written event marked (the texture cache, ProcessWritten), for the minute line.
-void NoteYebisHeapRetaken(std::uint64_t images);
-// Such an image over no game resource at its registration (the texture cache): counted by who asked for
-// the YEBIS allocation under it (the minute line "YEBIS's allocations"), the first 16 named, with whether
-// it is left to the calls (watch_rules.h; BB_WATCH_YEBIS_HEAP=1 watches it).
-void NoteYebisHeapImage(std::uint64_t memory, std::uint64_t bytes, std::uint32_t width, std::uint32_t height,
-                        std::uint32_t format, bool left_to_calls);
+// 0.4.6 beta 16, YEBIS by its calls: whether [begin, end) lies in YEBIS's pool (the heap in the game's
+// graphics object the game's allocator for YEBIS takes from; read from there, 1.09 only), with YEBIS's
+// allocations followed (they tell when YEBIS takes memory there). The images in it are left to YEBIS's calls
+// (watch_rules.h).
+bool InYebisPool(std::uint64_t begin, std::uint64_t end);
+// The images a pool event marked (the texture cache, ProcessWritten), and an engine DMA store told to the
+// texture cache with the images it marked (NoteEngineStore), for the beta 16 minute line.
+void NoteYebisPoolTaken(std::uint64_t images);
+void NoteEngineStoreTold(std::uint64_t images);
 // 0.4.6 beta 16 part 4: a write fault on an image's pages (the texture cache, the faulting thread): the
 // image's owner kind, whether the write landed inside the image, and whether the image reaches past the
 // bytes of the resource starting at it; the first 16 images of the session are named in the log.

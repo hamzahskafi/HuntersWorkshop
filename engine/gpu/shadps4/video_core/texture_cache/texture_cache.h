@@ -182,6 +182,11 @@ public:
     /// Marks an image as dirty if it exists at the provided address.
     void InvalidateMemoryFromGPU(VAddr address, size_t max_size);
 
+    /// 0.4.6 beta 16 (YEBIS by its calls, part 2): the engine stored [address, address + size) on the CPU
+    /// for a DMA copy or fill: the images left to the calls whose contents come from memory over it are
+    /// marked written (WatchRules::StoreTells; BB_DMA_TELLS_TEXTURES=0: off).
+    void NoteEngineStore(VAddr address, u64 size);
+
     /// Evicts any images that overlap the unmapped range.
     void UnmapMemory(VAddr cpu_addr, size_t size);
 

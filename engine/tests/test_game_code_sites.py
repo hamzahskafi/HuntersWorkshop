@@ -37,20 +37,11 @@ def site_lists(text):
 
 
 def gx_sites():
-    """gx_resources.cpp's 0.4.6 beta 16 research hooks (image offsets): YEBIS's allocators (three since step
-    2), the game heap's allocate and free methods, the heap core's, each with the prologue it is prepared
-    with."""
+    """gx_resources.cpp's 0.4.6 beta 16 hooks on YEBIS's three allocators (image offsets; YEBIS by its calls:
+    the calls that tell when YEBIS takes memory from its pool), each with the prologue it is prepared with."""
     text = GX_RESOURCES.read_text(encoding='utf-8')
     code, lists = arrays(text), site_lists(text)
-    sites = [(f'YEBIS allocator {i}', at, code['kYebisAllocPrologue']) for i, at in enumerate(lists['kYebisAllocators'])]
-    sites += [(f'game heap allocate {i}', at, code['kHeapAlignedPrologue' if i % 2 else 'kHeapPrologue'])
-              for i, at in enumerate(lists['kHeapAllocs'])]
-    sites += [(f'game heap free {i}', at, code['kHeapPrologue']) for i, at in enumerate(lists['kHeapFrees'])]
-    at = constants(text)
-    sites += [('heap core allocate', at['kHeapCoreAlloc'], code['kHeapCoreAllocPrologue']),
-              ('heap core allocate aligned', at['kHeapCoreAligned'], code['kHeapCoreAlignedPrologue']),
-              ('heap core free', at['kHeapCoreFree'], code['kHeapCoreFreePrologue'])]
-    return sites
+    return [(f'YEBIS allocator {i}', at, code['kYebisAllocPrologue']) for i, at in enumerate(lists['kYebisAllocators'])]
 
 
 def constants(text):
@@ -133,23 +124,21 @@ class GameCodeSites(unittest.TestCase):
             rel, = struct.unpack_from('<i', code, call + 1)
             self.assertEqual(start + call + 5 + rel, target)
 
-    def test_the_gx_research_sites_parse(self):
+    def test_the_yebis_sites_parse(self):
         sites = gx_sites()
-        self.assertEqual(len(sites), 3 + 4 + 2 + 3)
+        self.assertEqual(len(sites), 3)
         for name, at, code in sites:
             # Prepare needs at least 14 bytes (the absolute jump) and whole instructions.
             self.assertGreaterEqual(len(code), 14, name)
-            if not name.startswith('heap core'):
-                self.assertEqual(code[:4], b'\x55\x48\x89\xe5', name)  # push rbp; mov rbp, rsp
+            self.assertEqual(code[:4], b'\x55\x48\x89\xe5', name)  # push rbp; mov rbp, rsp
             self.assertTrue(0x1000000 <= at < 0x3000000, name)
-        # The heap core's allocate: its jb (bytes 7-12) goes where the re-encoded prologue jumps.
         text = GX_RESOURCES.read_text(encoding='utf-8')
         at, code = constants(text), arrays(text)
-        prologue = code['kHeapCoreAllocPrologue']
-        self.assertEqual(prologue[7:9], b'\x0f\x82')
-        rel, = struct.unpack_from('<i', prologue, 9)
-        self.assertEqual(at['kHeapCoreAlloc'] + 13 + rel, at['kHeapCoreAllocFail'])
-        # Step 2: YEBIS's heap as the game's callback reads it: mov rbx, [rip + disp] (the graphics object's
+        # The research hooks are gone (YEBIS by its calls): no heap class or heap core site left.
+        for gone in ('kHeapAllocs', 'kHeapFrees', 'kHeapCoreAlloc', 'kHeapCoreAllocPrologue', 'kYebisUpdatePrologue',
+                     'kYebisMapPrologue'):
+            self.assertNotIn(gone, text, gone)
+        # YEBIS's pool as the game's callback reads it: mov rbx, [rip + disp] (the graphics object's
         # pointer), cmp dword [rbx + used], 0; jle; add r13d, 0x40; mov r14d, esi; lea r15, [rbx + core].
         heap = code['kYebisHeapCodeBytes']
         self.assertEqual(heap[:3], b'\x48\x8b\x1d')

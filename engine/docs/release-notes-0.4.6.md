@@ -328,19 +328,22 @@ Safe mode turns all four off.
 The last of the game's memory still watched by page protection was some of its textures: each write
 near one stopped the game's thread for a moment while the engine checked it. Now:
 
-- **YEBIS's post-processing no longer stops the game 8-12 times a second.** For every
-  post-processing pass YEBIS writes a few vertices into a buffer that sits beside its small built-in
-  textures (dither, film grain, colour spectrum, fade). Because those textures were watched, every
-  one of those writes was caught and checked. YEBIS changes its textures only through its own calls,
-  which the engine already follows, so they are no longer watched. `BB_WATCH_YEBIS_TEXTURES=1` in
-  Extra variables watches them as before.
+- **YEBIS's post-processing no longer stops the game 8-12 times a second, nor after area loads.**
+  For every post-processing pass YEBIS writes a few vertices into a buffer that sits beside its small
+  built-in textures (dither, film grain, colour spectrum, fade). And when it fills or changes a
+  texture, it writes the data into a scratch block from its own memory pool, which the GPU then
+  copies in; the pool's bookkeeping beside those blocks was caught dozens of times in the minute after
+  each area load. Because those textures and blocks were watched, every one of those writes was caught
+  and checked. Nothing in YEBIS's memory pool is watched now: YEBIS only ever writes memory it has just
+  taken from the pool, and taking it tells the engine. `BB_WATCH_YEBIS=1` in Extra variables watches
+  them as before.
 - **The UI's texture planes** (Scaleform's) are no longer watched either: Scaleform tells the engine
   when it has finished writing one. `BB_WATCH_SCALEFORM=1` watches them as before.
-- **YEBIS's other textures** (small ones, made in its own memory pool) are no longer watched
-  either. The game's memory bookkeeping right beside them was caught dozens of times in the minute
-  after each area load. YEBIS writes these textures only through its own calls, and when it reuses
-  their memory its allocation tells the engine; the safety net below checks them like the others.
-  `BB_WATCH_YEBIS_HEAP=1` in Extra variables watches them as before.
+- **The engine's own copies tell the textures they land in.** When the engine carries out one of the
+  game's GPU copies or fills by writing memory directly, it now tells the textures it no longer
+  watches that their contents changed, as it already told its buffers. Before, such a texture kept
+  its old contents until the safety net below noticed, seconds later. `BB_DMA_TELLS_TEXTURES=0` in
+  Extra variables turns it off.
 - **A safety net:** once a second the engine checks a slice of the textures it no longer watches
   (about 2 MB a second for YEBIS's and the UI's, which takes seconds to go round them, and as much
   again for the game's own). If one changed without the game's calls saying so, and still nothing has
@@ -387,15 +390,9 @@ mask, by FSR's own answer (FSR 4.1.2 does not), instead of "FSR 4 may".
 - **Sharpening for comparison** (beta 16): `BB_SHARPEN_FSR_OWN=1` in Extra variables has FSR sharpen
   with its own sharpening instead, at the same percentage, for side-by-side comparisons.
 
-- **For the remaining texture write faults** (beta 16): a line a minute names which of YEBIS's
-  functions asked for the memory under YEBIS's unwatched textures, and under any texture that still
-  faults; `BB_YEBIS_ALLOCS=0` in Extra variables turns it off (YEBIS's other textures are then watched
-  again, as nothing tells the engine when YEBIS reuses their memory). Two more lines, off by default, do the
-  same for one of the game's memory heaps and name every heap the game has with its address range:
-  `BB_GAME_HEAP_ALLOCS=1` and `BB_GAME_HEAP_RANGES=1` turn them on (the second slows the game a
-  little). Another line says how much of
-  the 1080p picture is brighter than white, for the sharpening; and a line says how strong the
-  sharpening is and where it runs, once a change has held for a second.
+- **For the sharpening** (beta 16): a line says how much of the 1080p picture is brighter than
+  white, and a line says how strong the sharpening is and where it runs, once a change has held for a
+  second.
 
 - **The "Building shaders" note** shows when a frame was late while shaders were being
   prepared, for 2 seconds, rather than once 30 ms of that work had added up: it missed the short

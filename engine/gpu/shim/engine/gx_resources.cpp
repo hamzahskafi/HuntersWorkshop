@@ -142,66 +142,30 @@ constexpr std::uint8_t kShaderPrologue[2][16] = {
 // formats, as D3D11 does (bbhost's 0x25657a0). push rbp; mov rbp, rsp; push r15; push r14; push r12;
 // push rbx; sub rsp, 0x70
 constexpr std::size_t kCreateInputLayout = 0x21657a0;
-// 0.4.6 beta 9: YEBIS's context's UpdateSubresource (ctx, resource, subresource, box, data, ...), Map
-// (ctx, resource, subresource, type, flags, mapped*) and Unmap (a thunk: mov rdi, [rdi + 0xaa0]; mov
-// esi, 0x38; xor edx, edx; xor ecx, ecx; jmp), bbhost's 0x15d8d70, 0x15d92c0 and 0x15d99c0; Scaleform's
-// texture manager's unmapTexture (manager, texture, ...), bbhost's 0x7a3270, where its CPU writes into
-// a texture's planes end (Update and Unmap both come there).
-constexpr std::size_t kYebisUpdate = 0x11d8d70, kYebisMap = 0x11d92c0, kYebisUnmap = 0x11d99c0,
-                      kScaleformUnmap = 0x3a3270;
-constexpr std::uint8_t kYebisUpdatePrologue[] = {0x55, 0x48, 0x89, 0xe5, 0x41, 0x57, 0x41, 0x56, 0x41, 0x55,
-                                                 0x41, 0x54, 0x53, 0x48, 0x81, 0xec, 0x58, 0x01, 0x00, 0x00};
-constexpr std::uint8_t kYebisMapPrologue[] = {0x55, 0x48, 0x89, 0xe5, 0x41, 0x57, 0x41, 0x56, 0x41, 0x55,
-                                              0x41, 0x54, 0x53, 0x48, 0x81, 0xec, 0x98, 0x00, 0x00, 0x00};
+// 0.4.6 beta 9: YEBIS's context's Unmap (a thunk: mov rdi, [rdi + 0xaa0]; mov esi, 0x38; xor edx, edx;
+// xor ecx, ecx; jmp), bbhost's 0x15d99c0; Scaleform's texture manager's unmapTexture (manager, texture,
+// ...), bbhost's 0x7a3270, where its CPU writes into a texture's planes end (Update and Unmap both come
+// there). 0.4.6 beta 16, YEBIS by its calls: YEBIS's UpdateSubresource (0x11d8d70) and Map (0x11d92c0) no
+// longer hooked: an update never writes the texture's memory (its data is staged in a block from YEBIS's
+// pool and copied in by the GPU), and Map was only counted (its own buffers, about 16,000 a second).
+constexpr std::size_t kYebisUnmap = 0x11d99c0, kScaleformUnmap = 0x3a3270;
 constexpr std::uint8_t kYebisUnmapPrologue[] = {0x48, 0x8b, 0xbf, 0xa0, 0x0a, 0x00, 0x00, 0xbe,
                                                 0x38, 0x00, 0x00, 0x00, 0x31, 0xd2, 0x31, 0xc9};
-// 0.4.6 beta 16 (the remaining faults, step 1: research): YEBIS's GPU memory allocators (edi the size,
-// esi the alignment; the memory returned). Its 2D, 1D and 3D texture creators take their memory from
-// 0x11e6810 (default usage, made without data) or 0x11e6700 (otherwise) and keep it at the object's +0x98;
-// six other functions call them too. Who asked (the return address) names the creator of the memory under
-// an image over no game resource. Step 2: the third, 0x11e65f0 (the same call through YEBIS's allocator
-// pointer, kept in a list of its own), called by the same creators' helpers, the device's wrappers and six
-// other functions, YEBIS's update (0x11d8d70) and Map (0x11d92c0) among them. Step 2's rule needs them
-// (NoteYebisHeapRetake). push rbp; mov rbp, rsp; push r15; push r14; push r12; push rbx; sub rsp, 0x30
-// (all three)
+// 0.4.6 beta 16 (YEBIS by its calls): YEBIS's GPU memory allocators (edi the size, esi the alignment; the
+// memory returned): 0x11e6810 (its texture creators' memory made without data), 0x11e6700 (with data) and
+// 0x11e65f0 (the staging blocks of its creators' initial data and of its updates, and others), all through
+// the allocator the game gives it (the pointer at 0x54b9f38: the game's 0x21d1e40, its pool). Each call is
+// the call that tells: YEBIS takes memory it is about to fill (NoteYebisPoolTake). push rbp; mov rbp, rsp;
+// push r15; push r14; push r12; push rbx; sub rsp, 0x30 (all three)
 constexpr std::size_t kYebisAllocators[3] = {0x11e6810, 0x11e6700, 0x11e65f0};
 constexpr std::uint8_t kYebisAllocPrologue[] = {0x55, 0x48, 0x89, 0xe5, 0x41, 0x57, 0x41, 0x56,
                                                 0x41, 0x54, 0x53, 0x48, 0x83, 0xec, 0x30};
-// 0.4.6 beta 16 (the remaining faults, step 1b: research): the game's heap class whose blocks the faulting
-// images over no game resource lie among (vtable 0x52e70c0 in 1.09; YEBIS's memory comes from the same
-// heap code, 0x2085a60, through the game's callback 0x21d1e40). Its methods lock the heap and call the heap
-// core: allocate (this, rsi the size) at 0x2929690 and 0x29297f0, allocate aligned (this, rsi the size, rdx
-// the alignment) at 0x29296f0 and 0x2929850, free (this, rsi the block) at 0x2929780 and 0x29298e0. The
-// core's free (0x20858a0) rewrites the block headers between blocks: the "write beside it" faults.
-constexpr std::size_t kHeapAllocs[4] = {0x2929690, 0x29296f0, 0x29297f0, 0x2929850};
-constexpr std::size_t kHeapFrees[2] = {0x2929780, 0x29298e0};
-// push rbp; mov rbp, rsp; push r15; push r14; push r12; push rbx; mov r14, rsi; mov rbx, [rdi + 8]
-constexpr std::uint8_t kHeapPrologue[] = {0x55, 0x48, 0x89, 0xe5, 0x41, 0x57, 0x41, 0x56, 0x41,
-                                          0x54, 0x53, 0x49, 0x89, 0xf6, 0x48, 0x8b, 0x5f, 0x08};
-// push rbp; mov rbp, rsp; push r15; push r14; push r13; push r12; push rbx; push rax; mov r14, rdx
-constexpr std::uint8_t kHeapAlignedPrologue[] = {0x55, 0x48, 0x89, 0xe5, 0x41, 0x57, 0x41, 0x56, 0x41,
-                                                 0x55, 0x41, 0x54, 0x53, 0x50, 0x49, 0x89, 0xd6};
-// 0.4.6 beta 16 (the remaining faults, step 1c: research): the heap core every one of the game's heaps of
-// this kind shares (rdi the heap's core; its managed range [core + 8], [core + 0x10], as the free checks a
-// block): allocate 0x2085730, allocate aligned 0x2085a60, free 0x20858a0. Recorded once per heap, to find
-// the heap whose range holds the faulting textures over no game resource.
-constexpr std::size_t kHeapCoreAlloc = 0x2085730, kHeapCoreAligned = 0x2085a60, kHeapCoreFree = 0x20858a0;
-constexpr std::size_t kHeapCoreAllocFail = 0x2085884; // its first instruction's jb target
-// push rbx; xor eax, eax; cmp [rdi + 0x18], rsi; jb 0x2085884; mov r9d, 0x18 (the jb is relative: re-encoded)
-constexpr std::uint8_t kHeapCoreAllocPrologue[] = {0x53, 0x31, 0xc0, 0x48, 0x39, 0x77, 0x18, 0x0f, 0x82, 0x47,
-                                                   0x01, 0x00, 0x00, 0x41, 0xb9, 0x18, 0x00, 0x00, 0x00};
-// push r15; push r14; push r13; push r12; push rbx; xor eax, eax; blsr rcx, rdx
-constexpr std::uint8_t kHeapCoreAlignedPrologue[] = {0x41, 0x57, 0x41, 0x56, 0x41, 0x55, 0x41, 0x54,
-                                                     0x53, 0x31, 0xc0, 0xc4, 0xe2, 0xf0, 0xf3, 0xca};
-// push rbp; mov rbp, rsp; push r15; push r14; push r13; push r12; push rbx; push rax
-constexpr std::uint8_t kHeapCoreFreePrologue[] = {0x55, 0x48, 0x89, 0xe5, 0x41, 0x57, 0x41,
-                                                  0x56, 0x41, 0x55, 0x41, 0x54, 0x53, 0x50};
-// 0.4.6 beta 16 (the remaining faults, step 2): YEBIS's heap. The game's allocation callback for YEBIS
+// 0.4.6 beta 16 (the remaining faults, step 2; YEBIS by its calls): YEBIS's pool.// 0.4.6 beta 16 (the remaining faults, step 2): YEBIS's heap. The game's allocation callback for YEBIS
 // (0x21d1e40, given to YEBIS as its allocator at the renderer's init) takes YEBIS's memory from a heap in the
 // game's graphics object when that heap is set up: mov rbx, [rip + ...] (the object's pointer, at image +
 // 0x56a6d18); cmp dword [rbx + 0x2714], 0; jle (no heap: elsewhere); add r13d, 0x40; mov r14d, esi;
-// lea r15, [rbx + 0x21e8] (the heap's core: its range [core + 8], [core + 0x10], as step 1c recorded it).
-// Read from there when the bytes are 1.09's (YebisHeapRange); otherwise no image is found in it.
+// lea r15, [rbx + 0x21e8] (the heap's core: its range [core + 8], [core + 0x10], as the core's free checks
+// a block). Read from there when the bytes are 1.09's (YebisPoolRange); otherwise no image is found in it.
 constexpr std::size_t kYebisHeapCode = 0x21d1e51, kGraphicsObjectPointer = 0x56a6d18;
 constexpr std::uint8_t kYebisHeapCodeBytes[] = {0x48, 0x8b, 0x1d, 0xc0, 0x4e, 0x4d, 0x03, 0x83, 0xbb, 0x14,
                                                 0x27, 0x00, 0x00, 0x00, 0x7e, 0x5c, 0x41, 0x83, 0xc5, 0x40,
@@ -253,8 +217,7 @@ struct Entry {
 };
 
 // What a return through the stub belongs to.
-enum Op : std::uint8_t { kOpCreate, kOpTsharp, kOpView, kOpCreate1D, kOpYebis, kOpScaleform, kOpYebisUpdate, kOpYebisAlloc,
-                          kOpHeapAlloc };
+enum Op : std::uint8_t { kOpCreate, kOpTsharp, kOpView, kOpCreate1D, kOpYebis, kOpScaleform, kOpYebisAlloc };
 
 struct Pending {
     std::uint64_t ret;
@@ -455,22 +418,21 @@ struct Counts {
     std::atomic<std::uint64_t> unwatched{0}, unwatched_bytes{0};
     std::atomic<std::uint64_t> input_layouts{0}, input_layouts_loading{0}, input_layout_elements{0};
     std::array<std::atomic<std::uint64_t>, 4> translated{}, translated_ns{}, translated_seen{};
-    // 0.4.6 beta 9: YEBIS's update, Map and Unmap calls on its registered 2D textures (updates of
-    // surfaces made without data for the GPU), Scaleform's unmaps of planes it owns, and the written
-    // events queued and dropped; CPU writes on textures made with data logged with their code.
-    std::atomic<std::uint64_t> yebis_updates{0}, yebis_update_surfaces{0}, yebis_maps{0}, yebis_unmaps{0},
-        sf_unmaps{0}, written_events{0}, written_dropped{0}, data_writes_logged{0};
-    // 0.4.6 beta 16: YEBIS's Maps of its own buffers (the shared vertex buffer's, each post-processing pass);
-    // write faults on images by [owner][inside the image], those whose image reaches past its resource; the
-    // texture net's passes and what it found; the last census of watched images.
-    std::atomic<std::uint64_t> yebis_buffer_maps{0};
+    // 0.4.6 beta 9: YEBIS's Unmaps of its registered 2D textures, Scaleform's unmaps of planes it owns,
+    // and the written events queued and dropped; CPU writes on textures made with data logged with their
+    // code.
+    std::atomic<std::uint64_t> yebis_unmaps{0}, sf_unmaps{0}, written_events{0}, written_dropped{0},
+        data_writes_logged{0};
+    // 0.4.6 beta 16: write faults on images by [owner][inside the image], those whose image reaches past its
+    // resource; the texture net's passes and what it found; the last census of watched images.
     std::array<std::array<std::atomic<std::uint64_t>, 2>, std::size_t(Owner::kCount)> image_faults{};
     std::atomic<std::uint64_t> image_faults_past{0};
     std::atomic<std::uint64_t> tnet_images{0}, tnet_bytes{0}, tnet_untold{0}, tnet_untold_bytes{0};
     std::atomic<int> tnet_named{0};
     std::atomic<std::uint64_t> handover_watched{0};
-    // Step 2: YEBIS's allocations in its heap told as written events, and the images they marked.
-    std::atomic<std::uint64_t> yebis_heap_retakes{0}, yebis_heap_retaken_images{0};
+    // YEBIS by its calls: YEBIS's takes from its pool told as written events and the images they marked;
+    // the engine's own DMA stores told to the texture cache and the images they marked.
+    std::atomic<std::uint64_t> yebis_pool_takes{0}, yebis_pool_marked{0}, engine_stores{0}, engine_store_marked{0};
     // 0.4.6 beta 10: new textures made over a live texture's memory, at its base or partly, by [the live
     // one's owner kind][the new one's]; images marked written by a creation with data; dead images a draw
     // took (after a destroy / after something newer), of them the owner rule's hand-overs and refusals.
@@ -691,10 +653,6 @@ void RegisterOther(std::uint64_t key, std::uint64_t memory, std::uint32_t bytes,
 }
 
 // `memory_now`: where the resource's memory is at its destructor's entry (the holder is still whole).
-namespace Rebuild {
-void Destroyed(std::uint64_t memory, const Entry& e);
-}
-
 void Unregister(std::uint64_t holder, bool texture, std::uint64_t memory_now) {
     // 0.4.6 beta 5: the game's Map does not move a resource's memory (a rename writes into a copy
     // from GX's own pool, the holder's memory unchanged), so a resource whose memory differs here is
@@ -713,9 +671,6 @@ void Unregister(std::uint64_t holder, bool texture, std::uint64_t memory_now) {
         }
         const Entry e = it->second;
         g_by_holder.erase(it);
-        if (e.kind == kYebis) {
-            Rebuild::Destroyed(e.memory == memory_now ? e.memory : 0, e);
-        }
         g_counts.destroyed[e.kind].fetch_add(1, std::memory_order_relaxed);
         g_counts.destroyed_bytes[e.kind].fetch_add(e.bytes, std::memory_order_relaxed);
         if (e.kind != kBuffer) {
@@ -839,261 +794,22 @@ GUEST_ABI std::int64_t Create1DEntry(std::uint64_t, const std::uint64_t* saved) 
     return 0;
 }
 
-// 0.4.6 beta 16, step 1: YEBIS's allocations by their memory (the newest over any it overlaps: memory
-// given back and taken again), who asked for them (an image offset), and this minute's counts: made, by
-// who asked; write faults on images over no game resource, by the allocation under them (0: none).
-struct YebisAlloc {
-    std::uint64_t end = 0, ns = 0;
-    std::uint32_t caller = 0;
-    std::uint8_t which = 0;
-};
-std::mutex g_alloc_mutex;
-std::map<std::uint64_t, YebisAlloc> g_yebis_allocs;
-std::unordered_map<std::uint32_t, std::pair<std::uint64_t, std::uint64_t>> g_allocs_by_caller;
-std::unordered_map<std::uint32_t, std::uint64_t> g_faults_by_caller;
-// Step 2: images over no game resource registered in YEBIS's heap, by who asked for the allocation under
-// them (0: none known), and how many have been named.
-std::unordered_map<std::uint32_t, std::uint64_t> g_heap_images_by_caller;
-std::atomic<std::uint32_t> g_heap_images_named{0};
-std::uint64_t g_allocs_dropped = 0;
-constexpr std::size_t kMaxYebisAllocs = 200000;
-/// The functions that ask YEBIS's allocators for memory and are named in the minute line (1.09, read
-/// from its function table): each texture creator's helper, reached only from that creator (`0x11dea90`
-/// 1D, `0x11df570` 2D, `0x11e1750` 3D), and the one behind the device's method wrappers.
-struct AllocCaller {
-    std::uint32_t begin, end;
-    const char* name;
-};
-constexpr AllocCaller kAllocCallers[] = {
-    {0x11deca0, 0x11df47c, "the 1D texture creator"},
-    {0x11df840, 0x11e0278, "the 2D texture creator"},
-    {0x11e1960, 0x11e20b4, "the 3D texture creator"},
-    {0x11d7200, 0x11d73b5, "behind the device's wrappers"},
-};
-/// The name of the function a return address is in, or null.
-const char* AllocCallerName(std::uint32_t at) {
-    for (const AllocCaller& c : kAllocCallers) {
-        if (at > c.begin && at <= c.end) {
-            return c.name;
-        }
-    }
-    return nullptr;
-}
+// 0.4.6 beta 16 (step 2; YEBIS by its calls): YEBIS's pool (kYebisHeapCode), read once it is set up (the
+// renderer's init) and kept: published by g_yebis_pool_found (release) after its range is stored. The pool
+// rule holds only with YEBIS's allocations followed (g_yebis_allocs_on, set at Install before the game
+// runs): they are the calls that tell.
+bool g_yebis_pool_code = false, g_yebis_allocs_on = false;
+std::mutex g_yebis_pool_mutex;
+std::atomic<bool> g_yebis_pool_found{false};
+std::uint64_t g_yebis_pool_begin = 0, g_yebis_pool_end = 0;
 
-void NoteYebisHeapRetake(std::uint64_t memory, std::uint64_t size);
-
-void NoteYebisAllocation(std::uint64_t memory, std::uint64_t size, std::uint64_t ret, unsigned which) {
-    if (!memory || !size) {
-        return;
-    }
-    NoteYebisHeapRetake(memory, size);
-    const auto caller = std::uint32_t(ret - reinterpret_cast<std::uint64_t>(g_image_base));
-    const std::uint64_t end = memory + size, ns = NowNs();
-    std::scoped_lock lock{g_alloc_mutex};
-    auto& made = g_allocs_by_caller[caller];
-    ++made.first;
-    made.second += size;
-    auto it = g_yebis_allocs.lower_bound(memory);
-    if (it != g_yebis_allocs.begin()) {
-        if (const auto before = std::prev(it); before->second.end > memory) {
-            it = before;
-        }
-    }
-    while (it != g_yebis_allocs.end() && it->first < end) {
-        it = g_yebis_allocs.erase(it);
-    }
-    if (g_yebis_allocs.size() >= kMaxYebisAllocs) {
-        ++g_allocs_dropped;
-        return;
-    }
-    g_yebis_allocs.emplace(memory, YebisAlloc{end, ns, caller, std::uint8_t(which)});
-}
-
-// The YEBIS allocation over `address`, if one is known.
-bool YebisAllocationAt(std::uint64_t address, std::uint64_t* start, YebisAlloc* out) {
-    std::scoped_lock lock{g_alloc_mutex};
-    auto it = g_yebis_allocs.upper_bound(address);
-    if (it == g_yebis_allocs.begin()) {
-        return false;
-    }
-    --it;
-    if (address >= it->second.end) {
-        return false;
-    }
-    *start = it->first;
-    *out = it->second;
-    return true;
-}
-
-// 0.4.6 beta 16, step 1b: the game heap's live blocks by their memory (made through the class's
-// allocate methods, dropped at its frees), who asked (an image offset) and which heap (the object), and
-// this minute's counts: made by who asked, freed, the calls; write faults on images over no game resource,
-// by who asked for the block under them (0: none known). Under g_alloc_mutex.
-struct HeapBlock {
-    std::uint64_t end = 0, ns = 0, heap = 0;
-    std::uint32_t caller = 0;
-};
-std::map<std::uint64_t, HeapBlock> g_heap_blocks;
-std::unordered_map<std::uint32_t, std::pair<std::uint64_t, std::uint64_t>> g_heap_made_by_caller;
-std::unordered_map<std::uint32_t, std::uint64_t> g_heap_faults_by_caller;
-std::unordered_map<std::uint64_t, std::uint64_t> g_heap_made_by_heap;
-std::uint64_t g_heap_frees = 0, g_heap_frees_unknown = 0, g_heap_dropped = 0;
-constexpr std::size_t kMaxHeapBlocks = 400000;
-
-void NoteHeapBlock(std::uint64_t memory, std::uint64_t size, std::uint64_t ret, std::uint64_t heap) {
-    if (!memory || !size) {
-        return;
-    }
-    const auto caller = std::uint32_t(ret - reinterpret_cast<std::uint64_t>(g_image_base));
-    const std::uint64_t end = memory + size, ns = NowNs();
-    std::scoped_lock lock{g_alloc_mutex};
-    auto& made = g_heap_made_by_caller[caller];
-    ++made.first;
-    made.second += size;
-    ++g_heap_made_by_heap[heap];
-    // A block over older ones: memory given back without a free seen.
-    auto it = g_heap_blocks.lower_bound(memory);
-    if (it != g_heap_blocks.begin()) {
-        if (const auto before = std::prev(it); before->second.end > memory) {
-            it = before;
-        }
-    }
-    while (it != g_heap_blocks.end() && it->first < end) {
-        it = g_heap_blocks.erase(it);
-    }
-    if (g_heap_blocks.size() >= kMaxHeapBlocks) {
-        ++g_heap_dropped;
-        return;
-    }
-    g_heap_blocks.emplace(memory, HeapBlock{end, ns, heap, caller});
-}
-
-// The game heap's live block over `address`, if one is known.
-bool HeapBlockAt(std::uint64_t address, std::uint64_t* start, HeapBlock* out) {
-    std::scoped_lock lock{g_alloc_mutex};
-    auto it = g_heap_blocks.upper_bound(address);
-    if (it == g_heap_blocks.begin()) {
-        return false;
-    }
-    --it;
-    if (address >= it->second.end) {
-        return false;
-    }
-    *start = it->first;
-    *out = it->second;
-    return true;
-}
-
-// 0.4.6 beta 16, step 1b: the heap class's allocations (rdi the heap, rsi the size), read at their return.
-GUEST_ABI std::int64_t HeapAllocEntry(std::uint64_t, const std::uint64_t* saved) {
-    Pending p{saved[6], saved[5], kYebis, false, false, 0, kOpHeapAlloc};
-    p.holder = saved[4];
-    t_pending.push_back(p);
-    const_cast<std::uint64_t*>(saved)[6] = reinterpret_cast<std::uint64_t>(g_return_stub);
-    return 0;
-}
-
-// Its frees (rsi the block): the block is gone.
-GUEST_ABI std::int64_t HeapFreeEntry(std::uint64_t, const std::uint64_t* saved) {
-    if (const std::uint64_t block = saved[4]) {
-        std::scoped_lock lock{g_alloc_mutex};
-        ++g_heap_frees;
-        if (g_heap_blocks.erase(block) == 0) {
-            ++g_heap_frees_unknown;
-        }
-    }
-    return 0;
-}
-
-// 0.4.6 beta 16, step 1c: the game's heaps by their core (rdi at the heap core's calls), each heap's managed
-// range read at its first call, who first used it, its calls and the faults on images over no game resource
-// in its range. A heap's slot is filled before its core is published (count, release), so the hot path
-// scans published slots without a lock.
-struct KnownHeap {
-    std::atomic<std::uint64_t> core{0};
-    std::uint64_t begin = 0, end = 0;
-    std::uint32_t first = 0;
-    std::atomic<std::uint64_t> calls{0}, faults{0};
-};
-constexpr std::size_t kMaxHeaps = 256;
-std::array<KnownHeap, kMaxHeaps> g_heaps;
-std::atomic<std::size_t> g_heap_count{0};
-std::mutex g_heaps_mutex;
-std::atomic<std::uint64_t> g_heap_faults_none{0}, g_heaps_full{0};
-
-void NoteNewHeap(std::uint64_t core, std::uint64_t ret) {
-    std::uint64_t begin = 0, end = 0;
-    std::uint32_t first = 0;
-    {
-        std::scoped_lock lock{g_heaps_mutex};
-        const std::size_t n = g_heap_count.load(std::memory_order_relaxed);
-        for (std::size_t i = 0; i < n; ++i) {
-            if (g_heaps[i].core.load(std::memory_order_relaxed) == core) {
-                g_heaps[i].calls.fetch_add(1, std::memory_order_relaxed);
-                return;
-            }
-        }
-        if (n >= kMaxHeaps) {
-            g_heaps_full.fetch_add(1, std::memory_order_relaxed);
-            return;
-        }
-        KnownHeap& slot = g_heaps[n];
-        // The call itself reads these fields: the core is valid memory here.
-        begin = Read<std::uint64_t>(core + 8);
-        end = Read<std::uint64_t>(core + 0x10);
-        first = std::uint32_t(ret - reinterpret_cast<std::uint64_t>(g_image_base));
-        slot.begin = begin;
-        slot.end = end;
-        slot.first = first;
-        slot.calls.store(1, std::memory_order_relaxed);
-        slot.core.store(core, std::memory_order_relaxed);
-        g_heap_count.store(n + 1, std::memory_order_release);
-    }
-    host_log("GX memory: a game heap (core %#llx) manages %#llx-%#llx (%.1f MiB), first used by +%#x (beta 16, research)",
-             (unsigned long long)core, (unsigned long long)begin, (unsigned long long)end,
-             end > begin ? double(end - begin) / (1 << 20) : 0.0, first);
-}
-
-GUEST_ABI std::int64_t HeapCoreEntry(std::uint64_t, const std::uint64_t* saved) {
-    const std::uint64_t core = saved[5];
-    const std::size_t n = g_heap_count.load(std::memory_order_acquire);
-    for (std::size_t i = 0; i < n; ++i) {
-        if (g_heaps[i].core.load(std::memory_order_relaxed) == core) {
-            g_heaps[i].calls.fetch_add(1, std::memory_order_relaxed);
-            return 0;
-        }
-    }
-    NoteNewHeap(core, saved[6]);
-    return 0;
-}
-
-// The known heap whose range holds `address` (its index), or -1.
-int HeapRangeAt(std::uint64_t address) {
-    const std::size_t n = g_heap_count.load(std::memory_order_acquire);
-    for (std::size_t i = 0; i < n; ++i) {
-        if (address >= g_heaps[i].begin && address < g_heaps[i].end) {
-            return int(i);
-        }
-    }
-    return -1;
-}
-
-// 0.4.6 beta 16, step 2: YEBIS's heap (kYebisHeapCode), read once it is set up (the renderer's init) and
-// kept: published by g_yebis_heap_found (release) after its range is stored.
-bool g_yebis_heap_code = false;
-// Which of the research hooks are in (set at Install, before the game runs): a fault is described by those.
-bool g_yebis_allocs_on = false, g_heap_blocks_on = false, g_heap_ranges_on = false;
-std::mutex g_yebis_heap_mutex;
-std::atomic<bool> g_yebis_heap_found{false};
-std::uint64_t g_yebis_heap_begin = 0, g_yebis_heap_end = 0;
-
-bool YebisHeapRange(std::uint64_t* begin, std::uint64_t* end) {
-    if (!g_yebis_heap_found.load(std::memory_order_acquire)) {
-        if (!g_yebis_heap_code || !g_image_base) {
+bool YebisPoolRange(std::uint64_t* begin, std::uint64_t* end) {
+    if (!g_yebis_pool_found.load(std::memory_order_acquire)) {
+        if (!g_yebis_pool_code || !g_image_base) {
             return false;
         }
-        std::scoped_lock lock{g_yebis_heap_mutex};
-        if (!g_yebis_heap_found.load(std::memory_order_relaxed)) {
+        std::scoped_lock lock{g_yebis_pool_mutex};
+        if (!g_yebis_pool_found.load(std::memory_order_relaxed)) {
             // The object's pointer, its heap's "in use" and the heap core's range, as the callback reads
             // them; each read checked (the object is made at the renderer's init).
             std::uint64_t object = 0, b = 0, e = 0;
@@ -1107,34 +823,35 @@ bool YebisHeapRange(std::uint64_t* begin, std::uint64_t* end) {
                 b < 0x10000 || e <= b || e - b > (std::uint64_t(16) << 30)) {
                 return false;
             }
-            g_yebis_heap_begin = b;
-            g_yebis_heap_end = e;
-            g_yebis_heap_found.store(true, std::memory_order_release);
-            host_log("GX memory: YEBIS's heap is %#llx-%#llx (%.0f MiB), read from the game's graphics object "
-                     "(beta 16, step 2)",
+            g_yebis_pool_begin = b;
+            g_yebis_pool_end = e;
+            g_yebis_pool_found.store(true, std::memory_order_release);
+            host_log("GX memory: YEBIS's pool is %#llx-%#llx (%.0f MiB), read from the game's graphics object; the "
+                     "images in it are left to YEBIS's calls (BB_WATCH_YEBIS=1: watched)",
                      (unsigned long long)b, (unsigned long long)e, double(e - b) / (1 << 20));
         }
     }
-    *begin = g_yebis_heap_begin;
-    *end = g_yebis_heap_end;
+    *begin = g_yebis_pool_begin;
+    *end = g_yebis_pool_end;
     return true;
 }
 
-// Step 2: YEBIS took [memory, memory + size) in its heap (at its allocator's return, before the memory is
-// filled): a written event for the images over no game resource there that step 2 leaves to the calls.
-// Page protection learnt it from the heap's header write beside them; this is the call that tells it.
-void NoteYebisHeapRetake(std::uint64_t memory, std::uint64_t size) {
+// YEBIS took [memory, memory + size) from its pool (at its allocator's return, before the memory is
+// filled): a written event for the images in the pool left to the calls over that block. The fill comes
+// after, within the same call; the GPU reads the block only once the call's commands are submitted.
+void NoteYebisPoolTake(std::uint64_t memory, std::uint64_t size) {
     std::uint64_t begin = 0, end = 0;
-    if (!g_follow || size > 0xffffffffu || !YebisHeapRange(&begin, &end) || memory < begin || memory + size > end) {
+    if (!memory || !size || !g_follow || size > 0xffffffffu || !YebisPoolRange(&begin, &end) || memory < begin ||
+        memory + size > end) {
         return;
     }
     std::scoped_lock lock{g_mutex};
     if (g_written.size() < kQueueCap) {
         Gone g{memory, std::uint32_t(size), NowNs()};
-        g.yebis_heap = true;
+        g.yebis_pool = true;
         g_written.push_back(g);
         g_written_waiting.store(true, std::memory_order_release);
-        g_counts.yebis_heap_retakes.fetch_add(1, std::memory_order_relaxed);
+        g_counts.yebis_pool_takes.fetch_add(1, std::memory_order_relaxed);
     } else {
         g_counts.written_dropped.fetch_add(1, std::memory_order_relaxed);
     }
@@ -1148,11 +865,10 @@ GUEST_ABI std::int64_t YebisCreateEntry(std::uint64_t, const std::uint64_t* save
     return 0;
 }
 
-// 0.4.6 beta 16, step 1: a YEBIS allocation (edi the size), read at its return (the memory).
-template <int which> GUEST_ABI std::int64_t YebisAllocEntry(std::uint64_t, const std::uint64_t* saved) {
+// 0.4.6 beta 16 (YEBIS by its calls): a YEBIS allocation (edi the size), read at its return (the memory).
+GUEST_ABI std::int64_t YebisAllocEntry(std::uint64_t, const std::uint64_t* saved) {
     Pending p{saved[6], 0, kYebis, false, false, 0, kOpYebisAlloc};
     p.holder = saved[5] & 0xffffffffu;
-    p.type = which;
     t_pending.push_back(p);
     const_cast<std::uint64_t*>(saved)[6] = reinterpret_cast<std::uint64_t>(g_return_stub);
     return 0;
@@ -1163,116 +879,6 @@ GUEST_ABI std::int64_t ScaleformInitEntry(std::uint64_t, const std::uint64_t* sa
     const_cast<std::uint64_t*>(saved)[6] = reinterpret_cast<std::uint64_t>(g_return_stub);
     return 0;
 }
-
-// 0.4.6 beta 8 (research): YEBIS's rebuilds. A rebuild is a burst of YEBIS 2D textures made less than
-// 250 ms apart; for each, where its textures landed against the YEBIS textures destroyed in the last 10 s
-// (the memory of one with the same shape, of one with another shape, inside one's memory, or fresh
-// memory), how many YEBIS textures were live when it began, and the destroys around it (the 2 s before,
-// during, the 2 s after): whether the old set goes before or after the new one is made.
-namespace Rebuild {
-struct Dead {
-    std::uint64_t bytes, ns;
-    std::uint32_t width, height;
-    std::uint16_t levels, layers;
-};
-enum Landed { kSameShape, kOtherShape, kInside, kFresh, kLandedCount };
-struct Burst {
-    std::uint64_t first_ns = 0, last_ns = 0, made = 0, targets = 0, live_at_start = 0, before = 0, during = 0,
-                  after = 0;
-    std::array<std::uint64_t, kLandedCount> landed{};
-};
-constexpr std::uint64_t kGapNs = 250'000'000, kAroundNs = 2'000'000'000, kDeadNs = 10'000'000'000;
-std::mutex mutex;
-std::map<std::uint64_t, Dead> dead;   // memory -> a YEBIS 2D texture destroyed in the last 10 s
-std::deque<std::uint64_t> destroys;   // when YEBIS 2D textures were destroyed (the last 2 s)
-std::int64_t live = 0;                // YEBIS 2D textures live
-Burst current, ended;                 // `ended` waits for its 2 s after
-int reported = 0;
-
-void Report(const Burst& b) {
-    if (b.made < 32 || reported >= 40) {
-        return; // single textures, or enough reported
-    }
-    ++reported;
-    host_log("YEBIS rebuild: %llu 2D textures made over %.0f ms (%llu render targets); landed on: the memory of a "
-             "destroyed one with the same shape %llu, with another shape %llu, inside a destroyed one's memory "
-             "%llu, fresh memory %llu; YEBIS 2D textures live when it began %llu; destroyed in the 2 s before it "
-             "%llu, during it %llu, in the 2 s after it %llu",
-             (unsigned long long)b.made, double(b.last_ns - b.first_ns) / 1e6, (unsigned long long)b.targets,
-             (unsigned long long)b.landed[kSameShape], (unsigned long long)b.landed[kOtherShape],
-             (unsigned long long)b.landed[kInside], (unsigned long long)b.landed[kFresh],
-             (unsigned long long)b.live_at_start, (unsigned long long)b.before, (unsigned long long)b.during,
-             (unsigned long long)b.after);
-}
-
-// Under `mutex`: the ended burst reported once its 2 s after have passed.
-void Settle(std::uint64_t now) {
-    if (ended.made != 0 && now - ended.last_ns >= kAroundNs) {
-        Report(ended);
-        ended = {};
-    }
-    while (!destroys.empty() && now - destroys.front() > kAroundNs) {
-        destroys.pop_front();
-    }
-    for (auto it = dead.begin(); it != dead.end();) {
-        it = now - it->second.ns > kDeadNs ? dead.erase(it) : std::next(it);
-    }
-}
-
-void Made(std::uint64_t memory, std::uint32_t width, std::uint32_t height, std::uint16_t levels,
-          std::uint16_t layers, bool target) {
-    const std::uint64_t now = NowNs();
-    std::scoped_lock lock{mutex};
-    if (current.made != 0 && now - current.last_ns > kGapNs) {
-        if (ended.made != 0) {
-            Report(ended); // a third burst before the second's 2 s after: report it as it stands
-        }
-        ended = current;
-        current = {};
-    }
-    Settle(now);
-    if (current.made == 0) {
-        current.first_ns = now;
-        current.live_at_start = std::uint64_t(std::max<std::int64_t>(live, 0));
-        current.before = destroys.size();
-    }
-    current.last_ns = now;
-    ++current.made;
-    current.targets += target ? 1 : 0;
-    Landed landed = kFresh;
-    if (const auto at = dead.find(memory); at != dead.end()) {
-        const Dead& d = at->second;
-        landed = d.width == width && d.height == height && d.levels == levels && d.layers == layers ? kSameShape
-                                                                                                    : kOtherShape;
-    } else if (auto it = dead.upper_bound(memory); it != dead.begin() && std::prev(it)->first +
-                                                                             std::prev(it)->second.bytes > memory) {
-        landed = kInside;
-    }
-    ++current.landed[landed];
-    ++live;
-}
-
-void Destroyed(std::uint64_t memory, const Entry& e) {
-    const std::uint64_t now = NowNs();
-    std::scoped_lock lock{mutex};
-    Settle(now);
-    --live;
-    destroys.push_back(now);
-    if (current.made != 0 && now - current.last_ns <= kGapNs) {
-        ++current.during;
-    } else if (ended.made != 0 && now - ended.last_ns < kAroundNs) {
-        ++ended.after;
-    }
-    if (memory && dead.size() < 8192) {
-        dead[memory] = Dead{std::max<std::uint64_t>(e.bytes, 1), now, e.width, e.height, e.levels, e.layers};
-    }
-}
-
-void Minute() {
-    std::scoped_lock lock{mutex};
-    Settle(NowNs());
-}
-} // namespace Rebuild
 
 void NoteYebisCreated(std::uint64_t object, bool initial) {
     if (!object || Read<std::uint32_t>(object + 0x80) != 3) {
@@ -1295,7 +901,6 @@ void NoteYebisCreated(std::uint64_t object, bool initial) {
     }
     const auto levels = std::uint16_t(std::min<std::uint32_t>(shape[2], 0xffff)),
                layers = std::uint16_t(std::min<std::uint32_t>(shape[3], 0xffff));
-    Rebuild::Made(memory, shape[0], shape[1], levels, layers, rt || ds);
     RegisterOther(kYebisKey | object, memory, bytes, kYebis, initial, rt, ds, shape[0], shape[1], levels, layers,
                   std::uint8_t(bind & 0xff));
 }
@@ -1369,16 +974,13 @@ GUEST_ABI std::int64_t ScaleformRelease(std::uint64_t, const std::uint64_t* save
 
 // 0.4.6 beta 9: a registered texture the CPU wrote through its own call: it is not a surface from now on
 // (SurfaceAt), and the texture cache marks the images over it written. Whether it was registered.
-bool Written(std::uint64_t key, bool count_surface = false) {
+bool Written(std::uint64_t key) {
     std::scoped_lock lock{g_mutex};
     const auto it = g_by_holder.find(key);
     if (it == g_by_holder.end() || !it->second.memory || !it->second.bytes) {
         return false;
     }
     Entry& e = it->second;
-    if (count_surface && !e.initial && ((e.bind & 0xe0) != 0 || e.render_target || e.depth_target)) {
-        g_counts.yebis_update_surfaces.fetch_add(1, std::memory_order_relaxed);
-    }
     e.cpu_written = true;
     if (g_follow) {
         if (g_written.size() < kQueueCap) {
@@ -1390,35 +992,6 @@ bool Written(std::uint64_t key, bool count_surface = false) {
         }
     }
     return true;
-}
-
-bool YebisRegistered(std::uint64_t object) {
-    std::scoped_lock lock{g_mutex};
-    return object && g_by_holder.count(kYebisKey | object) != 0;
-}
-
-// YEBIS's UpdateSubresource (rsi: the resource): its texture is written when it returns.
-GUEST_ABI std::int64_t YebisUpdateEntry(std::uint64_t, const std::uint64_t* saved) {
-    if (!YebisRegistered(saved[4])) {
-        return 0; // a buffer, or a texture this registry does not hold
-    }
-    Pending p{saved[6], 0, kYebis, false, false, NowNs(), kOpYebisUpdate};
-    p.holder = saved[4];
-    t_pending.push_back(p);
-    const_cast<std::uint64_t*>(saved)[6] = reinterpret_cast<std::uint64_t>(g_return_stub);
-    return 0;
-}
-
-// YEBIS's Map (rsi: the resource): counted (bbhost found its 2D textures never mapped).
-GUEST_ABI std::int64_t YebisMapEntry(std::uint64_t, const std::uint64_t* saved) {
-    if (YebisRegistered(saved[4])) {
-        g_counts.yebis_maps.fetch_add(1, std::memory_order_relaxed);
-    } else if (saved[4]) {
-        // 0.4.6 beta 16: one of its own buffers (IGPUBuffer::Map, 0xc6ebd0): the shared vertex buffer's quads
-        // for each post-processing pass (CTextureUtil::DrawRectGPU_*), its index and particle buffers.
-        g_counts.yebis_buffer_maps.fetch_add(1, std::memory_order_relaxed);
-    }
-    return 0;
 }
 
 // YEBIS's Unmap (rsi: the resource): the writes after its Map went to the memory itself.
@@ -1482,11 +1055,7 @@ GUEST_ABI std::uint64_t CreatorReturn(std::uint64_t result) {
     const Pending p = t_pending.back();
     t_pending.pop_back();
     if (p.op == kOpYebisAlloc) {
-        NoteYebisAllocation(result, p.holder, p.ret, unsigned(p.type));
-        return p.ret;
-    }
-    if (p.op == kOpHeapAlloc) {
-        NoteHeapBlock(result, p.holder, p.ret, p.out);
+        NoteYebisPoolTake(result, p.holder);
         return p.ret;
     }
     if (p.op == kOpTsharp) {
@@ -1502,12 +1071,6 @@ GUEST_ABI std::uint64_t CreatorReturn(std::uint64_t result) {
             NoteYebisCreated(Read<std::uint64_t>(p.out), p.initial);
         } else if (static_cast<std::uint32_t>(result) != 0) {
             g_counts.failed.fetch_add(1, std::memory_order_relaxed);
-        }
-        return p.ret;
-    }
-    if (p.op == kOpYebisUpdate) {
-        if (Written(kYebisKey | p.holder, true)) {
-            g_counts.yebis_updates.fetch_add(1, std::memory_order_relaxed);
         }
         return p.ret;
     }
@@ -1610,14 +1173,14 @@ bool Install(std::uint8_t* image, std::size_t size) {
     if (const char* env = std::getenv("BB_GX_FOLLOW"); !(env && env[0] == '0')) {
         g_follow = true;
     }
-    // 0.4.6 beta 16, step 2: YEBIS's heap found where 1.09 keeps it (YebisHeapRange).
-    g_yebis_heap_code = kYebisHeapCode + sizeof(kYebisHeapCodeBytes) <= size &&
+    // 0.4.6 beta 16 (YEBIS by its calls): YEBIS's pool found where 1.09 keeps it (YebisPoolRange).
+    g_yebis_pool_code = kYebisHeapCode + sizeof(kYebisHeapCodeBytes) <= size &&
                         std::memcmp(image + kYebisHeapCode, kYebisHeapCodeBytes, sizeof(kYebisHeapCodeBytes)) == 0;
-    if (!g_yebis_heap_code) {
-        host_log("GX memory: the game's YEBIS allocation differs from 1.09: YEBIS's heap not known, images over no "
-                 "game resource in it stay watched");
+    if (!g_yebis_pool_code) {
+        host_log("GX memory: the game's YEBIS allocation differs from 1.09: YEBIS's pool not known, its images "
+                 "watched");
     }
-    Hook hooks[39];
+    Hook hooks[28];
     bool ok = Prepare(hooks[0], image, size, kCreateBuffer, kCreatorPrologue, &CreatorEntry<kBuffer>) &&
               Prepare(hooks[1], image, size, kCreateTexture, kCreatorPrologue, &CreatorEntry<kTexture>) &&
               Prepare(hooks[2], image, size, kCreateTexture3D, kCreatorPrologue, &CreatorEntry<kTexture3D>) &&
@@ -1634,69 +1197,21 @@ bool Install(std::uint8_t* image, std::size_t size) {
               Prepare(hooks[15], image, size, kCreateDsv, kDsvPrologue, &ViewEntry<2>) &&
               Prepare(hooks[16], image, size, kCreate1D, kCreate1DPrologue, &Create1DEntry) &&
               Prepare(hooks[22], image, size, kCreateInputLayout, kInputLayoutPrologue, &InputLayoutCreated) &&
-              Prepare(hooks[23], image, size, kYebisUpdate, kYebisUpdatePrologue, &YebisUpdateEntry) &&
-              Prepare(hooks[24], image, size, kYebisMap, kYebisMapPrologue, &YebisMapEntry) &&
-              Prepare(hooks[25], image, size, kYebisUnmap, kYebisUnmapPrologue, &YebisUnmapEntry) &&
-              Prepare(hooks[26], image, size, kScaleformUnmap, kScaleformUnmapPrologue, &ScaleformUnmapEntry);
-    // 0.4.6 beta 16, step 1 (research; BB_YEBIS_ALLOCS=0: not hooked): YEBIS's allocators (step 2: all
-    // three). Not needed by the rest: where they differ, only they are left out.
-    if (const char* env = std::getenv("BB_YEBIS_ALLOCS"); ok && !(env && env[0] == '0')) {
-        if (!Prepare(hooks[27], image, size, kYebisAllocators[0], kYebisAllocPrologue, &YebisAllocEntry<0>) ||
-            !Prepare(hooks[28], image, size, kYebisAllocators[1], kYebisAllocPrologue, &YebisAllocEntry<1>) ||
-            !Prepare(hooks[38], image, size, kYebisAllocators[2], kYebisAllocPrologue, &YebisAllocEntry<2>)) {
-            Discard(hooks[27]);
-            Discard(hooks[28]);
-            Discard(hooks[38]);
-            host_log("GX memory: YEBIS's allocators differ from 1.09: its allocations not named");
-        } else {
+              Prepare(hooks[23], image, size, kYebisUnmap, kYebisUnmapPrologue, &YebisUnmapEntry) &&
+              Prepare(hooks[24], image, size, kScaleformUnmap, kScaleformUnmapPrologue, &ScaleformUnmapEntry);
+    // 0.4.6 beta 16 (YEBIS by its calls): YEBIS's three allocators, the calls that tell when YEBIS takes memory
+    // from its pool. Not needed by the rest: where they differ, only they are left out, and YEBIS's images are
+    // then watched (InYebisPool finds none).
+    if (ok) {
+        if (Prepare(hooks[25], image, size, kYebisAllocators[0], kYebisAllocPrologue, &YebisAllocEntry) &&
+            Prepare(hooks[26], image, size, kYebisAllocators[1], kYebisAllocPrologue, &YebisAllocEntry) &&
+            Prepare(hooks[27], image, size, kYebisAllocators[2], kYebisAllocPrologue, &YebisAllocEntry)) {
             g_yebis_allocs_on = true;
-        }
-    }
-    // 0.4.6 beta 16, step 1b (research; BB_GAME_HEAP_ALLOCS=1: hooked; step 2: off by default, its answer
-    // in): the game heap class's allocate and free methods. Not needed by the rest: where they differ, only
-    // they are left out.
-    if (const char* env = std::getenv("BB_GAME_HEAP_ALLOCS"); ok && env && env[0] == '1') {
-        bool heap_ok = true;
-        for (int i = 0; i < 4 && heap_ok; ++i) {
-            const bool aligned = i == 1 || i == 3;
-            heap_ok = aligned ? Prepare(hooks[29 + i], image, size, kHeapAllocs[i], kHeapAlignedPrologue, &HeapAllocEntry)
-                              : Prepare(hooks[29 + i], image, size, kHeapAllocs[i], kHeapPrologue, &HeapAllocEntry);
-        }
-        for (int i = 0; i < 2 && heap_ok; ++i) {
-            heap_ok = Prepare(hooks[33 + i], image, size, kHeapFrees[i], kHeapPrologue, &HeapFreeEntry);
-        }
-        if (!heap_ok) {
-            for (int i = 29; i < 35; ++i) {
-                Discard(hooks[i]);
-            }
-            host_log("GX memory: the game heap's methods differ from 1.09: its blocks not named");
         } else {
-            g_heap_blocks_on = true;
-        }
-    }
-    // 0.4.6 beta 16, step 1c (research; BB_GAME_HEAP_RANGES=1: hooked; step 2: off by default, about 145
-    // million calls a minute, its answer in): the heap core's allocate, aligned allocate and free, each
-    // heap's range recorded at its first call. The allocate's first bytes hold a relative jb: run
-    // re-encoded, its target as an absolute jump.
-    if (const char* env = std::getenv("BB_GAME_HEAP_RANGES"); ok && env && env[0] == '1') {
-        std::uint8_t displaced[29] = {0x53, 0x31, 0xc0, 0x48, 0x39, 0x77, 0x18, // push rbx; xor eax, eax; cmp [rdi + 0x18], rsi
-                                      0x73, 0x0e,                               // jae +14 (over the jump)
-                                      0xff, 0x25, 0x00, 0x00, 0x00, 0x00};      // jmp [rip + 0]: the jb's target
-        const std::uint64_t fail = reinterpret_cast<std::uint64_t>(image) + kHeapCoreAllocFail;
-        std::memcpy(displaced + 15, &fail, 8);
-        const std::uint8_t mov_r9[6] = {0x41, 0xb9, 0x18, 0x00, 0x00, 0x00}; // mov r9d, 0x18
-        std::memcpy(displaced + 23, mov_r9, 6);
-        const bool ranges_ok =
-            PrepareDisplaced(hooks[35], image, size, kHeapCoreAlloc, kHeapCoreAllocPrologue, displaced, &HeapCoreEntry) &&
-            Prepare(hooks[36], image, size, kHeapCoreAligned, kHeapCoreAlignedPrologue, &HeapCoreEntry) &&
-            Prepare(hooks[37], image, size, kHeapCoreFree, kHeapCoreFreePrologue, &HeapCoreEntry);
-        if (!ranges_ok) {
-            for (int i = 35; i < 38; ++i) {
-                Discard(hooks[i]);
-            }
-            host_log("GX memory: the game's heap core differs from 1.09: its heaps' ranges not recorded");
-        } else {
-            g_heap_ranges_on = true;
+            Discard(hooks[25]);
+            Discard(hooks[26]);
+            Discard(hooks[27]);
+            host_log("GX memory: YEBIS's allocators differ from 1.09: its images watched");
         }
     }
     // The game's destructors (2D and 3D textures at 4-7, 1D at 17-18) and YEBIS's 2D texture's (19).
@@ -1957,43 +1472,19 @@ Resource Describe(std::uint64_t begin, std::uint64_t end) {
     return r;
 }
 
-bool InYebisHeap(std::uint64_t begin, std::uint64_t end) {
-    std::uint64_t heap_begin = 0, heap_end = 0;
-    return g_active && g_follow && g_yebis_allocs_on && begin < end && YebisHeapRange(&heap_begin, &heap_end) &&
-           begin >= heap_begin && end <= heap_end;
+bool InYebisPool(std::uint64_t begin, std::uint64_t end) {
+    std::uint64_t pool_begin = 0, pool_end = 0;
+    return g_active && g_follow && g_yebis_allocs_on && begin < end && YebisPoolRange(&pool_begin, &pool_end) &&
+           begin >= pool_begin && end <= pool_end;
 }
 
-void NoteYebisHeapRetaken(std::uint64_t images) {
-    g_counts.yebis_heap_retaken_images.fetch_add(images, std::memory_order_relaxed);
+void NoteYebisPoolTaken(std::uint64_t images) {
+    g_counts.yebis_pool_marked.fetch_add(images, std::memory_order_relaxed);
 }
 
-void NoteYebisHeapImage(std::uint64_t memory, std::uint64_t bytes, std::uint32_t width, std::uint32_t height,
-                        std::uint32_t format, bool left_to_calls) {
-    std::uint64_t start = 0;
-    YebisAlloc alloc;
-    const bool in_alloc = g_yebis_allocs_on && YebisAllocationAt(memory, &start, &alloc);
-    {
-        std::scoped_lock lock{g_alloc_mutex};
-        ++g_heap_images_by_caller[in_alloc ? alloc.caller : 0];
-    }
-    if (g_heap_images_named.fetch_add(1, std::memory_order_relaxed) >= 16) {
-        return;
-    }
-    char from[224];
-    if (in_alloc) {
-        const char* name = AllocCallerName(alloc.caller);
-        std::snprintf(from, sizeof(from), "in YEBIS's allocation at %#llx (%llu bytes, allocator %u) asked for by +%#x%s%s%s, "
-                      "%.1f s before",
-                      (unsigned long long)start, (unsigned long long)(alloc.end - start), alloc.which, alloc.caller,
-                      name ? " (" : "", name ? name : "", name ? ")" : "", double(NowNs() - alloc.ns) / 1e9);
-    } else {
-        std::snprintf(from, sizeof(from), "%s",
-                      g_yebis_allocs_on ? "in no allocation of YEBIS's known" : "YEBIS's allocations not followed");
-    }
-    host_log("GX memory: an image over no game resource in YEBIS's heap (beta 16, step 2): at %#llx (%llu bytes, "
-             "%ux%u, format %u), %s; %s",
-             (unsigned long long)memory, (unsigned long long)bytes, width, height, format, from,
-             left_to_calls ? "left to YEBIS's calls and the texture net" : "watched (BB_WATCH_YEBIS_HEAP=1 or safe mode)");
+void NoteEngineStoreTold(std::uint64_t images) {
+    g_counts.engine_stores.fetch_add(1, std::memory_order_relaxed);
+    g_counts.engine_store_marked.fetch_add(images, std::memory_order_relaxed);
 }
 
 namespace {
@@ -2016,34 +1507,11 @@ void NoteImageWatchFault(const WatchedImage& w) {
     if (w.past) {
         g_counts.image_faults_past.fetch_add(1, std::memory_order_relaxed);
     }
-    // 0.4.6 beta 16, step 1: an image over no game resource, by the YEBIS allocation under it (who asked);
-    // step 1b: and by the game heap's block under it; step 1c: and by the heap whose range holds it (each
-    // when its hooks are in); step 2: whether it lies in YEBIS's heap (left to the calls unless
-    // BB_WATCH_YEBIS_HEAP=1).
-    const bool none = w.owner == Owner::None;
-    std::uint64_t alloc_start = 0, block_start = 0;
-    YebisAlloc alloc;
-    HeapBlock block;
-    const bool in_alloc = none && g_yebis_allocs_on && YebisAllocationAt(w.memory, &alloc_start, &alloc);
-    const bool in_block = none && g_heap_blocks_on && HeapBlockAt(w.memory, &block_start, &block);
-    const int heap_index = none && g_heap_ranges_on ? HeapRangeAt(w.memory) : -1;
-    std::uint64_t yebis_begin = 0, yebis_end = 0;
-    const bool yebis_heap_known = none && YebisHeapRange(&yebis_begin, &yebis_end);
-    const bool in_yebis_heap = yebis_heap_known && w.memory >= yebis_begin && w.memory < yebis_end;
-    if (none) {
-        std::scoped_lock lock{g_alloc_mutex};
-        if (g_yebis_allocs_on) {
-            ++g_faults_by_caller[in_alloc ? alloc.caller : 0];
-        }
-        if (g_heap_blocks_on) {
-            ++g_heap_faults_by_caller[in_block ? block.caller : 0];
-        }
-        if (heap_index >= 0) {
-            g_heaps[std::size_t(heap_index)].faults.fetch_add(1, std::memory_order_relaxed);
-        } else if (g_heap_ranges_on) {
-            g_heap_faults_none.fetch_add(1, std::memory_order_relaxed);
-        }
-    }
+    // 0.4.6 beta 16 (YEBIS by its calls): whether the image lies in YEBIS's pool (left to the calls unless
+    // BB_WATCH_YEBIS=1).
+    std::uint64_t pool_begin = 0, pool_end = 0;
+    const bool pool_known = YebisPoolRange(&pool_begin, &pool_end);
+    const bool in_pool = pool_known && w.memory >= pool_begin && w.memory < pool_end;
     {
         std::scoped_lock lock{g_census_mutex};
         if (g_named_watcher_count >= g_named_watchers.size()) {
@@ -2056,41 +1524,11 @@ void NoteImageWatchFault(const WatchedImage& w) {
         }
         g_named_watchers[g_named_watcher_count++] = w.memory;
     }
-    std::string where;
-    if (none) {
-        char part[200];
-        if (yebis_heap_known) {
-            std::snprintf(part, sizeof(part), "; %s YEBIS's heap (%#llx-%#llx)", in_yebis_heap ? "in" : "outside",
-                          (unsigned long long)yebis_begin, (unsigned long long)yebis_end);
-        } else {
-            std::snprintf(part, sizeof(part), "; YEBIS's heap not known");
-        }
-        where += part;
-        if (in_alloc) {
-            std::snprintf(part, sizeof(part), "; in YEBIS's allocation at %#llx (%llu bytes, allocator %u) asked for by +%#x, %.1f s ago",
-                          (unsigned long long)alloc_start, (unsigned long long)(alloc.end - alloc_start), alloc.which,
-                          alloc.caller, double(NowNs() - alloc.ns) / 1e9);
-            where += part;
-        } else if (g_yebis_allocs_on) {
-            where += "; in no allocation of YEBIS's known";
-        }
-        if (in_block) {
-            std::snprintf(part, sizeof(part), "; in the game heap %#llx's block at %#llx (%llu bytes) asked for by +%#x, %.1f s ago",
-                          (unsigned long long)block.heap, (unsigned long long)block_start,
-                          (unsigned long long)(block.end - block_start), block.caller, double(NowNs() - block.ns) / 1e9);
-            where += part;
-        } else if (g_heap_blocks_on) {
-            where += "; in no game heap block known";
-        }
-        if (heap_index >= 0) {
-            const KnownHeap& h = g_heaps[std::size_t(heap_index)];
-            std::snprintf(part, sizeof(part), "; in the range of the game heap with core %#llx (%#llx-%#llx, first used by +%#x)",
-                          (unsigned long long)h.core.load(std::memory_order_relaxed), (unsigned long long)h.begin,
-                          (unsigned long long)h.end, h.first);
-            where += part;
-        } else if (g_heap_ranges_on) {
-            where += "; in no game heap's range known";
-        }
+    char where[96];
+    if (pool_known) {
+        std::snprintf(where, sizeof(where), "; %s YEBIS's pool", in_pool ? "in" : "outside");
+    } else {
+        std::snprintf(where, sizeof(where), "; YEBIS's pool not known");
     }
     host_log("GX memory: a write fault at %#llx on the page of a watched image (beta 16): %s, the image at %#llx "
              "(%llu bytes, %ux%u, format %u), %s%s%s, the write %s it%s%s",
@@ -2099,7 +1537,7 @@ void NoteImageWatchFault(const WatchedImage& w) {
              w.owner == Owner::None ? "over no resource" : (w.whole ? "at its start" : "inside it"),
              w.owner == Owner::None ? "" : (w.with_data ? ", made with its data" : ", made without its data"),
              w.surface ? ", a surface" : "", w.inside ? "inside" : "beside",
-             w.past ? ", the image reaching past its resource" : "", where.c_str());
+             w.past ? ", the image reaching past its resource" : "", where);
 }
 
 void NoteHandOverWatched() {
@@ -2948,7 +2386,6 @@ void LogMinute() {
              (unsigned long long)take(g_counts.shaders[1]), (unsigned long long)take(g_counts.shaders[2]),
              (unsigned long long)take(g_counts.shaders[3]), (unsigned long long)take(g_counts.shaders_loading));
     // 0.4.6 beta 8: surfaces, first fills, CPU writes, the pool and the unwatched images; then shaders.
-    Rebuild::Minute();
     static const char* const kStartNames[] = {"empty", "depth cleared", "depth cleared under the game's clear",
                                               "taken from the GPU's writes as a buffer since it was made",
                                               "filled from memory (its resource gone)",
@@ -3033,13 +2470,11 @@ void LogMinute() {
             translated += part;
         }
     }
-    host_log("GX memory, write calls this minute (beta 9): YEBIS's updates of its 2D textures %llu (%llu of "
-             "surfaces made without data for the GPU), Maps %llu, Unmaps %llu; Scaleform's unmaps of planes "
-             "with memory of their own %llu; written textures told to the texture cache %llu (%llu dropped)",
-             (unsigned long long)take(g_counts.yebis_updates), (unsigned long long)take(g_counts.yebis_update_surfaces),
-             (unsigned long long)take(g_counts.yebis_maps), (unsigned long long)take(g_counts.yebis_unmaps),
-             (unsigned long long)take(g_counts.sf_unmaps), (unsigned long long)take(g_counts.written_events),
-             (unsigned long long)take(g_counts.written_dropped));
+    host_log("GX memory, write calls this minute (beta 9): YEBIS's Unmaps of its 2D textures %llu; Scaleform's "
+             "unmaps of planes with memory of their own %llu; written textures told to the texture cache %llu "
+             "(%llu dropped)",
+             (unsigned long long)take(g_counts.yebis_unmaps), (unsigned long long)take(g_counts.sf_unmaps),
+             (unsigned long long)take(g_counts.written_events), (unsigned long long)take(g_counts.written_dropped));
     std::string base_pairs, part_pairs;
     for (std::size_t a = 0; a < std::size_t(Owner::kCount); ++a) {
         for (std::size_t b = 0; b < std::size_t(Owner::kCount); ++b) {
@@ -3157,206 +2592,19 @@ void LogMinute() {
         }
         host_log("GX memory, textures by their calls this minute (beta 16): images watched by page protection: %s; "
                  "left to the calls: %s; write faults on images by the image's resource: %s (an image reaching past "
-                 "its resource's bytes %llu); YEBIS's maps of its own buffers %llu; images handed to a texture the calls do "
+                 "its resource's bytes %llu); YEBIS's takes from its pool told %llu, marking %llu images written; the "
+                 "engine's DMA stores told %llu, marking %llu images written; images handed to a texture the calls do "
                  "not cover, watched again %llu; the texture net: %llu images hashed (%.0f MiB), CPU writes found "
                  "that no call told %llu (%.0f MiB); its last round over %s",
                  have_census ? (watched.empty() ? "none" : watched.c_str()) : "not counted yet",
                  have_census ? (by_calls.empty() ? "none" : by_calls.c_str()) : "not counted yet",
                  faults.empty() ? "none" : faults.c_str(), (unsigned long long)take(g_counts.image_faults_past),
-                 (unsigned long long)take(g_counts.yebis_buffer_maps), (unsigned long long)take(g_counts.handover_watched),
+                 (unsigned long long)take(g_counts.yebis_pool_takes), (unsigned long long)take(g_counts.yebis_pool_marked),
+                 (unsigned long long)take(g_counts.engine_stores), (unsigned long long)take(g_counts.engine_store_marked),
+                 (unsigned long long)take(g_counts.handover_watched),
                  (unsigned long long)take(g_counts.tnet_images), Mib(take(g_counts.tnet_bytes)),
                  (unsigned long long)take(g_counts.tnet_untold), Mib(take(g_counts.tnet_untold_bytes)),
                  round_text.c_str());
-    }
-    {
-        // 0.4.6 beta 16, step 1: YEBIS's allocations by who asked, and the faults on images over no game
-        // resource by the allocation under them.
-        std::vector<std::pair<std::uint32_t, std::pair<std::uint64_t, std::uint64_t>>> made;
-        std::vector<std::pair<std::uint32_t, std::uint64_t>> faults, heap_images;
-        std::size_t known = 0;
-        std::uint64_t dropped = 0;
-        {
-            std::scoped_lock lock{g_alloc_mutex};
-            made.assign(g_allocs_by_caller.begin(), g_allocs_by_caller.end());
-            faults.assign(g_faults_by_caller.begin(), g_faults_by_caller.end());
-            heap_images.assign(g_heap_images_by_caller.begin(), g_heap_images_by_caller.end());
-            g_allocs_by_caller.clear();
-            g_faults_by_caller.clear();
-            g_heap_images_by_caller.clear();
-            known = g_yebis_allocs.size();
-            dropped = std::exchange(g_allocs_dropped, 0);
-        }
-        if (!made.empty() || !faults.empty() || !heap_images.empty()) {
-            std::sort(made.begin(), made.end(), [](const auto& a, const auto& b) { return a.second.first > b.second.first; });
-            std::sort(faults.begin(), faults.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
-            std::sort(heap_images.begin(), heap_images.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
-            std::string made_text, fault_text, heap_text;
-            // YEBIS's 1D and 3D creators: no YEBIS code calls them (read in 1.09); expected 0.
-            std::uint64_t made_1d = 0, made_3d = 0;
-            for (const auto& [at, count] : made) {
-                const char* name = AllocCallerName(at);
-                made_1d += name == kAllocCallers[0].name ? count.first : 0;
-                made_3d += name == kAllocCallers[2].name ? count.first : 0;
-            }
-            for (std::size_t i = 0; i < made.size() && i < 12; ++i) {
-                char part[128];
-                const char* name = AllocCallerName(made[i].first);
-                std::snprintf(part, sizeof(part), "%s+%#x%s%s%s %llu (%.1f MiB)", i ? ", " : "", made[i].first,
-                              name ? " (" : "", name ? name : "", name ? ")" : "",
-                              (unsigned long long)made[i].second.first, Mib(made[i].second.second));
-                made_text += part;
-            }
-            for (std::size_t i = 0; i < faults.size() && i < 12; ++i) {
-                char part[128];
-                if (faults[i].first) {
-                    const char* name = AllocCallerName(faults[i].first);
-                    std::snprintf(part, sizeof(part), "%s+%#x%s%s%s %llu", i ? ", " : "", faults[i].first,
-                                  name ? " (" : "", name ? name : "", name ? ")" : "",
-                                  (unsigned long long)faults[i].second);
-                } else {
-                    std::snprintf(part, sizeof(part), "%sin none %llu", i ? ", " : "", (unsigned long long)faults[i].second);
-                }
-                fault_text += part;
-            }
-            // Step 2: the same for the images over no game resource registered in YEBIS's heap.
-            for (std::size_t i = 0; i < heap_images.size() && i < 12; ++i) {
-                char part[128];
-                if (heap_images[i].first) {
-                    const char* name = AllocCallerName(heap_images[i].first);
-                    std::snprintf(part, sizeof(part), "%s+%#x%s%s%s %llu", i ? ", " : "", heap_images[i].first,
-                                  name ? " (" : "", name ? name : "", name ? ")" : "",
-                                  (unsigned long long)heap_images[i].second);
-                } else {
-                    std::snprintf(part, sizeof(part), "%sin none %llu", i ? ", " : "",
-                                  (unsigned long long)heap_images[i].second);
-                }
-                heap_text += part;
-            }
-            host_log("GX memory, YEBIS's allocations this minute (beta 16, research): made, by who asked: %s; by "
-                     "YEBIS's 1D texture creator %llu, its 3D one %llu (expected 0); write faults on images over no "
-                     "game resource, by who asked for the YEBIS allocation under them: %s; images over no game "
-                     "resource registered in YEBIS's heap, the same: %s; its allocations told to the texture cache "
-                     "%llu, marking %llu such images written (step 2) (allocations known %zu%s)",
-                     made_text.empty() ? "none" : made_text.c_str(), (unsigned long long)made_1d,
-                     (unsigned long long)made_3d, fault_text.empty() ? "none" : fault_text.c_str(),
-                     heap_text.empty() ? "none" : heap_text.c_str(),
-                     (unsigned long long)take(g_counts.yebis_heap_retakes),
-                     (unsigned long long)take(g_counts.yebis_heap_retaken_images), known,
-                     dropped ? ", some not kept: too many" : "");
-        }
-    }
-    {
-        // 0.4.6 beta 16, step 1b: the game heap's blocks by who asked, its heaps, its frees, and the faults on
-        // images over no game resource by who asked for the block under them.
-        std::vector<std::pair<std::uint32_t, std::pair<std::uint64_t, std::uint64_t>>> made;
-        std::vector<std::pair<std::uint32_t, std::uint64_t>> faults;
-        std::vector<std::pair<std::uint64_t, std::uint64_t>> heaps;
-        std::size_t live = 0;
-        std::uint64_t frees = 0, frees_unknown = 0, dropped = 0;
-        {
-            std::scoped_lock lock{g_alloc_mutex};
-            made.assign(g_heap_made_by_caller.begin(), g_heap_made_by_caller.end());
-            faults.assign(g_heap_faults_by_caller.begin(), g_heap_faults_by_caller.end());
-            heaps.assign(g_heap_made_by_heap.begin(), g_heap_made_by_heap.end());
-            g_heap_made_by_caller.clear();
-            g_heap_faults_by_caller.clear();
-            g_heap_made_by_heap.clear();
-            live = g_heap_blocks.size();
-            frees = std::exchange(g_heap_frees, 0);
-            frees_unknown = std::exchange(g_heap_frees_unknown, 0);
-            dropped = std::exchange(g_heap_dropped, 0);
-        }
-        if (!made.empty() || !faults.empty() || frees) {
-            std::sort(made.begin(), made.end(), [](const auto& a, const auto& b) { return a.second.first > b.second.first; });
-            std::sort(faults.begin(), faults.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
-            std::sort(heaps.begin(), heaps.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
-            std::uint64_t made_count = 0, made_bytes = 0;
-            for (const auto& [at, count] : made) {
-                made_count += count.first;
-                made_bytes += count.second;
-            }
-            std::string made_text, fault_text, heap_text;
-            for (std::size_t i = 0; i < made.size() && i < 12; ++i) {
-                char part[96];
-                std::snprintf(part, sizeof(part), "%s+%#x %llu (%.1f MiB)", i ? ", " : "", made[i].first,
-                              (unsigned long long)made[i].second.first, Mib(made[i].second.second));
-                made_text += part;
-            }
-            for (std::size_t i = 0; i < faults.size() && i < 12; ++i) {
-                char part[64];
-                if (faults[i].first) {
-                    std::snprintf(part, sizeof(part), "%s+%#x %llu", i ? ", " : "", faults[i].first,
-                                  (unsigned long long)faults[i].second);
-                } else {
-                    std::snprintf(part, sizeof(part), "%sin none %llu", i ? ", " : "", (unsigned long long)faults[i].second);
-                }
-                fault_text += part;
-            }
-            for (std::size_t i = 0; i < heaps.size() && i < 6; ++i) {
-                char part[64];
-                std::snprintf(part, sizeof(part), "%s%#llx %llu", i ? ", " : "", (unsigned long long)heaps[i].first,
-                              (unsigned long long)heaps[i].second);
-                heap_text += part;
-            }
-            host_log("GX memory, the game heap's blocks this minute (beta 16, research): made %llu (%.1f MiB), by who "
-                     "asked: %s; by heap: %s; freed %llu (%llu of blocks not known); write faults on images over no "
-                     "game resource, by who asked for the heap block under them: %s (live blocks known %zu%s)",
-                     (unsigned long long)made_count, Mib(made_bytes), made_text.empty() ? "none" : made_text.c_str(),
-                     heap_text.empty() ? "none" : heap_text.c_str(), (unsigned long long)frees,
-                     (unsigned long long)frees_unknown, fault_text.empty() ? "none" : fault_text.c_str(), live,
-                     dropped ? ", some not kept: too many" : "");
-        }
-    }
-    {
-        // 0.4.6 beta 16, step 1c: the game's heaps known, the busiest this minute and every one whose range
-        // holds a faulting image over no game resource; the faults in no heap's range.
-        struct Row {
-            std::uint64_t core, begin, end, calls, faults;
-            std::uint32_t first;
-        };
-        std::vector<Row> rows;
-        const std::size_t n = g_heap_count.load(std::memory_order_acquire);
-        for (std::size_t i = 0; i < n; ++i) {
-            KnownHeap& h = g_heaps[i];
-            rows.push_back({h.core.load(std::memory_order_relaxed), h.begin, h.end,
-                            h.calls.exchange(0, std::memory_order_relaxed), h.faults.exchange(0, std::memory_order_relaxed),
-                            h.first});
-        }
-        const std::uint64_t none = g_heap_faults_none.exchange(0, std::memory_order_relaxed);
-        const std::uint64_t full = g_heaps_full.exchange(0, std::memory_order_relaxed);
-        std::uint64_t calls = 0;
-        for (const Row& r : rows) {
-            calls += r.calls;
-        }
-        if (calls || none) {
-            std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) {
-                return a.faults != b.faults ? a.faults > b.faults : a.calls > b.calls;
-            });
-            std::string text;
-            std::size_t shown = 0;
-            for (const Row& r : rows) {
-                if (shown >= 10 && !r.faults) {
-                    break;
-                }
-                char part[200];
-                std::snprintf(part, sizeof(part), "%score %#llx %#llx-%#llx (%.0f MiB, first used by +%#x): calls %llu",
-                              shown ? "; " : "", (unsigned long long)r.core, (unsigned long long)r.begin,
-                              (unsigned long long)r.end, r.end > r.begin ? double(r.end - r.begin) / (1 << 20) : 0.0,
-                              r.first, (unsigned long long)r.calls);
-                text += part;
-                if (r.faults) {
-                    char faults[96];
-                    std::snprintf(faults, sizeof(faults), ", write faults on images over no game resource %llu",
-                                  (unsigned long long)r.faults);
-                    text += faults;
-                }
-                ++shown;
-            }
-            host_log("GX memory, the game's heaps this minute (beta 16, research): %zu known%s, calls %llu; %s; write "
-                     "faults on images over no game resource in no heap's range: %llu",
-                     n, full ? " (more not kept: too many)" : "", (unsigned long long)calls,
-                     text.empty() ? "none" : text.c_str(), (unsigned long long)none);
-        }
     }
     host_log("GX memory, owners this minute (beta 10): new textures over a live texture's memory, at its base: %s; "
              "partly: %s; images marked written by a creation with data over them %llu (%.0f MiB), live surfaces "

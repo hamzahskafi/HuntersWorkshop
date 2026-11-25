@@ -1555,6 +1555,35 @@ store notice is read in the run: its count, the net finding no write no call tol
 **The tester's calls before building:** the switches (one for the pool, one for the stores; `BB_YEBIS_ALLOCS`
 removed or kept; the heap research switches removed with their hooks).
 
+**Built (engine id 113; the tester: "This sounds like a step in the right direction, please proceed",
+with the switches as recommended):**
+
+1. `watch_rules.h`: an image in YEBIS's pool (`Image::yebis_pool`, `Image::gx_yebis_pool` in the texture
+   cache, set at registration from `GxResources::InYebisPool`) is left to the calls under the default
+   setting, whatever its owner, and checked by the net's first lane; a YEBIS texture outside a known pool
+   is watched (surfaces and targets left to the calls, beta 9's set). `BB_WATCH_YEBIS=1` watches the pool
+   as before beta 16; `BB_WATCH_YEBIS_TEXTURES` and `BB_WATCH_YEBIS_HEAP` are gone.
+2. `TextureCache::NoteEngineStore`, called by `Rasterizer::CopyBuffer` and `FillBuffer` where they store
+   on the CPU: the images left to the calls that the CPU fills (`WatchRules::StoreTells`: the net's kind,
+   not drawn by the GPU) over the destination are marked written. `BB_DMA_TELLS_TEXTURES=0`: off.
+3. `gx_resources.cpp`: YEBIS's three allocators hooked unconditionally (byte-checked; where they differ,
+   the pool rule is off and YEBIS's images are watched), each return sending the pool event
+   (`Gone::yebis_pool`) for a block inside the pool; nothing recorded. Removed: the update and Map hooks,
+   the heap class's and heap core's hooks and lines, the allocation records, their naming and minute line,
+   the rebuild research, `BB_YEBIS_ALLOCS`, `BB_GAME_HEAP_ALLOCS`, `BB_GAME_HEAP_RANGES`. A faulting
+   image's line says whether it lies in YEBIS's pool. The beta 16 minute line counts the pool events and
+   the images they marked, and the engine's DMA stores told and the images they marked; the beta 9 line
+   keeps YEBIS's Unmaps.
+
+**Tests:** `watch-rules-test` (the pool for every owner kind and setting, YEBIS outside a known pool, the
+net and its lanes, the store rule; fails on 10 deliberate breaks); `test_game_code_sites.py` (the three
+allocators and the pool's code against the 1.09 executable; the research sites gone); `engine-hooks-test`.
+
+**The next run should show:** the pool's line at start-up; no write faults on images in the pool; the
+beta 16 line's pool events and engine stores with the images they marked (pool events around loads,
+none in a minute without one; stores up to about 1,000 a second, few images marked); the net finding no
+write no call told; no "YEBIS rebuild", "YEBIS's allocations" or heap lines; the picture as before.
+
 ### Beta 17: shaders and pipelines (to research and design)
 
 The rule not met: "shaders are translated when the game creates them, pipelines built during

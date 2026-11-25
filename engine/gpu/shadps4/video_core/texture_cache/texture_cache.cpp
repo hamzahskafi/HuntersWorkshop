@@ -262,10 +262,9 @@ Unwatch UnwatchKinds() {
     }();
     return kinds;
 }
-// 0.4.6 beta 16 (watch_rules.h): YEBIS's textures made with their data (BB_WATCH_YEBIS_TEXTURES=1: watched
-// as before) and Scaleform's planes (BB_WATCH_SCALEFORM=1) left to their calls too; step 2: images over no
-// game resource in YEBIS's heap (BB_WATCH_YEBIS_HEAP=1: watched as before); the texture net
-// (BB_TEXTURE_NET=0: off) checks the images left to the calls that the CPU fills.
+// 0.4.6 beta 16 (watch_rules.h): Scaleform's planes (BB_WATCH_SCALEFORM=1: watched as before) and every
+// image in YEBIS's pool (YEBIS by its calls; BB_WATCH_YEBIS=1: watched as before beta 16) left to their
+// calls too; the texture net (BB_TEXTURE_NET=0: off) checks the images left to the calls that the CPU fills.
 const WatchRules::Settings& WatchSettings() {
     static const WatchRules::Settings settings = [] {
         const auto on = [](const char* name) {
@@ -274,9 +273,8 @@ const WatchRules::Settings& WatchSettings() {
         };
         WatchRules::Settings s;
         s.kinds = UnwatchKinds();
-        s.watch_yebis = on("BB_WATCH_YEBIS_TEXTURES");
+        s.watch_yebis = on("BB_WATCH_YEBIS");
         s.watch_scaleform = on("BB_WATCH_SCALEFORM");
-        s.watch_yebis_heap = on("BB_WATCH_YEBIS_HEAP");
         return s;
     }();
     return settings;
@@ -288,9 +286,18 @@ bool TextureNetEnabled() {
     }();
     return on;
 }
+// 0.4.6 beta 16, YEBIS by its calls, part 2 (BB_DMA_TELLS_TEXTURES=0: off): the engine's own DMA stores
+// tell the texture cache (NoteEngineStore).
+bool DmaTellsTextures() {
+    static const bool on = [] {
+        const char* env = std::getenv("BB_DMA_TELLS_TEXTURES");
+        return !(env && env[0] == '0');
+    }();
+    return on;
+}
 WatchRules::Image WatchView(const Image& image) {
     return {BbEngine::GxResources::Owner(image.gx_owner), image.gx_whole, image.surface_ns != 0, image.gx_with_data,
-            image.gx_yebis_heap};
+            image.gx_yebis_pool};
 }
 // 0.4.6 beta 11 (BB_IMAGE_OWNERS=0: off; on by default, off in safe mode): the owner rule. An image of a
 // texture of the game's (one starting where the image does, OwnedImage) is retired when that texture is
@@ -1867,7 +1874,7 @@ void TextureCache::RegisterImage(ImageId image_id) {
     image.surface_ns = 0;
     image.gx_owner = 0;
     image.gx_whole = false;
-    image.gx_yebis_heap = false;
+    image.gx_yebis_pool = false;
     if (BbEngine::GxResources::Active()) {
         const VAddr begin = image.info.guest_address;
         const VAddr end = begin + std::max<u64>(image.info.guest_size, 1);
@@ -1876,20 +1883,12 @@ void TextureCache::RegisterImage(ImageId image_id) {
         image.gx_owner = u8(owner);
         image.gx_whole = described.at_start;
         image.gx_with_data = described.with_data; // 0.4.6 beta 16
-        // 0.4.6 beta 16, step 2: memory over no game resource in YEBIS's heap (watch_rules.h).
-        image.gx_yebis_heap =
-            owner == BbEngine::GxResources::Owner::None && BbEngine::GxResources::InYebisHeap(begin, end);
+        // 0.4.6 beta 16, YEBIS by its calls: in YEBIS's pool, whatever the registry has there (watch_rules.h).
+        image.gx_yebis_pool = BbEngine::GxResources::InYebisPool(begin, end);
         if (EmptySurfaces()) {
             if (const auto surface = BbEngine::GxResources::SurfaceAt(begin, end); surface.found) {
                 image.surface_ns = surface.ns;
             }
-        }
-        // Step 2: such an image named and counted by the YEBIS allocation under it (it no longer faults to
-        // be named), with whether it is left to the calls.
-        if (image.gx_yebis_heap) {
-            BbEngine::GxResources::NoteYebisHeapImage(begin, image.info.guest_size, image.info.size.width,
-                                                      image.info.size.height, u32(image.info.pixel_format),
-                                                      WatchRules::ByCalls(WatchView(image), WatchSettings()));
         }
         if (!t_building_ahead) {
             const u64 bytes = image.backing ? image.GetHostImageSize() : 0;
@@ -1985,7 +1984,7 @@ void TextureCache::TrackImage(ImageId image_id) {
         image.track_addr = image_begin;
         image.track_addr_end = image_end;
         // 0.4.6 beta 8 (part 4; watch_rules.h): a texture of the game's whose writes its calls tell (made
-        // with its data, a target, a surface; beta 16: YEBIS's made with data, Scaleform's planes) is not
+        // with its data, a target, a surface; beta 16: Scaleform's planes, YEBIS's pool) is not
         // write-protected; its range is kept.
         if (WatchRules::ByCalls(WatchView(image), WatchSettings())) {
             image.calls_watch = true;
@@ -2437,15 +2436,14 @@ void TextureCache::ProcessWritten() {
             if (False(image.flags & ImageFlagBits::Registered)) {
                 return;
             }
-            // 0.4.6 beta 16, step 2: YEBIS took this memory in its heap again (its allocator's return, before
-            // the memory is filled): the images over no game resource left to the calls there take the
-            // memory at their next use, as page protection had them do at the heap's header write beside
-            // them. Any other image there follows its own rule.
-            if (written.yebis_heap) {
-                if (!image.calls_watch || !WatchRules::YebisHeapOnly(WatchView(image))) {
+            // 0.4.6 beta 16, YEBIS by its calls: YEBIS took this memory from its pool (its allocator's return,
+            // before the memory is filled: a staging block, a new texture's memory): the images in the pool
+            // left to the calls there take the memory at their next use. A watched image faults, as before.
+            if (written.yebis_pool) {
+                if (!image.calls_watch || !image.gx_yebis_pool) {
                     return;
                 }
-                RefreshTrace::Mark(image, "YEBIS took its heap memory again", written.memory, written.bytes);
+                RefreshTrace::Mark(image, "YEBIS took its pool's memory", written.memory, written.bytes);
                 image.flags |= ImageFlagBits::CpuDirty;
                 ++image.cpu_marks;
                 image.mip_hashes_current = false;
@@ -2462,8 +2460,29 @@ void TextureCache::ProcessWritten() {
     }
     gx_written.clear();
     if (retaken != 0) {
-        BbEngine::GxResources::NoteYebisHeapRetaken(retaken);
+        BbEngine::GxResources::NoteYebisPoolTaken(retaken);
     }
+}
+
+void TextureCache::NoteEngineStore(VAddr address, u64 size) {
+    if (!DmaTellsTextures() || size == 0) {
+        return;
+    }
+    std::scoped_lock lock{mutex};
+    u64 marked = 0;
+    ForEachImageInRegion(address, size, [&](ImageId, Image& image) {
+        if (False(image.flags & ImageFlagBits::Registered) ||
+            !WatchRules::StoreTells(WatchView(image), WatchSettings(), image.calls_watch,
+                                    True(image.flags & ImageFlagBits::GpuModified))) {
+            return;
+        }
+        RefreshTrace::Mark(image, "the engine's DMA store", address, size);
+        image.flags |= ImageFlagBits::CpuDirty;
+        ++image.cpu_marks; // the texture net's "told"
+        image.mip_hashes_current = false;
+        ++marked;
+    });
+    BbEngine::GxResources::NoteEngineStoreTold(marked);
 }
 
 void TextureCache::FreeDeadImages(u64 second) {

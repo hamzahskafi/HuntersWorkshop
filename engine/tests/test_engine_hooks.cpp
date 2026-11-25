@@ -199,10 +199,11 @@ int main() {
     assert(BbEngine::Call(reinterpret_cast<std::uint64_t>(image + 0x300), 1,2,3,4,5,6) == 77 && calls == 1);
     BbEngine::Discard(displaced);
 
-    // 0.4.6 beta 16 (gx_resources.cpp, the heap core's allocate): a prologue whose first bytes hold a relative
-    // jb, run re-encoded as jae over an absolute jump to the jb's target. The function: push rbx; xor eax, eax;
-    // cmp [rdi + 0x18], rsi; jb fail; mov r9d, 0x18; then mov rax, r9; pop rbx; ret. fail: mov rax, -1; pop rbx;
-    // ret. Both ways, with the callback seeing the heap (rdi) each time.
+    // 0.4.6 beta 16 (written for the heap core's allocate, a research hook since removed; the way stays in
+    // PrepareDisplaced): a prologue whose first bytes hold a relative jb, run re-encoded as jae over an
+    // absolute jump to the jb's target. The function: push rbx; xor eax, eax; cmp [rdi + 0x18], rsi; jb fail;
+    // mov r9d, 0x18; then mov rax, r9; pop rbx; ret. fail: mov rax, -1; pop rbx; ret. Both ways, with the
+    // callback seeing the heap (rdi) each time.
     {
         std::uint8_t core_site[19] = {0x53, 0x31, 0xc0, 0x48, 0x39, 0x77, 0x18, 0x0f, 0x82, 0, 0, 0, 0,
                                       0x41, 0xb9, 0x18, 0x00, 0x00, 0x00};
