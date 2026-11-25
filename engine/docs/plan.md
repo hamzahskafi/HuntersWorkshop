@@ -266,6 +266,27 @@ Gate: no new problem; part 3 seen working; the A/B read.
   removed); optionally AMD's pipeline library for the single pipelines a frame waits for (55-62 ms).
 - Gate: the cold run's frames after a load without GPU-thread translation spikes; a build that
   changes no stored format keeps the cache; the warm run unchanged.
+- *Research, first findings (2026-11-25, reading only):*
+  - *The identity and 0.4.6:* `build.sh` hashes the shader recompiler, all of `video_core/amdgpu`,
+    `cache_storage.*`, `serdes.h`, `liverpool_to_vk.*`, the `vk_*pipeline*` files (less the graphics
+    and compute pipelines' and the common ones), `pipeline_cache_blob.h` and `vk_object_motion.*`.
+    0.4.5's identity is `8e413f35b001886f`, today's `bc1f5b32fde7f850`: 0.4.6 as it stands would put
+    every player's cache through a recompile at its first start. The files that changed store nothing
+    differently: `liverpool.cpp` (the command processor's label stores telling the caches, betas 12-13),
+    `vk_pipeline_cache.*` (the object-motion permutation asked first, 0.4.5 beta 17; the translation
+    statistics, beta 8), `vk_pipeline_serialization.cpp` (the start's thread count, beta 15). So the
+    identity is broader than what the cache stores; narrowing it (the stored formats' own versions, or
+    hashing only the code that writes and reads them and the recompiler) would keep 0.4.5's caches.
+  - *A changed identity is a recompile, not a loss:* `start/main.cpp` `ResetStaleGpuCache` runs
+    `bb-shader-lab --recompile-cache` on each cache folder from the shader states kept beside it
+    (`BB_SHADER_STATES`, since Lantern 0.9.37), and clears a folder only if that fails. Not lossless:
+    beta 12's recompile lost 58 shaders and 113 pipeline keys (229 compiles in play against 98).
+  - *Translation on the GPU thread in a warm run* is small: 1-3 shaders a minute, 1-2 ms each
+    (`64880ba6`); the cost is the cold start (beta 15's first minute: 478 ms, one 220.8 ms frame) and
+    after a cache is lost.
+  - Next to read: where a draw's translation runs (`PipelineCache::GetProgram` and its callers on
+    the recording threads), the program cache's lock, the translator's per-thread state, and what a
+    draw needs before its pipeline exists.
 
 **Phase D: the release candidate.**
 
