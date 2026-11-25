@@ -384,7 +384,8 @@ mask, by FSR's own answer (FSR 4.1.2 does not), instead of "FSR 4 may".
 
 - **For the remaining texture write faults** (beta 16): a line a minute names the memory under the
   textures that still fault, and which of YEBIS's functions asked for it, to find their owner in the
-  next build. `BB_YEBIS_ALLOCS=0` in Extra variables turns it off. A second line says how much of
+  next build, and a second line does the same for the game's own memory heap they sit in.
+  `BB_YEBIS_ALLOCS=0` and `BB_GAME_HEAP_ALLOCS=0` in Extra variables turn them off. A second line says how much of
   the 1080p picture is brighter than white, for the sharpening; and a line says how strong the
   sharpening is and where it runs, once a change has held for a second.
 

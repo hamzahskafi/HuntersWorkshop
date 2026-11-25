@@ -9,6 +9,7 @@ from paths import ROOT
 HEADER = ROOT / 'gpu/shim/engine/crash_guards.h'
 FRAME_RATE = ROOT / 'gpu/shim/engine/frame_rate.cpp'
 CAMERA_RATE = ROOT / 'gpu/shim/engine/camera_rate.cpp'
+GX_RESOURCES = ROOT / 'gpu/shim/engine/gx_resources.cpp'
 
 
 def camera_tables(text):
@@ -27,6 +28,24 @@ def arrays(text):
     for name, body in re.findall(r'constexpr std::uint8_t (k\w+)\[\]\s*=\s*\{([^}]*)\}', text):
         out[name] = bytes(int(v, 16) for v in re.findall(r'0x[0-9a-fA-F]+', body))
     return out
+
+
+def site_lists(text):
+    """constexpr std::size_t kName[n] = {0x..., ...}; in a source: name -> offsets."""
+    return {name: [int(v, 16) for v in re.findall(r'0x[0-9a-fA-F]+', body)]
+            for name, body in re.findall(r'constexpr std::size_t (k\w+)\[\d+\]\s*=\s*\{([^}]*)\}', text)}
+
+
+def gx_sites():
+    """gx_resources.cpp's 0.4.6 beta 16 research hooks (image offsets): YEBIS's allocators, the game heap's
+    allocate and free methods, each with the prologue it is prepared with."""
+    text = GX_RESOURCES.read_text(encoding='utf-8')
+    code, lists = arrays(text), site_lists(text)
+    sites = [(f'YEBIS allocator {i}', at, code['kYebisAllocPrologue']) for i, at in enumerate(lists['kYebisAllocators'])]
+    sites += [(f'game heap allocate {i}', at, code['kHeapAlignedPrologue' if i % 2 else 'kHeapPrologue'])
+              for i, at in enumerate(lists['kHeapAllocs'])]
+    sites += [(f'game heap free {i}', at, code['kHeapPrologue']) for i, at in enumerate(lists['kHeapFrees'])]
+    return sites
 
 
 def constants(text):
@@ -109,6 +128,15 @@ class GameCodeSites(unittest.TestCase):
             rel, = struct.unpack_from('<i', code, call + 1)
             self.assertEqual(start + call + 5 + rel, target)
 
+    def test_the_gx_research_sites_parse(self):
+        sites = gx_sites()
+        self.assertEqual(len(sites), 2 + 4 + 2)
+        for name, at, code in sites:
+            # Prepare needs at least 14 bytes (the absolute jump) and whole instructions.
+            self.assertGreaterEqual(len(code), 14, name)
+            self.assertEqual(code[:4], b'\x55\x48\x89\xe5', name)  # push rbp; mov rbp, rsp
+            self.assertTrue(0x1000000 <= at < 0x3000000, name)
+
     def test_the_executable_holds_them(self):
         elf_path = ROOT / 'out/eboot.elf'
         if not elf_path.is_file():
@@ -119,6 +147,9 @@ class GameCodeSites(unittest.TestCase):
             self.skipTest('out/eboot.elf is not the verified 1.09 executable')
         for name, (offset, code) in self.sites.items():
             self.assertEqual(read_image(elf, offset, len(code)), code, name)
+        # gx_resources.cpp's research hooks: image offsets.
+        for name, at, code in gx_sites():
+            self.assertEqual(read_image(elf, at, len(code)), code, name)
         # The cloth's one substep is the 60 FPS++ list's write over the game's substep count.
         self.assertEqual(read_image(elf, self.at['kClothSubsteps'] - 0x400000, 11),
                          bytes.fromhex('8b581885db7504418b5d20'))

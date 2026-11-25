@@ -164,6 +164,20 @@ constexpr std::uint8_t kYebisUnmapPrologue[] = {0x48, 0x8b, 0xbf, 0xa0, 0x0a, 0x
 constexpr std::size_t kYebisAllocators[2] = {0x11e6810, 0x11e6700};
 constexpr std::uint8_t kYebisAllocPrologue[] = {0x55, 0x48, 0x89, 0xe5, 0x41, 0x57, 0x41, 0x56,
                                                 0x41, 0x54, 0x53, 0x48, 0x83, 0xec, 0x30};
+// 0.4.6 beta 16 (the remaining faults, step 1b: research): the game's heap class whose blocks the faulting
+// images over no game resource lie among (vtable 0x52e70c0 in 1.09; YEBIS's memory comes from the same
+// heap code, 0x2085a60, through the game's callback 0x21d1e40). Its methods lock the heap and call the heap
+// core: allocate (this, rsi the size) at 0x2929690 and 0x29297f0, allocate aligned (this, rsi the size, rdx
+// the alignment) at 0x29296f0 and 0x2929850, free (this, rsi the block) at 0x2929780 and 0x29298e0. The
+// core's free (0x20858a0) rewrites the block headers between blocks: the "write beside it" faults.
+constexpr std::size_t kHeapAllocs[4] = {0x2929690, 0x29296f0, 0x29297f0, 0x2929850};
+constexpr std::size_t kHeapFrees[2] = {0x2929780, 0x29298e0};
+// push rbp; mov rbp, rsp; push r15; push r14; push r12; push rbx; mov r14, rsi; mov rbx, [rdi + 8]
+constexpr std::uint8_t kHeapPrologue[] = {0x55, 0x48, 0x89, 0xe5, 0x41, 0x57, 0x41, 0x56, 0x41,
+                                          0x54, 0x53, 0x49, 0x89, 0xf6, 0x48, 0x8b, 0x5f, 0x08};
+// push rbp; mov rbp, rsp; push r15; push r14; push r13; push r12; push rbx; push rax; mov r14, rdx
+constexpr std::uint8_t kHeapAlignedPrologue[] = {0x55, 0x48, 0x89, 0xe5, 0x41, 0x57, 0x41, 0x56, 0x41,
+                                                 0x55, 0x41, 0x54, 0x53, 0x50, 0x49, 0x89, 0xd6};
 // push rbp; mov rbp, rsp; push r14; push rbx; mov r14, rdi; mov rbx, [rsi + 0x50]
 constexpr std::uint8_t kScaleformUnmapPrologue[] = {0x55, 0x48, 0x89, 0xe5, 0x41, 0x56, 0x53,
                                                     0x49, 0x89, 0xfe, 0x48, 0x8b, 0x5e, 0x50};
@@ -205,7 +219,8 @@ struct Entry {
 };
 
 // What a return through the stub belongs to.
-enum Op : std::uint8_t { kOpCreate, kOpTsharp, kOpView, kOpCreate1D, kOpYebis, kOpScaleform, kOpYebisUpdate, kOpYebisAlloc };
+enum Op : std::uint8_t { kOpCreate, kOpTsharp, kOpView, kOpCreate1D, kOpYebis, kOpScaleform, kOpYebisUpdate, kOpYebisAlloc,
+                          kOpHeapAlloc };
 
 struct Pending {
     std::uint64_t ret;
@@ -867,6 +882,86 @@ bool YebisAllocationAt(std::uint64_t address, std::uint64_t* start, YebisAlloc* 
     return true;
 }
 
+// 0.4.6 beta 16, step 1b: the game heap's live blocks by their memory (made through the class's
+// allocate methods, dropped at its frees), who asked (an image offset) and which heap (the object), and
+// this minute's counts: made by who asked, freed, the calls; write faults on images over no game resource,
+// by who asked for the block under them (0: none known). Under g_alloc_mutex.
+struct HeapBlock {
+    std::uint64_t end = 0, ns = 0, heap = 0;
+    std::uint32_t caller = 0;
+};
+std::map<std::uint64_t, HeapBlock> g_heap_blocks;
+std::unordered_map<std::uint32_t, std::pair<std::uint64_t, std::uint64_t>> g_heap_made_by_caller;
+std::unordered_map<std::uint32_t, std::uint64_t> g_heap_faults_by_caller;
+std::unordered_map<std::uint64_t, std::uint64_t> g_heap_made_by_heap;
+std::uint64_t g_heap_frees = 0, g_heap_frees_unknown = 0, g_heap_dropped = 0;
+constexpr std::size_t kMaxHeapBlocks = 400000;
+
+void NoteHeapBlock(std::uint64_t memory, std::uint64_t size, std::uint64_t ret, std::uint64_t heap) {
+    if (!memory || !size) {
+        return;
+    }
+    const auto caller = std::uint32_t(ret - reinterpret_cast<std::uint64_t>(g_image_base));
+    const std::uint64_t end = memory + size, ns = NowNs();
+    std::scoped_lock lock{g_alloc_mutex};
+    auto& made = g_heap_made_by_caller[caller];
+    ++made.first;
+    made.second += size;
+    ++g_heap_made_by_heap[heap];
+    // A block over older ones: memory given back without a free seen.
+    auto it = g_heap_blocks.lower_bound(memory);
+    if (it != g_heap_blocks.begin()) {
+        if (const auto before = std::prev(it); before->second.end > memory) {
+            it = before;
+        }
+    }
+    while (it != g_heap_blocks.end() && it->first < end) {
+        it = g_heap_blocks.erase(it);
+    }
+    if (g_heap_blocks.size() >= kMaxHeapBlocks) {
+        ++g_heap_dropped;
+        return;
+    }
+    g_heap_blocks.emplace(memory, HeapBlock{end, ns, heap, caller});
+}
+
+// The game heap's live block over `address`, if one is known.
+bool HeapBlockAt(std::uint64_t address, std::uint64_t* start, HeapBlock* out) {
+    std::scoped_lock lock{g_alloc_mutex};
+    auto it = g_heap_blocks.upper_bound(address);
+    if (it == g_heap_blocks.begin()) {
+        return false;
+    }
+    --it;
+    if (address >= it->second.end) {
+        return false;
+    }
+    *start = it->first;
+    *out = it->second;
+    return true;
+}
+
+// 0.4.6 beta 16, step 1b: the heap class's allocations (rdi the heap, rsi the size), read at their return.
+GUEST_ABI std::int64_t HeapAllocEntry(std::uint64_t, const std::uint64_t* saved) {
+    Pending p{saved[6], saved[5], kYebis, false, false, 0, kOpHeapAlloc};
+    p.holder = saved[4];
+    t_pending.push_back(p);
+    const_cast<std::uint64_t*>(saved)[6] = reinterpret_cast<std::uint64_t>(g_return_stub);
+    return 0;
+}
+
+// Its frees (rsi the block): the block is gone.
+GUEST_ABI std::int64_t HeapFreeEntry(std::uint64_t, const std::uint64_t* saved) {
+    if (const std::uint64_t block = saved[4]) {
+        std::scoped_lock lock{g_alloc_mutex};
+        ++g_heap_frees;
+        if (g_heap_blocks.erase(block) == 0) {
+            ++g_heap_frees_unknown;
+        }
+    }
+    return 0;
+}
+
 // 0.4.6 beta 6: YEBIS's 2D creator (r9 = the object's out, rdx = initial data) and Scaleform's texture
 // Initialize (rdi = the texture), read at their return; the destructors that end them.
 GUEST_ABI std::int64_t YebisCreateEntry(std::uint64_t, const std::uint64_t* saved) {
@@ -1212,6 +1307,10 @@ GUEST_ABI std::uint64_t CreatorReturn(std::uint64_t result) {
         NoteYebisAllocation(result, p.holder, p.ret, unsigned(p.type));
         return p.ret;
     }
+    if (p.op == kOpHeapAlloc) {
+        NoteHeapBlock(result, p.holder, p.ret, p.out);
+        return p.ret;
+    }
     if (p.op == kOpTsharp) {
         t_tsharp_valid = p.out != 0;
         if (t_tsharp_valid) {
@@ -1333,7 +1432,7 @@ bool Install(std::uint8_t* image, std::size_t size) {
     if (const char* env = std::getenv("BB_GX_FOLLOW"); !(env && env[0] == '0')) {
         g_follow = true;
     }
-    Hook hooks[29];
+    Hook hooks[35];
     bool ok = Prepare(hooks[0], image, size, kCreateBuffer, kCreatorPrologue, &CreatorEntry<kBuffer>) &&
               Prepare(hooks[1], image, size, kCreateTexture, kCreatorPrologue, &CreatorEntry<kTexture>) &&
               Prepare(hooks[2], image, size, kCreateTexture3D, kCreatorPrologue, &CreatorEntry<kTexture3D>) &&
@@ -1362,6 +1461,25 @@ bool Install(std::uint8_t* image, std::size_t size) {
             Discard(hooks[27]);
             Discard(hooks[28]);
             host_log("GX memory: YEBIS's allocators differ from 1.09: its allocations not named");
+        }
+    }
+    // 0.4.6 beta 16, step 1b (research; BB_GAME_HEAP_ALLOCS=0: not hooked): the game heap class's allocate
+    // and free methods. Not needed by the rest: where they differ, only they are left out.
+    if (const char* env = std::getenv("BB_GAME_HEAP_ALLOCS"); ok && !(env && env[0] == '0')) {
+        bool heap_ok = true;
+        for (int i = 0; i < 4 && heap_ok; ++i) {
+            const bool aligned = i == 1 || i == 3;
+            heap_ok = aligned ? Prepare(hooks[29 + i], image, size, kHeapAllocs[i], kHeapAlignedPrologue, &HeapAllocEntry)
+                              : Prepare(hooks[29 + i], image, size, kHeapAllocs[i], kHeapPrologue, &HeapAllocEntry);
+        }
+        for (int i = 0; i < 2 && heap_ok; ++i) {
+            heap_ok = Prepare(hooks[33 + i], image, size, kHeapFrees[i], kHeapPrologue, &HeapFreeEntry);
+        }
+        if (!heap_ok) {
+            for (int i = 29; i < 35; ++i) {
+                Discard(hooks[i]);
+            }
+            host_log("GX memory: the game heap's methods differ from 1.09: its blocks not named");
         }
     }
     // The game's destructors (2D and 3D textures at 4-7, 1D at 17-18) and YEBIS's 2D texture's (19).
@@ -1642,13 +1760,17 @@ void NoteImageWatchFault(const WatchedImage& w) {
     if (w.past) {
         g_counts.image_faults_past.fetch_add(1, std::memory_order_relaxed);
     }
-    // 0.4.6 beta 16, step 1: an image over no game resource, by the YEBIS allocation under it (who asked).
-    std::uint64_t alloc_start = 0;
+    // 0.4.6 beta 16, step 1: an image over no game resource, by the YEBIS allocation under it (who asked);
+    // step 1b: and by the game heap's block under it.
+    std::uint64_t alloc_start = 0, block_start = 0;
     YebisAlloc alloc;
+    HeapBlock block;
     const bool in_alloc = w.owner == Owner::None && YebisAllocationAt(w.memory, &alloc_start, &alloc);
+    const bool in_block = w.owner == Owner::None && HeapBlockAt(w.memory, &block_start, &block);
     if (w.owner == Owner::None) {
         std::scoped_lock lock{g_alloc_mutex};
         ++g_faults_by_caller[in_alloc ? alloc.caller : 0];
+        ++g_heap_faults_by_caller[in_block ? block.caller : 0];
     }
     {
         std::scoped_lock lock{g_census_mutex};
@@ -1662,13 +1784,24 @@ void NoteImageWatchFault(const WatchedImage& w) {
         }
         g_named_watchers[g_named_watcher_count++] = w.memory;
     }
-    char where[192] = "";
-    if (in_alloc) {
-        std::snprintf(where, sizeof(where), "; in YEBIS's allocation at %#llx (%llu bytes, allocator %u) asked for by +%#x, %.1f s ago",
-                      (unsigned long long)alloc_start, (unsigned long long)(alloc.end - alloc_start), alloc.which,
-                      alloc.caller, double(NowNs() - alloc.ns) / 1e9);
-    } else if (w.owner == Owner::None) {
-        std::snprintf(where, sizeof(where), "; in no allocation of YEBIS's known");
+    char where[384] = "";
+    if (w.owner == Owner::None) {
+        char yebis[192], heap[192];
+        if (in_alloc) {
+            std::snprintf(yebis, sizeof(yebis), "in YEBIS's allocation at %#llx (%llu bytes, allocator %u) asked for by +%#x, %.1f s ago",
+                          (unsigned long long)alloc_start, (unsigned long long)(alloc.end - alloc_start), alloc.which,
+                          alloc.caller, double(NowNs() - alloc.ns) / 1e9);
+        } else {
+            std::snprintf(yebis, sizeof(yebis), "in no allocation of YEBIS's known");
+        }
+        if (in_block) {
+            std::snprintf(heap, sizeof(heap), "in the game heap %#llx's block at %#llx (%llu bytes) asked for by +%#x, %.1f s ago",
+                          (unsigned long long)block.heap, (unsigned long long)block_start,
+                          (unsigned long long)(block.end - block_start), block.caller, double(NowNs() - block.ns) / 1e9);
+        } else {
+            std::snprintf(heap, sizeof(heap), "in no game heap block known");
+        }
+        std::snprintf(where, sizeof(where), "; %s; %s", yebis, heap);
     }
     host_log("GX memory: a write fault at %#llx on the page of a watched image (beta 16): %s, the image at %#llx "
              "(%llu bytes, %ux%u, format %u), %s%s%s, the write %s it%s%s",
@@ -2798,6 +2931,68 @@ void LogMinute() {
                      "game resource, by who asked for the YEBIS allocation under them: %s (allocations known %zu%s)",
                      made_text.empty() ? "none" : made_text.c_str(), (unsigned long long)made_1d,
                      (unsigned long long)made_3d, fault_text.empty() ? "none" : fault_text.c_str(), known,
+                     dropped ? ", some not kept: too many" : "");
+        }
+    }
+    {
+        // 0.4.6 beta 16, step 1b: the game heap's blocks by who asked, its heaps, its frees, and the faults on
+        // images over no game resource by who asked for the block under them.
+        std::vector<std::pair<std::uint32_t, std::pair<std::uint64_t, std::uint64_t>>> made;
+        std::vector<std::pair<std::uint32_t, std::uint64_t>> faults;
+        std::vector<std::pair<std::uint64_t, std::uint64_t>> heaps;
+        std::size_t live = 0;
+        std::uint64_t frees = 0, frees_unknown = 0, dropped = 0;
+        {
+            std::scoped_lock lock{g_alloc_mutex};
+            made.assign(g_heap_made_by_caller.begin(), g_heap_made_by_caller.end());
+            faults.assign(g_heap_faults_by_caller.begin(), g_heap_faults_by_caller.end());
+            heaps.assign(g_heap_made_by_heap.begin(), g_heap_made_by_heap.end());
+            g_heap_made_by_caller.clear();
+            g_heap_faults_by_caller.clear();
+            g_heap_made_by_heap.clear();
+            live = g_heap_blocks.size();
+            frees = std::exchange(g_heap_frees, 0);
+            frees_unknown = std::exchange(g_heap_frees_unknown, 0);
+            dropped = std::exchange(g_heap_dropped, 0);
+        }
+        if (!made.empty() || !faults.empty() || frees) {
+            std::sort(made.begin(), made.end(), [](const auto& a, const auto& b) { return a.second.first > b.second.first; });
+            std::sort(faults.begin(), faults.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
+            std::sort(heaps.begin(), heaps.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
+            std::uint64_t made_count = 0, made_bytes = 0;
+            for (const auto& [at, count] : made) {
+                made_count += count.first;
+                made_bytes += count.second;
+            }
+            std::string made_text, fault_text, heap_text;
+            for (std::size_t i = 0; i < made.size() && i < 12; ++i) {
+                char part[96];
+                std::snprintf(part, sizeof(part), "%s+%#x %llu (%.1f MiB)", i ? ", " : "", made[i].first,
+                              (unsigned long long)made[i].second.first, Mib(made[i].second.second));
+                made_text += part;
+            }
+            for (std::size_t i = 0; i < faults.size() && i < 12; ++i) {
+                char part[64];
+                if (faults[i].first) {
+                    std::snprintf(part, sizeof(part), "%s+%#x %llu", i ? ", " : "", faults[i].first,
+                                  (unsigned long long)faults[i].second);
+                } else {
+                    std::snprintf(part, sizeof(part), "%sin none %llu", i ? ", " : "", (unsigned long long)faults[i].second);
+                }
+                fault_text += part;
+            }
+            for (std::size_t i = 0; i < heaps.size() && i < 6; ++i) {
+                char part[64];
+                std::snprintf(part, sizeof(part), "%s%#llx %llu", i ? ", " : "", (unsigned long long)heaps[i].first,
+                              (unsigned long long)heaps[i].second);
+                heap_text += part;
+            }
+            host_log("GX memory, the game heap's blocks this minute (beta 16, research): made %llu (%.1f MiB), by who "
+                     "asked: %s; by heap: %s; freed %llu (%llu of blocks not known); write faults on images over no "
+                     "game resource, by who asked for the heap block under them: %s (live blocks known %zu%s)",
+                     (unsigned long long)made_count, Mib(made_bytes), made_text.empty() ? "none" : made_text.c_str(),
+                     heap_text.empty() ? "none" : heap_text.c_str(), (unsigned long long)frees,
+                     (unsigned long long)frees_unknown, fault_text.empty() ? "none" : fault_text.c_str(), live,
                      dropped ? ", some not kept: too many" : "");
         }
     }

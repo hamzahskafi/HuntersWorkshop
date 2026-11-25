@@ -1326,8 +1326,9 @@ FSR 4.1.2 at Native AA, about 12 minutes):**
   lines show small RGBA8 textures (1x1 to 32x32, 256x256) and mip chains of format 9 (64x64 down to
   4x4, one after the other) in the same memory as YEBIS's (`0x105e...`-`0x105f...`). Their writers:
   YEBIS's quads (`+0xc21ef2`) now only on the page `0x105eedf000`, where the watching image is over
-  no resource, and the game's `memcpy` (`0x20858a0`) called from a small method at `0x2929780`,
-  reached through a virtual call. They are textures made by a creator the engine does not follow;
+  no resource, and `0x20858a0` called from a small method at `0x2929780`, reached through a virtual
+  call (read as the game's `memcpy` then; it is the game heap's free, rewriting the headers between
+  blocks: step 1b below). They are textures made by a creator the engine does not follow;
   YEBIS's device has two creation methods reaching the tiler that are not hooked (`0x11dea90`,
   `0x11e1750`, also virtual). To find in a later beta, as planned.
 - The texture net: nothing untold in any minute; a round over YEBIS's and Scaleform's images in 1 s
@@ -1360,6 +1361,22 @@ frees are not followed: some of those may be memory handed back and reused). So 
 YEBIS. YEBIS's allocators take their memory through a function pointer (`0x54b9f38`) that the game
 installs through YEBIS's setter `0x11e61f0`: the game's own GPU memory allocator, the next thing to
 follow (`plan.md`).
+
+**Step 1b, built the same day (engine id 110):** the game hands YEBIS two of its functions (`0x21d1e40`
+allocates, `0x21d1f00` frees; set up by the renderer at `0x21d2dd0`): they allocate from one of the
+game's own heaps through the heap core (`0x2085a60` aligned, `0x2085730` plain; `0x20858a0` frees), a
+two-level segregated-fit heap that keeps a 16-byte header before each block and rewrites its
+neighbours' headers when a block is freed or split. The second writer of the earlier runs, `0x20858a0`
+called from `0x2929780`, is that free, not a copy: the faults "beside" the images are the heap's own
+bookkeeping on their pages. `0x2929780` is one method of a heap class (vtable `0x52e70c0`) whose
+allocate (`0x2929690`, `0x29297f0`; aligned `0x29296f0`, `0x2929850`) and free (`0x2929780`,
+`0x29298e0`) methods are now hooked (byte-checked; `BB_GAME_HEAP_ALLOCS=0`: not hooked): each block's
+range, the heap and who asked for it, dropped at its free. A faulting image over no game resource is
+named with the heap block under it as well as YEBIS's allocation; a minute line, "GX memory, the game
+heap's blocks this minute", gives the blocks made by who asked, by heap, the frees, and those faults by
+who asked for the block under them. Nothing else changes. If the textures are this heap's blocks, step
+2 knows their owner; if the bookkeeping writes are all that faults on their pages, the faults are
+harmless to the textures' contents (the headers lie between blocks, outside the images).
 
 ### Beta 17: shaders and pipelines (to research and design)
 
