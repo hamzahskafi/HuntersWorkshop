@@ -1125,6 +1125,7 @@ void NoteAheadProgram(PrepWorker& worker, HwStage hw_stage, SwStage sw_stage, co
     st.sw_stage = sw_stage;
     std::copy(params.user_data.begin(), params.user_data.end(), st.user_data.begin());
     st.code = params.code;
+    st.code_copy.assign(params.code.begin(), params.code.end());
     st.runtime = runtime;
     st.start = binding;
     st.start_known = worker.ahead.size() == 1;
@@ -1149,6 +1150,7 @@ void NoteAheadVariant(PrepWorker& worker, HwStage hw_stage, SwStage sw_stage, co
     st.sw_stage = sw_stage;
     std::copy(params.user_data.begin(), params.user_data.end(), st.user_data.begin());
     st.code = params.code;
+    st.code_copy.assign(params.code.begin(), params.code.end());
     st.runtime = runtime;
     st.start = binding;
     st.start_known = true;
@@ -1207,6 +1209,9 @@ void PipelineCache::RunAhead(TranslationJob& job) {
     Shader::Backend::Bindings carry{};
     for (AheadStage& st : job.stages) {
         const u64 start_ns = AheadNowNs();
+        if (!st.SameCode(st.code)) {
+            break; // the game rewrote the shader's memory since the worker read it
+        }
         const Shader::ShaderParams params{std::span<const u32, Shader::ShaderParams::NumShaderUserData>{st.user_data},
                                           st.code, st.hash};
         st.info = std::make_unique<Shader::Info>(st.hw_stage, st.sw_stage, params);
@@ -1222,7 +1227,11 @@ void PipelineCache::RunAhead(TranslationJob& job) {
             st.spec.emplace(*st.info, st.runtime_after, job.profile, st.actual_start);
         }
         st.ns = AheadNowNs() - start_ns;
-        st.ok = true;
+        // The code translated is the code queued only if the memory still holds it.
+        st.ok = st.SameCode(st.code);
+        if (!st.ok) {
+            break;
+        }
     }
     runtime_fault_recover = outer;
     bb_fault_recovers_only = recovers_only;
@@ -1231,6 +1240,7 @@ void PipelineCache::RunAhead(TranslationJob& job) {
 
 template <typename Pred>
 std::optional<std::pair<std::shared_ptr<TranslationJob>, u32>> PipelineCache::AcquireAhead(u64 hash, HwStage stage,
+                                                                                         std::span<const u32> code,
                                                                                          Pred&& pred) {
     // The registry's key mixes the hash and the stage: the stage found must be this program's.
     const auto entry = ahead_registry.Find(hash, u32(stage), [&](const TranslationJob& job, u32 i) {
@@ -1262,6 +1272,11 @@ std::optional<std::pair<std::shared_ptr<TranslationJob>, u32>> PipelineCache::Ac
         Ahead::NoteRefused();
         return std::nullopt;
     }
+    // This draw's program must be the code the job translated.
+    if (!st.SameCode(code)) {
+        Ahead::NoteRefused();
+        return std::nullopt;
+    }
     BbEngine::GxResources::NoteAheadUsed(AheadStatsStage(stage), st.ns, waited ? AheadNowNs() - start_ns : 0,
                                         ran_here);
     return std::make_pair(entry->job, entry->stage);
@@ -1271,7 +1286,7 @@ std::optional<PipelineCache::Result> PipelineCache::PublishAheadProgram(HwStage 
                                                                         const Shader::ShaderParams& params,
                                                                         const Shader::RuntimeInfo& runtime_info,
                                                                         Shader::Backend::Bindings& binding) {
-    const auto ahead = AcquireAhead(params.hash, hw_stage, [&](const TranslationJob& job, u32 i) {
+    const auto ahead = AcquireAhead(params.hash, hw_stage, params.code, [&](const TranslationJob& job, u32 i) {
         const auto& st = job.stages[i];
         return !st.variant_spec && st.runtime == runtime_info;
     });
@@ -1429,7 +1444,7 @@ PipelineCache::Result PipelineCache::GetProgram(PipelineSelection& sel, HwStage 
     // matched by it, as here).
     std::optional<std::pair<std::shared_ptr<TranslationJob>, u32>> ahead;
     if (it == program->modules.end() && TranslateAheadEnabled()) {
-        ahead = AcquireAhead(params.hash, hw_stage, [&](const TranslationJob& job, u32 i) {
+        ahead = AcquireAhead(params.hash, hw_stage, params.code, [&](const TranslationJob& job, u32 i) {
             const auto& st = job.stages[i];
             return st.variant_spec && *st.variant_spec == spec;
         });

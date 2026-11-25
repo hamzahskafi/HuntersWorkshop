@@ -124,6 +124,11 @@ struct AheadStage {
     Shader::SwStage sw_stage{};
     std::array<u32, Shader::ShaderParams::NumShaderUserData> user_data{};
     std::span<const u32> code;
+    /// The code's words as the worker read them: the job translates `code` in place (its address is
+    /// the program's base, which inline constant buffers are found by) and fails if the memory differs
+    /// from this before or after; the GPU thread uses the result only for code equal to it. A shader's
+    /// memory the game rewrote meanwhile is never published under the hash taken before.
+    std::vector<u32> code_copy;
     Shader::RuntimeInfo runtime{};
     Shader::Backend::Bindings start{};
     bool start_known = false; ///< false: where the job's previous stage ends (a chain of programs)
@@ -136,6 +141,12 @@ struct AheadStage {
     std::optional<Shader::StageSpecialization> spec; ///< a program's, from its translated Info
     u64 ns = 0;
     bool ok = false;
+
+    /// Whether `words` are the code this stage was queued with.
+    bool SameCode(std::span<const u32> words) const {
+        return words.size() == code_copy.size() &&
+               std::equal(words.begin(), words.end(), code_copy.begin());
+    }
 
     /// The same request: one job serves both.
     bool SameInputs(const AheadStage& other) const {
@@ -274,6 +285,7 @@ private:
     /// none when there is no such job or it failed.
     template <typename Pred>
     std::optional<std::pair<std::shared_ptr<TranslationJob>, u32>> AcquireAhead(u64 hash, Shader::HwStage stage,
+                                                                                std::span<const u32> code,
                                                                                 Pred&& pred);
     static void RunAhead(TranslationJob& job);
     std::optional<Result> PublishAheadProgram(Shader::HwStage hw_stage, Shader::SwStage sw_stage,

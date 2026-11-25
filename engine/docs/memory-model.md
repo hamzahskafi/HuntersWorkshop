@@ -1689,9 +1689,11 @@ that changes no translation keeps the cache; a warm run unchanged.
    `BB_GPU_CACHE_CHECK=0`: not checked). On a new fingerprint bb-start runs it on each cache folder
    before any rebuild: the rebuild's own loop (`RecompileBatch`) in a mode that writes nothing, in child
    processes, stopped at the first difference. A shader with a state is "the same" when its SPIR-V comes
-   out byte for byte as stored and its specialization equals the stored one (the stored record holds
-   the draw's user data too, so its bytes are not compared); one without a state or stored SPIR-V is not
-   compared. Every folder the same (at least one shader compared): the new fingerprint is stamped and
+   out byte for byte as stored, its specialization equals the stored one, and its stored record reads
+   back with this engine's loader and writes out byte for byte the same with its writer (a change in how
+   records are stored; the record holds the draw's user data, so it is not compared with a new one); one
+   without a state or stored SPIR-V is not compared. Pipeline keys are not: a rebuild keeps them as they
+   are too, and the warm-up checks their version (the builder session's review, engine id 115). Every folder the same (at least one shader compared): the new fingerprint is stamped and
    the cache kept whole. Any difference, a batch ended by the compiler, nothing to compare or another
    profile: the rebuild as before. Logged per folder ("GPU cache <game>: N shaders translated as stored
    by this engine ...") and once ("kept whole").
@@ -1717,6 +1719,12 @@ that changes no translation keeps the cache; a warm run unchanged.
      user data and tables equals the job's (what a variant is matched by); otherwise it translates
      itself. Publishing is stage A's: the program cache's insert, the variant's index, the module, the
      stored binary, record and state (`FinishModule`, `CompileModule`'s second half).
+   - The code: a job translates the shader's code in place (its address is the program's base, by
+     which inline constant buffers are found) and keeps a copy of the words the worker read; it fails
+     if the memory differs from the copy before or after translating, and stage A uses the result only
+     when its own draw's code equals the copy. The hash is the one in the shader's header, not computed
+     from the code: a shader rewritten in between is never published under the old hash (the builder
+     session's review of engine id 114; fixed in 115).
    - Not in it: dispatches (not prepared ahead), the object-motion variant of a program translated in
      the same draw (asked for only once its information is known), tessellation.
    - Counted in the Shaders minute line: stages queued (and those an equal job covered), used by stage

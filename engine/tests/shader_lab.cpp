@@ -816,8 +816,10 @@ void Leave(const fs::path& dir, const std::string& name, u64 pgm, size_t perm) {
 /// It only reports what to leave out: the parent removes those files once every batch is done, so
 /// each batch lists the same names in the same order.
 /// 0.4.6 beta 17 (`verify`, --verify-batch): nothing written; "@OK i" when this compiler's SPIR-V and
-/// specialization are the stored ones, "@OUT i why" when not, "@SKIP i why" for a permutation with no
-/// state or no stored SPIR-V (nothing to compare).
+/// specialization are the stored ones and the stored record reads back and writes out the same with
+/// this engine's code, "@OUT i why" when not, "@SKIP i why" for a permutation with no state or no
+/// stored SPIR-V (nothing to compare). Pipeline keys are not compared: a recompile keeps them as they
+/// are too, and their records carry a version the warm-up checks.
 int RecompileBatch(const fs::path& dir, size_t start, const fs::path& only, bool verify = false) {
     const auto profile_bytes = ReadAll(dir / "profile.bin");
     Profile profile{};
@@ -897,13 +899,35 @@ int RecompileBatch(const fs::path& dir, size_t start, const fs::path& only, bool
             const auto stored = ReadAll(dir / (name + ".spv"));
             if (stored.empty()) {
                 std::printf("\n@SKIP %zu no SPIR-V\n", i);
-            } else if (stored.size() != spv.size() * sizeof(u32) ||
-                       std::memcmp(stored.data(), spv.data(), stored.size()) != 0) {
+                std::fflush(stdout);
+                continue;
+            }
+            if (stored.size() != spv.size() * sizeof(u32) ||
+                std::memcmp(stored.data(), spv.data(), stored.size()) != 0) {
                 out("SPIR-V changed");
                 continue;
-            } else {
-                std::printf("\n@OK %zu\n", i);
             }
+            // The record's format: read with this engine's loader and written again with its writer,
+            // byte for byte (the comparison above cannot see a change in how records are stored; a
+            // recompile rewrites them, a kept cache must read them as they are).
+            Serialization::Archive record{std::vector<u8>(meta_bytes.begin(), meta_bytes.end())};
+            Info stored_info(HwStage(cap.header.hw_stage), SwStage(cap.header.sw_stage), params);
+            std::optional<Gcn::FetchShaderData> stored_fetch;
+            StageSpecialization stored_spec;
+            size_t stored_perm = 0;
+            if (!Vulkan::LoadShaderMeta(record, stored_info, stored_fetch, stored_spec, stored_perm,
+                                        HashCombine(pgm, u64(perm)))) {
+                out("record unreadable by this engine");
+                continue;
+            }
+            stored_spec.info = &stored_info;
+            const auto again = Vulkan::SerializeShaderMeta(stored_info, stored_spec, HashCombine(pgm, u64(perm)), perm);
+            if (again.size() != meta_bytes.size() ||
+                std::memcmp(again.data(), meta_bytes.data(), again.size()) != 0) {
+                out("record format changed");
+                continue;
+            }
+            std::printf("\n@OK %zu\n", i);
             std::fflush(stdout);
             continue;
         }
