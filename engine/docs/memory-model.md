@@ -1744,6 +1744,39 @@ aside for one session, the same route) shows the gain against `b53c92dc` and `27
 minute's translating on the GPU command thread (450-478 ms then) and the frames after the first load (one
 220.8 ms then).
 
+**Its run (2026-11-25, `e11c75b9`, engine id 115): a crash, and the check not run.**
+
+- **The check did not run:** the log starts with the old rebuild ("670 shaders recompiled ..., 0 left out",
+  then 527 of 527 pipelines at the start: a rebuild that lost nothing, now that every shader has a state)
+  and no line of `GpuCacheUnchanged`. The bb-start that ran was 113's: the builder's package for 115
+  carried only the files changed since 114, and the tester installed 115 in place of 114. Fixed on the
+  builder's side (every engine program in a package that replaces another).
+- **The crash** (exit 139, a C++ exception on `bb:Pipeline0` at the start of a loading screen),
+  symbolized by the builder session: Xbyak's `CodeGenerator::ready` in `GenerateSrtProgram`
+  (`flatten_extended_userdata_pass.cpp`) under `TranslateProgram` under `RunAhead`. The resource-table
+  walkers are emitted into one global code buffer (`g_srt_codegen`); until beta 17 only the GPU command
+  thread translated, and with jobs on the compile threads two emissions overlapped, mixing their labels,
+  and `ready()` threw on an undefined one (with no throw, a walker could have taken another's bytes).
+  The research's audit of the translator for shared state missed it: a text search that left out
+  declarations with parentheses (`static Xbyak::CodeGenerator g_srt_codegen(32_MB);`). Done again from
+  the compiled objects: every one of the translator's 76 files and Sirit's 20 compiled, their writable
+  globals and statics listed from the symbol tables. The walker buffer is the only shared state written
+  during a translation; the rest is `thread_local` (the fetch shader cache, the table plan's scratch),
+  atomic or `once_flag` (counters, logged-once flags), `constexpr` tables, or under the capture's own
+  locks; one log counter was a plain integer (made atomic).
+- **Requests the GPU thread never took:** the first minute's line, "stages queued 33 (13748 more
+  already queued), used none", with no translation on the GPU thread: the workers asked for 33 stages
+  the GPU thread did not need (a worker's view of some draws differs from the GPU thread's: the 3% of
+  draws whose preparation the GPU thread never uses). Their jobs translated on that view, against memory
+  the game reuses at a loading screen.
+
+**Fixed (engine id 116):** walker emission serialized (`g_srt_codegen_mutex`; the fault handler reads only
+the buffer's start and size, which only grows); a job contained whatever happens in it (a C++ exception
+caught, a failed assertion thrown instead of stopping the process while a job runs, `bb_assert_throws`,
+besides the fault recovery: the job is thrown out and the GPU thread translates as before); a request
+whose job was done and still untaken 2 s after it was queued is not queued again this session (the
+first eight named in the log; "never taken" in the Shaders line); the registry's entries go after 10 s.
+
 ### The 0.4.6 release
 
 - **Switches:** each beta's switches, and `BB_COPY_HOLD` and `BB_COPY_MERGE` (kept through 0.4.5

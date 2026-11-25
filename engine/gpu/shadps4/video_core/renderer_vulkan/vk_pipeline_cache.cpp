@@ -34,6 +34,9 @@
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
 
+// shim/common/assert.cpp: a failed assertion throws on this thread instead of stopping the process.
+extern thread_local bool bb_assert_throws;
+
 namespace Vulkan {
 
 namespace {
@@ -1169,17 +1172,36 @@ void PipelineCache::QueueAhead(std::vector<AheadStage>&& stages) {
         return;
     }
     const AheadStage& first = stages.front();
-    // Queued already for another draw: that job serves this one too.
-    if (ahead_registry.Find(first.hash, u32(first.hw_stage), [&](const TranslationJob& job, u32 i) {
+    const u64 phantom_key = (first.hash ^ (u64(first.hw_stage) << 56) ^ (first.variant_spec ? 1ull << 63 : 0)) *
+                            0x9E3779B97F4A7C15ull;
+    {
+        std::scoped_lock lk{ahead_phantom_mutex};
+        if (ahead_phantoms.contains(phantom_key)) {
+            BbEngine::GxResources::NoteAheadPhantom(0, 0, false, false);
+            return;
+        }
+    }
+    const u64 now = AheadNowNs();
+    // Queued already for another draw: that job serves this one too. Done 2 s ago and still not
+    // taken: the GPU thread does not ask for it (see ahead_phantoms).
+    if (const auto existing = ahead_registry.Find(first.hash, u32(first.hw_stage), [&](const TranslationJob& job, u32 i) {
             return job.stages[i].SameInputs(first);
         })) {
+        const auto state = existing->job->progress.Get();
+        if ((state == Ahead::State::Done || state == Ahead::State::Failed) &&
+            now - existing->queued_ns > 2'000'000'000ull) {
+            std::scoped_lock lk{ahead_phantom_mutex};
+            if (ahead_phantoms.size() < 4096 && ahead_phantoms.insert(phantom_key).second) {
+                BbEngine::GxResources::NoteAheadPhantom(first.hash, AheadStatsStage(first.hw_stage),
+                                                        first.variant_spec.has_value(), true);
+            }
+        }
         BbEngine::GxResources::NoteAheadQueued(0, 1);
         return;
     }
     auto job = std::make_shared<TranslationJob>();
     job->stages = std::move(stages);
     job->profile = profile;
-    const u64 now = AheadNowNs();
     for (u32 i = 0; i < job->stages.size(); ++i) {
         ahead_registry.Add(job->stages[i].hash, u32(job->stages[i].hw_stage), job, i, now);
     }
@@ -1193,19 +1215,43 @@ void PipelineCache::RunAhead(TranslationJob& job) {
     }
     // The translator's pools, one set per thread (the GPU command thread keeps its own).
     thread_local Shader::Pools pools;
-    // The game's memory read here (the fetch shader, the resource tables) may be gone by now: a
-    // fault ends the job, and the GPU command thread translates as before.
+    // The inputs are a draw-prep worker's view of a draw, which can differ from the GPU thread's (the
+    // engine id 115 run: requests the GPU thread never made, translated against memory the game had
+    // reused at a loading screen). Whatever happens here ends the job, never the game: a fault reading
+    // the game's memory (the recovery point), a C++ exception, a failed assertion (bb_assert_throws:
+    // thrown instead of stopping the process). The GPU command thread then translates as before.
     const bool recovers_only = bb_fault_recovers_only;
+    const bool assert_throws = bb_assert_throws;
     BbRecoverBuf* const outer = runtime_fault_recover;
     BbRecoverBuf recover;
     if (BB_RECOVER_SET(recover)) {
         runtime_fault_recover = outer;
         bb_fault_recovers_only = recovers_only;
+        bb_assert_throws = assert_throws;
         job.progress.Finish(false);
         return;
     }
     runtime_fault_recover = &recover;
     bb_fault_recovers_only = true;
+    bb_assert_throws = true;
+    bool ok = true;
+    try {
+        TranslateAheadStages(job, pools);
+    } catch (...) {
+        ok = false;
+    }
+    runtime_fault_recover = outer;
+    bb_fault_recovers_only = recovers_only;
+    bb_assert_throws = assert_throws;
+    if (!ok) {
+        for (AheadStage& st : job.stages) {
+            st.ok = false;
+        }
+    }
+    job.progress.Finish(ok);
+}
+
+void PipelineCache::TranslateAheadStages(TranslationJob& job, Shader::Pools& pools) {
     Shader::Backend::Bindings carry{};
     for (AheadStage& st : job.stages) {
         const u64 start_ns = AheadNowNs();
@@ -1233,9 +1279,6 @@ void PipelineCache::RunAhead(TranslationJob& job) {
             break;
         }
     }
-    runtime_fault_recover = outer;
-    bb_fault_recovers_only = recovers_only;
-    job.progress.Finish(true);
 }
 
 template <typename Pred>

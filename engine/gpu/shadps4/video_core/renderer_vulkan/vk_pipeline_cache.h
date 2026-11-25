@@ -4,6 +4,7 @@
 #pragma once
 
 #include <unordered_map>
+#include <unordered_set>
 #include <mutex>
 #include <shared_mutex>
 #include <variant>
@@ -288,6 +289,7 @@ private:
                                                                                 std::span<const u32> code,
                                                                                 Pred&& pred);
     static void RunAhead(TranslationJob& job);
+    static void TranslateAheadStages(TranslationJob& job, Shader::Pools& pools);
     std::optional<Result> PublishAheadProgram(Shader::HwStage hw_stage, Shader::SwStage sw_stage,
                                               const Shader::ShaderParams& params,
                                               const Shader::RuntimeInfo& runtime_info,
@@ -311,8 +313,14 @@ private:
     tsl::robin_map<size_t, std::unique_ptr<Program>> program_cache;
     /// bbport: exclusive for program/permutation insertions, shared for worker lookups.
     std::shared_mutex programs_mutex;
-    /// 0.4.6 beta 17 part 2: the translations queued ahead (workers add, the GPU thread takes).
-    Ahead::Registry<TranslationJob> ahead_registry;
+    /// 0.4.6 beta 17 part 2: the translations queued ahead (workers add, the GPU thread takes; an
+    /// entry no draw took goes after 10 s).
+    Ahead::Registry<TranslationJob> ahead_registry{10'000'000'000ull, 4096};
+    /// Requests the GPU thread never took (a job done and unused 2 s after it was queued): a worker's
+    /// view of that draw differs from the GPU thread's, so the request is not queued again (the
+    /// engine id 115 run: 33 such stages asked for 13,748 times a minute). By program, stage and kind.
+    std::mutex ahead_phantom_mutex;
+    std::unordered_set<u64> ahead_phantoms;
     u64 prepared_hits = 0, prepared_misses = 0;
     const PreparedDraw* used_prepared = nullptr;
     tsl::robin_map<ComputePipelineKey, std::unique_ptr<ComputePipeline>> compute_pipelines;

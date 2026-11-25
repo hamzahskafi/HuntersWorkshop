@@ -306,6 +306,9 @@ void NoteShaderTranslated(unsigned stage, std::uint64_t ns, bool program_seen);
 void NoteAheadQueued(std::uint64_t stages, std::uint64_t duplicates);
 void NoteAheadUsed(unsigned stage, std::uint64_t translate_ns, std::uint64_t wait_ns, bool ran_here);
 void NoteAheadRefused();
+// A request the GPU command thread never took (its job done and unused 2 s after it was queued): found
+// (`found`: the first eight named) and, after that, its requests not queued again.
+void NoteAheadPhantom(std::uint64_t hash, unsigned stage, bool variant, bool found);
 
 // Called on the game's thread when it destroys a texture (Following only).
 using DestroyedHook = void (*)(std::uint64_t memory, std::uint64_t bytes);

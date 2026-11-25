@@ -420,7 +420,7 @@ struct Counts {
     std::array<std::atomic<std::uint64_t>, 4> translated{}, translated_ns{}, translated_seen{};
     // 0.4.6 beta 17 part 2: translations queued ahead (NoteAheadQueued, NoteAheadUsed, NoteAheadRefused).
     std::atomic<std::uint64_t> xlate_queued{0}, xlate_duplicates{0}, xlate_used_ns{0}, xlate_wait_ns{0},
-        xlate_waits{0}, xlate_ran_here{0}, xlate_refused{0};
+        xlate_waits{0}, xlate_ran_here{0}, xlate_refused{0}, xlate_phantoms{0}, xlate_phantom_skipped{0};
     std::array<std::atomic<std::uint64_t>, 4> xlate_used{};
     // 0.4.6 beta 9: YEBIS's Unmaps of its registered 2D textures, Scaleform's unmaps of planes it owns,
     // and the written events queued and dropped; CPU writes on textures made with data logged with their
@@ -1735,6 +1735,21 @@ void NoteAheadRefused() {
     g_counts.xlate_refused.fetch_add(1, std::memory_order_relaxed);
 }
 
+void NoteAheadPhantom(std::uint64_t hash, unsigned stage, bool variant, bool found) {
+    if (!found) {
+        g_counts.xlate_phantom_skipped.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
+    g_counts.xlate_phantoms.fetch_add(1, std::memory_order_relaxed);
+    static std::atomic<int> named{0};
+    if (named.fetch_add(1, std::memory_order_relaxed) < 8) {
+        static constexpr const char* kStages[] = {"vertex", "pixel", "compute", "other"};
+        host_log("Shaders: a %s shader %016llx%s queued ahead was never taken by the GPU command thread (a draw "
+                 "the prep workers see differently): not queued ahead again (beta 17)",
+                 kStages[std::min(stage, 3u)], (unsigned long long)hash, variant ? "'s variant" : "");
+    }
+}
+
 void NoteShaderTranslated(unsigned stage, std::uint64_t ns, bool program_seen) {
     const unsigned s = std::min(stage, 3u);
     g_counts.translated[s].fetch_add(1, std::memory_order_relaxed);
@@ -2669,12 +2684,13 @@ void LogMinute() {
              "vertex elements); translated for draws on the GPU command thread: %s; translated ahead on the "
              "compile threads (beta 17): stages queued %llu (%llu more already queued), used %s (%.1f ms "
              "translating; the GPU command thread waited for %llu, %.1f ms, and ran %llu jobs itself), refused or "
-             "failed %llu",
+             "failed %llu, never taken %llu (their requests since not queued %llu)",
              (unsigned long long)take(g_counts.input_layouts), (unsigned long long)take(g_counts.input_layouts_loading),
              (unsigned long long)take(g_counts.input_layout_elements), translated.empty() ? "none" : translated.c_str(),
              (unsigned long long)take(g_counts.xlate_queued), (unsigned long long)take(g_counts.xlate_duplicates),
              ahead_used.empty() ? "none" : ahead_used.c_str(), double(take(g_counts.xlate_used_ns)) / 1e6,
              (unsigned long long)take(g_counts.xlate_waits), double(take(g_counts.xlate_wait_ns)) / 1e6,
-             (unsigned long long)take(g_counts.xlate_ran_here), (unsigned long long)take(g_counts.xlate_refused));
+             (unsigned long long)take(g_counts.xlate_ran_here), (unsigned long long)take(g_counts.xlate_refused),
+             (unsigned long long)take(g_counts.xlate_phantoms), (unsigned long long)take(g_counts.xlate_phantom_skipped));
 }
 } // namespace BbEngine::GxResources
