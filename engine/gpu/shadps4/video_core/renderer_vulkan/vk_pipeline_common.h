@@ -39,6 +39,10 @@ void SubmitPipelineJob(const void* owner, std::function<void()> job);
 /// bbport: `owner`'s job when no compile thread has started it yet (the caller runs it), else
 /// empty (BB_PIPELINE_TAKE=0: always empty).
 std::function<void()> TakePipelineJob(const void* owner);
+/// 0.4.6 beta 17 part 2: a shader translation queued ahead (PipelineCache::QueueAhead), on the same
+/// threads and queue as the pipelines, not counted as one; and taking it back as TakePipelineJob does.
+void SubmitTranslationJob(const void* owner, std::function<void()> job);
+std::function<void()> TakeTranslationJob(const void* owner);
 /// The number of compile threads.
 u32 PipelineCompileThreads();
 /// 0.4.6 beta 15 part 1: the burst threads beside them (bbport_cpu_layout.h).

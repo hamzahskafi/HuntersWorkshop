@@ -213,6 +213,22 @@ void SubmitPipelineJob(const void* owner, std::function<void()> job) {
     PipelineCompiler::Get().queue.Push(owner, std::move(job));
 }
 
+void SubmitTranslationJob(const void* owner, std::function<void()> job) {
+    PipelineCompiler::Get().queue.Push(owner, std::move(job));
+}
+
+std::function<void()> TakeTranslationJob(const void* owner) {
+    auto job = PipelineCompiler::Get().queue.Take(owner);
+    if (!job) {
+        return {};
+    }
+    return [job = std::move(job)] {
+        const u64 start = PipelineCompiler::NowNs();
+        job();
+        PipelineCompiler::Get().Finish(-1, PipelineCompiler::NowNs() - start);
+    };
+}
+
 std::function<void()> TakePipelineJob(const void* owner) {
     // bbport: BB_PIPELINE_TAKE=0: a thread that needs a queued pipeline waits for a compile
     // thread to get to it, as before.

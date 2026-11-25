@@ -9,7 +9,8 @@
 // the graphics pipeline and resource sharps of each direct draw. All helpers run as
 // SCHED_IDLE: they only use idle cores. The GPU thread uses a prepared draw only when the
 // running register checksums match and the flattened user data it computes itself equals the
-// worker's; otherwise it takes the regular path. Workers never create or compile anything.
+// worker's; otherwise it takes the regular path. Workers never create or compile anything; since
+// 0.4.6 beta 17 they queue a draw's untranslated shaders on the compile threads (translate_ahead.h).
 
 #pragma once
 

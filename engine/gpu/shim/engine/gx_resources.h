@@ -300,6 +300,12 @@ void NoteCopyThroughMemory(bool source_owned, bool destination_owned);
 // other), its time, and whether its program had been translated before in this session (another
 // variant of it).
 void NoteShaderTranslated(unsigned stage, std::uint64_t ns, bool program_seen);
+// 0.4.6 beta 17 part 2: translations queued ahead on the compile threads: stages queued (and requests
+// an equal job already covered), a stage the GPU command thread used (its translating time, how long
+// it waited for the job, whether it ran the job itself), and a job result refused or failed.
+void NoteAheadQueued(std::uint64_t stages, std::uint64_t duplicates);
+void NoteAheadUsed(unsigned stage, std::uint64_t translate_ns, std::uint64_t wait_ns, bool ran_here);
+void NoteAheadRefused();
 
 // Called on the game's thread when it destroys a texture (Following only).
 using DestroyedHook = void (*)(std::uint64_t memory, std::uint64_t bytes);

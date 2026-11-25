@@ -202,6 +202,38 @@ void SeedGpuCache(const fs::path& cache, const fs::path& catalogs, const fs::pat
     }
 }
 
+// 0.4.6 beta 17 (docs/memory-model.md, beta 17 part 1; BB_GPU_CACHE_CHECK=0: not checked): after an
+// engine update whose GPU cache identity changed, whether this engine's compiler translates every cache
+// folder's shaders as they are stored (bb-shader-lab --verify-cache: each shader with a state translated
+// again, its SPIR-V and specialization compared, nothing written). The identity hashes whole source
+// files, so it changes with edits that store nothing differently (0.4.6 against 0.4.5); then the cache
+// is kept whole, where a recompile leaves out every shader without a state and every key naming one.
+bool GpuCacheUnchanged(const fs::path& cache, const fs::path& recompiler) {
+    std::error_code error;
+    if (Env("BB_GPU_CACHE_CHECK", "1") == "0" || Env("BB_SHADER_STATES", "1") == "0" ||
+        !fs::is_regular_file(recompiler, error)) {
+        return false;
+    }
+    bool checked = false;
+    for (const auto& entry : fs::directory_iterator(cache, error)) {
+        std::error_code e;
+        if (!entry.is_directory(e) || !fs::is_regular_file(entry.path() / "profile.bin", e)) continue;
+        std::string output;
+        const auto start = std::chrono::steady_clock::now();
+        const int code = RunProgram(recompiler, {L"--verify-cache", entry.path().native()}, &output);
+        const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+        const auto line = output.rfind("Shader cache:");
+        Log("GPU cache %s: %s (%.1f s)", Utf8(entry.path().filename()).c_str(),
+            line != std::string::npos
+                ? Trim(output.substr(line + 14, output.find('\n', line) - line - 14)).c_str()
+                : "not checked",
+            seconds);
+        if (code != 0) return false;
+        checked = true;
+    }
+    return checked;
+}
+
 void ResetStaleGpuCache(const fs::path& cache, const std::string& identity, const fs::path& recompiler) {
     if (identity.empty()) return;
     const fs::path stamp = cache / "engine.txt";
@@ -209,6 +241,11 @@ void ResetStaleGpuCache(const fs::path& cache, const std::string& identity, cons
     try {
         if (Trim(ReadText(stamp)) == identity) return;
     } catch (const Error&) {
+    }
+    if (fs::is_directory(cache, error) && GpuCacheUnchanged(cache, recompiler)) {
+        WriteText(stamp, identity + "\n");
+        Log("GPU cache: this engine translates its shaders as stored (%s); kept whole", identity.c_str());
+        return;
     }
     if (fs::is_directory(cache, error) && RecompileGpuCache(cache, recompiler)) {
         WriteText(stamp, identity + "\n");
@@ -331,7 +368,7 @@ const SwitchGroup kSwitchGroups[] = {
          {"BB_EMPTY_SURFACES", "0"}, {"BB_TARGET_POOL", "0"},
          {"BB_WATCH_GAME_TEXTURES", "1"}, {"BB_IMAGE_OWNERS", "0"},
          {"BB_WATCH_GAME_BUFFERS", "1"}, {"BB_PIPELINE_BURST", "0"}, {"BB_LOAD_UPLOAD", "0"},
-         {"BB_READY_SURFACES", "0"}, {"BB_COPY_NOTICE", "0"}}},
+         {"BB_READY_SURFACES", "0"}, {"BB_COPY_NOTICE", "0"}, {"BB_TRANSLATE_AHEAD", "0"}}},
     {"BB_FAST_DRAWS", "0", false,
      {
          {"BB_SUBMIT_END_TASKS", "0"}, {"BB_MEMO_REVALIDATE", "0"}, {"BB_SAMPLER_MEMO", "0"},

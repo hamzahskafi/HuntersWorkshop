@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// bbport: speculative draw preparation on worker threads (see vk_draw_prep.h).
+// bbport: speculative draw preparation on worker threads (see vk_draw_prep.h). 0.4.6 beta 17 part 2: a
+// draw whose shader or variant is not translated yet has it queued on the compile threads
+// (PipelineCache::QueueAhead, translate_ahead.h); the draw itself stays the GPU thread's.
 
 #include <algorithm>
 #include <chrono>
@@ -473,6 +475,8 @@ void DrawPreparation::WorkerLoop(std::stop_token stop, u32 index) {
                 runtime_fault_recover = &recover;
                 prep_worker.stages.clear();
                 prep_worker.failed = false;
+                prep_worker.ahead.clear();
+                prep_worker.ahead_closed = false;
                 sel.draw_indirect_params = {};
                 if (pipeline_cache.PrepareGraphicsPipeline(sel)) {
                     draw.reg_checksum = checksum;
@@ -499,6 +503,13 @@ void DrawPreparation::WorkerLoop(std::stop_token stop, u32 index) {
                     draw.state.store(PreparedDraw::Ready, std::memory_order_release);
                 } else {
                     draw.state.store(PreparedDraw::Unavailable, std::memory_order_release);
+                    // 0.4.6 beta 17 part 2: its stages not translated yet go to the compile threads,
+                    // so the GPU thread finds them translated, or under way, when it gets here.
+                    if (!prep_worker.ahead.empty()) {
+                        runtime_fault_recover = nullptr;
+                        pipeline_cache.QueueAhead(std::move(prep_worker.ahead));
+                        prep_worker.ahead.clear();
+                    }
                 }
                 runtime_fault_recover = nullptr;
             }

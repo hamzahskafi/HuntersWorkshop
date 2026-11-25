@@ -15,6 +15,7 @@
 #include "video_core/renderer_vulkan/vk_compute_pipeline.h"
 #include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
 #include "video_core/renderer_vulkan/vk_resource_pool.h"
+#include "video_core/renderer_vulkan/translate_ahead.h"
 
 template <>
 struct std::hash<vk::ShaderModule> {
@@ -113,6 +114,46 @@ struct PipelineSelection {
     struct PrepWorker* worker{}; ///< set: read-only selection for a draw-preparation worker
 };
 
+/// 0.4.6 beta 17 part 2 (translate_ahead.h): a stage a draw-preparation worker found not translated,
+/// queued ahead of the GPU command thread: a program not translated yet, or a variant of a known one
+/// (`variant_spec`, its specialization as the worker computed it). Its inputs are the worker's,
+/// copied (the user data live in the worker's register copy); the job fills in the rest.
+struct AheadStage {
+    u64 hash{};
+    Shader::HwStage hw_stage{};
+    Shader::SwStage sw_stage{};
+    std::array<u32, Shader::ShaderParams::NumShaderUserData> user_data{};
+    std::span<const u32> code;
+    Shader::RuntimeInfo runtime{};
+    Shader::Backend::Bindings start{};
+    bool start_known = false; ///< false: where the job's previous stage ends (a chain of programs)
+    std::optional<Shader::StageSpecialization> variant_spec;
+    // The job's results.
+    std::unique_ptr<Shader::Info> info;
+    Shader::RuntimeInfo runtime_after{};  ///< as the translation left it (CompileModule's)
+    Shader::Backend::Bindings actual_start{}, end{};
+    std::vector<u32> spv;
+    std::optional<Shader::StageSpecialization> spec; ///< a program's, from its translated Info
+    u64 ns = 0;
+    bool ok = false;
+
+    /// The same request: one job serves both.
+    bool SameInputs(const AheadStage& other) const {
+        return hash == other.hash && hw_stage == other.hw_stage && runtime == other.runtime &&
+               start_known == other.start_known && (!start_known || start == other.start) &&
+               variant_spec.has_value() == other.variant_spec.has_value() &&
+               (!variant_spec || *variant_spec == *other.variant_spec);
+    }
+};
+
+/// A job: one draw's stages not translated yet, in the order the draw binds them. Self-contained (its
+/// own profile copy): a compile thread runs it without the pipeline cache.
+struct TranslationJob {
+    std::vector<AheadStage> stages;
+    Shader::Profile profile{};
+    Ahead::Progress progress;
+};
+
 /// bbport: a draw-preparation worker's own program state (see vk_draw_prep.h).
 struct PrepWorker {
     struct Stage {
@@ -126,6 +167,11 @@ struct PrepWorker {
     std::unordered_map<const Program*, Shader::Info> infos;
     boost::container::static_vector<Stage, MaxShaderStages> stages;
     bool failed = false;
+    /// 0.4.6 beta 17 part 2: this draw's stages not translated yet, to queue (cleared per draw);
+    /// `ahead_closed`: a later stage cannot join (its bindings would start where an untranslated
+    /// stage ends, or it is a variant after one).
+    std::vector<AheadStage> ahead;
+    bool ahead_closed = false;
 };
 
 struct PreparedDraw;
@@ -177,6 +223,11 @@ public:
         return used_prepared;
     }
 
+    /// 0.4.6 beta 17 part 2 (BB_TRANSLATE_AHEAD=0: off): a draw-preparation worker's stages not
+    /// translated yet (PrepWorker::ahead), queued on the compile threads unless an equal job is.
+    void QueueAhead(std::vector<AheadStage>&& stages);
+    static bool TranslateAheadEnabled();
+
     const ComputePipeline* GetComputePipeline();
 
     using Result = std::tuple<const Shader::Info*, vk::ShaderModule,
@@ -213,6 +264,22 @@ private:
     vk::ShaderModule CompileModule(Shader::Info& info, Shader::RuntimeInfo& runtime_info,
                                    const std::span<const u32>& code, size_t perm_idx,
                                    Shader::Backend::Bindings& binding);
+    /// The part of CompileModule after the translation (it needs the variant's index): the module
+    /// (or the shader patch's), the stored binary and state, the dumps and names.
+    vk::ShaderModule FinishModule(const Shader::Info& info, const Shader::RuntimeInfo& runtime_before,
+                                  const std::span<const u32>& code, size_t perm_idx, std::vector<u32>&& spv,
+                                  bool ahead);
+    /// 0.4.6 beta 17 part 2: where the GPU command thread would translate, the queued job's stage
+    /// for it (found by `pred`), run here if no compile thread has started it, waited for if one has;
+    /// none when there is no such job or it failed.
+    template <typename Pred>
+    std::optional<std::pair<std::shared_ptr<TranslationJob>, u32>> AcquireAhead(u64 hash, Shader::HwStage stage,
+                                                                                Pred&& pred);
+    static void RunAhead(TranslationJob& job);
+    std::optional<Result> PublishAheadProgram(Shader::HwStage hw_stage, Shader::SwStage sw_stage,
+                                              const Shader::ShaderParams& params,
+                                              const Shader::RuntimeInfo& runtime_info,
+                                              Shader::Backend::Bindings& binding);
     const Shader::RuntimeInfo& BuildRuntimeInfo(PipelineSelection& sel, Shader::HwStage stage,
                                                 Shader::SwStage l_stage);
 
@@ -232,6 +299,8 @@ private:
     tsl::robin_map<size_t, std::unique_ptr<Program>> program_cache;
     /// bbport: exclusive for program/permutation insertions, shared for worker lookups.
     std::shared_mutex programs_mutex;
+    /// 0.4.6 beta 17 part 2: the translations queued ahead (workers add, the GPU thread takes).
+    Ahead::Registry<TranslationJob> ahead_registry;
     u64 prepared_hits = 0, prepared_misses = 0;
     const PreparedDraw* used_prepared = nullptr;
     tsl::robin_map<ComputePipelineKey, std::unique_ptr<ComputePipeline>> compute_pipelines;

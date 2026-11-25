@@ -418,6 +418,10 @@ struct Counts {
     std::atomic<std::uint64_t> unwatched{0}, unwatched_bytes{0};
     std::atomic<std::uint64_t> input_layouts{0}, input_layouts_loading{0}, input_layout_elements{0};
     std::array<std::atomic<std::uint64_t>, 4> translated{}, translated_ns{}, translated_seen{};
+    // 0.4.6 beta 17 part 2: translations queued ahead (NoteAheadQueued, NoteAheadUsed, NoteAheadRefused).
+    std::atomic<std::uint64_t> xlate_queued{0}, xlate_duplicates{0}, xlate_used_ns{0}, xlate_wait_ns{0},
+        xlate_waits{0}, xlate_ran_here{0}, xlate_refused{0};
+    std::array<std::atomic<std::uint64_t>, 4> xlate_used{};
     // 0.4.6 beta 9: YEBIS's Unmaps of its registered 2D textures, Scaleform's unmaps of planes it owns,
     // and the written events queued and dropped; CPU writes on textures made with data logged with their
     // code.
@@ -1709,6 +1713,28 @@ void NoteUnwatched(std::uint64_t images, std::uint64_t bytes) {
     g_counts.unwatched_bytes.fetch_add(bytes, std::memory_order_relaxed);
 }
 
+void NoteAheadQueued(std::uint64_t stages, std::uint64_t duplicates) {
+    g_counts.xlate_queued.fetch_add(stages, std::memory_order_relaxed);
+    g_counts.xlate_duplicates.fetch_add(duplicates, std::memory_order_relaxed);
+}
+
+void NoteAheadUsed(unsigned stage, std::uint64_t translate_ns, std::uint64_t wait_ns, bool ran_here) {
+    const unsigned s = std::min(stage, 3u);
+    g_counts.xlate_used[s].fetch_add(1, std::memory_order_relaxed);
+    g_counts.xlate_used_ns.fetch_add(translate_ns, std::memory_order_relaxed);
+    g_counts.xlate_wait_ns.fetch_add(wait_ns, std::memory_order_relaxed);
+    if (wait_ns) {
+        g_counts.xlate_waits.fetch_add(1, std::memory_order_relaxed);
+    }
+    if (ran_here) {
+        g_counts.xlate_ran_here.fetch_add(1, std::memory_order_relaxed);
+    }
+}
+
+void NoteAheadRefused() {
+    g_counts.xlate_refused.fetch_add(1, std::memory_order_relaxed);
+}
+
 void NoteShaderTranslated(unsigned stage, std::uint64_t ns, bool program_seen) {
     const unsigned s = std::min(stage, 3u);
     g_counts.translated[s].fetch_add(1, std::memory_order_relaxed);
@@ -2629,9 +2655,26 @@ void LogMinute() {
              (unsigned long long)take(g_counts.copies_memory),
              (unsigned long long)take(g_counts.copies_memory_owned_destination),
              (unsigned long long)take(g_counts.copies_memory_both_owned));
+    // 0.4.6 beta 17 part 2: those translated ahead, by stage.
+    std::string ahead_used;
+    for (unsigned s = 0; s < 4; ++s) {
+        if (const std::uint64_t n = take(g_counts.xlate_used[s])) {
+            char part[48];
+            std::snprintf(part, sizeof(part), "%s%s %llu", ahead_used.empty() ? "" : ", ", kStageNames[s],
+                          (unsigned long long)n);
+            ahead_used += part;
+        }
+    }
     host_log("Shaders this minute (beta 8): input layouts the game created %llu (%llu during loading screens, %llu "
-             "vertex elements); translated for draws: %s",
+             "vertex elements); translated for draws on the GPU command thread: %s; translated ahead on the "
+             "compile threads (beta 17): stages queued %llu (%llu more already queued), used %s (%.1f ms "
+             "translating; the GPU command thread waited for %llu, %.1f ms, and ran %llu jobs itself), refused or "
+             "failed %llu",
              (unsigned long long)take(g_counts.input_layouts), (unsigned long long)take(g_counts.input_layouts_loading),
-             (unsigned long long)take(g_counts.input_layout_elements), translated.empty() ? "none" : translated.c_str());
+             (unsigned long long)take(g_counts.input_layout_elements), translated.empty() ? "none" : translated.c_str(),
+             (unsigned long long)take(g_counts.xlate_queued), (unsigned long long)take(g_counts.xlate_duplicates),
+             ahead_used.empty() ? "none" : ahead_used.c_str(), double(take(g_counts.xlate_used_ns)) / 1e6,
+             (unsigned long long)take(g_counts.xlate_waits), double(take(g_counts.xlate_wait_ns)) / 1e6,
+             (unsigned long long)take(g_counts.xlate_ran_here), (unsigned long long)take(g_counts.xlate_refused));
 }
 } // namespace BbEngine::GxResources

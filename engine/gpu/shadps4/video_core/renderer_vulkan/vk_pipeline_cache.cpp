@@ -1037,6 +1037,21 @@ vk::ShaderModule PipelineCache::CompileModule(Shader::Info& info, Shader::Runtim
     Shader::Native::Capture(info, runtime_before, code, profile);
     Shader::Native::StoreState(info, runtime_before, code, perm_idx);
     auto spv = Shader::Backend::SPIRV::EmitSPIRV(profile, runtime_info, ir_program, binding);
+    return FinishModule(info, runtime_before, code, perm_idx, std::move(spv), false);
+}
+
+vk::ShaderModule PipelineCache::FinishModule(const Shader::Info& info, const Shader::RuntimeInfo& runtime_before,
+                                             const std::span<const u32>& code, size_t perm_idx,
+                                             std::vector<u32>&& spv, bool ahead) {
+    if (ahead) {
+        // A translation done ahead (0.4.6 beta 17 part 2): what CompileModule does around it, now
+        // that the variant's index is known.
+        LOG_INFO(Render_Vulkan, "Compiling {} shader {:#x} {} (translated ahead)", info.hw_stage, info.pgm_hash,
+                 perm_idx != 0 ? "(permutation)" : "");
+        DumpShader(code, info.pgm_hash, info.hw_stage, perm_idx, "bin");
+        Shader::Native::Capture(info, runtime_before, code, profile);
+        Shader::Native::StoreState(info, runtime_before, code, perm_idx);
+    }
     DumpShader(spv, info.pgm_hash, info.hw_stage, perm_idx, "spv");
 
     vk::ShaderModule module;
@@ -1061,6 +1076,239 @@ vk::ShaderModule PipelineCache::CompileModule(Shader::Info& info, Shader::Runtim
     return module;
 }
 
+// --- 0.4.6 beta 17 part 2: translations queued ahead (translate_ahead.h, docs/memory-model.md) ---------
+
+bool PipelineCache::TranslateAheadEnabled() {
+    static const bool on = [] {
+        const char* env = std::getenv("BB_TRANSLATE_AHEAD");
+        return !(env && env[0] == '0');
+    }();
+    return on;
+}
+
+namespace {
+u64 AheadNowNs() {
+    return u64(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                   std::chrono::steady_clock::now().time_since_epoch())
+                   .count());
+}
+
+/// The translation statistics' stage (0 vertex, 1 pixel, 2 compute, 3 other), as CompileModule's.
+unsigned AheadStatsStage(HwStage stage) {
+    return stage == HwStage::Fragment  ? 1u
+           : stage == HwStage::Compute ? 2u
+           : stage == HwStage::Vertex || stage == HwStage::Export || stage == HwStage::Local ? 0u
+                                                                                             : 3u;
+}
+
+/// A worker's draw: a program not translated yet. The first starts this draw's chain where its
+/// bindings start; a later one joins it, its bindings starting where the stage before it ends.
+void NoteAheadProgram(PrepWorker& worker, HwStage hw_stage, SwStage sw_stage, const Shader::ShaderParams& params,
+                      const Shader::RuntimeInfo& runtime, const Shader::Backend::Bindings& binding) {
+    if (!PipelineCache::TranslateAheadEnabled() || worker.ahead_closed) {
+        return;
+    }
+    // A second pass over the stages (the object-motion variant asked for) meets it again.
+    if (std::ranges::any_of(worker.ahead, [&](const AheadStage& st) {
+            return st.hash == params.hash && st.hw_stage == hw_stage;
+        })) {
+        worker.ahead_closed = true;
+        return;
+    }
+    if (worker.ahead.size() >= MaxShaderStages) {
+        worker.ahead_closed = true;
+        return;
+    }
+    AheadStage& st = worker.ahead.emplace_back();
+    st.hash = params.hash;
+    st.hw_stage = hw_stage;
+    st.sw_stage = sw_stage;
+    std::copy(params.user_data.begin(), params.user_data.end(), st.user_data.begin());
+    st.code = params.code;
+    st.runtime = runtime;
+    st.start = binding;
+    st.start_known = worker.ahead.size() == 1;
+}
+
+/// A worker's draw: a variant of a known program not translated yet, with its specialization. Only
+/// as the draw's first such stage (after an untranslated program its bindings would start elsewhere),
+/// and nothing after it (where its bindings end is not known here).
+void NoteAheadVariant(PrepWorker& worker, HwStage hw_stage, SwStage sw_stage, const Shader::ShaderParams& params,
+                      const Shader::RuntimeInfo& runtime, const Shader::Backend::Bindings& binding,
+                      const Shader::StageSpecialization& spec) {
+    if (!PipelineCache::TranslateAheadEnabled() || worker.ahead_closed) {
+        return;
+    }
+    worker.ahead_closed = true;
+    if (!worker.ahead.empty()) {
+        return;
+    }
+    AheadStage& st = worker.ahead.emplace_back();
+    st.hash = params.hash;
+    st.hw_stage = hw_stage;
+    st.sw_stage = sw_stage;
+    std::copy(params.user_data.begin(), params.user_data.end(), st.user_data.begin());
+    st.code = params.code;
+    st.runtime = runtime;
+    st.start = binding;
+    st.start_known = true;
+    st.variant_spec = spec;
+}
+} // namespace
+
+namespace Ahead {
+void NoteRefused() {
+    BbEngine::GxResources::NoteAheadRefused();
+}
+} // namespace Ahead
+
+void PipelineCache::QueueAhead(std::vector<AheadStage>&& stages) {
+    if (stages.empty() || !TranslateAheadEnabled()) {
+        return;
+    }
+    const AheadStage& first = stages.front();
+    // Queued already for another draw: that job serves this one too.
+    if (ahead_registry.Find(first.hash, u32(first.hw_stage), [&](const TranslationJob& job, u32 i) {
+            return job.stages[i].SameInputs(first);
+        })) {
+        BbEngine::GxResources::NoteAheadQueued(0, 1);
+        return;
+    }
+    auto job = std::make_shared<TranslationJob>();
+    job->stages = std::move(stages);
+    job->profile = profile;
+    const u64 now = AheadNowNs();
+    for (u32 i = 0; i < job->stages.size(); ++i) {
+        ahead_registry.Add(job->stages[i].hash, u32(job->stages[i].hw_stage), job, i, now);
+    }
+    BbEngine::GxResources::NoteAheadQueued(job->stages.size(), 0);
+    SubmitTranslationJob(job.get(), [job] { RunAhead(*job); });
+}
+
+void PipelineCache::RunAhead(TranslationJob& job) {
+    if (!job.progress.Start()) {
+        return;
+    }
+    // The translator's pools, one set per thread (the GPU command thread keeps its own).
+    thread_local Shader::Pools pools;
+    // The game's memory read here (the fetch shader, the resource tables) may be gone by now: a
+    // fault ends the job, and the GPU command thread translates as before.
+    const bool recovers_only = bb_fault_recovers_only;
+    BbRecoverBuf* const outer = runtime_fault_recover;
+    BbRecoverBuf recover;
+    if (BB_RECOVER_SET(recover)) {
+        runtime_fault_recover = outer;
+        bb_fault_recovers_only = recovers_only;
+        job.progress.Finish(false);
+        return;
+    }
+    runtime_fault_recover = &recover;
+    bb_fault_recovers_only = true;
+    Shader::Backend::Bindings carry{};
+    for (AheadStage& st : job.stages) {
+        const u64 start_ns = AheadNowNs();
+        const Shader::ShaderParams params{std::span<const u32, Shader::ShaderParams::NumShaderUserData>{st.user_data},
+                                          st.code, st.hash};
+        st.info = std::make_unique<Shader::Info>(st.hw_stage, st.sw_stage, params);
+        Shader::RuntimeInfo runtime = st.runtime;
+        Shader::Backend::Bindings binding = st.start_known ? st.start : carry;
+        st.actual_start = binding;
+        const auto ir_program = Shader::TranslateProgram(st.code, pools, *st.info, runtime, job.profile);
+        st.spv = Shader::Backend::SPIRV::EmitSPIRV(job.profile, runtime, ir_program, binding);
+        st.runtime_after = runtime;
+        st.end = binding;
+        carry = binding;
+        if (!st.variant_spec) {
+            st.spec.emplace(*st.info, st.runtime_after, job.profile, st.actual_start);
+        }
+        st.ns = AheadNowNs() - start_ns;
+        st.ok = true;
+    }
+    runtime_fault_recover = outer;
+    bb_fault_recovers_only = recovers_only;
+    job.progress.Finish(true);
+}
+
+template <typename Pred>
+std::optional<std::pair<std::shared_ptr<TranslationJob>, u32>> PipelineCache::AcquireAhead(u64 hash, HwStage stage,
+                                                                                         Pred&& pred) {
+    // The registry's key mixes the hash and the stage: the stage found must be this program's.
+    const auto entry = ahead_registry.Find(hash, u32(stage), [&](const TranslationJob& job, u32 i) {
+        const AheadStage& st = job.stages[i];
+        return st.hash == hash && st.hw_stage == stage && pred(job, i);
+    });
+    if (!entry) {
+        return std::nullopt;
+    }
+    TranslationJob& job = *entry->job;
+    const u64 start_ns = AheadNowNs();
+    bool ran_here = false, waited = false;
+    // Not started by a compile thread: this draw's translation either way, run here.
+    if (job.progress.Get() == Ahead::State::Queued) {
+        if (auto run = TakeTranslationJob(&job)) {
+            run();
+            ran_here = true;
+        }
+    }
+    Ahead::State state = job.progress.Get();
+    if (state != Ahead::State::Done && state != Ahead::State::Failed) {
+        waited = true;
+        RaisePipelineBursts();
+        state = job.progress.Wait();
+    }
+    ahead_registry.Remove(hash, u32(stage), &job, entry->stage);
+    const AheadStage& st = job.stages[entry->stage];
+    if (state != Ahead::State::Done || !st.ok) {
+        Ahead::NoteRefused();
+        return std::nullopt;
+    }
+    BbEngine::GxResources::NoteAheadUsed(AheadStatsStage(stage), st.ns, waited ? AheadNowNs() - start_ns : 0,
+                                        ran_here);
+    return std::make_pair(entry->job, entry->stage);
+}
+
+std::optional<PipelineCache::Result> PipelineCache::PublishAheadProgram(HwStage hw_stage, SwStage sw_stage,
+                                                                        const Shader::ShaderParams& params,
+                                                                        const Shader::RuntimeInfo& runtime_info,
+                                                                        Shader::Backend::Bindings& binding) {
+    const auto ahead = AcquireAhead(params.hash, hw_stage, [&](const TranslationJob& job, u32 i) {
+        const auto& st = job.stages[i];
+        return !st.variant_spec && st.runtime == runtime_info;
+    });
+    if (!ahead) {
+        return std::nullopt;
+    }
+    AheadStage& st = ahead->first->stages[ahead->second];
+    if (!(st.actual_start == binding)) {
+        Ahead::NoteRefused();
+        return std::nullopt;
+    }
+    // The translated Info with this draw's user data and tables, as CompileModule leaves the program's;
+    // used only if this draw's specialization is the job's (what a variant is matched by).
+    auto new_program = std::make_unique<Program>(hw_stage, sw_stage, params);
+    new_program->info = *st.info;
+    new_program->info.pgm_base = params.Base();
+    new_program->info.user_data = params.user_data;
+    new_program->info.RefreshFlatBuf();
+    auto spec = Shader::StageSpecialization(new_program->info, st.runtime_after, profile, binding);
+    if (!st.spec || !(spec == *st.spec)) {
+        Ahead::NoteRefused();
+        return std::nullopt;
+    }
+    const auto module = FinishModule(new_program->info, st.runtime, params.code, 0, std::move(st.spv), true);
+    binding = st.end;
+    const auto perm_hash = HashCombine(params.hash, 0);
+    RegisterShaderMeta(new_program->info, spec.fetch_shader_data, spec, perm_hash, 0);
+    new_program->AddPermut(module, std::move(spec));
+    new_program->info_template = std::make_unique<Shader::Info>(new_program->info);
+    Program* program = new_program.get();
+    {
+        std::unique_lock lk{programs_mutex};
+        program_cache.emplace(params.hash, std::move(new_program));
+    }
+    return std::make_tuple(&program->info, module, program->modules[0].spec.fetch_shader_data, perm_hash);
+}
+
 PipelineCache::Result PipelineCache::GetProgram(PipelineSelection& sel, HwStage hw_stage,
                                                 SwStage sw_stage,
                                                 const Shader::ShaderParams& params,
@@ -1072,6 +1320,12 @@ PipelineCache::Result PipelineCache::GetProgram(PipelineSelection& sel, HwStage 
         std::shared_lock lk{programs_mutex};
         const auto found_program = program_cache.find(params.hash);
         if (found_program == program_cache.end() || !found_program->second->info_template) {
+            // 0.4.6 beta 17 part 2: a program not translated yet, queued ahead with this draw.
+            if (found_program == program_cache.end()) {
+                NoteAheadProgram(worker, hw_stage, sw_stage, params, runtime_info, binding);
+            } else {
+                worker.ahead_closed = true;
+            }
             worker.failed = true;
             return {};
         }
@@ -1100,8 +1354,13 @@ PipelineCache::Result PipelineCache::GetProgram(PipelineSelection& sel, HwStage 
         runtime_fault_recover = outer_recover;
         const auto it = std::ranges::find(program->modules, spec, &Program::Module::spec);
         if (it == program->modules.end()) {
+            // 0.4.6 beta 17 part 2: a variant not translated yet, queued ahead with this draw.
+            NoteAheadVariant(worker, hw_stage, sw_stage, params, runtime_info, binding, spec);
             worker.failed = true;
             return {};
+        }
+        if (!worker.ahead.empty()) {
+            worker.ahead_closed = true; // its bindings start where an untranslated stage ends
         }
         info.AddBindings(binding);
         const size_t perm_idx = std::distance(program->modules.begin(), it);
@@ -1113,6 +1372,12 @@ PipelineCache::Result PipelineCache::GetProgram(PipelineSelection& sel, HwStage 
     }
 
     auto it_pgm = program_cache.find(params.hash); // this thread is the only writer
+    if (it_pgm == program_cache.end() && TranslateAheadEnabled()) {
+        // 0.4.6 beta 17 part 2: translated ahead (for this draw, or one with the same inputs).
+        if (auto published = PublishAheadProgram(hw_stage, sw_stage, params, runtime_info, binding)) {
+            return *published;
+        }
+    }
     if (it_pgm == program_cache.end()) {
         auto new_program = std::make_unique<Program>(hw_stage, sw_stage, params);
         auto start = binding;
@@ -1160,7 +1425,28 @@ PipelineCache::Result PipelineCache::GetProgram(PipelineSelection& sel, HwStage 
         program->last_used = std::distance(program->modules.begin(), it);
         if (!std::atomic_ref<bool>(it->state_stored).load(std::memory_order_relaxed) && Shader::Native::StatesEnabled()) { Shader::Native::StoreState(info, runtime_info, params.code, program->last_used); std::atomic_ref<bool>(it->state_stored).store(true, std::memory_order_relaxed); }
     }
-    if (it == program->modules.end()) {
+    // 0.4.6 beta 17 part 2: a variant translated ahead with this specialization (a variant is
+    // matched by it, as here).
+    std::optional<std::pair<std::shared_ptr<TranslationJob>, u32>> ahead;
+    if (it == program->modules.end() && TranslateAheadEnabled()) {
+        ahead = AcquireAhead(params.hash, hw_stage, [&](const TranslationJob& job, u32 i) {
+            const auto& st = job.stages[i];
+            return st.variant_spec && *st.variant_spec == spec;
+        });
+        if (ahead && !(ahead->first->stages[ahead->second].actual_start == binding)) {
+            Ahead::NoteRefused();
+            ahead.reset();
+        }
+    }
+    if (it == program->modules.end() && ahead) {
+        auto& st = ahead->first->stages[ahead->second];
+        module = FinishModule(*st.info, st.runtime, params.code, perm_idx, std::move(st.spv), true);
+        binding = st.end;
+
+        RegisterShaderMeta(info, spec.fetch_shader_data, spec, perm_hash, perm_idx);
+        std::unique_lock lk{programs_mutex};
+        program->AddPermut(module, std::move(spec));
+    } else if (it == program->modules.end()) {
         auto new_info = Shader::Info(hw_stage, sw_stage, params);
         module = CompileModule(new_info, runtime_info, params.code, perm_idx, binding);
 

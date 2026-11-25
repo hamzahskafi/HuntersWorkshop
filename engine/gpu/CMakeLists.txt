@@ -533,6 +533,11 @@ target_link_libraries(movie-decode-test PRIVATE bb_ffmpeg Threads::Threads)
 add_executable(watch-rules-test EXCLUDE_FROM_ALL ../tests/test_watch_rules.cpp)
 target_compile_options(watch-rules-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(watch-rules-test PRIVATE shim shadps4)
+# 0.4.6 beta 17 part 2: the registry of translations queued ahead and a job's progress (translate_ahead.h).
+add_executable(translate-ahead-test EXCLUDE_FROM_ALL ../tests/test_translate_ahead.cpp)
+target_compile_options(translate-ahead-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(translate-ahead-test PRIVATE shadps4)
+target_link_libraries(translate-ahead-test PRIVATE Threads::Threads)
 # 0.4.6 beta 16: the sharpening's maths (host_shaders/rcas_extra.glsl, its GLSL compiled as C++): the
 # encodings there and back, AMD's RCAS on each, the HDR scene's cap.
 add_executable(rcas-test EXCLUDE_FROM_ALL ../tests/test_rcas.cpp)

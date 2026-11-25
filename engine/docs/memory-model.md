@@ -1683,6 +1683,59 @@ research"):**
 **Gate (the track):** a cold run's frames after a load without stage A's translation spikes; an update
 that changes no translation keeps the cache; a warm run unchanged.
 
+**Built (0.4.6 beta 17, engine id 114; the tester: "yes", the catalog left for later):**
+
+1. **The check** (`bb-shader-lab --verify-cache`, `start/main.cpp` `GpuCacheUnchanged`;
+   `BB_GPU_CACHE_CHECK=0`: not checked). On a new fingerprint bb-start runs it on each cache folder
+   before any rebuild: the rebuild's own loop (`RecompileBatch`) in a mode that writes nothing, in child
+   processes, stopped at the first difference. A shader with a state is "the same" when its SPIR-V comes
+   out byte for byte as stored and its specialization equals the stored one (the stored record holds
+   the draw's user data too, so its bytes are not compared); one without a state or stored SPIR-V is not
+   compared. Every folder the same (at least one shader compared): the new fingerprint is stamped and
+   the cache kept whole. Any difference, a batch ended by the compiler, nothing to compare or another
+   profile: the rebuild as before. Logged per folder ("GPU cache <game>: N shaders translated as stored
+   by this engine ...") and once ("kept whole").
+2. **Translations queued ahead** (`translate_ahead.h`, `PipelineCache::QueueAhead`, `RunAhead`,
+   `AcquireAhead`, `PublishAheadProgram`; `BB_TRANSLATE_AHEAD=0`: off; off in safe mode).
+   - A draw-prep worker records, per draw, its stages not translated: a program not translated starts
+     a chain (its bindings' start known), the next programs not translated join it (they start where
+     the stage before ends); a variant of a known program is queued alone, with its specialization; a
+     stage found translated, a program without its template or a second variant ends the chain. A draw
+     whose preparation fails queues its chain as one job, unless a job with the same first stage is
+     queued already (`SameInputs`).
+   - The job (`TranslationJob`: the stages' inputs copied, a copy of the profile) runs on the compile
+     threads through their queue (`SubmitTranslationJob`; not counted as a pipeline), with a set of
+     translator pools per thread and a recovery point: a fault reading the game's memory (the fetch
+     shader, the resource tables) ends it, and stage A translates as before. It translates and emits
+     each stage in order (`TranslateProgram`, `EmitSPIRV`) and, for a program, its specialization from
+     the translated information; nothing is published.
+   - Stage A, where it would translate (`GetProgram`), looks the registry up: a program by its runtime
+     information, a variant by its specialization. A job no compile thread has started it takes out of
+     the queue and runs itself (`TakeTranslationJob`); one running it waits for (the burst threads
+     raised, as for a pipeline). It uses the result only if the bindings start where its own do and,
+     for a program, the specialization it computes from the translated information with its own draw's
+     user data and tables equals the job's (what a variant is matched by); otherwise it translates
+     itself. Publishing is stage A's: the program cache's insert, the variant's index, the module, the
+     stored binary, record and state (`FinishModule`, `CompileModule`'s second half).
+   - Not in it: dispatches (not prepared ahead), the object-motion variant of a program translated in
+     the same draw (asked for only once its information is known), tessellation.
+   - Counted in the Shaders minute line: stages queued (and those an equal job covered), used by stage
+     A by stage kind with their translating time, how many it waited for and for how long, how many jobs
+     it ran itself, and the results refused or failed.
+
+**Tests:** `translate-ahead-test` (the registry: found by program, stage and inputs, removed when used,
+old and surplus entries dropped; a job's progress: one thread starts it, every waiter sees it end, over
+eight threads fifty times); the three compilers on every changed file. The check and the jobs run in the
+tester's first start and play.
+
+**The next run should show:** at its first start (its fingerprint is new: `vk_pipeline_cache.*` changed)
+"GPU cache CUSA03173: ... shaders translated as stored by this engine" and "kept whole", then as many
+pipelines built at the start as before (519-525), not a rebuild's loss; in play, translations ahead used
+where the GPU command thread translated before, few in a warm run. A cold run (the cache folder moved
+aside for one session, the same route) shows the gain against `b53c92dc` and `27b942f1`: the first
+minute's translating on the GPU command thread (450-478 ms then) and the frames after the first load (one
+220.8 ms then).
+
 ### The 0.4.6 release
 
 - **Switches:** each beta's switches, and `BB_COPY_HOLD` and `BB_COPY_MERGE` (kept through 0.4.5
