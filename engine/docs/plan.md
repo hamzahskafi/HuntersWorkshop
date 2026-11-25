@@ -296,6 +296,11 @@ Gate: no new problem; part 3 seen working; the A/B read.
   `BB_COPY_NOTICE`, `BB_GX_FOLLOW`, `BB_GX_RESOURCES`, `BB_VRAM_MANAGER`, betas 16-17's), and
   0.4.5's `BB_COPY_HOLD` and `BB_COPY_MERGE`: kept as troubleshooting switches or removed with their
   old paths; safe mode's list to match.
+- Beta 16's research hooks off or out before the release: YEBIS's allocators (`BB_YEBIS_ALLOCS`) and
+  the game heap's allocate and free methods (`BB_GAME_HEAP_ALLOCS`, on every allocation and free of that
+  heap, with a lock and a map update each: far hotter than YEBIS's), and the scene-light measurement;
+  their cost read first in the tester's run (the heap line's blocks made and freed a minute, frame times
+  against a run with `BB_GAME_HEAP_ALLOCS=0`). The builder session's point (2026-11-25).
 - The small-card run (`BB_VRAM_TEST_BUDGET_MB=3500`, the VRAM manager on); its unbind waits row.
 - The NVIDIA checks (DLSS, part 3's time, the 8 GB budget) if the RTX 3070 Ti is at hand, else
   named as untested on NVIDIA in the release notes.
