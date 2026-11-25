@@ -1378,6 +1378,16 @@ who asked for the block under them. Nothing else changes. If the textures are th
 2 knows their owner; if the bookkeeping writes are all that faults on their pages, the faults are
 harmless to the textures' contents (the headers lie between blocks, outside the images).
 
+**Its run (2026-11-25, `498dc4e2`, engine id 110; the route of `b2e6bf1a` on engine id 109: the Hunter's
+Dream and back, five loads):** the heap class handled 72,000-227,000 blocks a minute (nearly all from
+`+0x1f3c753`, on one heap), with no measurable cost: 231.3 FPS on average against 230.4 on the same route
+without the hooks, the GPU thread's time per draw the same. But the faulting textures over no game
+resource (74 in the minute after the first load, 5 after the later ones) lie in no live block of that
+heap, as in no allocation of YEBIS's: all 15 named "in no game heap block known". Their memory comes from
+another allocator (the heap core has 21 other callers, other heap classes among them). The writes stay
+beside them, in the gaps between textures, never inside. Write faults in all 188, 82 and 62 in the minutes
+with loads, the rest on the buffer cache's pages.
+
 ### Beta 17: shaders and pipelines (to research and design)
 
 The rule not met: "shaders are translated when the game creates them, pipelines built during
