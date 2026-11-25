@@ -336,6 +336,13 @@ struct AmdFsr::Impl {
         }();
         if (debug) {
             desc.flags |= FFX_UPSCALE_ENABLE_DEBUG_CHECKING;
+            // 0.4.6 beta 16: said in the log, so that a run with no findings reads as checked.
+            static bool told = false;
+            if (!told) {
+                told = true;
+                std::printf("Upscaler: AMD FSR's own checks on (BB_AMD_FSR_DEBUG=1): their findings follow as "
+                            "'Upscaler: AMD FSR warning' lines\n");
+            }
         }
         // 0.4.6 beta 16: AMD's debug view (the menu, BB_AMD_FSR_DEBUG_VIEW=1) must be allowed when the context
         // is made; the dispatch flag alone drew nothing. It takes more memory: only while it is shown.

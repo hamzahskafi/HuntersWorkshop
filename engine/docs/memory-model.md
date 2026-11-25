@@ -1317,6 +1317,23 @@ with other players. Beta 16 changes no file of the GPU cache's identity: the cac
   inside, made with data or not, surface, shape), to find any watcher left.
 - `watch-rules-test` with YEBIS's new rule and the lanes; it fails on each of 11 deliberate breaks.
 
+**The second run (2026-11-25, `27b942f1`, engine id 105 with the trimmed FFmpeg; a fresh install,
+FSR 4.1.2 at Native AA, about 12 minutes):**
+
+- **The YEBIS faults are gone:** no YEBIS image is watched and none faults (500-740 a minute before).
+  Write faults in all 146-343 a minute (533-951 in the first run).
+- **What still faults** is images over no game resource (75-301 a minute, 9-11 watched): the named
+  lines show small RGBA8 textures (1x1 to 32x32, 256x256) and mip chains of format 9 (64x64 down to
+  4x4, one after the other) in the same memory as YEBIS's (`0x105e...`-`0x105f...`). Their writers:
+  YEBIS's quads (`+0xc21ef2`) now only on the page `0x105eedf000`, where the watching image is over
+  no resource, and the game's `memcpy` (`0x20858a0`) called from a small method at `0x2929780`,
+  reached through a virtual call. They are textures made by a creator the engine does not follow;
+  YEBIS's device has two creation methods reaching the tiler that are not hooked (`0x11dea90`,
+  `0x11e1750`, also virtual). To find in a later beta, as planned.
+- The texture net: nothing untold in any minute; a round over YEBIS's and Scaleform's images in 1 s
+  (1-3 images), over GX's 26 s (470 images, 58 MiB) and later 259 s (4,178 images, 572 MiB).
+- No hand-over needed the new rule (0 a minute).
+
 ### Beta 17: shaders and pipelines (to research and design)
 
 The rule not met: "shaders are translated when the game creates them, pipelines built during
