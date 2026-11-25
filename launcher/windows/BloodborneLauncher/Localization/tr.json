@@ -1438,7 +1438,7 @@
   "Balanced": "Dengeli",
   "Ultra Performance": "Ultra Performans",
   "Needs an upscaler or TAA": "Bir ölçekleyici veya TAA gerekir",
-  "Higher is sharper": "Yüksek daha keskin",
+  "Higher brings back more detail; too high halos edges": "Yükseldikçe daha çok ayrıntı geri gelir; çok yüksekte kenarlarda hale oluşur",
   "Brings back detail that upscaling softens": "Ölçeklemenin yumuşattığı ayrıntıyı geri getirir",
   "100% is the strongest. High values can halo edges and show grain.": "%100 en güçlüsüdür. Yüksek değerler kenarlarda hale ve grenlenme yapabilir.",
   "The default is 25%.": "Varsayılan %25.",

@@ -1438,7 +1438,7 @@
   "Balanced": "Équilibré",
   "Ultra Performance": "Ultra Performance",
   "Needs an upscaler or TAA": "Nécessite un upscaler ou TAA",
-  "Higher is sharper": "Plus haut, plus net",
+  "Higher brings back more detail; too high halos edges": "Plus haut rend plus de détail ; trop haut crée des halos aux bords",
   "Brings back detail that upscaling softens": "Rend le détail que l'upscaling adoucit",
   "100% is the strongest. High values can halo edges and show grain.": "100 % est le maximum. Des valeurs élevées peuvent créer des halos aux bords et faire ressortir le grain.",
   "The default is 25%.": "Par défaut : 25 %.",

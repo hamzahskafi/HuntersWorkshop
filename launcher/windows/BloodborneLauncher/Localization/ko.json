@@ -1438,7 +1438,7 @@
   "Balanced": "균형",
   "Ultra Performance": "울트라 성능",
   "Needs an upscaler or TAA": "업스케일러나 TAA가 필요합니다",
-  "Higher is sharper": "높을수록 선명",
+  "Higher brings back more detail; too high halos edges": "높을수록 디테일을 더 되살리고, 너무 높으면 가장자리에 후광이 생깁니다",
   "Brings back detail that upscaling softens": "업스케일링으로 흐려진 디테일을 되살립니다",
   "100% is the strongest. High values can halo edges and show grain.": "100%가 최대치입니다. 높은 값은 가장자리에 후광과 입자감이 생길 수 있습니다.",
   "The default is 25%.": "기본값은 25%입니다.",

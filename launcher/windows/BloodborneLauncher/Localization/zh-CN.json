@@ -1644,7 +1644,7 @@
   "Balanced": "平衡",
   "Ultra Performance": "超高性能",
   "Needs an upscaler or TAA": "需要超分辨率算法或 TAA",
-  "Higher is sharper": "越高越锐利",
+  "Higher brings back more detail; too high halos edges": "越高找回的细节越多；过高会让边缘出现光晕",
   "Brings back detail that upscaling softens": "找回放大时被柔化的细节",
   "100% is the strongest. High values can halo edges and show grain.": "100% 为最强值。数值过高会让边缘出现光晕并显出颗粒。",
   "The default is 25%.": "默认值为 25%。",

@@ -1438,7 +1438,7 @@
   "Balanced": "バランス",
   "Ultra Performance": "ウルトラパフォーマンス",
   "Needs an upscaler or TAA": "アップスケーラーか TAA が必要です",
-  "Higher is sharper": "高いほどシャープ",
+  "Higher brings back more detail; too high halos edges": "高いほど細部を多く取り戻し、高すぎるとエッジに縁取りが出ます",
   "Brings back detail that upscaling softens": "アップスケーリングで柔らかくなった細部を取り戻します",
   "100% is the strongest. High values can halo edges and show grain.": "100% が最大です。高い値ではエッジに縁取りや粒状感が出ることがあります。",
   "The default is 25%.": "既定値は 25% です。",

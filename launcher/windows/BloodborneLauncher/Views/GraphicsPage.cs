@@ -315,8 +315,10 @@ namespace BloodborneLauncher.Views
             _motionVectors.IsEnabled = temporal;
             // 0.4.6 beta 16 (the tester): no line per upscaler (the same sharpening runs after each); only
             // why the row is off without one.
-            _sharpenCard.SetInfo(temporal ? null : L.T("Needs an upscaler or TAA"));
-            _sharpnessCard.SetInfo(L.T("Higher is sharper"));
+            // Its description is the line under the title (SettingRow.ShowInfo): kept while the row is on
+            // (null cleared it, beta 16's first launcher), why it is off otherwise.
+            _sharpenCard.SetInfo(temporal ? L.T("Brings back detail that upscaling softens") : L.T("Needs an upscaler or TAA"));
+            _sharpnessCard.SetInfo(L.T("Higher brings back more detail; too high halos edges"));
             _fsrRow.Visibility = value == "fsr" ? Visibility.Visible : Visibility.Collapsed;
             if (value == "fsr") ShowFsrVersions();
             var dlss = value == "dlss" ? Visibility.Visible : Visibility.Collapsed;

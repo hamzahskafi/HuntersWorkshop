@@ -1438,7 +1438,7 @@
   "Balanced": "Баланс",
   "Ultra Performance": "Ультра",
   "Needs an upscaler or TAA": "Нужен апскейлер или TAA",
-  "Higher is sharper": "Чем выше, тем резче",
+  "Higher brings back more detail; too high halos edges": "Выше — больше деталей; слишком высоко — ореолы по краям",
   "Brings back detail that upscaling softens": "Возвращает детали, которые смягчает апскейлинг",
   "100% is the strongest. High values can halo edges and show grain.": "100% — максимум. Высокие значения дают ореолы по краям и зерно.",
   "The default is 25%.": "По умолчанию 25%.",
