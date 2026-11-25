@@ -40,8 +40,10 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <map>
 #include <new>
+#include <span>
 #include <string>
 #include <vector>
 #ifdef _WIN32
@@ -812,6 +814,46 @@ void Leave(const fs::path& dir, const std::string& name, u64 pgm, size_t perm) {
     fs::remove(MetaPath(dir, pgm, perm), error);
 }
 
+/// Whether a stored shader record equals the same record written again by this engine (`again`) but
+/// for the bytes a record written before engine id 118 held from its process: in the resource-table
+/// walker's struct (`PersistentSrtInfo`), the walker's address and the tail padding, zero in `again`.
+/// `marked` is `again` written with the struct's `flattened_bufsize_dw` inverted, which finds the struct.
+bool SameButProcessBytes(std::span<const u8> stored, std::span<const u8> again, std::span<const u8> marked) {
+    using Shader::PersistentSrtInfo;
+    if (stored.size() != again.size() || marked.size() != again.size()) {
+        return false;
+    }
+    size_t field = again.size(), differing = 0;
+    for (size_t b = 0; b < again.size(); ++b) {
+        if (again[b] != marked[b]) {
+            field = std::min(field, b);
+            ++differing;
+        }
+    }
+    constexpr size_t field_at = offsetof(PersistentSrtInfo, flattened_bufsize_dw);
+    const bool found = differing == sizeof(u32) && field >= field_at &&
+                       field - field_at + sizeof(PersistentSrtInfo) <= again.size() &&
+                       std::equal(again.begin() + std::ptrdiff_t(field),
+                                  again.begin() + std::ptrdiff_t(field + sizeof(u32)),
+                                  marked.begin() + std::ptrdiff_t(field), std::not_equal_to<>{});
+    const size_t base = found ? field - field_at : 0;
+    const auto process_byte = [&](size_t b) {
+        if (!found || b < base || b >= base + sizeof(PersistentSrtInfo)) {
+            return false;
+        }
+        const size_t at = b - base;
+        const bool address = at < offsetof(PersistentSrtInfo, walker_func) + sizeof(PersistentSrtInfo::walker_func);
+        const bool padding = at >= field_at + sizeof(u32);
+        return (address || padding) && again[b] == 0;
+    };
+    for (size_t b = 0; b < again.size(); ++b) {
+        if (stored[b] != again[b] && !process_byte(b)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 /// Child: the permutations from `start` on, one line each ("@OK i", "@OUT i why"), then "@END".
 /// It only reports what to leave out: the parent removes those files once every batch is done, so
 /// each batch lists the same names in the same order.
@@ -926,22 +968,18 @@ int RecompileBatch(const fs::path& dir, size_t start, const fs::path& only, bool
                 out("record format changed (its size)");
                 continue;
             }
-            // A record written before engine id 117 holds the walker's address in the process that wrote
-            // it (PersistentSrtInfo::Serialize writes zero since): one span of at most 8 bytes, zero in
-            // the record written again, may differ. Anything else is a change in how records are stored.
-            size_t first = again.size(), last = 0;
-            for (size_t b = 0; b < again.size(); ++b) {
-                if (u8(again[b]) != u8(meta_bytes[b])) {
-                    first = std::min(first, b);
-                    last = b;
-                }
-            }
-            const bool only_address =
-                first == again.size() ||
-                (last - first < 8 && std::all_of(again.begin() + std::ptrdiff_t(first),
-                                                 again.begin() + std::ptrdiff_t(last) + 1,
-                                                 [](auto byte) { return u8(byte) == 0; }));
-            if (!only_address) {
+            // A record written before engine id 118 holds, in its resource-table walker's struct, the
+            // walker's address in the process that wrote it and the struct's padding as that memory held
+            // it (PersistentSrtInfo::Serialize writes zero there since). Those bytes may differ, the copy
+            // zero; anything else is a change in how records are stored. The struct is found by writing
+            // the record once more with its buffer size changed: the 4 bytes that differ are that field.
+            auto& srt = stored_info.srt_info;
+            const u32 held = srt.flattened_bufsize_dw;
+            srt.flattened_bufsize_dw = ~held;
+            const auto marked = Vulkan::SerializeShaderMeta(stored_info, stored_spec, HashCombine(pgm, u64(perm)), perm);
+            srt.flattened_bufsize_dw = held;
+            const std::span stored_record{reinterpret_cast<const u8*>(meta_bytes.data()), meta_bytes.size()};
+            if (!SameButProcessBytes(stored_record, again, marked)) {
                 out("record format changed");
                 continue;
             }

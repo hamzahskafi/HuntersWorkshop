@@ -1810,6 +1810,17 @@ nothing; the check matters for caches with shaders that have no state, such as 0
 line ("left to the GPU thread's own passes"). Its run should show the cache "kept whole" and "never
 taken 0".
 
+**The builder session's review of 117 (engine id 118):** the struct also has 4 bytes of tail padding
+(24 bytes: the address, the walker's size, the buffer size, then padding), written as the memory held
+them, so records still differed between sessions there (the round trip itself kept them: a record is
+read back into the struct whole). And the tolerance accepted a zeroed span of up to 8 bytes anywhere in
+the record, so a real change zeroing a small field would have passed. Now `PersistentSrtInfo::Serialize`
+writes zeros and its two values at their offsets (the layout checked when compiled: a new field fails the
+build until it is written there too), and `--verify-cache` finds the struct in the record (written once
+more with its buffer size inverted: exactly those 4 bytes must differ) and accepts differences only in
+its address and padding, zero in the copy (`SameButProcessBytes`, tested on its own against 16 cases and
+7 deliberate breaks). Both errors failed the safe way (a rebuild, never a wrong keep).
+
 ### The 0.4.6 release
 
 - **Switches:** each beta's switches, and `BB_COPY_HOLD` and `BB_COPY_MERGE` (kept through 0.4.5

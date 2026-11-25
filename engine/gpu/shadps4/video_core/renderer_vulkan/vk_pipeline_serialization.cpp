@@ -947,12 +947,19 @@ bool Gcn::FetchShaderData::Deserialize(Serialization::Archive& ar) {
 void PersistentSrtInfo::Serialize(Serialization::Archive& ar) const {
     Serialization::Writer srt{ar};
 
-    // bbport (0.4.6 beta 17): the walker's address belongs to the process that translated the shader
-    // (Deserialize registers the code again and sets it), so it is written as zero: a record read back
-    // and written again is the same bytes (bb-shader-lab --verify-cache compares them). The rest as held.
-    std::array<u8, sizeof(*this)> bytes;
-    std::memcpy(bytes.data(), this, sizeof(*this));
-    std::memset(bytes.data() + offsetof(PersistentSrtInfo, walker_func), 0, sizeof(walker_func));
+    // bbport (0.4.6 beta 17): the struct's layout as before, but only its two values from this object:
+    // the walker's address belongs to the process that translated the shader (Deserialize registers
+    // the code again and sets it) and the tail padding holds whatever the memory held, so both are
+    // written as zero, and a shader's record is the same bytes in every session (bb-shader-lab
+    // --verify-cache reads records back and writes them again). A new field must be written here too.
+    static_assert(sizeof(PersistentSrtInfo) == 24 && offsetof(PersistentSrtInfo, walker_func) == 0 &&
+                  offsetof(PersistentSrtInfo, walker_func_size) == 8 &&
+                  offsetof(PersistentSrtInfo, flattened_bufsize_dw) == 16);
+    std::array<u8, sizeof(*this)> bytes{};
+    std::memcpy(bytes.data() + offsetof(PersistentSrtInfo, walker_func_size), &walker_func_size,
+                sizeof(walker_func_size));
+    std::memcpy(bytes.data() + offsetof(PersistentSrtInfo, flattened_bufsize_dw), &flattened_bufsize_dw,
+                sizeof(flattened_bufsize_dw));
     srt.Write(bytes.data(), bytes.size());
     if (walker_func_size) {
         srt.Write(reinterpret_cast<void*>(walker_func), walker_func_size);
