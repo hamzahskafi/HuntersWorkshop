@@ -1612,6 +1612,77 @@ narrowed to what the cache stores, so an engine update that changes no stored fo
 players' caches (beta 15 reset the tester's with a thread count); the catalog decision; optionally
 AMD's pipeline library for the single pipelines a frame waits for (`plan.md`, the track, phase C).
 
+**The research (2026-11-25, reading the code, the logs and git; the tester: "go ahead with the
+research"):**
+
+- **Every translation runs on stage A.** `PipelineCache::GetProgram` translates (`CompileModule`:
+  `TranslateProgram`, `EmitSPIRV`, the module) on the thread that looks the draw up, and the program
+  cache's comment says it: "this thread is the only writer". The draw-prep workers look up only: a
+  program or a variant of one not translated yet fails the preparation (`worker.failed`) and the draw
+  goes back to stage A. Beta 15's compile threads build pipelines from translated shaders; they never
+  translate.
+- **A draw needs its translation before anything else.** A pipeline's key is the program's hash and the
+  variant's index (`HashCombine(params.hash, perm_idx)`), and a variant is matched by a specialization
+  made from the translated program's information (`Shader::Info`: its resources). Binding the draw's
+  textures and buffers needs that information too, so a draw whose shader is not translated can be
+  neither drawn nor handed to a recording thread to bind later, as a draw whose pipeline is still
+  compiling is (`BindWhenCompiled`; or left out if it is scene geometry, `SkipUncompiledDraw`).
+- **The workers see far enough ahead.** A scanner copies every command buffer the game submits and the
+  workers take the nearest buffers ahead of stage A; the game runs up to a frame ahead, so while stage
+  A translates, the rest of the frame's draws are already visible to them. They prepare graphics draws
+  only: dispatches are not prepared.
+- **The translator can run on several threads.** Its memory pools (`Shader::Pools`) are one member of
+  the pipeline cache, used by stage A alone: each thread needs its own. Otherwise: one-time log flags,
+  `thread_local` statistics, the instruction decoder read-only after its set-up (`Common::Decoder`:
+  Zydis's decoder and formatter), the cache database's writes under its lock (`DataBase::Save`), the
+  shader states' store under its lock. Publishing (the program cache's insert, the variant's index, the
+  records and the state written with that index) stays on stage A.
+- **How much, from the logs.** A cold first minute: 478 ms (`b53c92dc`: 121 vertex 183 ms, 127 pixel
+  167 ms, 21 compute 120 ms at 5.7 ms each) and 450 ms (`27b942f1`, an empty cache folder: "Pipeline
+  cache cleared (0 files)"), then 20-90 ms a minute in new places; one 220.8 ms frame after a load. A
+  warm run: the same 3 vertex shaders in its first minute (1.3-2.2 ms), every session, not kept by the
+  cache (why, not known).
+- **0.4.5's caches are valid for 0.4.6.** Both fingerprints reproduce from git (`a6b34b8`:
+  `8e413f35b001886f`; today: `bc1f5b32fde7f850`). Four of the hashed files changed, none in what the
+  cache stores: `vk_pipeline_serialization.cpp` (the start's thread cap, 8 to 16), `vk_pipeline_cache.h`
+  and `.cpp` (the object-motion variant asked first, a flag at run time; the translation statistics),
+  `liverpool.cpp` (the command processor telling the caches of label stores). The stored records carry
+  versions of their own (shader binaries 7-9 by kind, the records 8, the pipeline keys 7), checked at
+  load; the fingerprint is a coarser net above them, and it fires on any edit of a hashed file.
+- **A rebuild loses entries.** On a new fingerprint, `bb-shader-lab --recompile-cache` translates each
+  shader again from its saved state; one without a state, one whose result changed and one the compiler
+  refuses are left out, and then every pipeline key that named one. Beta 12's lost 58 shaders and 113
+  keys; beta 15's start had 33 pipelines where the tester's cache had held hundreds. Why so many had no
+  state is not known (a verbose rebuild of a copy of the tester's cache, `BB_LAB_VERBOSE=1`, would say).
+
+**The design (for the tester's review):**
+
+1. **The cache kept across updates, by its output** (`start/main.cpp`, `bb-shader-lab`). On a new
+   fingerprint the shader lab first checks instead of rebuilding: each shader with a saved state is
+   translated again in memory and compared with the stored binary and record. All the same: the
+   compiler's output has not changed, and the cache is kept whole (no shader or key dropped) with the new
+   fingerprint stamped. Any difference: the rebuild as today. No judgement of which edits matter: 0.4.6
+   would keep 0.4.5's caches because its translations come out the same, and a real compiler change is
+   still caught. Its cost: one check at the first start after an engine update, about a rebuild's time.
+2. **Translations started ahead and run in parallel** (`vk_draw_prep.cpp`, `vk_pipeline_cache.cpp`). A
+   draw-prep worker that meets a shader or a variant not translated yet queues a job translating that
+   draw's missing stages, in order, on the compile threads (beta 15's: one per physical core, idle until
+   a frame waits on them). The job has its own pools and keeps its result (module, information,
+   specialization) without publishing it. Stage A, at that draw, publishes a finished result (it stays
+   the program cache's only writer, its lookups unchanged), waits for one still running, or translates
+   itself as today when no job was queued (a dispatch, a draw no worker prepared). A frame's new shaders
+   then translate side by side, begun while stage A works through what comes before them; stage A waits
+   only for what is left. A switch of its own. Not in it: dispatches (not prepared ahead; a third of the
+   cold minute, a second step if this one works), and leaving draws out while they translate.
+3. **The catalog (the tester's call).** With 1 and 2, a new player still translates and builds every
+   shader on its first sight. HW's own catalogs (keys, specializations and states from the tester's
+   played caches, one per GPU vendor; the code taken from the player's game files at the first start,
+   `SeedGpuCache`) would have them built before the first start ends. Or Lantern's inert seeding code is
+   removed.
+
+**Gate (the track):** a cold run's frames after a load without stage A's translation spikes; an update
+that changes no translation keeps the cache; a warm run unchanged.
+
 ### The 0.4.6 release
 
 - **Switches:** each beta's switches, and `BB_COPY_HOLD` and `BB_COPY_MERGE` (kept through 0.4.5

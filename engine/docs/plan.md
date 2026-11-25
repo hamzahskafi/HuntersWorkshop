@@ -295,6 +295,16 @@ Gate: no new problem; part 3 seen working; the A/B read.
   - Next to read: where a draw's translation runs (`PipelineCache::GetProgram` and its callers on
     the recording threads), the program cache's lock, the translator's per-thread state, and what a
     draw needs before its pipeline exists.
+  - *Research, read (2026-11-25; the tester: "go ahead with the research"; `memory-model.md`, beta
+    17):* every translation runs on stage A (the draw-prep workers give an untranslated draw back);
+    a draw needs its translation before its key, its binding or a deferred bind; the workers see the
+    rest of the frame while stage A translates; the translator can run on several threads with pools
+    of its own (publishing stays on stage A). 0.4.5's caches are valid for 0.4.6 (both fingerprints
+    reproduced from git; the four changed files store nothing differently). A rebuild loses the
+    shaders without a state and every key naming one.
+  - *Designed (for the tester's review):* the cache kept on a new fingerprint when every shader with
+    a state translates to the same output (else the rebuild); translations queued by the draw-prep
+    workers onto the compile threads, published by stage A; the catalog decision.
 
 **Phase D: the release candidate.**
 
