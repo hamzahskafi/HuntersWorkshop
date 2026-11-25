@@ -65,6 +65,20 @@ The sections after this one are the record of the work from the first frame anal
   RCAS up to 1 and an extra RCAS pass above it; DLSS, which has no sharpening of its own, gets the
   whole range from that pass; TAA has its own pass (docs/MODS.md, "TAA sharpening"). The launcher's
   and the menu's lines say which, for the upscaler chosen (0.4.4 beta 27d).
+- **Sharpening, the fix (designed 2026-11-25, for the tester's review).** Today the slider means
+  different things: under AMD FSR, 0-1 is AMD's own RCAS (AMD's mapping, in FSR 2/3.1's code
+  sharpness s runs RCAS at 2 - 2s stops, so even 0 sharpens a little); under DLSS and TAA the
+  engine's pass runs RCAS at the same stops but blends the result in at s, so 0.20 there is much
+  weaker than under FSR. AMD and NVIDIA leave sharpening to the player (NVIDIA retired DLSS's own
+  in 2.5.1; AMD asks for a slider and measures FSR 4 without it). The design: 0 is off everywhere
+  (FSR's sharpening not enabled at 0); up to 1 the same RCAS at AMD's mapping whatever the
+  upscaler (the engine's pass unblended, so DLSS and TAA match FSR); above 1 one more RCAS pass at
+  s - 1 on top of the maximum, for every upscaler (DLSS and TAA: the engine's pass twice, the
+  second only above 1, about 0.05 ms). Off by default in the engine, both launchers and the
+  shipped settings, the slider's value kept at 0.20 for when it is turned on; the Linux launcher's
+  0.5 fallback made 0.20. Whether existing settings switch once (proposed: only an untouched old
+  default, on at 0.20, turned off; any other choice kept) is the tester's call. FSR 4's own RCAS
+  mapping is not published: matched by eye.
 - **Texture mip bias** (`mip_bias`, -2..+1, live): the scene's texture LOD bias while AMD FSR or DLSS
   runs is log2(render / output) - 1, as both NVIDIA's DLSS guide and AMD's FSR docs ask
   (`mipBias = log2(renderResolution/displayResolution) - 1.0`), plus `mip_bias`. From 0.4.4 beta 27d

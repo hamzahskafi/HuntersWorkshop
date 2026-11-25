@@ -171,6 +171,33 @@ Gate: no new problem; part 3 seen working; the A/B read.
   finding nothing, no visual difference (YEBIS's dither, grain, spectrum and fade, the UI), frame
   times unchanged or better.
 
+**Beta 16's last part, designed 2026-11-25 for the tester's review: the remaining faults, and sharpening.**
+
+- *Where the remaining faults come from (read 2026-11-25).* 146-343 write faults a minute are left,
+  almost all on images over memory no resource the engine follows holds, in YEBIS's heap: small
+  RGBA8 textures (1x1 to 256x256), a 64x1/32x1/16x1 set and a 64x64-to-4x4 R8 chain, each its own
+  allocation (a 0x100 gap between them). Writers beside them: YEBIS's quads on one page and the
+  game's `memcpy` from `0x2929780` (reached through a function pointer). Ruled out by reading the
+  1.09 executable: YEBIS's device has 1D and 3D texture creators beside its 2D one (vtable slots
+  `+0x1e0`, `+0x1e8`, `+0x1f0`, thunks `0x2a39320/40/60`), but no YEBIS code calls the 1D or 3D slot
+  of the device, and every YEBIS texture comes through the 2D creator, which the engine follows. All
+  three take their memory from one allocator, `0x11e6810`, which six other functions call too, one
+  of them (`0x11d7200`) behind the device's method wrappers: likely YEBIS's buffers. Most likely
+  these images are YEBIS buffers or other allocations sampled as textures; not proven.
+- *Step 1, one build, nothing changed in behaviour:* the allocator hooked (byte-checked, as the
+  creators are), each allocation's range and the YEBIS function that asked for it kept; the log's
+  named watchers then say which allocation an image lies in and who made it. YEBIS's 1D and 3D
+  creators counted (expected 0). One run in the same places names the owner.
+- *Step 2, the fix, designed from step 1's answer:* that creator followed as YEBIS's textures are
+  (its memory, size and release), its images left to the calls that write them (YEBIS's Unmap,
+  hooked since beta 9) and checked by the texture net's first lane. Gate: write faults on images
+  near zero.
+- *Sharpening* (`upscaler.md`, "Sharpening, the fix"): one meaning for the slider whatever the
+  upscaler, 0 as off, off by default, the Linux launcher's 0.5 fallback made 0.20; whether existing
+  settings switch once is the tester's call.
+- *The reactive mask's menu line:* "FSR 4 may" replaced by what the running FSR answers (FSR 4.1.2:
+  not used), as the startup line already reports it.
+
 **Phase C: beta 17, shaders and pipelines (rule 5).**
 
 - Why: beta 15's cold run spent 478 ms translating shaders on the GPU thread in its first minute,
@@ -271,6 +298,7 @@ found.
 | FSR 4.1.2 reads only colour, depth and motion vectors (AMD's own answer, logged since beta 16): the reactive mask (menu, `reactive=1`) and FSR 3.1's tuning do nothing under it | Beta 16's second run (`27b942f1`), 2026-11-25 | The tuning section shows only under FSR 3.1 already; the reactive mask's rows could say the same. A menu change: the tester's call |
 | The second beta 16 run cannot show whether AMD's checks were on (`BB_AMD_FSR_DEBUG=1`) or whether a pre-rendered movie played (the player logged only at the detailed level) | Beta 16's second run, 2026-11-25 | Both logged since: "AMD FSR's own checks on" when they are, and a `Movie:` line for each movie (its codecs and size, FFmpeg's version). Answered by the tester (2026-11-25): the checks were on in `27b942f1` (no finding under FSR 4.1.2), and `027d744e` (engine id 105) played a 1080p movie under the trimmed FFmpeg to its end: about 2 minutes, its NV12 frames (1920x1088 and 960x544 planes) about 29 a second, frames steady (median 20.6 ms, p99 at most 21.4 ms, none over 1.5x the median, worst 30.1 ms), no error. Done |
 | The movie player's frames fault about 360 times a second on pages the buffer cache watches (its uploaded copies): the player copies each decoded frame into the game's memory, and the GPU reading it protects the pages again (`027d744e`: 1,200 a window at one address) | The movie run, 2026-11-25 | The movie plays steadily, so not urgent. The player is the engine's own code: it could tell the cache before each copy, as the create calls do since beta 15 (`BB_COPY_NOTICE`). A candidate for later |
+| The Linux launcher's sharpness falls back to 0.5 when `config.ini` has none (`AvaloniaLauncher/Views/GraphicsPage.cs`); the engine, the Windows launcher and the shipped settings say 0.20 | Reading the sharpening settings, 2026-11-25 | With beta 16's sharpening part (designed) |
 | `bb-shader-lab.exe` carries the engine's FFmpeg (about 6 MB of code and 3 MB of line tables) though it plays no movies: it links the whole GPU library, whose game library table reaches the movie player | The builder session's cross build of the trimmed FFmpeg, 2026-11-25 | Small beside the 111 MB saved. A follow-up could link the shader lab without the movie player |
 | Sharpening: on by default at 0.20, AMD's RCAS. Under AMD FSR it is AMD's own (0.20 is mild); under DLSS the engine's pass, much weaker at the same value (blended in at 20%); FSR's 0 still sharpens a little in FSR 2/3.1's code, so only the switch turns it off. NVIDIA retired DLSS's own sharpening (2.5.1) and leaves it to the game; AMD calls it optional and asks for a slider | The tester's question, 2026-11-24 | Proposed to the tester: off by default, the slider kept, the same strength under both upscalers, 0 as off. Pinned by the tester until before 0.4.6 closes (phase D) |
 | Beta 15 part 3 makes more surfaces than the first frames take: 82-185 ready (94-243 MiB) at the later loads of beta 16's first run, 20-40 taken; the rest freed 3 s after | Beta 16's first run (`5dbb0102`), 2026-11-24 | Made only while VRAM is comfortable, so not harmful as it stands; the learned shapes could keep only those taken. The release's small-card run decides whether it matters |
