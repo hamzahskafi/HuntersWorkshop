@@ -362,14 +362,8 @@ video and AAC sound): the engine folder drops from 110 DLLs (137 MB) to about 9 
 and cutscenes play as before. On Linux, the same build replaces FFmpeg 7.1.1, which had been built
 without thread support although the movie player uses it from three threads.
 
-## Shaders: the cache kept across updates, new ones translated ahead (beta 17)
+## Shaders: new ones translated ahead (beta 17)
 
-- **Your shader cache survives engine updates.** Until now an engine update made the engine rebuild
-  the shader cache at its first start, and the rebuild left part of it out, so the first sessions
-  after an update stuttered while those shaders were built again in play. Now, after an update, the
-  engine first checks whether it still translates your cached shaders exactly as before; when it does,
-  the cache is kept as it is. 0.4.6 should keep 0.4.5's caches. `BB_GPU_CACHE_CHECK=0` in Extra
-  variables skips the check (the rebuild as before).
 - **New shaders are translated ahead, several at once.** The first time the game needs a shader (a
   new area, an empty cache), the engine translated it on the thread that feeds the graphics card, and
   every frame behind it waited. Now the threads that prepare draws ahead notice it first and have it

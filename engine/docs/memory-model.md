@@ -1685,7 +1685,8 @@ that changes no translation keeps the cache; a warm run unchanged.
 
 **Built (0.4.6 beta 17, engine id 114; the tester: "yes", the catalog left for later):**
 
-1. **The check** (`bb-shader-lab --verify-cache`, `start/main.cpp` `GpuCacheUnchanged`;
+1. **The check** (reverted in engine id 119, at the end of this section: it compared a shader's output,
+not everything a record keeps) (`bb-shader-lab --verify-cache`, `start/main.cpp` `GpuCacheUnchanged`;
    `BB_GPU_CACHE_CHECK=0`: not checked). On a new fingerprint bb-start runs it on each cache folder
    before any rebuild: the rebuild's own loop (`RecompileBatch`) in a mode that writes nothing, in child
    processes, stopped at the first difference. A shader with a state is "the same" when its SPIR-V comes
@@ -1820,6 +1821,24 @@ build until it is written there too), and `--verify-cache` finds the struct in t
 more with its buffer size inverted: exactly those 4 bytes must differ) and accepts differences only in
 its address and padding, zero in the copy (`SameButProcessBytes`, tested on its own against 16 cases and
 7 deliberate breaks). Both errors failed the safe way (a rebuild, never a wrong keep).
+
+**Part 1 reverted (engine id 119; the tester: "yeah revert it", 2026-11-25).** Asked whether these
+changes could corrupt the cache or set engines against each other, the records were examined again:
+the address change could not (the loader never used the stored address: it registers the walker
+again whenever the shader has one, and a shader without one stored zero before too; nothing else
+reads, hashes or compares record bytes; the size, layout and version are unchanged, so engines before
+and after read each other's records). The check itself could keep stale entries: it compared the
+SPIR-V and the specialization, but a record also holds what the engine runs at every draw beside the
+SPIR-V, the resource-table walker's x86 code and the table plan among them. An update that changed
+those (a fixed walker, say) and not the SPIR-V would have been kept, its old walker run. It never
+kept a cache (115 did not run it; 116 refused, wrongly; 117 and 118 not run). A complete check would
+compare whole records, every part written the same in every session first; for a rebuild that now
+loses nothing (1.3 s on the tester's cache, 673 shaders, 0 left out) it is not worth it: only a
+cache with shaders that have no state (0.4.5's) loses something in a rebuild, a round of compiles
+in play. Removed: `GpuCacheUnchanged` and `BB_GPU_CACHE_CHECK`, `bb-shader-lab --verify-cache` and
+`--verify-batch` (`shader_lab.cpp` as before beta 17), and the zeroed address and padding
+(`vk_pipeline_serialization.cpp` as before beta 17). An engine update rebuilds the cache, as before
+beta 17. Kept: part 2 and 117's change to the prep workers.
 
 ### The 0.4.6 release
 
