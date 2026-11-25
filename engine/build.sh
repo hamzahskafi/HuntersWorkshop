@@ -143,8 +143,12 @@ fi
 # 0.4.6 beta 16: the Windows programs carry the engine's own FFmpeg (packaging/build-ffmpeg.sh); one
 # that imports an FFmpeg DLL linked a system FFmpeg instead (about 100 DLLs with it).
 if [[ -n $windows ]]; then
-    objdump=$(command -v llvm-objdump || command -v objdump || true)
-    if [[ -n $objdump ]]; then
+    # Versioned LLVM names too (llvm-objdump-23: a cross toolchain may have only those).
+    objdump=$(command -v llvm-objdump || command -v objdump ||
+              compgen -c llvm-objdump- | grep -E '^llvm-objdump-[0-9]+$' | sort -t- -k3 -n | tail -n 1 || true)
+    if [[ -z $objdump ]]; then
+        echo 'Warning: no llvm-objdump or objdump found: the check that no program imports an FFmpeg DLL did not run' >&2
+    else
         for program in out/bb-probe.exe out/bb-shader-lab.exe; do
             [[ -f $program ]] || continue
             if "$objdump" -p "$program" | grep -i -E 'DLL Name: (av(codec|format|util|device|filter)|sw(scale|resample)|postproc)-[0-9]+\.dll'; then
