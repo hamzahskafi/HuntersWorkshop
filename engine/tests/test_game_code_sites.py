@@ -37,8 +37,9 @@ def site_lists(text):
 
 
 def gx_sites():
-    """gx_resources.cpp's 0.4.6 beta 16 research hooks (image offsets): YEBIS's allocators, the game heap's
-    allocate and free methods, each with the prologue it is prepared with."""
+    """gx_resources.cpp's 0.4.6 beta 16 research hooks (image offsets): YEBIS's allocators (three since step
+    2), the game heap's allocate and free methods, the heap core's, each with the prologue it is prepared
+    with."""
     text = GX_RESOURCES.read_text(encoding='utf-8')
     code, lists = arrays(text), site_lists(text)
     sites = [(f'YEBIS allocator {i}', at, code['kYebisAllocPrologue']) for i, at in enumerate(lists['kYebisAllocators'])]
@@ -134,7 +135,7 @@ class GameCodeSites(unittest.TestCase):
 
     def test_the_gx_research_sites_parse(self):
         sites = gx_sites()
-        self.assertEqual(len(sites), 2 + 4 + 2 + 3)
+        self.assertEqual(len(sites), 3 + 4 + 2 + 3)
         for name, at, code in sites:
             # Prepare needs at least 14 bytes (the absolute jump) and whole instructions.
             self.assertGreaterEqual(len(code), 14, name)
@@ -148,6 +149,17 @@ class GameCodeSites(unittest.TestCase):
         self.assertEqual(prologue[7:9], b'\x0f\x82')
         rel, = struct.unpack_from('<i', prologue, 9)
         self.assertEqual(at['kHeapCoreAlloc'] + 13 + rel, at['kHeapCoreAllocFail'])
+        # Step 2: YEBIS's heap as the game's callback reads it: mov rbx, [rip + disp] (the graphics object's
+        # pointer), cmp dword [rbx + used], 0; jle; add r13d, 0x40; mov r14d, esi; lea r15, [rbx + core].
+        heap = code['kYebisHeapCodeBytes']
+        self.assertEqual(heap[:3], b'\x48\x8b\x1d')
+        disp, = struct.unpack_from('<i', heap, 3)
+        self.assertEqual(at['kYebisHeapCode'] + 7 + disp, at['kGraphicsObjectPointer'])
+        self.assertEqual(heap[7:9], b'\x83\xbb')
+        self.assertEqual(struct.unpack_from('<I', heap, 9)[0], at['kHeapUsedOffset'])
+        self.assertEqual(heap[13:15], b'\x00\x7e')
+        self.assertEqual(heap[23:26], b'\x4c\x8d\xbb')
+        self.assertEqual(struct.unpack_from('<I', heap, 26)[0], at['kYebisHeapCore'])
 
     def test_the_executable_holds_them(self):
         elf_path = ROOT / 'out/eboot.elf'
@@ -162,6 +174,9 @@ class GameCodeSites(unittest.TestCase):
         # gx_resources.cpp's research hooks: image offsets.
         for name, at, code in gx_sites():
             self.assertEqual(read_image(elf, at, len(code)), code, name)
+        gx_text = GX_RESOURCES.read_text(encoding='utf-8')
+        heap = arrays(gx_text)['kYebisHeapCodeBytes']
+        self.assertEqual(read_image(elf, constants(gx_text)['kYebisHeapCode'], len(heap)), heap, "YEBIS's heap")
         # The cloth's one substep is the 60 FPS++ list's write over the game's substep count.
         self.assertEqual(read_image(elf, self.at['kClothSubsteps'] - 0x400000, 11),
                          bytes.fromhex('8b581885db7504418b5d20'))

@@ -15,6 +15,14 @@
 //   updates, told since beta 9, fit it), so every YEBIS texture: YEBIS writes them through its own calls
 //   or the GPU, and the texture net's first lane looks at them within seconds. Part 2: Scaleform's
 //   planes (BB_WATCH_SCALEFORM=1), told by Scaleform's unmap.
+//   0.4.6 beta 16, step 2 of the remaining faults: images over no game resource in YEBIS's heap
+//   (BB_WATCH_YEBIS_HEAP=1 keeps them watched). The faults still left were all on such images, every
+//   write beside the image, never in it: the heap's bookkeeping and YEBIS's other memory between its
+//   textures (memory-model.md). The engine registers nothing there (none lay in an allocation of the
+//   two YEBIS allocators step 1 hooked; step 2 hooks the third to name them); like YEBIS's registered
+//   textures, they are left to YEBIS's calls and the GPU, and the texture net's first lane checks them.
+//   The call that tells: YEBIS's allocation of the memory again (GxResources, a written event for the
+//   new block: TextureCache::ProcessWritten), what page protection learnt from the heap's header write.
 #pragma once
 
 #include "engine/gx_resources.h"
@@ -26,8 +34,9 @@ enum class Unwatch { None, Targets, TargetsAndData };
 
 struct Settings {
     Unwatch kinds = Unwatch::TargetsAndData;
-    bool watch_yebis = false;     ///< BB_WATCH_YEBIS_TEXTURES=1
-    bool watch_scaleform = false; ///< BB_WATCH_SCALEFORM=1
+    bool watch_yebis = false;      ///< BB_WATCH_YEBIS_TEXTURES=1
+    bool watch_scaleform = false;  ///< BB_WATCH_SCALEFORM=1
+    bool watch_yebis_heap = false; ///< BB_WATCH_YEBIS_HEAP=1
 };
 
 /// What the texture cache knows of an image's memory at its registration.
@@ -36,12 +45,24 @@ struct Image {
     bool whole = false;     ///< a resource of the game's starts where the image does
     bool surface = false;   ///< a surface the game made without data for the GPU to write
     bool with_data = false; ///< that resource was made with its data
+    bool yebis_heap = false; ///< it lies in YEBIS's heap (GxResources::InYebisHeap)
 };
+
+/// Step 2: memory YEBIS took from its heap that holds no resource of the game's.
+inline bool YebisHeapOnly(const Image& image) {
+    return image.owner == BbEngine::GxResources::Owner::None && image.yebis_heap;
+}
 
 /// Whether the game's calls tell this image's writes, so its pages are not watched.
 inline bool ByCalls(const Image& image, const Settings& s) {
     using BbEngine::GxResources::Owner;
-    if (s.kinds == Unwatch::None || !image.whole) {
+    if (s.kinds == Unwatch::None) {
+        return false;
+    }
+    if (YebisHeapOnly(image)) {
+        return s.kinds == Unwatch::TargetsAndData && !s.watch_yebis_heap;
+    }
+    if (!image.whole) {
         return false;
     }
     if (image.surface || image.owner == Owner::RenderTarget || image.owner == Owner::DepthTarget) {
@@ -69,15 +90,17 @@ inline bool NetChecks(const Image& image, const Settings& s) {
     if (!ByCalls(image, s) || image.surface) {
         return false;
     }
-    return image.owner == Owner::TextureData || image.owner == Owner::Yebis || image.owner == Owner::Scaleform;
+    return image.owner == Owner::TextureData || image.owner == Owner::Yebis || image.owner == Owner::Scaleform ||
+           YebisHeapOnly(image);
 }
 
 /// The texture net's lane for an image it checks: 0 the middleware's (YEBIS's and Scaleform's: few,
-/// small, left to the calls in beta 16), 1 the GX textures made with their data (since beta 10). Each
-/// lane goes round on a budget of its own, so the first is looked at within seconds.
-inline unsigned NetLane(BbEngine::GxResources::Owner owner) {
+/// small, left to the calls in beta 16; step 2: YEBIS's heap's too), 1 the GX textures made with their
+/// data (since beta 10). Each lane goes round on a budget of its own, so the first is looked at within
+/// seconds.
+inline unsigned NetLane(const Image& image) {
     using BbEngine::GxResources::Owner;
-    return owner == Owner::Yebis || owner == Owner::Scaleform ? 0 : 1;
+    return image.owner == Owner::Yebis || image.owner == Owner::Scaleform || YebisHeapOnly(image) ? 0 : 1;
 }
 constexpr unsigned kNetLanes = 2;
 

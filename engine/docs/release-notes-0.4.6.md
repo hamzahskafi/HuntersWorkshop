@@ -336,6 +336,11 @@ near one stopped the game's thread for a moment while the engine checked it. Now
   Extra variables watches them as before.
 - **The UI's texture planes** (Scaleform's) are no longer watched either: Scaleform tells the engine
   when it has finished writing one. `BB_WATCH_SCALEFORM=1` watches them as before.
+- **YEBIS's other textures** (small ones, made in its own memory pool) are no longer watched
+  either. The game's memory bookkeeping right beside them was caught dozens of times in the minute
+  after each area load. YEBIS writes these textures only through its own calls, and when it reuses
+  their memory its allocation tells the engine; the safety net below checks them like the others.
+  `BB_WATCH_YEBIS_HEAP=1` in Extra variables watches them as before.
 - **A safety net:** once a second the engine checks a slice of the textures it no longer watches
   (about 2 MB a second for YEBIS's and the UI's, which takes seconds to go round them, and as much
   again for the game's own). If one changed without the game's calls saying so, and still nothing has
@@ -382,12 +387,13 @@ mask, by FSR's own answer (FSR 4.1.2 does not), instead of "FSR 4 may".
 - **Sharpening for comparison** (beta 16): `BB_SHARPEN_FSR_OWN=1` in Extra variables has FSR sharpen
   with its own sharpening instead, at the same percentage, for side-by-side comparisons.
 
-- **For the remaining texture write faults** (beta 16): a line a minute names the memory under the
-  textures that still fault, and which of YEBIS's functions asked for it, to find their owner in the
-  next build, and a second line does the same for the game's own memory heap they sit in.
-  A third names the game's heaps and the address range each manages, to find the one that holds those
-  textures. `BB_YEBIS_ALLOCS=0`, `BB_GAME_HEAP_ALLOCS=0` and `BB_GAME_HEAP_RANGES=0` in Extra variables
-  turn them off. A second line says how much of
+- **For the remaining texture write faults** (beta 16): a line a minute names which of YEBIS's
+  functions asked for the memory under YEBIS's unwatched textures, and under any texture that still
+  faults; `BB_YEBIS_ALLOCS=0` in Extra variables turns it off (YEBIS's other textures are then watched
+  again, as nothing tells the engine when YEBIS reuses their memory). Two more lines, off by default, do the
+  same for one of the game's memory heaps and name every heap the game has with its address range:
+  `BB_GAME_HEAP_ALLOCS=1` and `BB_GAME_HEAP_RANGES=1` turn them on (the second slows the game a
+  little). Another line says how much of
   the 1080p picture is brighter than white, for the sharpening; and a line says how strong the
   sharpening is and where it runs, once a change has held for a second.
 

@@ -1403,10 +1403,50 @@ over no game resource lies in one: core `0x102885d618`, managing `0x105d400010`-
 first used by `+0x21d1e96`, inside `0x21d1e40`: the allocator the game hands YEBIS. So they are YEBIS's
 memory after all, from the path the hooks did not cover: YEBIS's third allocation function `0x11e65f0`
 (through the same function pointer; called by all three texture creators' helpers, the device's wrappers
-`0x11d7200` and four methods reached through function pointers). The heap gets 5,000-20,000 calls a minute
+`0x11d7200` and six other functions, YEBIS's update `0x11d8d70` and Map `0x11d92c0` among them). The heap gets 5,000-20,000 calls a minute
 and faults 35-85 times in the minute after a load. The heap core's hooks, though, saw 119-147 million calls a
 minute (the game's main heaps share the core): the run averaged 226.0 FPS against 230.4-231.3 on the same
 route before (a different session length, so only a hint), and they are not to stay on.
+
+**Step 2 (engine id 112; the tester: "yeah go ahead, build it"):** the textures over no game resource in
+YEBIS's heap follow beta 16's rule for YEBIS's registered textures.
+
+1. **Left to YEBIS's calls** (`watch_rules.h`; `BB_WATCH_YEBIS_HEAP=1`: watched as before). The heap's
+   range is read where the game's YEBIS allocator reads it: the graphics object's pointer at image
+   `0x56a6d18` (the callback's `mov rbx, [rip + ...]` at `0x21d1e51`), its heap in use when
+   `[object + 0x2714] > 0`, the heap's core at `+0x21e8`, its range `[core + 8]` to `[core + 0x10]`. The
+   callback's bytes are checked against 1.09's at start-up; elsewhere nothing is found in the heap and
+   those images stay watched. The range is read once the heap is set up (each read checked) and kept;
+   one log line gives it. An image registered over no game resource and wholly inside it is left to the
+   calls (`Image::gx_yebis_heap`, set at registration), and the texture net's first lane checks it with
+   YEBIS's and Scaleform's (a change no call told marks it written). An image of a game resource in the
+   heap follows its kind's rule; one handed to a texture the calls do not cover is watched again, as
+   any (beta 16's hand-over). **The call that tells:** YEBIS's allocators (all three hooked, part 2). When
+   YEBIS takes memory in its heap, at the allocator's return and before the memory is filled, a written
+   event goes to the texture cache, and the images left to the calls over that block take the memory at
+   their next use. Page protection learnt the same from the heap's header write just before the block,
+   on the same page; the event is exact (the block, not its page's neighbours). Why it is safe: every
+   fault on these images in beta 16's runs was a write beside the image (the heap's bookkeeping and
+   YEBIS's other memory on the same pages), none inside; YEBIS writes its memory after taking it, through
+   its own calls or the GPU; the net covers a write no call tells. Safe mode and
+   `BB_WATCH_GAME_TEXTURES=targets` watch them, and so does `BB_YEBIS_ALLOCS=0` (nothing would tell).
+2. **YEBIS's third allocator hooked** (`0x11e65f0`, the same prologue as the other two; with them under
+   `BB_YEBIS_ALLOCS=0`). These images no longer fault, so they are named at registration instead: each is
+   counted by who asked for the YEBIS allocation under it (a new part of the minute line "YEBIS's
+   allocations": "images over no game resource registered in YEBIS's heap"), the first 16 named in the log
+   with their allocation and whether they were left to the calls. The same line counts the allocations
+   told to the texture cache and the images they marked written. YEBIS's allocator hooks are part of
+   the rule from here on, not research only.
+3. **The costly research hooks off by default:** the heap class's (`BB_GAME_HEAP_ALLOCS=1` turns them on)
+   and the heap core's (`BB_GAME_HEAP_RANGES=1`). A faulting image over no game resource is named with
+   whether it lies in YEBIS's heap in their place, and with what the hooks that are on find.
+
+The next run should show: the heap's line at start-up; no write faults on images over no game resource
+after loads (the beta 16 line's "write faults on images by the image's resource"), those images under
+"left to the calls: no game resource"; their maker in the YEBIS allocation line (the third allocator's
+callers, the 1D, 2D or 3D creator's helper or the device's wrappers); the net's first lane going round
+in seconds with them and finding no write no call told; a few such images marked written by YEBIS's
+allocations around loads (not every frame); and the route's frame rate back at about 230 FPS.
 
 ### Beta 17: shaders and pipelines (to research and design)
 

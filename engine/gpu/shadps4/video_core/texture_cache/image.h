@@ -244,6 +244,8 @@ public:
     /// mark since its last look as a write no call told.
     bool gx_with_data = false;
     u32 cpu_marks = 0;
+    /// 0.4.6 beta 16, step 2: over no game resource, in YEBIS's heap (registration; watch_rules.h).
+    bool gx_yebis_heap = false;
     ImageId depth_id{};
     u64 depth_uid{};
     u64 image_uid{};
