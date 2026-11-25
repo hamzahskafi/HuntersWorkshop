@@ -27,13 +27,19 @@
 #   BB_JOBS            parallel jobs (default: every processor).
 # Needs: curl, sha256sum, tar with xz, make, nasm (FFmpeg's SIMD code: without it H.264 and HEVC
 # decode several times slower, so its absence stops the build), and for MSYS2 diffutils (configure
-# runs cmp).
+# runs cmp); git where ffmpeg.org cannot be reached. A tarball already in BB_FFMPEG_CACHE with the
+# right checksum is used without downloading.
 set -euo pipefail
 
 version=9.1
 # The release tarball, its SHA-256 taken after checking FFmpeg's signature (ffmpeg-9.1.tar.xz.asc,
 # FFmpeg release signing key FCF9 86EA 15E6 E293 A564 4F10 B432 2F04 D676 58D8).
 sha256=1a4d394ae63d190a526cd052eb4415c156b5c5e2df37efab41a7de0b8fde2433
+# Where ffmpeg.org cannot be reached (a build machine's network policy): FFmpeg's own repository on
+# GitHub at the release's tag, checked to be this commit. Its tree is the tarball's but for the
+# FF_VERSION file the release adds, written here (checked 2026-11-25).
+git_url=https://github.com/FFmpeg/FFmpeg.git
+git_commit=74e4393595cf2b5857f0da925c4e0dd74ea306e5
 
 die() { echo "build-ffmpeg: $*" >&2; exit 1; }
 here=$(cd -- "$(dirname -- "$0")" && pwd)
@@ -114,16 +120,29 @@ fi
 cache=${BB_FFMPEG_CACHE:-$(dirname -- "$prefix")/.cache}
 mkdir -p "$cache" "$prefix"
 tarball=$cache/ffmpeg-$version.tar.xz
-if [[ ! -f $tarball ]] || ! echo "$sha256  $tarball" | sha256sum -c --status; then
-    echo "FFmpeg $version: downloading"
-    curl -fsSL --retry 3 -o "$tarball.part" "https://ffmpeg.org/releases/ffmpeg-$version.tar.xz"
-    echo "$sha256  $tarball.part" | sha256sum -c --status || { rm -f "$tarball.part"; die "ffmpeg-$version.tar.xz: wrong checksum"; }
-    mv -f "$tarball.part" "$tarball"
-fi
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
-tar -xJf "$tarball" -C "$work"
-cd "$work/ffmpeg-$version"
+source=$work/ffmpeg-$version
+if [[ ! -f $tarball ]] || ! echo "$sha256  $tarball" | sha256sum -c --status; then
+    echo "FFmpeg $version: downloading"
+    if curl -fsSL --retry 3 -o "$tarball.part" "https://ffmpeg.org/releases/ffmpeg-$version.tar.xz"; then
+        echo "$sha256  $tarball.part" | sha256sum -c --status || { rm -f "$tarball.part"; die "ffmpeg-$version.tar.xz: wrong checksum"; }
+        mv -f "$tarball.part" "$tarball"
+    else
+        rm -f "$tarball.part"
+        command -v git >/dev/null || die "ffmpeg.org cannot be reached and git is missing (or put ffmpeg-$version.tar.xz in $cache)"
+        echo "FFmpeg $version: ffmpeg.org cannot be reached; its repository at the tag n$version instead"
+        git -c advice.detachedHead=false clone -q --depth 1 -b "n$version" "$git_url" "$source"
+        got=$(git -C "$source" rev-parse HEAD)
+        [[ $got == "$git_commit" ]] || die "the tag n$version is commit $got, not $git_commit"
+        rm -rf "$source/.git"
+        printf '%s\n' "$version" > "$source/FF_VERSION"
+    fi
+fi
+if [[ ! -d $source ]]; then
+    tar -xJf "$tarball" -C "$work"
+fi
+cd "$source"
 echo "FFmpeg $version: configuring for ${target:-this machine} ($os)"
 if ! ./configure "${args[@]}" > "$work/configure.log" 2>&1; then
     tail -n 30 "$work/configure.log" >&2
