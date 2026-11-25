@@ -136,7 +136,8 @@ namespace BloodborneLauncher.Views
                 v => Ini.Set("sharpening", ((int)Math.Round(v)).ToString(System.Globalization.CultureInfo.InvariantCulture)),
                 "0'%'", defaultValue: 25);
             _sharpnessCard = Nest();
-            _sharpnessCard.SetTip(L.T("100% is the strongest. High values can halo edges and show grain."));
+            _sharpnessCard.SetTip(L.T("100% is the strongest. High values can halo edges and show grain.") + " " +
+                                  L.T("The default is 25%."));
 
             // The fine settings most players leave alone (27d: two; DLSS's sharper textures folded into the
             // bias, auto exposure as NVIDIA and AMD advise, without a row).

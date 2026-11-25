@@ -1441,6 +1441,7 @@
   "Higher is sharper": "Yüksek daha keskin",
   "Brings back detail that upscaling softens.": "Ölçeklemenin yumuşattığı ayrıntıyı geri getirir.",
   "100% is the strongest. High values can halo edges and show grain.": "%100 en güçlüsüdür. Yüksek değerler kenarlarda hale ve grenlenme yapabilir.",
+  "The default is 25%.": "Varsayılan %25.",
   "The game gives no motion for moving characters; this works it out. Off: faster, but moving enemies can trail. After a restart.": "Oyun hareket eden karakterlerin hareketini vermez; bu onu hesaplar. Kapalı: daha hızlı ama hareketli düşmanlar iz bırakabilir. Yeniden başlatınca.",
   "0 is what NVIDIA and AMD advise with an upscaler. Below 0 can shimmer.": "0, NVIDIA ve AMD'nin ölçekleyiciyle önerdiği değerdir. 0'ın altı titreşebilir.",
   "Off: the sharpest, with jagged edges. The game's own: its PS4 pass, after a restart. TAA: smooth edges, live.": "Kapalı: en keskin, tırtıklı kenarlarla. Oyunun kendi: PS4 geçişi, yeniden başlatınca. TAA: yumuşak kenarlar, anında.",

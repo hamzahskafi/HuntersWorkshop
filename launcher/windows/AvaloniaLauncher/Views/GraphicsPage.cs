@@ -38,7 +38,7 @@ namespace BloodborneLauncher.Views
             _sharpenCard = (SettingRow)Body.Children[^1];
             // 0.4.6 beta 16 (the tester): a percentage of RCAS's maximum, 25% by default, as the engine
             // (was 0..2 from 0.5).
-            SliderRow(SymbolRegular.SlideSize24, L.T("Sharpening strength"), L.T("100% is the strongest. High values can halo edges and show grain."), 0, 100, 1,
+            SliderRow(SymbolRegular.SlideSize24, L.T("Sharpening strength"), L.T("100% is the strongest. High values can halo edges and show grain.") + " " + L.T("The default is 25%."), 0, 100, 1,
                 () => ParseDouble(Ini.Get("sharpening"), 25),
                 v => Ini.Set("sharpening", ((int)Math.Round(v)).ToString(System.Globalization.CultureInfo.InvariantCulture)), "0'%'");
             _sharpnessCard = (SettingRow)Body.Children[^1];

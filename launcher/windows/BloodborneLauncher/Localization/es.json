@@ -1441,6 +1441,7 @@
   "Higher is sharper": "Más alto, más nítido",
   "Brings back detail that upscaling softens.": "Recupera el detalle que el escalado suaviza.",
   "100% is the strongest. High values can halo edges and show grain.": "100% es el máximo. Valores altos pueden crear halos en los bordes y mostrar grano.",
+  "The default is 25%.": "El valor predeterminado es 25%.",
   "The game gives no motion for moving characters; this works it out. Off: faster, but moving enemies can trail. After a restart.": "El juego no da el movimiento de los personajes; esto lo calcula. Desactivado: más rápido, pero los enemigos en movimiento pueden dejar estela. Tras reiniciar.",
   "0 is what NVIDIA and AMD advise with an upscaler. Below 0 can shimmer.": "0 es lo que NVIDIA y AMD recomiendan con un escalador. Por debajo de 0 puede parpadear.",
   "Off: the sharpest, with jagged edges. The game's own: its PS4 pass, after a restart. TAA: smooth edges, live.": "Desactivado: lo más nítido, con bordes dentados. La del juego: su pase de PS4, tras reiniciar. TAA: bordes suaves, al momento.",

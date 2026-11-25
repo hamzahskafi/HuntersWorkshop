@@ -1049,11 +1049,12 @@ void UpscalerSection() {
         Store(s.sharpening, std::clamp(percent, 0, 100), changed);
         ImGui::EndDisabled();
         char hint[384];
-        std::snprintf(hint, sizeof(hint), "%s %s", BbSettings::MenuText("Higher is sharper.", "Чем выше, тем резче."),
+        std::snprintf(hint, sizeof(hint), "%s %s %s", BbSettings::MenuText("Higher is sharper.", "Чем выше, тем резче."),
                       BbSettings::MenuText("100% is the strongest; high values can halo edges and show grain. "
                                            "Ctrl+click to type a value.",
                                            "100% — максимум; высокие значения дают ореолы по краям и зерно. "
-                                           "Ctrl+щелчок — ввести значение."));
+                                           "Ctrl+щелчок — ввести значение."),
+                      BbSettings::MenuText("The default is 25%.", "По умолчанию 25%."));
         Hint(hint);
     }
     ImGui::Unindent();
