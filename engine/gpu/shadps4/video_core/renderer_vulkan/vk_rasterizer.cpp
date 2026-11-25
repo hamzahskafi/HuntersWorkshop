@@ -1886,10 +1886,7 @@ void Rasterizer::PrintPipeStats() {
     last_busy = busy;
 }
 
-bool Rasterizer::FilterDrawPasses() const {
-    // FilterDraw's checks without its side effects: false when it would skip the draw or run
-    // a pass of its own (fast clear elimination, resolve, depth/stencil copy).
-    const auto& regs = Regs();
+bool DrawSelectsPipeline(const AmdGpu::Regs& regs) {
     using Mode = AmdGpu::ColorControl::OperationMode;
     const auto mode = regs.color_control.mode;
     if (mode == Mode::EliminateFastClear || mode == Mode::FmaskDecompress ||
@@ -1906,6 +1903,12 @@ bool Rasterizer::FilterDrawPasses() const {
         regs.depth_buffer.StencilWriteValid() &&
         regs.depth_buffer.StencilAddress() != regs.depth_buffer.StencilWriteAddress();
     return !(mode == Mode::Disable && (depth_copy || stencil_copy));
+}
+
+bool Rasterizer::FilterDrawPasses() const {
+    // FilterDraw's checks without its side effects: false when it would skip the draw or run
+    // a pass of its own (fast clear elimination, resolve, depth/stencil copy).
+    return DrawSelectsPipeline(Regs());
 }
 
 void Rasterizer::Draw(bool is_indexed, u32 index_offset, const PreparedDraw* prepared) {

@@ -1777,6 +1777,39 @@ besides the fault recovery: the job is thrown out and the GPU thread translates 
 whose job was done and still untaken 2 s after it was queued is not queued again this session (the
 first eight named in the log; "never taken" in the Shaders line); the registry's entries go after 10 s.
 
+**Its run (2026-11-25, `d09d8caa`, engine id 116): no crash; the check refused the cache, wrongly.**
+
+- **The check ran** and refused: "translated differently by this engine (0x00000000006c079b_0: record
+  format changed; 0 the same before it)", then the rebuild (673 shaders, 0 left out, 1.3 s) and 527 of
+  527 pipelines built at the start. The SPIR-V and the specialization were the same; the record read back
+  and written again was not. The cause: `PersistentSrtInfo::Serialize` writes its struct's bytes as they
+  are, and the struct starts with the resource-table walker's address (`walker_func`), an address in the
+  process that translated the shader. Reading a record registers the walker's code again at a new
+  address, so no record with a walker can come back the same bytes, whatever the engine: the check would
+  have refused every cache, every update.
+- **Translate-ahead:** in the minute a new area's shaders came, 27 stages were translated ahead and used
+  (vertex 9, pixel 18; 47.7 ms of translating off the GPU command thread, which waited for 7 of them,
+  9.6 ms in all) and 10 vertex stages translated on the GPU thread as before (6 of them variants); one
+  refused. With the cache warm, nothing was translated on the GPU thread.
+- **Requests never taken:** eight pixel shaders' variants, then 10,972-53,367 requests a minute for them
+  (about one to four a frame), none queued again. These shaders draw ordinary passes in the GPU timings;
+  their variants never seen there. The cause, read in the code: the GPU command thread looks up no
+  pipeline for the draws `FilterDraw` handles itself (fast clear elimination, FMASK decompression,
+  resolve, no primitive type, depth/stencil copy), but the prep workers prepared every draw. A pass such
+  as a fast clear elimination, drawn with the previous pass's pixel shader still bound against another
+  target, makes a variant the GPU thread never translates; the worker asked for it at every frame.
+  The guess written for 115 (a worker's view differing from the GPU thread's) was wrong.
+- Frame rate in play 160-285 FPS a report (most 190-250), as before; a clean exit.
+
+**Fixed (engine id 117):** the walker's address is written as zero (its other bytes as they are), so a
+record read back and written again is the same bytes; `--verify-cache` also accepts records written
+before 117 that differ from their copy in that address only (one span of at most 8 bytes, zero in the
+copy), so 117's first start should keep the cache 116 rebuilt (a rebuild here is 1.3 s and loses
+nothing; the check matters for caches with shaders that have no state, such as 0.4.5's). The prep workers leave the draws the GPU thread looks up no pipeline for
+(`DrawSelectsPipeline`, shared with `Rasterizer::FilterDrawPasses`), counted on the Draw preparation
+line ("left to the GPU thread's own passes"). Its run should show the cache "kept whole" and "never
+taken 0".
+
 ### The 0.4.6 release
 
 - **Switches:** each beta's switches, and `BB_COPY_HOLD` and `BB_COPY_MERGE` (kept through 0.4.5

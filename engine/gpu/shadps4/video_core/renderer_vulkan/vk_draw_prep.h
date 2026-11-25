@@ -31,6 +31,12 @@
 
 namespace Vulkan {
 
+/// FilterDraw's checks without its side effects, on any register state: false when the GPU thread
+/// skips the draw or runs a pass of its own for it (fast clear elimination, FMASK decompression,
+/// resolve, no primitive type, depth/stencil copy), so it never looks up a pipeline for it
+/// (Rasterizer::Draw). 0.4.6 beta 17: the draw-preparation workers leave those draws too.
+bool DrawSelectsPipeline(const AmdGpu::Regs& regs);
+
 struct PreparedStage {
     const Program* program;
     u64 hash;
@@ -162,6 +168,9 @@ public:
 private:
     u32 current_draw = 0;
     u64 used = 0, unused = 0;
+    /// Draws the workers left because the GPU thread looks up no pipeline for them
+    /// (DrawSelectsPipeline; 0.4.6 beta 17), since the last report.
+    std::atomic<u64> passes_left{0};
     u32 worker_count = 0; ///< fixed before the worker threads start
     std::jthread scanner;
     std::vector<std::jthread> workers;

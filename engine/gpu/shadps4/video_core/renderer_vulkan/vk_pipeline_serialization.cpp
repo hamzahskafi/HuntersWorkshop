@@ -1,7 +1,10 @@
 // SPDX-FileCopyrightText: Copyright 2025-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <array>
 #include <chrono>
+#include <cstddef>
+#include <cstring>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -944,7 +947,13 @@ bool Gcn::FetchShaderData::Deserialize(Serialization::Archive& ar) {
 void PersistentSrtInfo::Serialize(Serialization::Archive& ar) const {
     Serialization::Writer srt{ar};
 
-    srt.Write(this, sizeof(*this));
+    // bbport (0.4.6 beta 17): the walker's address belongs to the process that translated the shader
+    // (Deserialize registers the code again and sets it), so it is written as zero: a record read back
+    // and written again is the same bytes (bb-shader-lab --verify-cache compares them). The rest as held.
+    std::array<u8, sizeof(*this)> bytes;
+    std::memcpy(bytes.data(), this, sizeof(*this));
+    std::memset(bytes.data() + offsetof(PersistentSrtInfo, walker_func), 0, sizeof(walker_func));
+    srt.Write(bytes.data(), bytes.size());
     if (walker_func_size) {
         srt.Write(reinterpret_cast<void*>(walker_func), walker_func_size);
     }

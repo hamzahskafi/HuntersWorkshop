@@ -922,8 +922,26 @@ int RecompileBatch(const fs::path& dir, size_t start, const fs::path& only, bool
             }
             stored_spec.info = &stored_info;
             const auto again = Vulkan::SerializeShaderMeta(stored_info, stored_spec, HashCombine(pgm, u64(perm)), perm);
-            if (again.size() != meta_bytes.size() ||
-                std::memcmp(again.data(), meta_bytes.data(), again.size()) != 0) {
+            if (again.size() != meta_bytes.size()) {
+                out("record format changed (its size)");
+                continue;
+            }
+            // A record written before engine id 117 holds the walker's address in the process that wrote
+            // it (PersistentSrtInfo::Serialize writes zero since): one span of at most 8 bytes, zero in
+            // the record written again, may differ. Anything else is a change in how records are stored.
+            size_t first = again.size(), last = 0;
+            for (size_t b = 0; b < again.size(); ++b) {
+                if (u8(again[b]) != u8(meta_bytes[b])) {
+                    first = std::min(first, b);
+                    last = b;
+                }
+            }
+            const bool only_address =
+                first == again.size() ||
+                (last - first < 8 && std::all_of(again.begin() + std::ptrdiff_t(first),
+                                                 again.begin() + std::ptrdiff_t(last) + 1,
+                                                 [](auto byte) { return u8(byte) == 0; }));
+            if (!only_address) {
                 out("record format changed");
                 continue;
             }

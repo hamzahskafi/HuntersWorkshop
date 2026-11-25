@@ -478,6 +478,16 @@ void DrawPreparation::WorkerLoop(std::stop_token stop, u32 index) {
                 prep_worker.ahead.clear();
                 prep_worker.ahead_closed = false;
                 sel.draw_indirect_params = {};
+                // 0.4.6 beta 17: a draw the GPU thread looks up no pipeline for (a pass of its own,
+                // or skipped) is not prepared: its stages, never translated there, would be queued
+                // ahead at every frame and never taken (the "never taken" of the shader report).
+                if (!DrawSelectsPipeline(*regs)) {
+                    passes_left.fetch_add(1, std::memory_order_relaxed);
+                    runtime_fault_recover = nullptr;
+                    draw.state.store(PreparedDraw::Unavailable, std::memory_order_release);
+                    ++ordinal;
+                    return;
+                }
                 if (pipeline_cache.PrepareGraphicsPipeline(sel)) {
                     draw.reg_checksum = checksum;
                     draw.key = sel.graphics_key;
@@ -535,9 +545,10 @@ void DrawPreparation::Count(bool was_used) {
     }
     window = now;
     std::printf("Draw preparation: %llu prepared pipelines used, %llu not (%u workers, "
-                "%llu scanner rebases)\n",
+                "%llu scanner rebases); left to the GPU thread's own passes %llu\n",
                 static_cast<unsigned long long>(used), static_cast<unsigned long long>(unused),
-                worker_count, static_cast<unsigned long long>(rebases));
+                worker_count, static_cast<unsigned long long>(rebases),
+                static_cast<unsigned long long>(passes_left.exchange(0, std::memory_order_relaxed)));
     used = unused = 0;
 }
 
