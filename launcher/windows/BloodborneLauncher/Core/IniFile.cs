@@ -22,7 +22,7 @@ namespace BloodborneLauncher.Core
             ("fsr_version", "auto"),
             ("preset", "auto"),
             ("sharpen", "0"), // 0.4.6 beta 16 (the tester): off by default; Load switches the old default off once
-            ("sharpening", "50"), // 0.4.6 beta 16 (the tester): a percentage of RCAS's maximum (was sharpness)
+            ("sharpening", "25"), // 0.4.6 beta 16 (the tester): a percentage of RCAS's maximum (was sharpness)
             ("object_motion", "1"),
             ("show_fps", "0"),
             ("compile_note", "1"),
@@ -89,7 +89,7 @@ namespace BloodborneLauncher.Core
             // shown as it, the file left as it is until something is saved.
             if (_values.TryGetValue("upscaler", out var upscaler) && upscaler is "fsr3" or "fsr4" or "fsr411")
                 _values["upscaler"] = "fsr";
-            // 0.4.6 beta 16 (the tester): the strength is a percentage of RCAS's maximum (`sharpening`, 50
+            // 0.4.6 beta 16 (the tester): the strength is a percentage of RCAS's maximum (`sharpening`, 25
             // by default) in place of AMD's sharpness (`sharpness`): an old value kept as the same
             // strength, the old default (0.20) made the new one, the old line removed at the next save;
             // as the engine does (bbport_settings.h, SharpeningFromOld).
@@ -126,10 +126,10 @@ namespace BloodborneLauncher.Core
         }
 
         /// <summary>0.4.6 beta 16: the percentage for an old `sharpness` (bbport_settings.h,
-        /// SharpeningFromOld): 0.20, the old default, the new default 50; another value the strength the
+        /// SharpeningFromOld): 0.20, the old default, the new default 25; another value the strength the
         /// first beta 16 build gave it (2 - 2s stops below RCAS's maximum); 1 and above 100, 0 or less 0.</summary>
         public static int SharpeningFromOld(double s) =>
-            !(s > 0) ? 0 : s > 0.199 && s < 0.201 ? 50 : s >= 1 ? 100 : (int)(100 * Math.Pow(2, 2 * s - 2) + 0.5);
+            !(s > 0) ? 0 : s > 0.199 && s < 0.201 ? 25 : s >= 1 ? 100 : (int)(100 * Math.Pow(2, 2 * s - 2) + 0.5);
 
         /// <summary>0.4.6 beta 16: config.ini's sign that the old sharpening default was switched off.</summary>
         public const string SharpenOffMarker = "sharpen_off_046";

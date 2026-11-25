@@ -170,10 +170,10 @@ struct Values {
     std::atomic<int> upscaler{UpscalerOff}; // 0.4.4 beta 28 (the tester): the game's own AA by default
     std::atomic<int> preset{PresetAuto};
     // 0.4.6 beta 16: off by default (the tester's choice). Its strength (`sharpening`) is a percentage
-    // of RCAS's maximum, 0-100, 50 by default (the tester), kept for when it is turned on; it replaces
-    // `sharpness` (SharpeningFromOld).
+    // of RCAS's maximum, 0-100, 25 by default (the tester: a starting point), kept for when it is turned
+    // on; it replaces `sharpness` (SharpeningFromOld).
     std::atomic<bool> sharpen{false};
-    std::atomic<int> sharpening{50};
+    std::atomic<int> sharpening{25};
     std::atomic<bool> jitter{true};
     std::atomic<bool> reactive{false};
     std::atomic<bool> object_motion{true};
@@ -322,14 +322,14 @@ inline float HdrPeakNits(const Values& v) {
     return peak < HdrPeakMin ? HdrPeakMin : peak > HdrPeakMax ? HdrPeakMax : peak;
 }
 /// 0.4.6 beta 16: the percentage (`sharpening`) for a file's old `sharpness`: the old default left as
-/// it was, 0.20, becomes the new default, 50; another value the strength the first beta 16 build gave
+/// it was, 0.20, becomes the new default, 25; another value the strength the first beta 16 build gave
 /// it (AMD's mapping: 2 - 2s stops below the maximum; 1 and above the maximum), 0 or less 0.
 inline int SharpeningFromOld(float s) {
     if (!(s > 0.0f)) {
         return 0;
     }
     if (s > 0.199f && s < 0.201f) {
-        return 50;
+        return 25;
     }
     if (s >= 1.0f) {
         return 100;

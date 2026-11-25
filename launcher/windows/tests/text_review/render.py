@@ -44,7 +44,7 @@ DETAIL = ['effect_dynamic_shadows', 'effect_ssao', 'effect_ssr']; LOOK = ['effec
 EXTRAS = ['skip_intro', 'debug_camera', 'debug_menu']
 FIXES = ['BB_RESPAWN_DELAY_FIX', 'BB_SOUND_HACK', 'BB_OPTISCALER_COMPAT', 'BB_EFFECT_FIXES', 'BB_PS4_FPU', 'BB_RED_ZONE_FUNCTIONS',
          'BB_INTEL_TONEMAP_FIX', 'BB_SKIP_GAME_CHECK']
-EXTRA_NOW = {('Graphics', 'Sharpening (RCAS)'): "Line set by the upscaler: DLSS \"After DLSS\", AMD FSR \"After FSR (its own is off)\", TAA \"After TAA\", none \"Needs an upscaler or TAA\"",
+EXTRA_NOW = {('Graphics', 'Sharpening (RCAS)'): "\"Needs an upscaler or TAA\" with neither",
              ('Graphics', 'Sharpening strength'): "\"Higher is sharper\"",
              ('Graphics', 'DLSS model'): "Status line with Auto: \"Auto: model K at this quality\" (the model Auto picks)",
              ('Graphics', 'Anti-aliasing'): "With an upscaler the box shows \"Upscaler (DLSS)\" (or AMD FSR), greyed",

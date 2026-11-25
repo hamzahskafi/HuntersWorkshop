@@ -238,6 +238,11 @@ Gate: no new problem; part 3 seen working; the A/B read.
   the first build: the scaled path's sharpening in the copy into the UI image (one pass for three),
   the 1080p path's TAA sharpened in the merge (its own pass not run), and the log's line written
   once a change has held for a second (no formatting each frame).
+- *The second run (`64880ba6`, engine id 107) and after it (engine id 108):* AMD's checks clean; the
+  sharpening without measurable cost (186-188 FPS off and at 20, 50 and 100% in one spot); faults only
+  after the load, as before. The tester: 25% by default, a starting point; the rows say "RCAS" and name
+  no vendor, with no line per upscaler. A run at an output other than 1080p is still needed to see the
+  scaled path's copy at work ("Upscaler: the UI image is ...").
 - *Next for the faults (to design for the tester's review):* follow the allocator behind YEBIS's
   function pointer: read what the game installs there and who else calls it, hook it as YEBIS's
   allocators are, and name the faulting images by who asked for their memory; then step 2 for that

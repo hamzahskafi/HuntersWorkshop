@@ -356,25 +356,19 @@ without thread support although the movie player uses it from three threads.
 
 ## Sharpening: one meaning, off by default (beta 16)
 
-The sharpening slider meant different things under each upscaler: under AMD FSR it was AMD's own
-sharpening up to 1 and an extra pass above, under DLSS and TAA the engine's pass blended in, so 0.20
-was about five times weaker there. And on the 1080p picture AMD FSR's own sharpening worked on the
-game's linear light, so it sharpened about half as much on strong edges and not at all beside bright
+The sharpening slider meant different things depending on the upscaler, so the same value could be
+five times stronger under one than another, and on the 1080p picture it barely touched bright
 highlights. Now:
 
-- **One sharpening for every upscaler**, the engine's, after AMD FSR, DLSS and TAA alike (AMD FSR's
-  own is turned off): AMD's RCAS on a picture encoded as the eye sees it, which is what RCAS is
-  designed for. Highlights are sharpened as well, and kept from flaring. It costs almost nothing: at
-  1080p it is done in a step that runs anyway, and at other output sizes in the copy of the picture
-  that runs anyway.
-- **The strength is a percentage** of AMD's strongest sharpening: 0% is none, 100% the strongest,
-  50% (the default) half of it. Your old strength is kept as the same strength (the old default,
-  0.20, becomes 50%).
-- **Off by default**, as AMD and NVIDIA leave sharpening to the player. If your settings still had
-  the old default (on, at 0.20), it is switched off once; any other choice you made is kept.
-- `BB_SHARPEN_FSR_OWN=1` in Extra variables uses AMD FSR's own sharpening instead, for comparison.
+- **One sharpening for every upscaler and TAA**: RCAS, on a picture encoded as the eye sees it,
+  which is what RCAS is designed for. Highlights are sharpened as well, and kept from flaring. It
+  costs no measurable frame rate: it runs inside steps the engine does anyway.
+- **The strength is a percentage**: 0% is none, 100% the strongest, and twice the percentage is
+  about twice the sharpening. A strength you set before is kept as the same strength.
+- **Off by default.** If your settings still had the old default (on, at 0.20), it is switched off
+  once; any other choice you made is kept.
 
-The reactive mask's line in the in-game menu now says whether the AMD FSR version running reads the
+The reactive mask's line in the in-game menu now says whether the FSR version running reads the
 mask, by FSR's own answer (FSR 4.1.2 does not), instead of "FSR 4 may".
 
 ## Diagnostics
@@ -384,6 +378,9 @@ mask, by FSR's own answer (FSR 4.1.2 does not), instead of "FSR 4 may".
   finds newly uncovered areas and how much it trusts its history. AMD FSR only; turning it on or off
   restarts FSR in the background for a moment; not saved. `BB_AMD_FSR_DEBUG=1` in Extra variables turns
   on AMD's own checks of what the engine gives FSR (any finding in the log).
+
+- **Sharpening for comparison** (beta 16): `BB_SHARPEN_FSR_OWN=1` in Extra variables has FSR sharpen
+  with its own sharpening instead, at the same percentage, for side-by-side comparisons.
 
 - **For the remaining texture write faults** (beta 16): a line a minute names the memory under the
   textures that still fault, and which of YEBIS's functions asked for it, to find their owner in the

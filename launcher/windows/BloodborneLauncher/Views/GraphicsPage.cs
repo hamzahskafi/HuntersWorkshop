@@ -128,15 +128,15 @@ namespace BloodborneLauncher.Views
             // Sharpening: its line says where it runs, for what runs (UpdateUpscaler; 27d, the tester).
             IniToggle(SymbolRegular.Eyedropper24, L.T("Sharpening (RCAS)"), null, "sharpen", changed: UpdateUpscaler);
             _sharpenCard = LastRow;
-            _sharpenCard.SetTip(L.T("AMD's RCAS. Brings back detail that upscaling softens."));
-            // 0.4.6 beta 16 (the tester): a percentage of RCAS's maximum, 50% by default (the engine's
-            // sharpening after every upscaler).
+            _sharpenCard.SetTip(L.T("Brings back detail that upscaling softens."));
+            // 0.4.6 beta 16 (the tester): a percentage of RCAS's maximum, 25% by default (a starting
+            // point).
             SliderRow(SymbolRegular.SlideSize24, L.T("Sharpening strength"), null, 0, 100, 1,
-                () => ParseDouble(Ini.Get("sharpening"), 50),
+                () => ParseDouble(Ini.Get("sharpening"), 25),
                 v => Ini.Set("sharpening", ((int)Math.Round(v)).ToString(System.Globalization.CultureInfo.InvariantCulture)),
-                "0'%'", defaultValue: 50);
+                "0'%'", defaultValue: 25);
             _sharpnessCard = Nest();
-            _sharpnessCard.SetTip(L.T("100% is AMD's strongest. High values can halo edges and show grain."));
+            _sharpnessCard.SetTip(L.T("100% is the strongest. High values can halo edges and show grain."));
 
             // The fine settings most players leave alone (27d: two; DLSS's sharper textures folded into the
             // bias, auto exposure as NVIDIA and AMD advise, without a row).
@@ -311,16 +311,9 @@ namespace BloodborneLauncher.Views
             _sharpnessCard.IsEnabled = temporal && Ini.Flag("sharpen"); // as in game
             _mipBiasCard.IsEnabled = upscaling;
             _motionVectors.IsEnabled = temporal;
-            // Where the sharpening runs, for what runs. 0.4.6 beta 16: the engine's pass after each of
-            // them, AMD FSR's own off (until beta 15 FSR sharpened up to 1 itself and the pass added the
-            // rest, to 2).
-            _sharpenCard.SetInfo(value switch
-            {
-                "dlss" => L.T("After DLSS"),
-                "fsr" => L.T("After FSR (its own is off)"),
-                "taa" => L.T("After TAA"),
-                _ => L.T("Needs an upscaler or TAA"),
-            });
+            // 0.4.6 beta 16 (the tester): no line per upscaler (the same sharpening runs after each); only
+            // why the row is off without one.
+            _sharpenCard.SetInfo(temporal ? null : L.T("Needs an upscaler or TAA"));
             _sharpnessCard.SetInfo(L.T("Higher is sharper"));
             _fsrRow.Visibility = value == "fsr" ? Visibility.Visible : Visibility.Collapsed;
             if (value == "fsr") ShowFsrVersions();

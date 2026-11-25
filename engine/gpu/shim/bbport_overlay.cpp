@@ -1026,37 +1026,33 @@ void UpscalerSection() {
     }
     ImGui::Unindent();
     const bool temporal = s.upscaler != BbSettings::UpscalerOff; // an upscaler or TAA
-    // Sharpening after an upscaler or TAA, its strength under it. 0.4.4 beta 27d (the tester): their
-    // hints say where it runs for what runs, as the launcher's lines. 0.4.6 beta 16: one pass after
-    // each of them, the engine's (rcas_extra.glsl), FSR's own off; 0..1, AMD's own range.
-    const char* where = s.upscaler == BbSettings::UpscalerDlss  ? BbSettings::MenuText("After DLSS.", "После DLSS.")
-                        : s.upscaler == BbSettings::UpscalerFsr ? BbSettings::MenuText("After FSR (its own is off).",
-                                                                                       "После FSR (его собственная резкость выключена).")
-                        : s.upscaler == BbSettings::UpscalerTaa ? BbSettings::MenuText("After TAA.", "После TAA.")
-                                                                : BbSettings::MenuText("Needs an upscaler or TAA.",
-                                                                                       "Нужен апскейлер или TAA.");
+    // Sharpening after an upscaler or TAA, its strength under it: 0.4.6 beta 16, the engine's RCAS after
+    // each of them (rcas_extra.glsl), a percentage. The tester: no line per upscaler, no vendor named;
+    // only why the row is off without one.
     ImGui::BeginDisabled(!temporal);
     if (const char* label = Item("Sharpening (RCAS)")) {
         Checkbox(label, s.sharpen);
         char hint[384];
-        std::snprintf(hint, sizeof(hint), "%s %s", where,
-                      BbSettings::MenuText("AMD's RCAS: brings back detail that upscaling softens.",
-                                           "RCAS от AMD: возвращает детали, которые смягчает апскейлинг."));
+        std::snprintf(hint, sizeof(hint), "%s%s%s",
+                      temporal ? "" : BbSettings::MenuText("Needs an upscaler or TAA.", "Нужен апскейлер или TAA."),
+                      temporal ? "" : " ",
+                      BbSettings::MenuText("Brings back detail that upscaling softens.",
+                                           "Возвращает детали, которые смягчает апскейлинг."));
         Hint(hint);
     }
     ImGui::Indent();
     if (const char* label = Item("Sharpening strength", "Сила резкости")) {
         ImGui::BeginDisabled(!s.sharpen);
-        // 0.4.6 beta 16 (the tester): a percentage of RCAS's maximum, 50% by default.
+        // 0.4.6 beta 16 (the tester): a percentage of RCAS's maximum (25% by default: a starting point).
         int percent = std::clamp(s.sharpening.load(), 0, 100);
         const bool changed = ImGui::SliderInt(label, &percent, 0, 100, "%d%%", ImGuiSliderFlags_AlwaysClamp);
         Store(s.sharpening, std::clamp(percent, 0, 100), changed);
         ImGui::EndDisabled();
         char hint[384];
         std::snprintf(hint, sizeof(hint), "%s %s", BbSettings::MenuText("Higher is sharper.", "Чем выше, тем резче."),
-                      BbSettings::MenuText("100% is AMD's strongest; high values can halo edges and show grain. "
+                      BbSettings::MenuText("100% is the strongest; high values can halo edges and show grain. "
                                            "Ctrl+click to type a value.",
-                                           "100% — максимум AMD; высокие значения дают ореолы по краям и зерно. "
+                                           "100% — максимум; высокие значения дают ореолы по краям и зерно. "
                                            "Ctrl+щелчок — ввести значение."));
         Hint(hint);
     }

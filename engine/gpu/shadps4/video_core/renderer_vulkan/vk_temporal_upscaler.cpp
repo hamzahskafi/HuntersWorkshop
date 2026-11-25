@@ -1189,15 +1189,15 @@ void TemporalUpscaler::ReportSharpening(float strength, u32 encoding) {
     }
     sharpen_said = true;
     static constexpr const char* kHolds[] = {
-        "the HDR scene, through AMD's reversible tone mapper and gamma 2.0",
-        "linear light, in gamma 2.0", "the display-encoded frame"};
+        "the HDR scene (tone mapped reversibly, gamma 2.0)", "linear light (gamma 2.0)",
+        "the display-encoded frame"};
     const std::string who = BackendName();
     if (state.fsr_own) {
         std::printf("Upscaler: sharpening: AMD FSR's own RCAS at %d%% (BB_SHARPEN_FSR_OWN=1; AMD's "
                     "sharpness %.2f), on the light it upscales\n",
                     percent, FsrSharpness(percent));
     } else if (state.percent > 0) {
-        std::printf("Upscaler: sharpening: the engine's RCAS at %d%% of its maximum after %s, on %s\n",
+        std::printf("Upscaler: sharpening: RCAS at %d%% after %s, on %s\n",
                     state.percent, who.c_str(), kHolds[std::min(encoding, 2u)]);
     } else {
         std::printf("Upscaler: sharpening: off (%s)\n", who.c_str());

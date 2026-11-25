@@ -62,8 +62,10 @@ The sections after this one are the record of the work from the first frame anal
 - **DLSS's model** (`dlss_preset`): Auto from 0.4.4 beta 27c (NVIDIA's pairing: K for DLAA, Quality and
   Balanced, M for Performance, L for Ultra Performance), was K; J, K, L, M or the DLL's default.
 - **Sharpening** (0.4.6 beta 16, the tester's go-ahead 2026-11-25): `sharpen` (off by default) and
-  `sharpening` (a percentage of RCAS's maximum, 0-100%, 50% by default, the tester's choice after
-  the first run; kept for when it is turned on). One pass for every upscaler and TAA, the engine's
+  `sharpening` (a percentage of RCAS's maximum, 0-100%, 25% by default: a starting point, the
+  tester; 50% in engine id 107; kept for when it is turned on). The menu's and the launchers' rows
+  name no vendor and give no line per upscaler (the tester: it is RCAS, the same after each); only
+  why the row is off without an upscaler or TAA. One pass for every upscaler and TAA, the engine's
   (`host_shaders/rcas_extra.glsl`): AMD's RCAS (FSR 1's `FsrRcasF`, with its noise detection),
   applied in full, its lobe scaled by the percentage (linear: 0% none, 100% AMD's maximum; AMD's
   `FsrRcasCon` takes the same as stops below the maximum, and FSR 2 and 3 map their sharpness s to
@@ -87,9 +89,10 @@ The sections after this one are the record of the work from the first frame anal
   one, scaled down whole (AMD's ceiling, 1, is infinite light there: where one channel stands out
   of its ring RCAS lifts it toward 1 and the inverse multiplies the whole pixel, a blue of 0.47 out
   at 12; grey and tinted edges never reach the cap); a pixel RCAS leaves is returned exactly as
-  read. One log line once a change has held for a second ("Upscaler: sharpening: the engine's RCAS
-  at 50% of its maximum after FSR 4.1.2, on the HDR scene, ..."; the first build wrote one a slider
-  step, 1,272 lines in the tester's `4bc9ea19`). Until beta 15 the slider ran 0-2 and meant
+  read. One log line once a change has held for a second ("Upscaler: sharpening: RCAS at 25% after
+  FSR 4.1.2, on the HDR scene (tone mapped reversibly, gamma 2.0)"; the first build wrote one a
+  slider step, 1,272 lines in the tester's `4bc9ea19`). No measurable cost: in the tester's
+  `64880ba6` the same spot ran at 186-188 FPS off and at 20, 50 and 100%. Until beta 15 the slider ran 0-2 and meant
   different things: under AMD FSR its own RCAS up to 1 (on linear light on the 1080p path: about
   half the sharpening on strong edges, none beside a value above 1) and the engine's pass above 1;
   under DLSS and TAA the engine's pass blended in at s (so 0.20 was about a fifth of FSR's 0.20),
@@ -99,7 +102,7 @@ The sections after this one are the record of the work from the first frame anal
   Off by default in the engine, both launchers and the shipped settings; a `config.ini` with the old
   default untouched (on, at 0.20) is switched off once, any other choice kept (`sharpen_off_046`,
   written by the engine's and the launcher's saves); an old `sharpness` becomes `sharpening` (0.20,
-  the old default, 50%; another value the same strength, 100 x 2^(2s - 2); the line replaced in
+  the old default, 25%; another value the same strength, 100 x 2^(2s - 2); the line replaced in
   place), the Linux launcher's 0.5 fallback gone with it. The HDR encoding's research: the 1080p
   scene is almost all below 1 (the tester's `4bc9ea19`: 0.01-0.15% of pixels above 1 a minute, at
   most 0.29% in a frame, above 4 at most 0.001%, the brightest 2.6-23.3), so the tone mapper matters

@@ -508,16 +508,16 @@ int main() {
     assert(!BbSettings::GameAaApplies(false, BbSettings::UpscalerOff));
     {
         // 0.4.6 beta 16 (the tester): sharpening off by default, its strength a percentage of RCAS's
-        // maximum (50 by default). The old default untouched (on, at 0.20) switched off once and made
-        // 50; any other old strength kept as the same strength; the new key wins over the old.
+        // maximum (25 by default). The old default untouched (on, at 0.20) switched off once and made
+        // 25; any other old strength kept as the same strength; the new key wins over the old.
         const auto load = [&](const char* text) {
             { std::ofstream file(path); file << text; assert(file.good()); }
             BbSettings::Load();
         };
         load("sharpen=1\nsharpness=0.20\n");
-        assert(!s.sharpen && s.sharpening == 50);
+        assert(!s.sharpen && s.sharpening == 25);
         load("sharpness=0.20\nsharpen=1\n");
-        assert(!s.sharpen && s.sharpening == 50);
+        assert(!s.sharpen && s.sharpening == 25);
         s.sharpening = 7;
         load("sharpen=1\n"); // an old file without the strength: the old default too
         assert(!s.sharpen);
@@ -530,9 +530,9 @@ int main() {
         load("sharpen=1\nsharpness=0\n");
         assert(s.sharpen && s.sharpening == 0);
         load("sharpen=0\nsharpness=0.20\n");
-        assert(!s.sharpen && s.sharpening == 50);
+        assert(!s.sharpen && s.sharpening == 25);
         load("sharpen=1\nsharpness=0.20\nsharpen_off_046=1\n");
-        assert(s.sharpen && s.sharpening == 50);
+        assert(s.sharpen && s.sharpening == 25);
         load("sharpen=1\nsharpening=35\nsharpness=0.90\n");
         assert(s.sharpen && s.sharpening == 35);
         load("sharpen=1\nsharpening=250\n");
@@ -543,12 +543,12 @@ int main() {
         assert(!s.sharpen);
         s.sharpen = true;
         BbSettings::Save();
-        assert(Read(path).find("sharpen=1\nsharpening=50\n") == 0);
+        assert(Read(path).find("sharpen=1\nsharpening=25\n") == 0);
         assert(Read(path).find("sharpness") == std::string::npos);
         assert(Read(path).find("\nsharpen_off_046=1\n") != std::string::npos);
         s.sharpen = false;
         BbSettings::Load();
-        assert(s.sharpen && s.sharpening == 50);
+        assert(s.sharpen && s.sharpening == 25);
         // The old line and the new one both there: one line, the new one's value.
         load("sharpening=40\nsharpness=0.80\n");
         BbSettings::Save();
