@@ -1,0 +1,47 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// Hunter's Workshop 0.4.6 beta 16 (research, for the sharpening's encoding of the HDR scene in
+// rcas_extra.glsl): how much of the 1080p path's upscaled scene has its brightest channel above 1,
+// 2, 4 and 16, how much is not finite, and its brightest value. One pixel in 16 (every fourth of
+// every fourth row), counted per workgroup in shared memory, then into the buffer the engine reads
+// (TemporalUpscaler::RecordSceneRange).
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(binding = 0, rgba16f) uniform readonly image2D scene;
+// Pixels sampled, above 1, 2, 4 and 16, not finite, and the brightest (a float's bits: positive
+// floats order as their bits do). Zeroed before the pass.
+layout(binding = 1, std430) buffer Counts {
+    uint counts[7];
+};
+
+shared uint group[7];
+
+void main() {
+    const uint lane = gl_LocalInvocationIndex;
+    if (lane < 7u) {
+        group[lane] = 0u;
+    }
+    barrier();
+    const ivec2 pixel = ivec2(gl_GlobalInvocationID.xy) * 4;
+    if (all(lessThan(pixel, imageSize(scene)))) {
+        const vec3 c = imageLoad(scene, pixel).rgb;
+        const float brightest = max(c.r, max(c.g, c.b));
+        atomicAdd(group[0], 1u);
+        if (isnan(c.r) || isnan(c.g) || isnan(c.b) || isinf(brightest)) {
+            atomicAdd(group[5], 1u);
+        } else {
+            if (brightest > 1.0) atomicAdd(group[1], 1u);
+            if (brightest > 2.0) atomicAdd(group[2], 1u);
+            if (brightest > 4.0) atomicAdd(group[3], 1u);
+            if (brightest > 16.0) atomicAdd(group[4], 1u);
+            if (brightest > 0.0) atomicMax(group[6], floatBitsToUint(brightest));
+        }
+    }
+    barrier();
+    if (lane < 6u) {
+        if (group[lane] != 0u) atomicAdd(counts[lane], group[lane]);
+    } else if (lane == 6u) {
+        atomicMax(counts[6], group[6]);
+    }
+}

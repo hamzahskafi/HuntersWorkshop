@@ -1027,12 +1027,11 @@ void UpscalerSection() {
     ImGui::Unindent();
     const bool temporal = s.upscaler != BbSettings::UpscalerOff; // an upscaler or TAA
     // Sharpening after an upscaler or TAA, its strength under it. 0.4.4 beta 27d (the tester): their
-    // hints say where it runs for what runs, as the launcher's lines: FSR sharpens up to 1 itself and an
-    // RCAS pass adds the rest; DLSS has none of its own, so the pass does it all; TAA's runs after it.
-    const bool fsr = s.upscaler == BbSettings::UpscalerFsr;
-    const char* where = s.upscaler == BbSettings::UpscalerDlss
-                            ? BbSettings::MenuText("After DLSS (it has none of its own).", "После DLSS (своей у него нет).")
-                        : fsr ? BbSettings::MenuText("FSR's own sharpening.", "Собственная резкость FSR.")
+    // hints say where it runs for what runs, as the launcher's lines. 0.4.6 beta 16: one pass after
+    // each of them, the engine's (rcas_extra.glsl), FSR's own off; 0..1, AMD's own range.
+    const char* where = s.upscaler == BbSettings::UpscalerDlss  ? BbSettings::MenuText("After DLSS.", "После DLSS.")
+                        : s.upscaler == BbSettings::UpscalerFsr ? BbSettings::MenuText("After FSR (its own is off).",
+                                                                                       "После FSR (его собственная резкость выключена).")
                         : s.upscaler == BbSettings::UpscalerTaa ? BbSettings::MenuText("After TAA.", "После TAA.")
                                                                 : BbSettings::MenuText("Needs an upscaler or TAA.",
                                                                                        "Нужен апскейлер или TAA.");
@@ -1048,12 +1047,10 @@ void UpscalerSection() {
     ImGui::Indent();
     if (const char* label = Item("Sharpening strength", "Сила резкости")) {
         ImGui::BeginDisabled(!s.sharpen);
-        Slider(label, s.sharpness, 0.0f, 2.0f);
+        Slider(label, s.sharpness, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
         ImGui::EndDisabled();
         char hint[384];
-        std::snprintf(hint, sizeof(hint), "%s %s",
-                      fsr ? BbSettings::MenuText("Above 1 adds a second pass.", "Выше 1 добавляется второй проход.")
-                          : BbSettings::MenuText("Higher is sharper.", "Чем выше, тем резче."),
+        std::snprintf(hint, sizeof(hint), "%s %s", BbSettings::MenuText("Higher is sharper.", "Чем выше, тем резче."),
                       BbSettings::MenuText("0.20 is light; high values can halo edges and show grain. Ctrl+click to "
                                            "type a value.",
                                            "0.20 — слегка; высокие значения дают ореолы по краям и зерно. Ctrl+щелчок — "
@@ -1184,15 +1181,36 @@ void MaskSection() {
         Hint(BbSettings::MenuText(
             "Marks transparent effects (particles, haze) so the upscaler relies less on past "
             "frames. Fewer trails behind effects, but shimmer returns underneath them."));
-        // What the selected upscaler does with it.
-        const char* use = s.upscaler == BbSettings::UpscalerFsr
-                              ? BbSettings::MenuText("AMD FSR takes it as its reactive mask (FSR 3.1 uses it; FSR 4 "
-                                                     "may).",
-                                                     "AMD FSR берёт её как реактивную маску (FSR 3.1 её использует; "
-                                                     "FSR 4 может).")
-                          : dlss
-                              ? BbSettings::MenuText("DLSS does not use it.", "DLSS её не использует.")
-                              : BbSettings::MenuText("TAA does not use it.", "TAA её не использует.");
+        // What the selected upscaler does with it. 0.4.6 beta 16: for AMD FSR, the running version's own
+        // answer (AMD's resource query, asked as its context is made), not a guess by version.
+        char use[256];
+        if (s.upscaler == BbSettings::UpscalerFsr) {
+            const char* fsr = s.fsr_running.load();
+            const char* name = fsr ? fsr : "AMD FSR";
+            switch (s.fsr_reactive.load()) {
+            case BbSettings::FsrReactiveNeeded:
+            case BbSettings::FsrReactiveRead:
+                std::snprintf(use, sizeof(use), BbSettings::MenuText("%s reads it as its reactive mask.",
+                                                                     "%s читает её как реактивную маску."),
+                              name);
+                break;
+            case BbSettings::FsrReactiveUnread:
+                std::snprintf(use, sizeof(use),
+                              BbSettings::MenuText("%s does not read it (it says so itself).",
+                                                   "%s её не читает (так говорит он сам)."),
+                              name);
+                break;
+            default:
+                std::snprintf(use, sizeof(use), "%s",
+                              BbSettings::MenuText("Whether AMD FSR reads it shows here while it runs.",
+                                                   "Читает ли её AMD FSR, видно здесь, пока он работает."));
+                break;
+            }
+        } else {
+            std::snprintf(use, sizeof(use), "%s",
+                          dlss ? BbSettings::MenuText("DLSS does not use it.", "DLSS её не использует.")
+                               : BbSettings::MenuText("TAA does not use it.", "TAA её не использует."));
+        }
         ImGui::PushTextWrapPos();
         ImGui::TextDisabled("%s", use);
         ImGui::PopTextWrapPos();

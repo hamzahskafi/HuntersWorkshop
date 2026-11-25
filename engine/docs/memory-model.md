@@ -1334,6 +1334,22 @@ FSR 4.1.2 at Native AA, about 12 minutes):**
   (1-3 images), over GX's 26 s (470 images, 58 MiB) and later 259 s (4,178 images, 572 MiB).
 - No hand-over needed the new rule (0 a minute).
 
+**Step 1 for those, built the same day (engine id 106; `plan.md`, "Beta 16's last part"):** read in
+the 1.09 executable, YEBIS's device has 1D and 3D texture creators beside its 2D one, but no YEBIS code
+calls them; all three allocate through a helper only they call (`0x11deca0`, `0x11df840`,
+`0x11e1960`), from YEBIS's two allocators (`0x11e6810`, and `0x11e6700` for memory given data), which
+13 functions call in all. Both allocators are hooked now (byte-checked; `BB_YEBIS_ALLOCS=0`: not
+hooked), each allocation's range and the return address that asked for it kept, so:
+
+- a watched image over no game resource that faults is named with the YEBIS allocation under it and
+  who asked for it, or "in no allocation of YEBIS's known";
+- a minute line, "GX memory, YEBIS's allocations this minute", gives the allocations by who asked (the
+  three creators and the function behind the device's wrappers named), the 1D and 3D creators'
+  counts (expected 0), and those faults by who asked for the memory under them.
+
+Nothing else changes. The next run's lines name the owner; step 2 (follow it, leave its images to the
+calls that write them) is designed from that.
+
 ### Beta 17: shaders and pipelines (to research and design)
 
 The rule not met: "shaders are translated when the game creates them, pipelines built during

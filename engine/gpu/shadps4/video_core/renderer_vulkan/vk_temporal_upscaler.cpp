@@ -28,6 +28,7 @@
 #include "video_core/host_shaders/taa_sharpen_comp.h"
 #include "video_core/host_shaders/fsr4_decode_comp.h"
 #include "video_core/host_shaders/fsr4_encode_comp.h"
+#include "video_core/host_shaders/scene_range_comp.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
 #include "video_core/renderer_vulkan/vk_camera_motion.h"
 #include "video_core/renderer_vulkan/vk_frame_capture.h"
@@ -366,6 +367,12 @@ TemporalUpscaler::TemporalUpscaler(const Instance& instance_, Scheduler& schedul
 
 TemporalUpscaler::~TemporalUpscaler() {
     if (resources_ready) scheduler.Finish();
+    if (range_buffer) {
+        if (range_pending) {
+            scheduler.Finish();
+        }
+        vmaDestroyBuffer(instance.GetAllocator(), VkBuffer(range_buffer), range_allocation);
+    }
 }
 
 bool TemporalUpscaler::Active() const {
@@ -566,6 +573,7 @@ bool TemporalUpscaler::OnFrameStart() {
         if (!running) {
             BbSettings::Get().fsr_running.store(nullptr, std::memory_order_relaxed);
             BbSettings::Get().fsr_runs_31.store(false, std::memory_order_relaxed);
+            BbSettings::Get().fsr_reactive.store(BbSettings::FsrReactiveUnknown, std::memory_order_relaxed);
             BbSettings::Get().fsr_running_driver.store(false, std::memory_order_relaxed);
         } else if (const std::string name = amd_fsr->VersionName(); name != shown_name ||
                    !BbSettings::Get().fsr_running.load(std::memory_order_relaxed)) {
@@ -575,6 +583,10 @@ bool TemporalUpscaler::OnFrameStart() {
             next_name = (next_name + 1) % names.size();
             BbSettings::Get().fsr_runs_31.store(amd_fsr->RunsFsr31(), std::memory_order_relaxed);
             BbSettings::Get().fsr_running_driver.store(amd_fsr->RunsDriverVersion(), std::memory_order_relaxed);
+        }
+        if (running) {
+            // 0.4.6 beta 16: its answer on the reactive mask, for the menu (asked as its context is made).
+            BbSettings::Get().fsr_reactive.store(amd_fsr->ReactiveUse(), std::memory_order_relaxed);
         }
     }
     const bool active = Active();
@@ -927,7 +939,8 @@ void TemporalUpscaler::CreatePipelines() {
     // 0.4.4 beta 21: the edge clamp in RGB only (edge_clamp.comp's Params: width, height).
     storage_layout(1, edge_clamp_desc_layout, edge_clamp_pipeline_layout, 2 * sizeof(u32));
     edge_clamp_pipeline = compute(EDGE_CLAMP_COMP, *edge_clamp_pipeline_layout);
-    storage_layout(2, taa_sharpen_desc_layout, taa_sharpen_pipeline_layout, sizeof(float));
+    // 0.4.6 beta 16: the strength and what the image holds (taa_sharpen.comp's Params).
+    storage_layout(2, taa_sharpen_desc_layout, taa_sharpen_pipeline_layout, 2 * sizeof(u32));
     taa_sharpen_pipeline = compute(TAA_SHARPEN_COMP, *taa_sharpen_pipeline_layout);
     storage_layout(1, fsr4_encode_desc_layout, fsr4_encode_pipeline_layout, sizeof(u32));
     {
@@ -950,6 +963,21 @@ void TemporalUpscaler::CreatePipelines() {
         debug_pipeline = compute(UPSCALE_DEBUG_COMP, *debug_pipeline_layout);
     }
     fsr4_encode_pipeline = compute(FSR4_ENCODE_COMP, *fsr4_encode_pipeline_layout);
+    {
+        // 0.4.6 beta 16: RecordSceneRange: the scene (storage image) and its counts (buffer).
+        const std::array<vk::DescriptorSetLayoutBinding, 2> bindings{{
+            {.binding = 0, .descriptorType = vk::DescriptorType::eStorageImage,
+             .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eCompute},
+            {.binding = 1, .descriptorType = vk::DescriptorType::eStorageBuffer,
+             .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eCompute},
+        }};
+        range_desc_layout = Check(device.createDescriptorSetLayoutUnique({
+            .flags = vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptorKHR,
+            .bindingCount = u32(bindings.size()), .pBindings = bindings.data()}));
+        range_pipeline_layout = Check(device.createPipelineLayoutUnique({
+            .setLayoutCount = 1, .pSetLayouts = &*range_desc_layout}));
+        range_pipeline = compute(SCENE_RANGE_COMP, *range_pipeline_layout);
+    }
     {
         const std::array<vk::DescriptorSetLayoutBinding, 2> bindings{{
             {.binding = 0, .descriptorType = vk::DescriptorType::eSampledImage,
@@ -992,7 +1020,7 @@ void TemporalUpscaler::CreatePipelines() {
 }
 
 void TemporalUpscaler::RecordTaa(vk::CommandBuffer cmdbuf, vk::ImageView color,
-                                vk::ImageView depth) {
+                                vk::ImageView depth, u32 encoding) {
     // Make scene writes and the last storage-image history writes visible to sampled reads.
     const vk::MemoryBarrier2 inputs{
         .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
@@ -1077,8 +1105,11 @@ void TemporalUpscaler::RecordTaa(vk::CommandBuffer cmdbuf, vk::ImageView color,
                          sizeof(params), &params);
     cmdbuf.dispatch((out_width + 7) / 8, (out_height + 7) / 8, 1);
     const auto& settings = BbSettings::Get();
-    const float strength = std::clamp(settings.sharpness.load(), 0.0f, 2.0f);
-    if (settings.sharpen && strength > 0.0f && !(params.pad & 0xffu)) {
+    // 0.4.6 beta 16: 0..1, AMD's own range, on what the colour holds (rcas_extra.glsl).
+    const float strength =
+        settings.sharpen ? std::clamp(settings.sharpness.load(), 0.0f, 1.0f) : 0.0f;
+    ReportSharpening("TAA", strength, encoding);
+    if (strength > 0.0f && !(params.pad & 0xffu)) {
         const vk::MemoryBarrier2 resolved{
             .srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
             .srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
@@ -1096,20 +1127,51 @@ void TemporalUpscaler::RecordTaa(vk::CommandBuffer cmdbuf, vk::ImageView color,
         cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, *taa_sharpen_pipeline);
         cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute,
                                     *taa_sharpen_pipeline_layout, 0, sharpen_writes);
+        const struct {
+            float strength;
+            u32 encoding;
+        } sharpen_params{strength, encoding};
         cmdbuf.pushConstants(*taa_sharpen_pipeline_layout, vk::ShaderStageFlagBits::eCompute,
-                             0, sizeof(strength), &strength);
+                             0, sizeof(sharpen_params), &sharpen_params);
         cmdbuf.dispatch((out_width + 7) / 8, (out_height + 7) / 8, 1);
     }
     taa_next = 1 - taa_next;
 }
 
 float TemporalUpscaler::ExtraSharpenAmount() const {
+    // 0.4.6 beta 16: one sharpening for every upscaler, the engine's (rcas_extra.glsl), at AMD's
+    // own 0..1. Until beta 15, AMD FSR's own RCAS sharpened up to 1 and this pass above it, up to
+    // 2, and for DLSS this pass alone (NVIDIA retired DLSS's sharpening): AMD FSR's RCAS works on
+    // the light it upscales, linear on the 1080p path, where it sharpened about half as much on
+    // strong edges and nothing beside a value above 1. BB_SHARPEN_FSR_OWN=1: AMD FSR's own
+    // instead, for comparison (RecordFrameUpscaler).
+    if (fsr_sharpened) {
+        return 0.0f;
+    }
     const auto& settings = BbSettings::Get();
-    // FSR 3 and 4 sharpen up to 1 themselves (RCAS). DLSS has no sharpening of its own (NVIDIA
-    // retired its Sharpness parameter), so for DLSS this pass applies the whole 0..2.
-    const float own = settings.upscaler == BbSettings::UpscalerDlss ? 0.0f : 1.0f;
-    const float extra = std::clamp(settings.sharpness.load(), 0.0f, 2.0f) - own;
-    return settings.sharpen && extra > 0.0f ? extra : 0.0f;
+    return settings.sharpen ? std::clamp(settings.sharpness.load(), 0.0f, 1.0f) : 0.0f;
+}
+
+void TemporalUpscaler::ReportSharpening(const char* path, float strength, u32 encoding) {
+    static constexpr const char* kHolds[] = {
+        "the HDR scene, through AMD's reversible tone mapper and gamma 2.0",
+        "linear light, in gamma 2.0", "the display-encoded frame"};
+    char line[256];
+    if (strength > 0.0f) {
+        std::snprintf(line, sizeof(line), "the engine's RCAS at %.2f after %s, on %s", strength,
+                      path, kHolds[std::min(encoding, 2u)]);
+    } else if (fsr_sharpened) {
+        std::snprintf(line, sizeof(line),
+                      "AMD FSR's own RCAS at %.2f (BB_SHARPEN_FSR_OWN=1), on the light it upscales",
+                      std::clamp(BbSettings::Get().sharpness.load(), 0.0f, 1.0f));
+    } else {
+        std::snprintf(line, sizeof(line), "off (%s)", path);
+    }
+    static std::string last;
+    if (last != line) {
+        last = line;
+        std::printf("Upscaler: sharpening: %s\n", line);
+    }
 }
 
 void TemporalUpscaler::MarkRunStep(const char* label) {
@@ -1119,8 +1181,9 @@ void TemporalUpscaler::MarkRunStep(const char* label) {
     }
 }
 
-void TemporalUpscaler::ExtraSharpen(vk::Image target, u32 w, u32 h) {
+void TemporalUpscaler::ExtraSharpen(vk::Image target, u32 w, u32 h, u32 encoding) {
     const float extra = ExtraSharpenAmount();
+    ReportSharpening(BackendName().c_str(), extra, encoding);
     if (extra <= 0.0f) {
         return;
     }
@@ -1154,7 +1217,7 @@ void TemporalUpscaler::ExtraSharpen(vk::Image target, u32 w, u32 h) {
     const vk::ImageView target_view = *output_view;
     // bbport: the commands are recorded through the scheduler.
     scheduler.RecordCrumb({.name = "TAA extra sharpen"}, [target, copy = vk::Image(extra_sharpen_image),
-                      copy_view = *extra_sharpen_view, target_view, extra, w, h,
+                      copy_view = *extra_sharpen_view, target_view, extra, encoding, w, h,
                       pipeline = *taa_sharpen_pipeline,
                       layout = *taa_sharpen_pipeline_layout](vk::CommandBuffer cmdbuf) {
         const auto image_barrier = [&](vk::Image image, vk::ImageLayout old_layout,
@@ -1198,7 +1261,11 @@ void TemporalUpscaler::ExtraSharpen(vk::Image target, u32 w, u32 h) {
                 .descriptorType = vk::DescriptorType::eStorageImage, .pImageInfo = &infos[i]};
         cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline);
         cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute, layout, 0, writes);
-        cmdbuf.pushConstants(layout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(extra), &extra);
+        const struct {
+            float strength;
+            u32 encoding;
+        } params{extra, encoding};
+        cmdbuf.pushConstants(layout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(params), &params);
         cmdbuf.dispatch((w + 7) / 8, (h + 7) / 8, 1);
         image_barrier(target, vk::ImageLayout::eGeneral,
                       vk::PipelineStageFlagBits2::eComputeShader,
@@ -1638,7 +1705,7 @@ void TemporalUpscaler::Run() {
     MarkRunStep(taa ? "upscaler Run: TAA" : "upscaler Run: evaluate");
     BbSections::Scope eval_scope{BbSections::UpscalerEval};
     if (taa) {
-        RecordTaa(cmdbuf, input_color_view, input_depth_view);
+        RecordTaa(cmdbuf, input_color_view, input_depth_view, 0); // the HDR scene
         dispatched = true;
     } else {
         // AMD FSR or DLSS: the HDR scene colour, the mask when made (AMD FSR takes it).
@@ -1652,9 +1719,13 @@ void TemporalUpscaler::Run() {
     }
     reset = false;
     dispatched_last_frame = true;
-    // 0.4.4 beta 20: the extra sharpening done in the merge (upscale_merge.comp, rcas_extra.glsl):
-    // no RGBA32F copy of the output, no pass of its own and its barriers; the same result.
+    // 0.4.4 beta 20: the sharpening done in the merge (upscale_merge.comp, rcas_extra.glsl): no
+    // RGBA32F copy of the output, no pass of its own and its barriers; the same result. On the HDR
+    // scene (0.4.6 beta 16: through AMD's reversible tone mapper and gamma 2.0).
     const float merge_sharpen = taa ? 0.0f : ExtraSharpenAmount();
+    if (!taa) {
+        ReportSharpening(BackendName().c_str(), merge_sharpen, 0);
+    }
     // bbport: BB_DUMP_TRIGGER on this (HDR scene color) path too: the upscaler's inputs and
     // its result, for ghosting and history checks (tools/dump_view.py).
     if (const int dump_frame = DumpFrame(); dump_frame >= 0) {
@@ -1675,6 +1746,104 @@ void TemporalUpscaler::Run() {
                     vk::AccessFlagBits2::eShaderRead | vk::AccessFlagBits2::eShaderWrite);
     runtime.FlushBarriers();
     RecordMerge(cmdbuf, merge_pass(merge_sharpen));
+    RecordSceneRange(cmdbuf, ow, oh);
+}
+
+void TemporalUpscaler::RecordSceneRange(vk::CommandBuffer cmdbuf, u32 w, u32 h) {
+    const auto now = std::chrono::steady_clock::now();
+    if (range_failed || range_pending || now < range_next || !range_pipeline) {
+        return;
+    }
+    range_next = now + std::chrono::seconds(1);
+    constexpr VkDeviceSize kSize = 7 * sizeof(u32);
+    if (!range_buffer) {
+        const VkBufferCreateInfo buffer_ci{
+            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+            .size = kSize,
+            .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        };
+        const VmaAllocationCreateInfo alloc_ci{
+            .flags = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT,
+            .usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST,
+        };
+        VkBuffer buffer{};
+        VmaAllocationInfo info{};
+        if (vmaCreateBuffer(instance.GetAllocator(), &buffer_ci, &alloc_ci, &buffer,
+                            &range_allocation, &info) != VK_SUCCESS || !info.pMappedData) {
+            if (buffer) {
+                vmaDestroyBuffer(instance.GetAllocator(), buffer, range_allocation);
+            }
+            std::printf("Upscaler: the scene's range is not measured (no host memory)\n");
+            range_failed = true;
+            return;
+        }
+        range_buffer = buffer;
+        range_counts = static_cast<const u32*>(info.pMappedData);
+    }
+    // The output image is read in General by the merge already; only the counts need ordering.
+    cmdbuf.fillBuffer(range_buffer, 0, kSize, 0);
+    const vk::MemoryBarrier2 zeroed{
+        .srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
+        .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
+        .dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+        .dstAccessMask = vk::AccessFlagBits2::eShaderStorageRead |
+                         vk::AccessFlagBits2::eShaderStorageWrite};
+    cmdbuf.pipelineBarrier2({.memoryBarrierCount = 1, .pMemoryBarriers = &zeroed});
+    const vk::DescriptorImageInfo scene_info{.imageView = *output_view,
+                                             .imageLayout = vk::ImageLayout::eGeneral};
+    const vk::DescriptorBufferInfo counts_info{.buffer = range_buffer, .offset = 0, .range = kSize};
+    const std::array<vk::WriteDescriptorSet, 2> writes{{
+        {.dstBinding = 0, .descriptorCount = 1, .descriptorType = vk::DescriptorType::eStorageImage,
+         .pImageInfo = &scene_info},
+        {.dstBinding = 1, .descriptorCount = 1, .descriptorType = vk::DescriptorType::eStorageBuffer,
+         .pBufferInfo = &counts_info},
+    }};
+    cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, *range_pipeline);
+    cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute, *range_pipeline_layout, 0, writes);
+    // One pixel in 16: a thread for every fourth of every fourth row, 16 x 16 to a group.
+    cmdbuf.dispatch(((w + 3) / 4 + 15) / 16, ((h + 3) / 4 + 15) / 16, 1);
+    const vk::MemoryBarrier2 counted{
+        .srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+        .srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
+        .dstStageMask = vk::PipelineStageFlagBits2::eHost,
+        .dstAccessMask = vk::AccessFlagBits2::eHostRead};
+    cmdbuf.pipelineBarrier2({.memoryBarrierCount = 1, .pMemoryBarriers = &counted});
+    range_pending = true;
+    // On this thread once the GPU is past this frame's work (at a submission).
+    scheduler.DeferOperation([this] { ReadSceneRange(); });
+}
+
+void TemporalUpscaler::ReadSceneRange() {
+    vmaInvalidateAllocation(instance.GetAllocator(), range_allocation, 0, VK_WHOLE_SIZE);
+    std::array<u32, 7> c{};
+    std::memcpy(c.data(), range_counts, sizeof(c));
+    range_pending.store(false, std::memory_order_release); // the counts are read: free for the next pass
+    if (c[0] == 0) {
+        return;
+    }
+    ++range.frames;
+    range.sampled += c[0];
+    for (u32 i = 0; i < range.above.size(); ++i) {
+        range.above[i] += c[1 + i];
+    }
+    range.not_finite += c[5];
+    range.most_above_one = std::max(range.most_above_one, double(c[1]) / c[0]);
+    float brightest;
+    std::memcpy(&brightest, &c[6], sizeof(brightest));
+    range.brightest = std::max(range.brightest, brightest);
+    if (range.frames < 60) {
+        return;
+    }
+    const double n = double(range.sampled);
+    std::printf("Upscaler: the 1080p scene's light, the last %u frames measured (beta 16, research for "
+                "the sharpening; one pixel in 16 of the upscaled scene, a frame a second): the "
+                "brightest channel above 1 in %.2f%% of pixels (in one frame at most %.2f%%), above "
+                "2 in %.2f%%, above 4 in %.3f%%, above 16 in %.4f%%; the brightest %.1f; not "
+                "finite %llu\n",
+                range.frames, 100.0 * range.above[0] / n, 100.0 * range.most_above_one,
+                100.0 * range.above[1] / n, 100.0 * range.above[2] / n, 100.0 * range.above[3] / n,
+                range.brightest, static_cast<unsigned long long>(range.not_finite));
+    range = {};
 }
 
 vk::ImageView TemporalUpscaler::CachedView(const VideoCore::Image& image, vk::Format format,
@@ -2237,8 +2406,15 @@ void TemporalUpscaler::RunScaled() {
                 vk::ImageLayout::eUndefined, all, vk::AccessFlagBits2::eNone,
                 vk::ImageLayout::eGeneral, all, rw);
         bool ok4 = true;
+        // An sRGB-format frame is decoded by its view already (and encoded by the blit).
+        const bool srgb_format =
+            vk::to_string(color.info.pixel_format).find("Srgb") != std::string::npos;
+        // 0.4.6 beta 16: what the upscalers' output holds, for the sharpening after them
+        // (rcas_extra.glsl): linear light from a frame in an sRGB format, else the frame as the
+        // game encoded it (AMD FSR's decoded input is encoded again before the sharpening).
+        const u32 encoding = srgb_format ? 1u : 2u;
         if (BbSettings::Get().upscaler == BbSettings::UpscalerTaa) {
-            RecordTaa(cmdbuf, color_view, depth_view);
+            RecordTaa(cmdbuf, color_view, depth_view, encoding);
         } else {
             if (BbSettings::Get().upscaler == BbSettings::UpscalerDlss) {
             ok4 = RecordFrameUpscaler(cmdbuf,
@@ -2254,9 +2430,6 @@ void TemporalUpscaler::RunScaled() {
                 const char* env = std::getenv("BB_FSR_LINEAR");
                 return !env || env[0] != '0';
             }();
-            // An sRGB-format frame is decoded by its view already (and encoded by the blit).
-            const bool srgb_format =
-                vk::to_string(color.info.pixel_format).find("Srgb") != std::string::npos;
             // 0.4.4 beta 21: its image, made when a frame is first decoded (it was made with the
             // context whenever FSR 4 or DLSS was selected; DLSS never decodes). The decode below
             // starts it from the undefined layout every frame.
@@ -2351,7 +2524,7 @@ void TemporalUpscaler::RunScaled() {
         }
         if (ok4) {
             if (BbSettings::Get().upscaler != BbSettings::UpscalerTaa) {
-                ExtraSharpen(vk::Image(output_image), ow, oh);
+                ExtraSharpen(vk::Image(output_image), ow, oh, encoding);
             }
             DebugView(vk::Image(output_image), w, h, ow, oh, mask_ready && ReactiveOn());
             barrier(vk::Image(output_image), vk::ImageAspectFlagBits::eColor,
@@ -2606,6 +2779,13 @@ bool TemporalUpscaler::RecordFrameUpscaler(vk::CommandBuffer cmdbuf, UpscaleInpu
     // The jitter convention FSR 3 had; fsr_invert_jitter in config.ini flips it for tests.
     const float sign = settings.fsr_invert_jitter.load() ? -1.0f : 1.0f;
     const bool use_dlss = settings.upscaler == BbSettings::UpscalerDlss && dlss;
+    // 0.4.6 beta 16: AMD FSR's own RCAS off, the engine's sharpening after it as after DLSS
+    // (ExtraSharpenAmount). BB_SHARPEN_FSR_OWN=1: AMD FSR's own instead, for comparison.
+    static const bool fsr_own = [] {
+        const char* env = std::getenv("BB_SHARPEN_FSR_OWN");
+        return env && env[0] == '1';
+    }();
+    fsr_sharpened = !use_dlss && fsr_own && settings.sharpen && settings.sharpness.load() > 0.0f;
     UpscaleInput::Frame frame{
         .cmdbuf = cmdbuf,
         .color = color,
@@ -2621,8 +2801,8 @@ bool TemporalUpscaler::RecordFrameUpscaler(vk::CommandBuffer cmdbuf, UpscaleInpu
         .near_plane = camera_motion.Near(),
         .far_plane = 3000.0f,
         .vertical_fov = camera_motion.VerticalFov(),
-        .sharpness = std::min(settings.sharpness.load(), 1.0f),
-        .sharpen = settings.sharpen,
+        .sharpness = std::clamp(settings.sharpness.load(), 0.0f, 1.0f),
+        .sharpen = fsr_sharpened,
         .reset = reset,
         .hdr = hdr,
     };

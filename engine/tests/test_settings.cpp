@@ -506,6 +506,36 @@ int main() {
     assert(BbSettings::GameAaApplies(true, BbSettings::UpscalerOff));
     assert(!BbSettings::GameAaApplies(true, BbSettings::UpscalerFsr) && !BbSettings::GameAaApplies(true, BbSettings::UpscalerTaa));
     assert(!BbSettings::GameAaApplies(false, BbSettings::UpscalerOff));
+    {
+        // 0.4.6 beta 16 (the tester): sharpening off by default; the old default untouched (on, at
+        // 0.20) switched off once, any other choice kept; 0..1.
+        const auto load = [&](const char* text) {
+            { std::ofstream file(path); file << text; assert(file.good()); }
+            BbSettings::Load();
+        };
+        load("sharpen=1\nsharpness=0.20\n");
+        assert(!s.sharpen && s.sharpness == 0.2f);
+        load("sharpness=0.20\nsharpen=1\n");
+        assert(!s.sharpen);
+        load("sharpen=1\nsharpness=0.50\n");
+        assert(s.sharpen && s.sharpness == 0.5f);
+        load("sharpen=0\nsharpness=0.20\n");
+        assert(!s.sharpen);
+        load("sharpen=1\nsharpness=0.20\nsharpen_off_046=1\n");
+        assert(s.sharpen && s.sharpness == 0.2f);
+        load("sharpen=1\nsharpness=1.50\nsharpen_off_046=1\n");
+        assert(s.sharpen && s.sharpness == 1.0f);
+        // Every save writes the marker: turned on again at 0.20, it stays on.
+        load("sharpen=1\nsharpness=0.20\n");
+        assert(!s.sharpen);
+        s.sharpen = true;
+        BbSettings::Save();
+        assert(Read(path).find("sharpen=1\nsharpness=0.20\n") == 0);
+        assert(Read(path).find("\nsharpen_off_046=1\n") != std::string::npos);
+        s.sharpen = false;
+        BbSettings::Load();
+        assert(s.sharpen);
+    }
     std::filesystem::remove(temporary);
     std::puts("PASS: settings save keeps other keys, menu position");
 }

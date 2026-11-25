@@ -13,6 +13,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <memory>
 #include <mutex>
@@ -217,7 +218,9 @@ private:
     /// and AMD FSR to TAA. `reactive`: the mask is made this frame (AMD FSR takes it).
     bool RecordFrameUpscaler(vk::CommandBuffer cmdbuf, UpscaleInput::Image color, UpscaleInput::Image depth,
                              u32 w, u32 h, u32 ow, u32 oh, float frame_ms, bool hdr, bool reactive);
-    void RecordTaa(vk::CommandBuffer cmdbuf, vk::ImageView color, vk::ImageView depth);
+    /// `encoding`: what the colour holds, for the sharpening after it (rcas_extra.glsl: 0 the HDR
+    /// scene, 1 linear 0..1, 2 display-encoded).
+    void RecordTaa(vk::CommandBuffer cmdbuf, vk::ImageView color, vk::ImageView depth, u32 encoding);
     /// 0.4.4 beta 21: BB_DUMP_TRIGGER's images of frame `dump` (Run and RunScaled had a copy
     /// each): `input` (none: null) and `depth` as the upscaler read them (`sw` x `sh`), the motion
     /// vectors and the result, TAA's history and diagnostic image (`taa_diagnostics`), and the
@@ -226,11 +229,20 @@ private:
     void DumpUpscale(vk::CommandBuffer cmdbuf, int dump, vk::Image input, u32 input_bytes,
                      const char* input_format, bool input_alone, vk::Image depth, u32 sw, u32 sh,
                      u32 w, u32 h, u32 ow, u32 oh, bool taa_diagnostics);
-    /// Additional RCAS sharpening; DLSS applies the whole requested range here.
-    void ExtraSharpen(vk::Image target, u32 w, u32 h);
-    /// The strength ExtraSharpen applies (0: none): the menu's 0..2, less what the backend's own
-    /// RCAS already did (FSR 3 and 4 up to 1; DLSS none).
+    /// The sharpening after AMD FSR or DLSS on the scaled path (rcas_extra.glsl), the frame holding
+    /// `encoding`.
+    void ExtraSharpen(vk::Image target, u32 w, u32 h, u32 encoding);
+    /// 0.4.6 beta 16: the strength the engine's sharpening applies after AMD FSR or DLSS (0: none):
+    /// the menu's 0..1, AMD's own range, for both; none when AMD FSR sharpened this frame itself
+    /// (BB_SHARPEN_FSR_OWN=1, RecordFrameUpscaler).
     [[nodiscard]] float ExtraSharpenAmount() const;
+    /// 0.4.6 beta 16: one line when the sharpening changes (who sharpens, how strongly, on what).
+    void ReportSharpening(const char* path, float strength, u32 encoding);
+    /// 0.4.6 beta 16 (research, for the sharpening's encoding of the HDR scene): once a second, how
+    /// much of the 1080p path's upscaled scene is above 1, 2, 4 and 16 (scene_range.comp), read
+    /// when the GPU is past it (ReadSceneRange); one line a minute of such frames.
+    void RecordSceneRange(vk::CommandBuffer cmdbuf, u32 w, u32 h);
+    void ReadSceneRange();
     /// 0.4.4 beta 20: Run's profiler label for one of its steps (GPU profile).
     void MarkRunStep(const char* label);
     /// bbport: the menu's mask / motion debug view over the scaled path's output, in place;
@@ -368,6 +380,28 @@ private:
     vk::UniqueDescriptorSetLayout fsr4_encode_desc_layout;
     vk::UniquePipelineLayout fsr4_encode_pipeline_layout;
     vk::UniquePipeline fsr4_encode_pipeline;
+    /// 0.4.6 beta 16: AMD FSR sharpened the last frame itself (BB_SHARPEN_FSR_OWN=1).
+    bool fsr_sharpened = false;
+    /// 0.4.6 beta 16: RecordSceneRange's pass, its counts (host memory, scene_range.comp's Counts)
+    /// and this minute's sums.
+    vk::UniqueDescriptorSetLayout range_desc_layout;
+    vk::UniquePipelineLayout range_pipeline_layout;
+    vk::UniquePipeline range_pipeline;
+    vk::Buffer range_buffer{};
+    VmaAllocation range_allocation{};
+    const u32* range_counts = nullptr;
+    bool range_failed = false;  ///< no host memory for the counts: not measured
+    /// A pass the GPU may not have run yet. ReadSceneRange runs where the scheduler runs deferred
+    /// operations (at a submission), which may not be Run's thread; `range` is its alone.
+    std::atomic<bool> range_pending{false};
+    std::chrono::steady_clock::time_point range_next{};
+    struct SceneRange {
+        u32 frames = 0;
+        u64 sampled = 0, not_finite = 0;
+        std::array<u64, 4> above{}; ///< above 1, 2, 4 and 16
+        double most_above_one = 0;  ///< the largest share above 1 in one frame
+        float brightest = 0;
+    } range;
     // ExtraSharpen: a copy of the upscaled frame (RCAS reads neighbours).
     // 0.4.4 beta 21: the copy is released by EnsureResources (made again when next needed).
     VideoCore::UniqueImage extra_sharpen_image;

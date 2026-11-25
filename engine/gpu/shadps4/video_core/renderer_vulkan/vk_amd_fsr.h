@@ -75,6 +75,9 @@ public:
     [[nodiscard]] bool RunsFsr31() const noexcept;
     /// The version that runs is one AMD's driver provides (" *" in AMD's list).
     [[nodiscard]] bool RunsDriverVersion() const noexcept;
+    /// 0.4.6 beta 16: what the version that runs says of the reactive mask (AMD's resource query):
+    /// BbSettings::FsrReactive*.
+    [[nodiscard]] int ReactiveUse() const noexcept;
     /// A user retry (a menu change): failures forgotten, the context made again when next needed.
     void ClearFailure() noexcept;
 

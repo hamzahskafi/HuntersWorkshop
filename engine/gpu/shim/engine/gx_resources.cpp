@@ -155,6 +155,15 @@ constexpr std::uint8_t kYebisMapPrologue[] = {0x55, 0x48, 0x89, 0xe5, 0x41, 0x57
                                               0x41, 0x54, 0x53, 0x48, 0x81, 0xec, 0x98, 0x00, 0x00, 0x00};
 constexpr std::uint8_t kYebisUnmapPrologue[] = {0x48, 0x8b, 0xbf, 0xa0, 0x0a, 0x00, 0x00, 0xbe,
                                                 0x38, 0x00, 0x00, 0x00, 0x31, 0xd2, 0x31, 0xc9};
+// 0.4.6 beta 16 (the remaining faults, step 1: research): YEBIS's two GPU memory allocators (edi the size,
+// esi the alignment; the memory returned). Its 2D, 1D and 3D texture creators take their memory from
+// 0x11e6810 (default usage, made without data) or 0x11e6700 (otherwise) and keep it at the object's +0x98;
+// six other functions call them too. Who asked (the return address) names the creator of the memory under
+// an image over no game resource. push rbp; mov rbp, rsp; push r15; push r14; push r12; push rbx;
+// sub rsp, 0x30 (both)
+constexpr std::size_t kYebisAllocators[2] = {0x11e6810, 0x11e6700};
+constexpr std::uint8_t kYebisAllocPrologue[] = {0x55, 0x48, 0x89, 0xe5, 0x41, 0x57, 0x41, 0x56,
+                                                0x41, 0x54, 0x53, 0x48, 0x83, 0xec, 0x30};
 // push rbp; mov rbp, rsp; push r14; push rbx; mov r14, rdi; mov rbx, [rsi + 0x50]
 constexpr std::uint8_t kScaleformUnmapPrologue[] = {0x55, 0x48, 0x89, 0xe5, 0x41, 0x56, 0x53,
                                                     0x49, 0x89, 0xfe, 0x48, 0x8b, 0x5e, 0x50};
@@ -196,7 +205,7 @@ struct Entry {
 };
 
 // What a return through the stub belongs to.
-enum Op : std::uint8_t { kOpCreate, kOpTsharp, kOpView, kOpCreate1D, kOpYebis, kOpScaleform, kOpYebisUpdate };
+enum Op : std::uint8_t { kOpCreate, kOpTsharp, kOpView, kOpCreate1D, kOpYebis, kOpScaleform, kOpYebisUpdate, kOpYebisAlloc };
 
 struct Pending {
     std::uint64_t ret;
@@ -779,10 +788,99 @@ GUEST_ABI std::int64_t Create1DEntry(std::uint64_t, const std::uint64_t* saved) 
     return 0;
 }
 
+// 0.4.6 beta 16, step 1: YEBIS's allocations by their memory (the newest over any it overlaps: memory
+// given back and taken again), who asked for them (an image offset), and this minute's counts: made, by
+// who asked; write faults on images over no game resource, by the allocation under them (0: none).
+struct YebisAlloc {
+    std::uint64_t end = 0, ns = 0;
+    std::uint32_t caller = 0;
+    std::uint8_t which = 0;
+};
+std::mutex g_alloc_mutex;
+std::map<std::uint64_t, YebisAlloc> g_yebis_allocs;
+std::unordered_map<std::uint32_t, std::pair<std::uint64_t, std::uint64_t>> g_allocs_by_caller;
+std::unordered_map<std::uint32_t, std::uint64_t> g_faults_by_caller;
+std::uint64_t g_allocs_dropped = 0;
+constexpr std::size_t kMaxYebisAllocs = 200000;
+/// The functions that ask YEBIS's allocators for memory and are named in the minute line (1.09, read
+/// from its function table): each texture creator's helper, reached only from that creator (`0x11dea90`
+/// 1D, `0x11df570` 2D, `0x11e1750` 3D), and the one behind the device's method wrappers.
+struct AllocCaller {
+    std::uint32_t begin, end;
+    const char* name;
+};
+constexpr AllocCaller kAllocCallers[] = {
+    {0x11deca0, 0x11df47c, "the 1D texture creator"},
+    {0x11df840, 0x11e0278, "the 2D texture creator"},
+    {0x11e1960, 0x11e20b4, "the 3D texture creator"},
+    {0x11d7200, 0x11d73b5, "behind the device's wrappers"},
+};
+/// The name of the function a return address is in, or null.
+const char* AllocCallerName(std::uint32_t at) {
+    for (const AllocCaller& c : kAllocCallers) {
+        if (at > c.begin && at <= c.end) {
+            return c.name;
+        }
+    }
+    return nullptr;
+}
+
+void NoteYebisAllocation(std::uint64_t memory, std::uint64_t size, std::uint64_t ret, unsigned which) {
+    if (!memory || !size) {
+        return;
+    }
+    const auto caller = std::uint32_t(ret - reinterpret_cast<std::uint64_t>(g_image_base));
+    const std::uint64_t end = memory + size, ns = NowNs();
+    std::scoped_lock lock{g_alloc_mutex};
+    auto& made = g_allocs_by_caller[caller];
+    ++made.first;
+    made.second += size;
+    auto it = g_yebis_allocs.lower_bound(memory);
+    if (it != g_yebis_allocs.begin()) {
+        if (const auto before = std::prev(it); before->second.end > memory) {
+            it = before;
+        }
+    }
+    while (it != g_yebis_allocs.end() && it->first < end) {
+        it = g_yebis_allocs.erase(it);
+    }
+    if (g_yebis_allocs.size() >= kMaxYebisAllocs) {
+        ++g_allocs_dropped;
+        return;
+    }
+    g_yebis_allocs.emplace(memory, YebisAlloc{end, ns, caller, std::uint8_t(which)});
+}
+
+// The YEBIS allocation over `address`, if one is known.
+bool YebisAllocationAt(std::uint64_t address, std::uint64_t* start, YebisAlloc* out) {
+    std::scoped_lock lock{g_alloc_mutex};
+    auto it = g_yebis_allocs.upper_bound(address);
+    if (it == g_yebis_allocs.begin()) {
+        return false;
+    }
+    --it;
+    if (address >= it->second.end) {
+        return false;
+    }
+    *start = it->first;
+    *out = it->second;
+    return true;
+}
+
 // 0.4.6 beta 6: YEBIS's 2D creator (r9 = the object's out, rdx = initial data) and Scaleform's texture
 // Initialize (rdi = the texture), read at their return; the destructors that end them.
 GUEST_ABI std::int64_t YebisCreateEntry(std::uint64_t, const std::uint64_t* saved) {
     t_pending.push_back({saved[6], saved[0], kYebis, saved[3] != 0, false, NowNs(), kOpYebis});
+    const_cast<std::uint64_t*>(saved)[6] = reinterpret_cast<std::uint64_t>(g_return_stub);
+    return 0;
+}
+
+// 0.4.6 beta 16, step 1: a YEBIS allocation (edi the size), read at its return (the memory).
+template <int which> GUEST_ABI std::int64_t YebisAllocEntry(std::uint64_t, const std::uint64_t* saved) {
+    Pending p{saved[6], 0, kYebis, false, false, 0, kOpYebisAlloc};
+    p.holder = saved[5] & 0xffffffffu;
+    p.type = which;
+    t_pending.push_back(p);
     const_cast<std::uint64_t*>(saved)[6] = reinterpret_cast<std::uint64_t>(g_return_stub);
     return 0;
 }
@@ -1110,6 +1208,10 @@ GUEST_ABI std::uint64_t CreatorReturn(std::uint64_t result) {
     }
     const Pending p = t_pending.back();
     t_pending.pop_back();
+    if (p.op == kOpYebisAlloc) {
+        NoteYebisAllocation(result, p.holder, p.ret, unsigned(p.type));
+        return p.ret;
+    }
     if (p.op == kOpTsharp) {
         t_tsharp_valid = p.out != 0;
         if (t_tsharp_valid) {
@@ -1231,7 +1333,7 @@ bool Install(std::uint8_t* image, std::size_t size) {
     if (const char* env = std::getenv("BB_GX_FOLLOW"); !(env && env[0] == '0')) {
         g_follow = true;
     }
-    Hook hooks[27];
+    Hook hooks[29];
     bool ok = Prepare(hooks[0], image, size, kCreateBuffer, kCreatorPrologue, &CreatorEntry<kBuffer>) &&
               Prepare(hooks[1], image, size, kCreateTexture, kCreatorPrologue, &CreatorEntry<kTexture>) &&
               Prepare(hooks[2], image, size, kCreateTexture3D, kCreatorPrologue, &CreatorEntry<kTexture3D>) &&
@@ -1252,6 +1354,16 @@ bool Install(std::uint8_t* image, std::size_t size) {
               Prepare(hooks[24], image, size, kYebisMap, kYebisMapPrologue, &YebisMapEntry) &&
               Prepare(hooks[25], image, size, kYebisUnmap, kYebisUnmapPrologue, &YebisUnmapEntry) &&
               Prepare(hooks[26], image, size, kScaleformUnmap, kScaleformUnmapPrologue, &ScaleformUnmapEntry);
+    // 0.4.6 beta 16, step 1 (research; BB_YEBIS_ALLOCS=0: not hooked): YEBIS's allocators. Not needed
+    // by the rest: where they differ, only they are left out.
+    if (const char* env = std::getenv("BB_YEBIS_ALLOCS"); ok && !(env && env[0] == '0')) {
+        if (!Prepare(hooks[27], image, size, kYebisAllocators[0], kYebisAllocPrologue, &YebisAllocEntry<0>) ||
+            !Prepare(hooks[28], image, size, kYebisAllocators[1], kYebisAllocPrologue, &YebisAllocEntry<1>)) {
+            Discard(hooks[27]);
+            Discard(hooks[28]);
+            host_log("GX memory: YEBIS's allocators differ from 1.09: its allocations not named");
+        }
+    }
     // The game's destructors (2D and 3D textures at 4-7, 1D at 17-18) and YEBIS's 2D texture's (19).
     for (std::size_t i = 0; ok && i < std::size(kDestructors) + std::size(k1DDestructors) + 1; ++i) {
         const bool one_d = i >= std::size(kDestructors) && i < std::size(kDestructors) + std::size(k1DDestructors);
@@ -1530,6 +1642,14 @@ void NoteImageWatchFault(const WatchedImage& w) {
     if (w.past) {
         g_counts.image_faults_past.fetch_add(1, std::memory_order_relaxed);
     }
+    // 0.4.6 beta 16, step 1: an image over no game resource, by the YEBIS allocation under it (who asked).
+    std::uint64_t alloc_start = 0;
+    YebisAlloc alloc;
+    const bool in_alloc = w.owner == Owner::None && YebisAllocationAt(w.memory, &alloc_start, &alloc);
+    if (w.owner == Owner::None) {
+        std::scoped_lock lock{g_alloc_mutex};
+        ++g_faults_by_caller[in_alloc ? alloc.caller : 0];
+    }
     {
         std::scoped_lock lock{g_census_mutex};
         if (g_named_watcher_count >= g_named_watchers.size()) {
@@ -1542,14 +1662,22 @@ void NoteImageWatchFault(const WatchedImage& w) {
         }
         g_named_watchers[g_named_watcher_count++] = w.memory;
     }
+    char where[192] = "";
+    if (in_alloc) {
+        std::snprintf(where, sizeof(where), "; in YEBIS's allocation at %#llx (%llu bytes, allocator %u) asked for by +%#x, %.1f s ago",
+                      (unsigned long long)alloc_start, (unsigned long long)(alloc.end - alloc_start), alloc.which,
+                      alloc.caller, double(NowNs() - alloc.ns) / 1e9);
+    } else if (w.owner == Owner::None) {
+        std::snprintf(where, sizeof(where), "; in no allocation of YEBIS's known");
+    }
     host_log("GX memory: a write fault at %#llx on the page of a watched image (beta 16): %s, the image at %#llx "
-             "(%llu bytes, %ux%u, format %u), %s%s%s, the write %s it%s",
+             "(%llu bytes, %ux%u, format %u), %s%s%s, the write %s it%s%s",
              (unsigned long long)w.fault, OwnerName(w.owner), (unsigned long long)w.memory,
              (unsigned long long)w.bytes, w.width, w.height, w.format,
              w.owner == Owner::None ? "over no resource" : (w.whole ? "at its start" : "inside it"),
              w.owner == Owner::None ? "" : (w.with_data ? ", made with its data" : ", made without its data"),
              w.surface ? ", a surface" : "", w.inside ? "inside" : "beside",
-             w.past ? ", the image reaching past its resource" : "");
+             w.past ? ", the image reaching past its resource" : "", where);
 }
 
 void NoteHandOverWatched() {
@@ -2617,6 +2745,61 @@ void LogMinute() {
                  (unsigned long long)take(g_counts.tnet_images), Mib(take(g_counts.tnet_bytes)),
                  (unsigned long long)take(g_counts.tnet_untold), Mib(take(g_counts.tnet_untold_bytes)),
                  round_text.c_str());
+    }
+    {
+        // 0.4.6 beta 16, step 1: YEBIS's allocations by who asked, and the faults on images over no game
+        // resource by the allocation under them.
+        std::vector<std::pair<std::uint32_t, std::pair<std::uint64_t, std::uint64_t>>> made;
+        std::vector<std::pair<std::uint32_t, std::uint64_t>> faults;
+        std::size_t known = 0;
+        std::uint64_t dropped = 0;
+        {
+            std::scoped_lock lock{g_alloc_mutex};
+            made.assign(g_allocs_by_caller.begin(), g_allocs_by_caller.end());
+            faults.assign(g_faults_by_caller.begin(), g_faults_by_caller.end());
+            g_allocs_by_caller.clear();
+            g_faults_by_caller.clear();
+            known = g_yebis_allocs.size();
+            dropped = std::exchange(g_allocs_dropped, 0);
+        }
+        if (!made.empty() || !faults.empty()) {
+            std::sort(made.begin(), made.end(), [](const auto& a, const auto& b) { return a.second.first > b.second.first; });
+            std::sort(faults.begin(), faults.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
+            std::string made_text, fault_text;
+            // YEBIS's 1D and 3D creators: no YEBIS code calls them (read in 1.09); expected 0.
+            std::uint64_t made_1d = 0, made_3d = 0;
+            for (const auto& [at, count] : made) {
+                const char* name = AllocCallerName(at);
+                made_1d += name == kAllocCallers[0].name ? count.first : 0;
+                made_3d += name == kAllocCallers[2].name ? count.first : 0;
+            }
+            for (std::size_t i = 0; i < made.size() && i < 12; ++i) {
+                char part[128];
+                const char* name = AllocCallerName(made[i].first);
+                std::snprintf(part, sizeof(part), "%s+%#x%s%s%s %llu (%.1f MiB)", i ? ", " : "", made[i].first,
+                              name ? " (" : "", name ? name : "", name ? ")" : "",
+                              (unsigned long long)made[i].second.first, Mib(made[i].second.second));
+                made_text += part;
+            }
+            for (std::size_t i = 0; i < faults.size() && i < 12; ++i) {
+                char part[128];
+                if (faults[i].first) {
+                    const char* name = AllocCallerName(faults[i].first);
+                    std::snprintf(part, sizeof(part), "%s+%#x%s%s%s %llu", i ? ", " : "", faults[i].first,
+                                  name ? " (" : "", name ? name : "", name ? ")" : "",
+                                  (unsigned long long)faults[i].second);
+                } else {
+                    std::snprintf(part, sizeof(part), "%sin none %llu", i ? ", " : "", (unsigned long long)faults[i].second);
+                }
+                fault_text += part;
+            }
+            host_log("GX memory, YEBIS's allocations this minute (beta 16, research): made, by who asked: %s; by "
+                     "YEBIS's 1D texture creator %llu, its 3D one %llu (expected 0); write faults on images over no "
+                     "game resource, by who asked for the YEBIS allocation under them: %s (allocations known %zu%s)",
+                     made_text.empty() ? "none" : made_text.c_str(), (unsigned long long)made_1d,
+                     (unsigned long long)made_3d, fault_text.empty() ? "none" : fault_text.c_str(), known,
+                     dropped ? ", some not kept: too many" : "");
+        }
     }
     host_log("GX memory, owners this minute (beta 10): new textures over a live texture's memory, at its base: %s; "
              "partly: %s; images marked written by a creation with data over them %llu (%.0f MiB), live surfaces "

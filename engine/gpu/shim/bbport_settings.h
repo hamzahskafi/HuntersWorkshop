@@ -58,6 +58,9 @@ enum FpsPosition : int { FpsTopRight = 0, FpsTopLeft, FpsBottomRight, FpsBottomL
 /// 0.4.6 beta 16: DebugAmdFsr is AMD's own debug view (AMD FSR only; its context made again with the view
 /// allowed, AmdFsr's key).
 enum DebugView : int { DebugNone = 0, DebugReactive = 1, DebugMotion = 2, DebugAmdFsr = 3, DebugViewCount };
+/// 0.4.6 beta 16: what the running FSR version says of the reactive mask (AMD's resource query): no
+/// FSR running or no answer; it does not read it; it reads it when given; it needs it.
+enum FsrReactive : int { FsrReactiveUnknown = -1, FsrReactiveUnread = 0, FsrReactiveRead = 1, FsrReactiveNeeded = 2 };
 /// The menu's language, in the Language selector's order (bbport_overlay.cpp).
 enum class MenuLanguage {
     English, Russian, Spanish, PortugueseBrazil, French, German, Italian, Polish, Turkish, ChineseSimplified
@@ -165,7 +168,9 @@ struct Values {
     std::atomic<MenuLanguage> menu_language{MenuLanguage::English};
     std::atomic<int> upscaler{UpscalerOff}; // 0.4.4 beta 28 (the tester): the game's own AA by default
     std::atomic<int> preset{PresetAuto};
-    std::atomic<bool> sharpen{true};
+    // 0.4.6 beta 16: off by default (the tester's choice; its strength kept for when it is turned on),
+    // 0..1, AMD's own range.
+    std::atomic<bool> sharpen{false};
     std::atomic<float> sharpness{0.2f};
     std::atomic<bool> jitter{true};
     std::atomic<bool> reactive{false};
@@ -272,6 +277,9 @@ struct Values {
     /// whether it is FSR 3.1 (it takes the fsr3_* tuning).
     std::atomic<const char*> fsr_running{nullptr};
     std::atomic<bool> fsr_runs_31{false};
+    /// Set by the renderer (0.4.6 beta 16): what the running FSR version says of the reactive mask
+    /// (AMD's resource query; FsrReactive*), for the menu's line.
+    std::atomic<int> fsr_reactive{FsrReactiveUnknown};
     /// Set by the renderer (0.4.4 beta 27c): the running FSR version is one AMD's driver provides.
     std::atomic<bool> fsr_running_driver{false};
     /// Set by DLSS at start (0.4.4 beta 27c): the version of the DLSS file it loads ("310.9.16"), or null.

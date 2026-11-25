@@ -36,8 +36,9 @@ namespace BloodborneLauncher.Views
 
             IniToggle(SymbolRegular.Eyedropper24, L.T("Sharpening (RCAS)"), L.T("Works with every option above, TAA included: turn it up if the picture looks soft"), "sharpen");
             _sharpenCard = (SettingRow)Body.Children[^1];
-            SliderRow(SymbolRegular.SlideSize24, L.T("Sharpening strength"), L.T("Up to 1: the upscaler's own sharpening. Above 1: an extra pass"), 0, 2, 0.05,
-                () => ParseDouble(Ini.Get("sharpness"), 0.5), v => Ini.Set("sharpness", Fmt(v)));
+            // 0.4.6 beta 16: 0..1, AMD's own range, from the engine's 0.20 (was 0..2 from 0.5).
+            SliderRow(SymbolRegular.SlideSize24, L.T("Sharpening strength"), L.T("0.20 is light. High values can halo edges and show grain."), 0, 1, 0.05,
+                () => ParseDouble(Ini.Get("sharpness"), 0.2), v => Ini.Set("sharpness", Fmt(v)));
             _sharpnessCard = (SettingRow)Body.Children[^1];
 
             IniCombo(SymbolRegular.FastForward24, L.T("Frame generation"),

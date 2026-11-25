@@ -21,6 +21,8 @@
 #include <type_traits>
 #include <vector>
 
+#include "bbport_settings.h" // BbSettings::FsrReactive* (0.4.6 beta 16), for both builds
+
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -32,7 +34,6 @@
 #include "api/include/vk/ffx_api_vk.h"
 #include "upscalers/include/ffx_upscale.h"
 
-#include "bbport_settings.h"
 #include "bbport_toggles.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
@@ -179,6 +180,7 @@ struct AmdFsr::Impl {
     } made{}, wanted{};
     std::string provider_name;
     bool runs_fsr31{}, runs_driver{};
+    int reactive_use = BbSettings::FsrReactiveUnknown; ///< 0.4.6 beta 16: its answer on the mask
     std::array<float, 5> tuning{};
     bool tuned{};
     std::deque<u64> ticks; ///< scheduler ticks of the frames in flight
@@ -228,6 +230,7 @@ struct AmdFsr::Impl {
         tuned = false;
         provider_name.clear();
         runs_fsr31 = runs_driver = false;
+        reactive_use = BbSettings::FsrReactiveUnknown;
     }
 
     bool Load() {
@@ -405,6 +408,12 @@ struct AmdFsr::Impl {
         ffxQueryDescUpscaleGetResourceRequirements needs{};
         needs.header.type = FFX_API_QUERY_DESC_TYPE_UPSCALE_GET_RESOURCE_REQUIREMENTS;
         const bool needs_ok = query(&context, &needs.header) == FFX_API_RETURN_OK;
+        reactive_use = !needs_ok ? BbSettings::FsrReactiveUnknown
+                       : needs.required_resources & FFX_API_QUERY_RESOURCE_INPUT_REACTIVEMASK
+                           ? BbSettings::FsrReactiveNeeded
+                       : needs.optional_resources & FFX_API_QUERY_RESOURCE_INPUT_REACTIVEMASK
+                           ? BbSettings::FsrReactiveRead
+                           : BbSettings::FsrReactiveUnread;
         FfxApiEffectMemoryUsage usage{};
         ffxQueryDescUpscaleGetGPUMemoryUsage memory{};
         memory.header.type = FFX_API_QUERY_DESC_TYPE_UPSCALE_GPU_MEMORY_USAGE;
@@ -717,6 +726,10 @@ bool AmdFsr::RunsDriverVersion() const noexcept {
     return !impl->preparing && impl->runs_driver;
 }
 
+int AmdFsr::ReactiveUse() const noexcept {
+    return impl->preparing ? BbSettings::FsrReactiveUnknown : impl->reactive_use;
+}
+
 void AmdFsr::ClearFailure() noexcept {
     impl->Settle();
     if (impl->preparing) {
@@ -769,6 +782,9 @@ bool AmdFsr::RunsFsr31() const noexcept {
 }
 bool AmdFsr::RunsDriverVersion() const noexcept {
     return false;
+}
+int AmdFsr::ReactiveUse() const noexcept {
+    return BbSettings::FsrReactiveUnknown;
 }
 void AmdFsr::ClearFailure() noexcept {}
 

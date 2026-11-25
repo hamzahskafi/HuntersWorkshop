@@ -213,7 +213,7 @@ int main(int argc, char** argv) {
     auto sharpen_desc=device.createDescriptorSetLayoutUnique({
         .flags=vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptorKHR,
         .bindingCount=2,.pBindings=sharpen_bindings.data()},nullptr,d).value;
-    const vk::PushConstantRange sharpen_push{vk::ShaderStageFlagBits::eCompute,0,4};
+    const vk::PushConstantRange sharpen_push{vk::ShaderStageFlagBits::eCompute,0,8};
     auto sharpen_layout=device.createPipelineLayoutUnique({.setLayoutCount=1,.pSetLayouts=&*sharpen_desc,
         .pushConstantRangeCount=1,.pPushConstantRanges=&sharpen_push},nullptr,d).value;
     auto sharpen_module=device.createShaderModuleUnique({.codeSize=sizeof(TAA_SHARPEN_COMP),
@@ -221,7 +221,9 @@ int main(int argc, char** argv) {
     auto sharpen_pipeline=device.createComputePipelineUnique({}, {
         .stage={.stage=vk::ShaderStageFlagBits::eCompute,.module=*sharpen_module,.pName="main"},
         .layout=*sharpen_layout},nullptr,d).value;
-    const auto sharpen=[&](const char* label,float strength,float scale,bool flat) {
+    // 0.4.6 beta 16: the strength 0..1 and what the image holds (rcas_extra.glsl: 0 the HDR scene,
+    // 1 linear 0..1, 2 display-encoded).
+    const auto sharpen=[&](const char* label,float strength,float scale,bool flat,u32 encoding) {
         auto* input=static_cast<float*>(ai.pMappedData);
         for (u32 p=0;p<N;++p) {
             for (u32 c=0;c<3;++c) input[p*4+c]=(p==center && !flat ? 0.55f : 0.5f)*scale;
@@ -245,7 +247,8 @@ int main(int argc, char** argv) {
             .descriptorType=vk::DescriptorType::eStorageImage,.pImageInfo=&si[i]};
         cmd.bindPipeline(vk::PipelineBindPoint::eCompute,*sharpen_pipeline,d);
         cmd.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute,*sharpen_layout,0,sw,d);
-        cmd.pushConstants(*sharpen_layout,vk::ShaderStageFlagBits::eCompute,0,4,&strength,d);
+        const struct { float strength; u32 encoding; } params{strength,encoding};
+        cmd.pushConstants(*sharpen_layout,vk::ShaderStageFlagBits::eCompute,0,8,&params,d);
         cmd.dispatch((W+7)/8,(H+7)/8,1,d);
         barrier(cmd,vk::PipelineStageFlagBits2::eComputeShader,
                 vk::AccessFlagBits2::eShaderStorageRead|vk::AccessFlagBits2::eShaderStorageWrite,
@@ -275,19 +278,22 @@ int main(int argc, char** argv) {
             assert(half(output[p*4+3])==1.f);
         }
         const float value=half(output[center*4]);
-        if (!flat && strength>0 && scale==1) assert(value>input[center*4]+0.002f);
+        // Sharpened up, the HDR scene's detail beside values above 1 as well (beta 20 left it).
+        if (!flat && strength>0) assert(value>input[center*4]+0.002f*scale);
         std::printf("TAA RCAS: %s PASS (%.4f), history unchanged\n",label,value);
         return value;
     };
-    sharpen("zero bypass",0,1,false);
-    sharpen("lower limit",-1,1,false);
-    const float middle=sharpen("half strength",0.5f,1,false);
-    const float maximum=sharpen("full strength",1,1,false);
+    sharpen("zero bypass",0,1,false,2);
+    sharpen("lower limit",-1,1,false,2);
+    const float middle=sharpen("half strength",0.5f,1,false,2);
+    const float maximum=sharpen("full strength",1,1,false,2);
     assert(maximum>middle);
-    assert(sharpen("above one (extra pass for FSR)",2,1,false)>maximum);
-    sharpen("flat gray",1,1,true);
-    sharpen("flat black",1,0,true);
-    sharpen("flat HDR",1,8,true);
-    sharpen("HDR detail",1,8,false);
+    assert(sharpen("above one: one",2,1,false,2)==maximum);
+    sharpen("full strength, linear",1,1,false,1);
+    sharpen("full strength, HDR scene",1,1,false,0);
+    sharpen("flat gray",1,1,true,2);
+    sharpen("flat black",1,0,true,0);
+    sharpen("flat HDR",1,8,true,0);
+    sharpen("HDR detail",1,8,false,0);
     vmaDestroyBuffer(instance.GetAllocator(),staging,allocation);
 }

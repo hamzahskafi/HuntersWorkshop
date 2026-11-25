@@ -21,7 +21,7 @@ namespace BloodborneLauncher.Core
             ("upscaler", "off"), // 0.4.4 beta 28 (the tester): the game's own AA by default
             ("fsr_version", "auto"),
             ("preset", "auto"),
-            ("sharpen", "1"),
+            ("sharpen", "0"), // 0.4.6 beta 16 (the tester): off by default; Load switches the old default off once
             ("sharpness", "0.20"),
             ("object_motion", "1"),
             ("show_fps", "0"),
@@ -86,7 +86,27 @@ namespace BloodborneLauncher.Core
             // shown as it, the file left as it is until something is saved.
             if (_values.TryGetValue("upscaler", out var upscaler) && upscaler is "fsr3" or "fsr4" or "fsr411")
                 _values["upscaler"] = "fsr";
+            // 0.4.6 beta 16 (the tester): sharpening off by default. A config.ini with the old default
+            // untouched (on, at 0.20) has it switched off once, any other choice kept; the marker says
+            // it happened, so turning it on at 0.20 later stays. The engine does the same when it reads a
+            // file without the marker (bbport_settings.cpp, SharpenOffMarker), and writes the marker.
+            if (!_values.ContainsKey(SharpenOffMarker))
+            {
+                if (_values.GetValueOrDefault("sharpen") == "1" &&
+                    double.TryParse(_values.GetValueOrDefault("sharpness"), System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out var strength) &&
+                    Math.Abs(strength - 0.2) < 0.001)
+                {
+                    _values["sharpen"] = "0";
+                    _changed.Add("sharpen");
+                }
+                _values[SharpenOffMarker] = "1";
+                _changed.Add(SharpenOffMarker);
+            }
         }
+
+        /// <summary>0.4.6 beta 16: config.ini's sign that the old sharpening default was switched off.</summary>
+        public const string SharpenOffMarker = "sharpen_off_046";
 
         public void Save()
         {
@@ -124,6 +144,8 @@ namespace BloodborneLauncher.Core
             File.WriteAllText(Paths.IniPath, string.Join("\n", output) + "\n");
             FileTime = File.GetLastWriteTimeUtc(Paths.IniPath);
             _lines = output;
+            // Everything is in the file now, Load's own changes as well (0.4.6 beta 16's marker).
+            _changed.Clear();
         }
 
         /// <summary>The value, or null when the key is absent (e.g. a binding left at its default).</summary>

@@ -354,6 +354,27 @@ video and AAC sound): the engine folder drops from 110 DLLs (137 MB) to about 9 
 and cutscenes play as before. On Linux, the same build replaces FFmpeg 7.1.1, which had been built
 without thread support although the movie player uses it from three threads.
 
+## Sharpening: one meaning, off by default (beta 16)
+
+The sharpening slider meant different things under each upscaler: under AMD FSR it was AMD's own
+sharpening up to 1 and an extra pass above, under DLSS and TAA the engine's pass blended in, so 0.20
+was about five times weaker there. And on the 1080p picture AMD FSR's own sharpening worked on the
+game's linear light, so it sharpened about half as much on strong edges and not at all beside bright
+highlights. Now:
+
+- **One sharpening for every upscaler**, the engine's, after AMD FSR, DLSS and TAA alike (AMD FSR's
+  own is turned off): AMD's RCAS, at AMD's own strength scale, on a picture encoded as the eye sees
+  it, which is what RCAS is designed for. Highlights are sharpened as well, and kept from flaring.
+- **The slider runs from 0 to 1**, AMD's range: 0 is off, 1 AMD's strongest. A value above 1 saved
+  before is read as 1.
+- **Off by default**, as AMD and NVIDIA leave sharpening to the player. If your settings still had
+  the old default (on, at 0.20), it is switched off once; any other choice you made is kept, and the
+  strength stays at 0.20 for when you turn it on.
+- `BB_SHARPEN_FSR_OWN=1` in Extra variables uses AMD FSR's own sharpening instead, for comparison.
+
+The reactive mask's line in the in-game menu now says whether the AMD FSR version running reads the
+mask, by FSR's own answer (FSR 4.1.2 does not), instead of "FSR 4 may".
+
 ## Diagnostics
 
 - **AMD FSR's own view** (beta 16): "Show AMD FSR's own view (debug)" in the in-game menu, under Motion
@@ -361,6 +382,11 @@ without thread support although the movie player uses it from three threads.
   finds newly uncovered areas and how much it trusts its history. AMD FSR only; turning it on or off
   restarts FSR in the background for a moment; not saved. `BB_AMD_FSR_DEBUG=1` in Extra variables turns
   on AMD's own checks of what the engine gives FSR (any finding in the log).
+
+- **For the remaining texture write faults** (beta 16): a line a minute names the memory under the
+  textures that still fault, and which of YEBIS's functions asked for it, to find their owner in the
+  next build. `BB_YEBIS_ALLOCS=0` in Extra variables turns it off. A second line says how much of
+  the 1080p picture is brighter than white, for the sharpening.
 
 - **The "Building shaders" note** shows when a frame was late while shaders were being
   prepared, for 2 seconds, rather than once 30 ms of that work had added up: it missed the short

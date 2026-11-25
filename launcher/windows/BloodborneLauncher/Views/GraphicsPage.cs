@@ -129,7 +129,8 @@ namespace BloodborneLauncher.Views
             IniToggle(SymbolRegular.Eyedropper24, L.T("Sharpening (RCAS)"), null, "sharpen", changed: UpdateUpscaler);
             _sharpenCard = LastRow;
             _sharpenCard.SetTip(L.T("AMD's RCAS. Brings back detail that upscaling softens."));
-            SliderRow(SymbolRegular.SlideSize24, L.T("Sharpening strength"), null, 0, 2, 0.05,
+            // 0.4.6 beta 16: 0..1, AMD's own range (the engine's sharpening after every upscaler).
+            SliderRow(SymbolRegular.SlideSize24, L.T("Sharpening strength"), null, 0, 1, 0.05,
                 () => ParseDouble(Ini.Get("sharpness"), 0.2), v => Ini.Set("sharpness", Fmt(v)), defaultValue: 0.2);
             _sharpnessCard = Nest();
             _sharpnessCard.SetTip(L.T("0.20 is light. High values can halo edges and show grain."));
@@ -307,16 +308,17 @@ namespace BloodborneLauncher.Views
             _sharpnessCard.IsEnabled = temporal && Ini.Flag("sharpen"); // as in game
             _mipBiasCard.IsEnabled = upscaling;
             _motionVectors.IsEnabled = temporal;
-            // Where the sharpening runs, for what runs: FSR sharpens up to 1 itself and an RCAS pass adds
-            // the rest; DLSS has none of its own, so the pass does it all; TAA's runs after it.
+            // Where the sharpening runs, for what runs. 0.4.6 beta 16: the engine's pass after each of
+            // them, AMD FSR's own off (until beta 15 FSR sharpened up to 1 itself and the pass added the
+            // rest, to 2).
             _sharpenCard.SetInfo(value switch
             {
-                "dlss" => L.T("After DLSS (it has none of its own)"),
-                "fsr" => L.T("FSR's own sharpening"),
+                "dlss" => L.T("After DLSS"),
+                "fsr" => L.T("After FSR (its own is off)"),
                 "taa" => L.T("After TAA"),
                 _ => L.T("Needs an upscaler or TAA"),
             });
-            _sharpnessCard.SetInfo(value == "fsr" ? L.T("Above 1 adds a second pass") : L.T("Higher is sharper"));
+            _sharpnessCard.SetInfo(L.T("Higher is sharper"));
             _fsrRow.Visibility = value == "fsr" ? Visibility.Visible : Visibility.Collapsed;
             if (value == "fsr") ShowFsrVersions();
             var dlss = value == "dlss" ? Visibility.Visible : Visibility.Collapsed;
