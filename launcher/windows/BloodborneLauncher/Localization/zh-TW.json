@@ -1439,7 +1439,7 @@
   "Ultra Performance": "極致效能",
   "Needs an upscaler or TAA": "需要超解析度技術或 TAA",
   "Higher is sharper": "越高越銳利",
-  "Brings back detail that upscaling softens.": "找回放大時被柔化的細節。",
+  "Brings back detail that upscaling softens": "找回放大時被柔化的細節",
   "100% is the strongest. High values can halo edges and show grain.": "100% 為最強值。數值過高會讓邊緣出現光暈並顯出顆粒。",
   "The default is 25%.": "預設值為 25%。",
   "The game gives no motion for moving characters; this works it out. Off: faster, but moving enemies can trail. After a restart.": "遊戲不提供角色的運動資訊，此項會計算它。關閉：更快，但移動中的敵人可能拖影。重新啟動後生效。",

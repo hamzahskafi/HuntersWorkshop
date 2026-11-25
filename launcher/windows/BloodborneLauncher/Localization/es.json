@@ -1439,7 +1439,7 @@
   "Ultra Performance": "Ultra rendimiento",
   "Needs an upscaler or TAA": "Necesita un escalador o TAA",
   "Higher is sharper": "Más alto, más nítido",
-  "Brings back detail that upscaling softens.": "Recupera el detalle que el escalado suaviza.",
+  "Brings back detail that upscaling softens": "Recupera el detalle que el escalado suaviza",
   "100% is the strongest. High values can halo edges and show grain.": "100% es el máximo. Valores altos pueden crear halos en los bordes y mostrar grano.",
   "The default is 25%.": "El valor predeterminado es 25%.",
   "The game gives no motion for moving characters; this works it out. Off: faster, but moving enemies can trail. After a restart.": "El juego no da el movimiento de los personajes; esto lo calcula. Desactivado: más rápido, pero los enemigos en movimiento pueden dejar estela. Tras reiniciar.",

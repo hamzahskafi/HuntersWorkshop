@@ -1439,7 +1439,7 @@
   "Ultra Performance": "울트라 성능",
   "Needs an upscaler or TAA": "업스케일러나 TAA가 필요합니다",
   "Higher is sharper": "높을수록 선명",
-  "Brings back detail that upscaling softens.": "업스케일링으로 흐려진 디테일을 되살립니다.",
+  "Brings back detail that upscaling softens": "업스케일링으로 흐려진 디테일을 되살립니다",
   "100% is the strongest. High values can halo edges and show grain.": "100%가 최대치입니다. 높은 값은 가장자리에 후광과 입자감이 생길 수 있습니다.",
   "The default is 25%.": "기본값은 25%입니다.",
   "The game gives no motion for moving characters; this works it out. Off: faster, but moving enemies can trail. After a restart.": "게임은 움직이는 캐릭터의 움직임을 주지 않습니다. 이 기능이 계산합니다. 끄면 빨라지지만 움직이는 적에 잔상이 남을 수 있습니다. 재시작 후 적용.",

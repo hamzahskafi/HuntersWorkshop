@@ -1439,7 +1439,7 @@
   "Ultra Performance": "ウルトラパフォーマンス",
   "Needs an upscaler or TAA": "アップスケーラーか TAA が必要です",
   "Higher is sharper": "高いほどシャープ",
-  "Brings back detail that upscaling softens.": "アップスケーリングで柔らかくなった細部を取り戻します。",
+  "Brings back detail that upscaling softens": "アップスケーリングで柔らかくなった細部を取り戻します",
   "100% is the strongest. High values can halo edges and show grain.": "100% が最大です。高い値ではエッジに縁取りや粒状感が出ることがあります。",
   "The default is 25%.": "既定値は 25% です。",
   "The game gives no motion for moving characters; this works it out. Off: faster, but moving enemies can trail. After a restart.": "ゲームは動くキャラクターの動きを渡しません。これがそれを求めます。オフ: 速くなりますが、動く敵が尾を引くことがあります。再起動後に適用。",

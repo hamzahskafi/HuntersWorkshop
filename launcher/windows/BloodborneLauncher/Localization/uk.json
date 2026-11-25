@@ -1439,7 +1439,7 @@
   "Ultra Performance": "Ультра",
   "Needs an upscaler or TAA": "Потрібен апскейлер або TAA",
   "Higher is sharper": "Що вище, то різкіше",
-  "Brings back detail that upscaling softens.": "Повертає деталі, які пом’якшує апскейлінг.",
+  "Brings back detail that upscaling softens": "Повертає деталі, які пом’якшує апскейлінг",
   "100% is the strongest. High values can halo edges and show grain.": "100% — максимум. Високі значення дають ореоли по краях і зерно.",
   "The default is 25%.": "Типово 25%.",
   "The game gives no motion for moving characters; this works it out. Off: faster, but moving enemies can trail. After a restart.": "Гра не дає руху персонажів; це його обчислює. Вимк.: швидше, але рухомі вороги можуть лишати шлейф. Після перезапуску.",

@@ -125,10 +125,11 @@ namespace BloodborneLauncher.Views
             _dlssModel.SetTip(L.T("Auto: K from DLAA to Balanced, M at Performance, L at Ultra Performance."));
             _dlssHint = (TextBlock)_dlssModel.Tag;
 
-            // Sharpening: its line says where it runs, for what runs (UpdateUpscaler; 27d, the tester).
-            IniToggle(SymbolRegular.Eyedropper24, L.T("Sharpening (RCAS)"), null, "sharpen", changed: UpdateUpscaler);
+            // Sharpening: its line under the title, as the other rows have (0.4.6 beta 16, the tester); the
+            // info line says why it is off without an upscaler or TAA (UpdateUpscaler).
+            IniToggle(SymbolRegular.Eyedropper24, L.T("Sharpening (RCAS)"), L.T("Brings back detail that upscaling softens"),
+                "sharpen", changed: UpdateUpscaler);
             _sharpenCard = LastRow;
-            _sharpenCard.SetTip(L.T("Brings back detail that upscaling softens."));
             // 0.4.6 beta 16 (the tester): a percentage of RCAS's maximum, 25% by default (a starting
             // point).
             SliderRow(SymbolRegular.SlideSize24, L.T("Sharpening strength"), null, 0, 100, 1,

@@ -1439,7 +1439,7 @@
   "Ultra Performance": "Ultra Performans",
   "Needs an upscaler or TAA": "Bir ölçekleyici veya TAA gerekir",
   "Higher is sharper": "Yüksek daha keskin",
-  "Brings back detail that upscaling softens.": "Ölçeklemenin yumuşattığı ayrıntıyı geri getirir.",
+  "Brings back detail that upscaling softens": "Ölçeklemenin yumuşattığı ayrıntıyı geri getirir",
   "100% is the strongest. High values can halo edges and show grain.": "%100 en güçlüsüdür. Yüksek değerler kenarlarda hale ve grenlenme yapabilir.",
   "The default is 25%.": "Varsayılan %25.",
   "The game gives no motion for moving characters; this works it out. Off: faster, but moving enemies can trail. After a restart.": "Oyun hareket eden karakterlerin hareketini vermez; bu onu hesaplar. Kapalı: daha hızlı ama hareketli düşmanlar iz bırakabilir. Yeniden başlatınca.",
