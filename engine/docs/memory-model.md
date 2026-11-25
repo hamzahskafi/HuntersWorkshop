@@ -1448,6 +1448,26 @@ callers, the 1D, 2D or 3D creator's helper or the device's wrappers); the net's 
 in seconds with them and finding no write no call told; a few such images marked written by YEBIS's
 allocations around loads (not every frame); and the route's frame rate back at about 230 FPS.
 
+**Its run (2026-11-25, `d19667df`, engine id 112, the same route, five loads):** the heap found at
+start-up (`0x105d400010`-`0x106d3ffff0`, as in step 1c's run). No write fault on an image over no game
+resource; 45-66 such images left to the calls (under 1 MiB); the net's first lane went round in 1 s
+(49-55 images) and found no write no call told. **Their maker:** all 16 named images lie in blocks from
+YEBIS's third allocator asked for by `+0x11d8f6c`, inside YEBIS's update (`0x11d8d70`): the
+256x256-to-1x1 and 256x1-to-8x1 RGBA8 chains, one block per mip level. Read in 1.09: the update takes a
+block the size of the subresource from `0x11e65f0`, copies the caller's data into it (a plain or a tiling
+copy) and records GPU DMA copies from that block into the texture (`0x11fc6b0`, in pieces of just under 2
+MiB through `0x1073e60`): a staging upload. YEBIS's updates of its registered 2D textures (87 and 116 in
+the minutes with loads, 0 in the one without) match those allocations exactly. So the images over no game
+resource are the staging blocks (how they become images, the copy's replay or a read of the block, is not
+established), and once the copy is done the block goes back to the heap, whose bookkeeping and reuse wrote
+beside them: the faults of betas 15 and 16. The allocations were told to the cache 5,261 and 6,926 times
+in those minutes, marking 149 and 1,076 such images (staging blocks taken again), and nothing in the
+minute without a load: YEBIS allocated nothing then. **Frame rate:** the medians of the 5-second reports
+in play on this route are 223.6 (engine id 109), 220.2 (110), 217.5 (111) and 209.6 FPS (112). Run 111
+had the heap core's hooks, and 112 does no YEBIS work in a minute without a load, so the spread is the
+runs' own, not the hooks'. The 230.4, 231.3 and 226.0 FPS above came from another count and are not
+comparable with these.
+
 ### Beta 17: shaders and pipelines (to research and design)
 
 The rule not met: "shaders are translated when the game creates them, pipelines built during
