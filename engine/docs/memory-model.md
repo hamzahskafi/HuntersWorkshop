@@ -1468,6 +1468,93 @@ had the heap core's hooks, and 112 does no YEBIS work in a minute without a load
 runs' own, not the hooks'. The 230.4, 231.3 and 226.0 FPS above came from another count and are not
 comparable with these.
 
+### YEBIS by its calls (designed 2026-11-25, for the tester's review)
+
+The tester, after step 2's run: "what we have been doing for some time now is not optimal", and "I do
+tend to prefer optimal designs that target root causes"; YEBIS's effects drawn on the PC's GPU set aside
+("too large to tackle currently and would not likely improve performance by much"). Betas 6 to 16 and
+the four builds of the remaining faults followed YEBIS's memory, one path at a time: each path not
+followed came back as unexplained faults. This design follows what YEBIS's calls do instead, read in 1.09
+for every kind of write.
+
+**What YEBIS does with its resources (1.09):**
+
+- **Its memory** comes from its pool only: the heap in the game's graphics object (256 MiB, found by step
+  2), through its three allocators (`0x11e6810`, `0x11e6700`, `0x11e65f0`), handed back through the
+  game's free (`0x21d1f00`). A staging block (below) goes back once the GPU has used it: the update
+  records it with the context's frame counter (`[context + 0x3400]`, a list at `[context + 0x3460]`).
+- **Its textures:** made by its device; only the 2D creator is used (the 1D and 3D creators made nothing
+  in any run). The memory is kept at the object's `+0x98`; a target's metadata block at `+0xf8`.
+- **The CPU never writes a texture's own memory.** Initial data is staged: the 2D creator takes a block
+  from `0x11e65f0` (`+0x11dfc17`), fills it and has the GPU copy it in. An update (`0x11d8d70`) does the
+  same per subresource: a block the subresource's size, the caller's data copied in (by a plain copy, or
+  tiled by YEBIS's tiler on the CPU), then a GPU copy into the texture: DMA copies for a linear layout
+  (`0x11fc6b0`, pieces under 2 MiB), or for a tiled one a copy pass that reads the block through a texture
+  descriptor of the subresource's shape (`0x10890c0` sets its base, `0x11e9410` records it). A buffer's
+  update is staged and DMA-copied too. Map and Unmap are used on its own buffers only
+  (`IGPUBuffer::Map` `0xc6ebd0`, about 16,000 a second: the shared vertex buffer's quads and others);
+  none of its textures was mapped in any minute of any run (64 minute lines).
+- **The GPU** draws its targets and runs those copies.
+
+So the images over no game resource were the staging blocks, read as textures by the copy passes, and
+every CPU write YEBIS makes into memory the texture cache holds images of follows YEBIS taking that
+memory from its pool (or, for a texture, an Unmap, which never happens).
+
+**What the engine does for YEBIS today, and what this design does with it:**
+
+| Piece | Since | Verdict |
+|---|---|---|
+| Its 2D textures registered (creator, destructor) | Beta 6 | Kept: ownership (a destroy retires its images, a re-created target takes its image, surfaces start empty) |
+| Rebuilds: a re-created target takes the old one's image (exact shape), a destroyed texture's image waits 3 s for it | Beta 7 | Kept: 27 targets (123 MiB) kept in one minute of `d19667df` |
+| Rebuild research lines ("YEBIS rebuild: ...", about 10 a session) | Beta 8 | Removed |
+| The update hook: the texture marked written at the update's return | Beta 9 | Removed: it marks the wrong memory (the CPU writes the staging block, the GPU the texture). Where the copy runs on the GPU the mark costs a hash check and changes nothing; where the engine replays the DMA as a memory copy, it is the only thing that tells the texture cache, by accident (part 2 below tells it for every such copy) |
+| The Map hook (counts only; 16,000 calls a second, a lock each) | Betas 9, 16 | Removed |
+| The Unmap hook (a registered texture marked written) | Beta 9 | Kept: a real write path, though never seen |
+| YEBIS's registered textures left to the calls; the texture net's first lane | Beta 16 | Folded into part 1 |
+| Images over no game resource in YEBIS's heap left to the calls | Step 2 | Folded into part 1 |
+| YEBIS's allocations told to the texture cache (the images over a new block marked written) | Step 2 | Kept, slimmed (part 3) |
+| YEBIS's allocations kept by address (up to 200,000, a lock and a map update each), named by caller, their minute line, the 16 named images | Steps 1, 2 | Removed |
+| The heap class's and heap core's hooks (9: six and three), their lines | Steps 1b, 1c | Removed |
+
+**The design, three parts:**
+
+1. **YEBIS's pool is YEBIS's** (`watch_rules.h`). Every image in the pool is left to the calls,
+   whatever the registry says is there (a YEBIS texture, a staging block, nothing), and the texture
+   net's first lane checks those the CPU fills. One rule in place of beta 16's (by registration) and step
+   2's (no game resource in the heap). Where the pool is not found (not 1.09's code), or YEBIS's
+   allocations are not followed, every image in YEBIS's memory is watched, as before beta 16: nothing
+   else would tell. A switch for the whole pool replaces `BB_WATCH_YEBIS_TEXTURES` and
+   `BB_WATCH_YEBIS_HEAP` (the tester's call).
+2. **The engine's own stores tell the texture cache** (every DMA, not YEBIS's only). When the engine
+   replays a DMA copy or fill as a memory write on the CPU (`Rasterizer::CopyBuffer`, `FillBuffer`: about
+   1,000 a second, mostly 4-byte counters), it tells the buffer cache (beta 12) but not the texture
+   cache: an image left to the calls over that memory (a GX texture made with its data, YEBIS's,
+   Scaleform's) is not marked, and only the net would find the change. The images left to the calls over
+   the destination are marked written there and then (exact range; watched images fault as before). This
+   is the root cause the update hook covered for YEBIS by accident, and the same gap for every texture
+   unwatched since beta 10. A switch of its own, and a count in the beta 16 line.
+3. **YEBIS taking memory tells, and nothing else is kept** (`gx_resources.cpp`). The three allocator
+   hooks send the written event for the new block (step 2's), with no record of the allocation: the
+   staging block's image is read again at its copy, a new texture's at its first use. The fill comes after
+   the allocation, within the same call, and the GPU reads the block only after the call returns and its
+   commands are submitted, so the event is never late.
+
+**Not changed:** the registration and rebuild handling above, Scaleform's rule, GX's rules, the buffer
+cache (YEBIS's buffers are written through Map at 16,000 a second, and no fault in any run came from
+them), safe mode (every image watched).
+
+**What it buys:** no visible change is expected (the faults are gone since engine id 112). One YEBIS rule
+instead of three; eleven fewer hooks (nine heap, the update, the Map; the allocators do less); a gap closed
+for every texture left to the calls; the research parts gone. No measurable frame-rate change is
+expected either way: in play YEBIS allocates nothing, and the runs differ by more than these hooks cost.
+
+**Tests:** `watch-rules-test` (the pool rule for every owner kind and setting, the fallback when the pool
+or the allocations are not known; deliberate breaks); `test_game_code_sites.py` (the sites kept). The
+store notice is read in the run: its count, the net finding no write no call told.
+
+**The tester's calls before building:** the switches (one for the pool, one for the stores; `BB_YEBIS_ALLOCS`
+removed or kept; the heap research switches removed with their hooks).
+
 ### Beta 17: shaders and pipelines (to research and design)
 
 The rule not met: "shaders are translated when the game creates them, pipelines built during
