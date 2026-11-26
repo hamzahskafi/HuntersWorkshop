@@ -547,10 +547,33 @@ add_executable(watch-rules-test EXCLUDE_FROM_ALL ../tests/test_watch_rules.cpp)
 target_compile_options(watch-rules-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(watch-rules-test PRIVATE shim shadps4)
 # 0.4.6 beta 17 part 2: the registry of translations queued ahead and a job's progress (translate_ahead.h).
-# 0.4.6 beta 17: the start's splash's picture readers (PNG on miniz, BC1 DDS).
-add_executable(splash-art-test EXCLUDE_FROM_ALL ../tests/test_splash_art.cpp shim/engine/splash_art.cpp)
+# 0.4.6 beta 17: bb-splash, the start's splash (splash/main.cpp): a program of its own that bb-start and
+# run.sh start first, so it shows from the start's first step. The menus' language and translations
+# (bbport_settings.cpp, bbport_menu_i18n.cpp), the game's art read with miniz (splash_art.cpp), the
+# menus' font embedded.
+add_executable(bb-splash EXCLUDE_FROM_ALL splash/main.cpp splash/splash_art.cpp shim/bbport_settings.cpp
+    shim/bbport_menu_i18n.cpp)
+target_include_directories(bb-splash PRIVATE .. shim third_party/imgui)
+target_compile_definitions(bb-splash PRIVATE MINIZ_NO_ZLIB_COMPATIBLE_NAMES
+    BB_FONT_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/DejaVuSans.ttf")
+set_source_files_properties(splash/main.cpp PROPERTIES
+    OBJECT_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/DejaVuSans.ttf)
+target_compile_options(bb-splash PRIVATE -Wall -Wextra)
+target_link_libraries(bb-splash PRIVATE PkgConfig::SDL3 miniz::miniz)
+if (WIN32)
+    target_compile_definitions(bb-splash PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0A00)
+    # A window program: no console of its own (SDL3's -mwindows, taken off above for the others).
+    target_link_options(bb-splash PRIVATE -mwindows)
+    target_link_libraries(bb-splash PRIVATE shell32)
+endif()
+# Its status file (splash/status.h).
+add_executable(splash-status-test EXCLUDE_FROM_ALL ../tests/test_splash_status.cpp)
+target_compile_options(splash-status-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(splash-status-test PRIVATE splash)
+# Its picture readers (PNG on miniz, BC1 DDS).
+add_executable(splash-art-test EXCLUDE_FROM_ALL ../tests/test_splash_art.cpp splash/splash_art.cpp)
 target_compile_options(splash-art-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
-target_include_directories(splash-art-test PRIVATE shim)
+target_include_directories(splash-art-test PRIVATE splash)
 target_link_libraries(splash-art-test PRIVATE miniz::miniz)
 # Only miniz's own names (mz_*): its zlib-compatible wrappers are static functions the test never
 # calls, unused-function errors under -Werror.

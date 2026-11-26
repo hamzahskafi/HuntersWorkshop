@@ -31,7 +31,7 @@ bin=$root/engine/out
 rm -rf out/package
 mkdir -p "$bin/gpu"
 install -m755 out/bb-probe out/bb-gpu-capabilities packaging/linux/bb-start "$bin/"
-for tool in bb-engine-assets bb-shader-lab; do
+for tool in bb-engine-assets bb-shader-lab bb-splash; do
     [[ ! -f out/$tool ]] || install -m755 "out/$tool" "$bin/"
 done
 install -m755 out/gpu/libbbgpu.so "$bin/gpu/"
@@ -42,6 +42,8 @@ sdl=$(pkg-config --variable=libdir sdl3)/libSDL3.so.0
 install -m755 "$(readlink -f "$sdl")" "$bin/gpu/libSDL3.so.0"
 patchelf --set-rpath '$ORIGIN' "$bin/gpu/libbbgpu.so"
 patchelf --set-rpath '$ORIGIN/gpu' "$bin/bb-gpu-capabilities"
+# The start's splash (run.sh starts it first) finds SDL3 there too.
+[[ ! -f $bin/bb-splash ]] || patchelf --set-rpath '$ORIGIN/gpu' "$bin/bb-splash"
 strip --strip-debug "$bin/gpu/libbbgpu.so" "$bin/gpu/libSDL3.so.0"
 cp out/gpu-cache.id "$bin/" 2>/dev/null || true
 # NVIDIA's DLSS runtime (DLSS SDK license, tools/fetch_dlss.sh) beside bb-probe, where the engine

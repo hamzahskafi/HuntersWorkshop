@@ -342,6 +342,9 @@ const char* MenuText(const char* english, const char* russian);
 /// Text without a Russian translation at its call site: English in Russian too.
 inline const char* MenuText(const char* english) { return MenuText(english, english); }
 
+/// The menus' language alone, as Load finds it (the system's, then config.ini's menu_language), with
+/// nothing else read, printed or written: bb-splash, which runs beside the start, shows its text in it.
+MenuLanguage ReadMenuLanguage();
 /// Reads the file, then the environment overrides. Called once at start.
 void Load();
 /// Checks the loaded choice before the first frame: DLSS where it cannot run becomes AMD FSR, and AMD

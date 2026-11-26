@@ -333,6 +333,9 @@ private:
     std::array<Shader::Backend::Bindings, MaxShaderStages> warmup_start{}, warmup_count{};
     std::array<bool, MaxShaderStages> warmup_no_bindings{};
     bool warmup_mip_bindings = false;
+    /// 0.4.6 beta 17: the last key LoadGraphicsPipeline read has stages and a key that disagree on
+    /// object motion: it never loads, and the warm-up removes it.
+    bool warmup_motion_disagrees = false;
     ComputePipelineKey compute_key{};
     u32 num_new_pipelines{}; // new pipelines added to the cache since the game start
     bool object_motion_enabled{};

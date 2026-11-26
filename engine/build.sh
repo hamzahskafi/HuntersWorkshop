@@ -68,14 +68,15 @@ if [[ ! -f out/gpu/build.ninja || $(cat out/gpu/bb-configure.txt 2>/dev/null) !=
 fi
 echo "GPU library: PGO $pgo, LTO ${BB_LTO:-ON}, march ${BB_MARCH:-default}"
 # A failed GPU build must stop here: an older libbbgpu.so would otherwise be used silently.
-if ! ninja -C out/gpu ${BB_JOBS:+-j "$BB_JOBS"} bbgpu bb-engine-assets bb-shader-lab > out/gpu-build.log 2>&1; then
+if ! ninja -C out/gpu ${BB_JOBS:+-j "$BB_JOBS"} bbgpu bb-engine-assets bb-shader-lab bb-splash > out/gpu-build.log 2>&1; then
     grep -v '^\[' out/gpu-build.log | tail -40 >&2
     echo 'GPU library build failed (full log: out/gpu-build.log)' >&2; exit 1
 fi
 cp -f out/gpu/bb-engine-assets* out/
-# The cache recompile after a compiler change (start/main.cpp RecompileGpuCache).
-cp -f out/gpu/bb-shader-lab* out/ 2>/dev/null || true
-# The GPU cache's identity (start/main.cpp ResetStaleGpuCache): a hash of the sources that decide
+# The GPU cache settled at the engine's start (translated again, the catalog seeded: the engine runs
+# it, vk_pipeline_serialization.cpp SettleGpuCache), and the start's splash (gpu/splash/main.cpp).
+cp -f out/gpu/bb-shader-lab* out/gpu/bb-splash* out/ 2>/dev/null || true
+# The GPU cache's identity (SettleGpuCache, out/gpu-cache.id): a hash of the sources that decide
 # what the shader and pipeline caches hold - the shader recompiler, the register layouts in the
 # keys, the keys and their records, the shader patches. An engine update that leaves them alone
 # keeps the players' compiled shaders; one that changes them starts the caches again (GitHub
@@ -149,7 +150,7 @@ if [[ -n $windows ]]; then
     if [[ -z $objdump ]]; then
         echo 'Warning: no llvm-objdump or objdump found: the check that no program imports an FFmpeg DLL did not run' >&2
     else
-        for program in out/bb-probe.exe out/bb-shader-lab.exe; do
+        for program in out/bb-probe.exe out/bb-shader-lab.exe out/bb-splash.exe; do
             [[ -f $program ]] || continue
             if "$objdump" -p "$program" | grep -i -E 'DLL Name: (av(codec|format|util|device|filter)|sw(scale|resample)|postproc)-[0-9]+\.dll'; then
                 echo "$program imports an FFmpeg DLL: run packaging/build-ffmpeg.sh and build again (README, Build)" >&2

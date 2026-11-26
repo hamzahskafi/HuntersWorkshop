@@ -14,6 +14,7 @@
 #include "online.h"
 #include "patches.h"
 #include "prepare.h"
+#include "splash.h"
 
 #include <windows.h>
 
@@ -303,6 +304,10 @@ int Main(std::vector<std::wstring> arguments) {
     const fs::path original = fs::canonical(game_dir);
     WriteText(remembered, Utf8(original));
     SetEnv("BB_GAME_DIR", Utf8(original));
+    // 0.4.6 beta 17: the start's splash, from here until the game's first frame (splash.h); the
+    // engine writes its steps into the splash's file too.
+    Splash splash;
+    splash.Start(out, original);
     // The in-game menu's "Apply and restart" runs this program again (probe.c runtime_restart).
     {
         std::vector<std::wstring> all(arguments);
@@ -533,6 +538,7 @@ int Main(std::vector<std::wstring> arguments) {
                                       Path(Env("BB_USER_DIR", Utf8(data / "user"))).native(), L"--timeout",
                                       Wide(Env("BB_TIMEOUT", "0"))};
     command.insert(command.end(), arguments.begin(), arguments.end());
+    splash.Step(BbSplashStatus::Step::Engine);
     return RunProbe(probe, command, folders.engine);
 }
 

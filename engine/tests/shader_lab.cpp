@@ -1519,8 +1519,20 @@ int CheckCache(const fs::path& dir) {
             }
             if (!is_compute && stage < 5) warmup_stages[stage] = infos[at.first].get();
         }
-        if (why.empty() && fs_motion && !vs_motion) {
-            why = "motion vectors read by the fragment stage, not written by the vertex stage";
+        // Object motion, as the warm-up decides it (LoadGraphicsPipeline, 0.4.6 beta 17): the key's
+        // motion attachment, the vertex stage's motion varyings and the fragment stage's motion output
+        // one choice; a key where they disagree never loads, and the warm-up removes it.
+        if (why.empty() && !is_compute) {
+            Vulkan::GraphicsPipelineKey graphics{};
+            if (key.size() >= 8 + sizeof(graphics)) {
+                std::memcpy(&graphics, key.data() + 8, sizeof(graphics));
+                const bool key_motion = graphics.motion_vectors != 0;
+                const bool has_fs = graphics.stage_hashes[u32(SwStage::Fragment)] != 0;
+                if (vs_motion != key_motion || (has_fs && fs_motion != key_motion)) {
+                    why = std::string("object motion: the key ") + (key_motion ? "on" : "off") + ", the vertex stage " +
+                          (vs_motion ? "on" : "off") + (has_fs ? std::string(", the fragment stage ") + (fs_motion ? "on" : "off") : "");
+                }
+            }
         }
         if (why.empty()) {
             ++good;

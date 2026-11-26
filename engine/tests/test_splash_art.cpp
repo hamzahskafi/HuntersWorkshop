@@ -3,7 +3,7 @@
 // sce_sys/pic1.png or pic1.dds. PNGs of every 8-bit colour type, each row with another filter, are
 // written here (miniz) and read back pixel for pixel; a 16-bit and an interlaced PNG, a cut file and
 // junk are refused; a DDS of BC1 blocks in both modes is read back.
-#include "engine/splash_art.h"
+#include "splash_art.h"
 
 #include <cstdio>
 #include <cstdlib>

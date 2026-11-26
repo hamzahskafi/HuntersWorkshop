@@ -338,6 +338,7 @@ bool GraphicsPipeline::SerializationSupport::Deserialize(Serialization::Archive&
 }
 
 bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar, u32 version) {
+    warmup_motion_disagrees = false;
     sel.graphics_key.Deserialize(ar);
     // 0.4.4 beta 15: keys saved before it carry the motion attachment as RGBA32F.
     if (sel.graphics_key.motion_vectors) {
@@ -422,6 +423,9 @@ bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar, u32 version
     // writes (undefined motion, found by validation), a vertex shader that reads the motion set
     // with a key whose layout has none (invalid Vulkan, a crash on stricter drivers; found by
     // Lantern 0.9.39 beta 26), or a motion attachment nothing writes.
+    // 0.4.6 beta 17: such a key never loads (the records under its stages' names stay this
+    // cache's), so the warm-up removes it: 46 of the shipped catalog's keys were left out at every
+    // start.
     const auto& fs_runtime = sel.runtime_infos[u32(Shader::SwStage::Fragment)];
     const auto& vs_runtime = sel.runtime_infos[u32(Shader::SwStage::Vertex)];
     const bool key_motion = sel.graphics_key.motion_vectors != 0;
@@ -429,6 +433,7 @@ bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar, u32 version
     const bool has_fs = sel.graphics_key.stage_hashes[u32(Shader::SwStage::Fragment)] != 0;
     const bool vs_motion = has_vs && vs_runtime.hw_stage == Shader::HwStage::Vertex && vs_runtime.hw.vs.motion_vectors;
     if (vs_motion != key_motion || (has_fs && fs_runtime.hw.fs.motion_vectors != key_motion)) {
+        warmup_motion_disagrees = true;
         return false;
     }
 
@@ -602,15 +607,7 @@ void SettleGpuCache(const Shader::Profile& profile) {
         const char* states_off = std::getenv("BB_SHADER_STATES");
         bool rebuilt = false;
         if (have_lab && !(states_off && states_off[0] == '0')) {
-            if (for_gpu) {
-                BbStartup::SetStep("Preparing the shader cache for this graphics card",
-                                   "Подготовка кэша шейдеров для этой видеокарты",
-                                   "Once after a graphics card or driver change.",
-                                   "Один раз после смены видеокарты или драйвера.");
-            } else {
-                BbStartup::SetStep("Updating the shader cache for this version", "Обновление кэша шейдеров для этой версии",
-                                   "Once after an update.", "Один раз после обновления.");
-            }
+            BbStartup::SetStep(for_gpu ? BbStartup::Step::CacheForGpu : BbStartup::Step::CacheUpdate);
             const auto start = std::chrono::steady_clock::now();
             std::string catalog_line, cache_line;
             const int code = RunLab(lab, {"--recompile-cache", BbStartup::Utf8(folder)}, catalog_line, cache_line);
@@ -655,8 +652,7 @@ void SettleGpuCache(const Shader::Profile& profile) {
         std::printf("GPU cache %s: the shader catalog not seeded (no game folder or eboot.elf)\n", game.c_str());
         return;
     }
-    BbStartup::SetStep("Installing the shader catalog", "Установка каталога шейдеров",
-                       "Once for each catalog update.", "Один раз для каждого обновления каталога.");
+    BbStartup::SetStep(BbStartup::Step::Catalog);
     const auto start = std::chrono::steady_clock::now();
     std::string catalog_line, cache_line;
     const int code = RunLab(lab,
@@ -683,7 +679,7 @@ void PipelineCache::WarmUp() {
             precache_progress.rejected = precache_progress.total - precache_progress.loaded;
             precache_progress.complete = true;
         }
-        BbStartup::SetStep("Starting the game", "Запуск игры");
+        BbStartup::SetStep(BbStartup::Step::Starting);
     };
     if (!EmulatorSettings.IsPipelineCacheEnabled()) {
         complete();
@@ -702,7 +698,7 @@ void PipelineCache::WarmUp() {
         std::scoped_lock lock{progress_mutex};
         precache_progress.total = static_cast<u32>(names.size());
     }
-    BbStartup::SetStep("Building shaders", "Сборка шейдеров");
+    BbStartup::SetStep(BbStartup::Step::Shaders);
     BbStartup::SetProgress(0, names.size());
 
     // Check if cache is compatible
@@ -845,10 +841,11 @@ void PipelineCache::WarmUp() {
     // on BB_WARMUP_THREADS threads below; the game starts once all are there, as before.
     WarmupJobs batch;
     std::vector<const std::string*> job_names;
-    // 0.4.6 beta 17: keys whose record did not read or whose pipeline the driver refused, removed
-    // alone after the warm-up (a catalog of another vendor may hold a few); the whole cache was
-    // emptied for one before.
+    // 0.4.6 beta 17: keys whose record did not read, whose pipeline the driver refused, or whose
+    // stages and key disagree on object motion, removed alone after the warm-up (a catalog of
+    // another vendor may hold a few); the whole cache was emptied for one before.
     std::vector<std::string> dropped;
+    u32 disagreeing = 0;
     std::mutex dropped_mutex;
     const auto counted = [&] { // under progress_mutex
         BbStartup::SetProgress(precache_progress.loaded + precache_progress.rejected, precache_progress.total);
@@ -877,6 +874,10 @@ void PipelineCache::WarmUp() {
             if ((version == 5 || version == 6 || version == Serialization::PipelineKeyVersion) &&
                 is_compute <= 1) {
                 loaded = is_compute ? LoadComputePipeline(ar) : LoadGraphicsPipeline(ar, version);
+                if (!loaded && !is_compute && warmup_motion_disagrees) {
+                    ++disagreeing;
+                    dropped.push_back(name);
+                }
             }
         } catch (const std::exception& error) {
             ++damaged;
@@ -941,16 +942,17 @@ void PipelineCache::WarmUp() {
         std::error_code ignored;
         std::filesystem::remove(guard_path, ignored);
     }
-    // 0.4.6 beta 17: a key whose record did not read, or whose pipeline the driver refused, removed
-    // alone (it compiles again in play if a draw needs it). The stages that loaded for it stay: each
-    // was read whole and checked before it joined its program. Before, one emptied the whole cache.
+    // 0.4.6 beta 17: a key whose record did not read, whose pipeline the driver refused, or whose
+    // stages and key disagree on object motion, removed alone (it compiles again in play if a draw
+    // needs it). The stages that loaded for it stay: each was read whole and checked before it
+    // joined its program. Before, one emptied the whole cache.
     if (!dropped.empty()) {
         for (const auto& name : dropped) {
             database.Remove(Storage::BlobType::PipelineKey, name);
         }
         std::printf("GPU cache: %zu pipeline keys removed (%u records unreadable, %u pipelines the driver "
-                    "refused)\n",
-                    dropped.size(), damaged, refused.load());
+                    "refused, %u whose stages and key disagree on object motion)\n",
+                    dropped.size(), damaged, refused.load(), disagreeing);
     }
     const auto status = GetPrecacheProgress();
     LOG_INFO(Render, "Preloaded {} of {} pipelines ({} rejected)", status.loaded, status.total,

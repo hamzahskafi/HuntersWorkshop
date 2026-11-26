@@ -75,12 +75,6 @@ extern "C" const unsigned char bb_font_cjk[];
 extern "C" const unsigned char bb_font_cjk_end[];
 #endif
 
-namespace BbOverlay {
-std::span<const unsigned char> UiFont() {
-    return {bb_font_ttf, size_t(bb_font_ttf_end - bb_font_ttf)};
-}
-} // namespace BbOverlay
-
 extern "C" void runtime_restart(void); // bb-probe (probe.c)
 extern "C" void bbnet_exit_begin(int timeout_ms); // bbnet_glue.cpp: out of a co-op room at exit
 extern "C" void bbnet_exit_wait(void);

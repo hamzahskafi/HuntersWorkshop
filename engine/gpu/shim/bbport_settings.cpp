@@ -79,22 +79,26 @@ int CheatChoice(const std::string& key, const std::string& value, const int (&ch
     return choices[0];
 }
 
+// menu_language's value: a launcher's code (en, ru, pt_BR... zh_CN; zh and zh-CN too).
+std::optional<MenuLanguage> MenuLanguageOfCode(const std::string& value) {
+    if (value == "zh" || value == "zh-CN" || value == "zh_CN") {
+        return MenuLanguage::ChineseSimplified;
+    }
+    for (int l = 0; l < MenuLanguageCount; ++l) {
+        if (value == MenuLanguageCodes[l]) {
+            return MenuLanguage(l);
+        }
+    }
+    return std::nullopt;
+}
+
 void Set(Values& v, const std::string& key, const std::string& value) {
     const float f = float(std::atof(value.c_str()));
     const int i = std::atoi(value.c_str());
     if (key == "menu_language") {
-        if (value == "zh" || value == "zh-CN" || value == "zh_CN") {
-            v.menu_language = MenuLanguage::ChineseSimplified;
-            return;
-        }
-        bool known = false;
-        for (int l = 0; l < MenuLanguageCount; ++l) {
-            if (value == MenuLanguageCodes[l]) {
-                v.menu_language = MenuLanguage(l);
-                known = true;
-            }
-        }
-        if (!known) {
+        if (const auto language = MenuLanguageOfCode(value)) {
+            v.menu_language = *language;
+        } else {
             std::printf("Settings: unknown menu_language '%s' (expected en, ru, es, pt_BR, fr, de, it, pl "
                         "or tr, zh_CN)\n",
                         value.c_str());
@@ -373,6 +377,15 @@ MenuLanguage LanguageOfLocale(const char* lang) {
     return MenuLanguage::English;
 }
 
+MenuLanguage SystemMenuLanguage() {
+    for (const char* key : {"LC_ALL", "LC_MESSAGES", "LANG", "LANGUAGE"}) {
+        if (const char* value = std::getenv(key); value && *value) {
+            return LanguageOfLocale(value);
+        }
+    }
+    return MenuLanguage::English;
+}
+
 } // namespace
 
 // The display's size for output_res = auto: BB_DISPLAY_SIZE ("WxH", from bb-start or run.sh), even
@@ -419,6 +432,26 @@ const char* MenuText(const char* english, const char* russian) {
     }
 }
 
+MenuLanguage ReadMenuLanguage() {
+    MenuLanguage language = SystemMenuLanguage();
+    if (FILE* file = std::fopen(Path(), "r")) {
+        char line[256];
+        while (std::fgets(line, sizeof(line), file)) {
+            std::string text{line};
+            text.erase(text.find_last_not_of(" \t\r\n") + 1);
+            const auto eq = text.find('=');
+            if (eq == std::string::npos || text.compare(0, eq, "menu_language") != 0) {
+                continue;
+            }
+            if (const auto chosen = MenuLanguageOfCode(text.substr(eq + 1))) {
+                language = *chosen;
+            }
+        }
+        std::fclose(file);
+    }
+    return language;
+}
+
 void Load() {
     auto& v = Get();
     for (int e = 0; e < EffectCount; ++e) {
@@ -426,16 +459,7 @@ void Load() {
     }
     // bbport: the menu's language until one is chosen in it (menu_language in config.ini): the
     // system's, as the launcher picks its own.
-    {
-        const char* lang = nullptr;
-        for (const char* key : {"LC_ALL", "LC_MESSAGES", "LANG", "LANGUAGE"}) {
-            if (const char* value = std::getenv(key); value && *value) {
-                lang = value;
-                break;
-            }
-        }
-        v.menu_language = LanguageOfLocale(lang);
-    }
+    v.menu_language = SystemMenuLanguage();
     if (FILE* file = std::fopen(Path(), "r")) {
         char line[256];
         bool sharpen_marker = false, have_sharpening = false;

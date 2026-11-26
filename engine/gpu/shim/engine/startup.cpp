@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Hunter's Workshop 0.4.6 beta 17: the start's step for the splash, and helper programs run without a
+// Hunter's Workshop 0.4.6 beta 17: the start's step for its splash, and helper programs run without a
 // window (engine/startup.h).
 
 #include "engine/startup.h"
+
+#include "../../splash/status_file.h"
 
 #include <atomic>
 #include <chrono>
@@ -26,17 +28,38 @@
 extern char** environ;
 #endif
 
-#include "bbport_settings.h"
-
 namespace BbStartup {
 
 namespace {
-std::mutex g_mutex;
-Status g_status;
+std::mutex g_mutex; // the status below and its file
+BbSplashStatus::Writer g_writer;
+bool g_closed = false;
+Step g_step = Step::Engine;
+std::uint64_t g_done = 0, g_total = 0;
+std::chrono::steady_clock::time_point g_written{};
 std::atomic<bool> g_first_frame{false};
 std::mutex g_shown_mutex;
 std::condition_variable g_shown_cv;
 bool g_shown = false;
+
+const std::filesystem::path& StatusPath() {
+    static const std::filesystem::path path = EnvPath("BB_SPLASH_STATUS");
+    return path;
+}
+
+/// Under g_mutex: the status into the splash's file, at once (`now`) or when 50 ms have passed since
+/// the last write (the warm-up counts each of its pipelines, on every compile thread). The file is
+/// opened for each write: a splash that closes removes it at once, and nothing makes it again.
+void Write(bool now) {
+    if (g_closed || StatusPath().empty()) return;
+    const auto at = std::chrono::steady_clock::now();
+    if (!now && at - g_written < std::chrono::milliseconds(50)) return;
+    g_written = at;
+    if (g_writer.Open(StatusPath(), false)) {
+        g_writer.Write(g_step, g_done, g_total);
+        g_writer.Close();
+    }
+}
 
 /// Hands each complete line of `pending` to `on_line`, keeping the rest.
 void SplitLines(std::string& pending, const std::function<void(const std::string&)>& on_line) {
@@ -84,29 +107,33 @@ void AppendArgument(std::wstring& line, const std::wstring& arg) {
 #endif
 } // namespace
 
-void SetStep(const char* english, const char* russian, const char* note_english, const char* note_russian) {
-    // The splash draws with DejaVu Sans (Latin, Greek, Cyrillic): Chinese menus get English here.
-    const bool english_only = BbSettings::Get().menu_language == BbSettings::MenuLanguage::ChineseSimplified;
-    const auto text = [&](const char* en, const char* ru) {
-        return english_only ? en : BbSettings::MenuText(en, ru ? ru : en);
-    };
+bool SplashRunning() {
+    std::error_code error;
+    return !StatusPath().empty() && std::filesystem::exists(StatusPath(), error);
+}
+
+void SetStep(Step step) {
     std::scoped_lock lock{g_mutex};
-    g_status.step = text(english, russian);
-    g_status.note = note_english ? text(note_english, note_russian) : "";
-    g_status.done = 0;
-    g_status.total = 0;
-    ++g_status.generation;
+    g_step = step;
+    g_done = 0;
+    g_total = 0;
+    Write(true);
 }
 
 void SetProgress(std::uint64_t done, std::uint64_t total) {
     std::scoped_lock lock{g_mutex};
-    g_status.done = done;
-    g_status.total = total;
+    g_done = done;
+    g_total = total;
+    Write(done >= total);
 }
 
-Status Get() {
+void CloseSplash() {
     std::scoped_lock lock{g_mutex};
-    return g_status;
+    g_step = Step::Close;
+    g_done = 0;
+    g_total = 0;
+    Write(true);
+    g_closed = true;
 }
 
 void FirstFrameReady(int timeout_ms) {

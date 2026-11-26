@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Hunter's Workshop 0.4.6 beta 17: what the engine's start is doing, for the splash (shim/splash.cpp),
-// and the helper programs it runs on the way (bb-shader-lab: the GPU cache settled at the start,
-// docs/memory-model.md, "First sight").
+// Hunter's Workshop 0.4.6 beta 17: what the engine's start is doing, for the start's splash (bb-splash,
+// splash/main.cpp, a program of its own that bb-start or run.sh starts first: its status file,
+// splash/status.h), and the helper programs the start runs on the way (bb-shader-lab: the GPU cache
+// settled at the start, docs/memory-model.md, "First sight").
 
 #pragma once
 
@@ -11,25 +12,28 @@
 #include <string>
 #include <vector>
 
+#include "../../splash/status.h"
+
 namespace BbStartup {
 
-/// The step the start is on (English and Russian, as the menus; BbSettings::MenuText picks one), and
-/// an optional second line; the progress starts again at nothing. Any thread.
-void SetStep(const char* english, const char* russian, const char* note_english = nullptr,
-             const char* note_russian = nullptr);
-/// How far the step is: `done` of `total` (0 total: no count, the bar moves on its own).
-void SetProgress(std::uint64_t done, std::uint64_t total);
+using Step = BbSplashStatus::Step;
 
-struct Status {
-    std::string step, note;
-    std::uint64_t done = 0, total = 0;
-    std::uint32_t generation = 0; ///< changes with every SetStep
-};
-Status Get();
+/// Whether the start's splash is on the screen beside this engine: bb-start or run.sh started it and
+/// named its status file (BB_SPLASH_STATUS), and the file is still there (the splash removes it as it
+/// closes, or when it could not show). The game window stays hidden behind it until the game's first
+/// frame. A file check: the window thread asks a few times a second.
+bool SplashRunning();
+/// The step the start is on; its progress starts again at nothing. Any thread.
+void SetStep(Step step);
+/// How far the step is: `done` of `total` (0 total: no count, the splash's bar moves on its own).
+/// Written at most every 50 ms, and when it is complete.
+void SetProgress(std::uint64_t done, std::uint64_t total);
+/// Window thread, the game window shown: the splash closes. Nothing is written after it.
+void CloseSplash();
 
 /// Present thread, before the game's first frame: asks the window thread to show the game window
-/// (hidden behind the splash until then) and close the splash, and waits until the window shows, at
-/// most `timeout_ms` (a frame put into a window not shown yet: an error on Wayland).
+/// (hidden behind the splash until then), and waits until the window shows, at most `timeout_ms` (a
+/// frame put into a window not shown yet: an error on Wayland).
 void FirstFrameReady(int timeout_ms);
 /// Window thread: whether the first frame is waiting for the game window.
 bool FirstFrame();

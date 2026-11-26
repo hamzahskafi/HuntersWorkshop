@@ -113,6 +113,19 @@ if [[ -z ${PYTHON:-} ]]; then echo 'Install Python 3 or set PYTHON.' >&2; exit 1
 # BB_GAME_DIR: the game's folder (eboot.bin, sce_module, ...); default next to this directory.
 game=${BB_GAME_DIR:-../CUSA03173}
 if [[ ! -f $game/eboot.bin ]]; then echo "No eboot.bin in $game (set BB_GAME_DIR)." >&2; exit 1; fi
+# 0.4.6 beta 17: the start's splash (bb-splash beside bb-probe: gpu/splash/main.cpp), from here until
+# the game's first frame. This script and the engine write the step they are on into its status file
+# (gpu/splash/status.h); it closes by itself when this process (bb-probe after the exec) ends.
+# BB_SPLASH=0: none. A restart (probe.c runtime_restart runs this script again) starts its own.
+unset BB_SPLASH_STATUS
+splash=$(dirname -- "${BB_PROBE:-out/bb-probe}")/bb-splash
+if [[ ${BB_SPLASH:-1} != 0 && -x $splash ]]; then
+    splash_status=${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/hunters-workshop-splash-$$.txt
+    if printf '%-63s\n' '1 prepare 0 0 1' 2>/dev/null > "$splash_status"; then
+        export BB_SPLASH_STATUS=$splash_status
+        "$splash" --status "$splash_status" --parent $$ --game-dir "$game" &
+    fi
+fi
 # Configure the selected online backend on Linux, as bb-start does on Windows.
 # The launcher already supplies the signed-in account in the environment. Capture changes
 # privately: credentials must never be printed into the game log or evaluated as shell code.
@@ -238,6 +251,10 @@ if [[ -n ${BB_PREBUILT:-} ]]; then
 else
     bash build.sh
     probe=${BB_PROBE:-out/bb-probe}  # BB_PROBE: a wrapper (gdb) around it
+fi
+# Written over the last step, never made again: a splash that closed removed it.
+if [[ -n ${BB_SPLASH_STATUS:-} && -f $BB_SPLASH_STATUS ]]; then
+    printf '%-63s\n' '2 engine 0 0 2' 1<> "$BB_SPLASH_STATUS" 2>/dev/null || true
 fi
 probe_args=("$out/boot-linked.bin" --content-profile "$out/content.bin" --patches "$out/patches.bin" --app0 "$game" --user "${BB_USER_DIR:-$data/user}" --timeout "${BB_TIMEOUT:-0}" "$@")
 if [[ -n ${mod_game:-} ]]; then

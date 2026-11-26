@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Hunter's Workshop 0.4.6 beta 17: the splash's picture from the game folder (engine/splash_art.h).
 
-#include "engine/splash_art.h"
+#include "splash_art.h"
 
 #include <cstdlib>
 #include <cstring>

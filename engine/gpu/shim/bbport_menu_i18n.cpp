@@ -313,7 +313,9 @@ constexpr Entry kSpanish[] = {
      "Se suma al detalle de texturas que pide el escalador: la relación entre render y salida y un nivel más, como aconsejan NVIDIA y AMD. Por debajo de 0 texturas más nítidas (más parpadeo), por encima más suaves. En vivo."},
     {"Anti-aliasing above runs instead. Select the upscaler again to retry.",
      "En su lugar se usa el antialiasing de arriba. Vuelve a elegir el escalador para reintentarlo."},
-    // 0.4.6 beta 17: the start's splash (shim/splash.cpp).
+    // 0.4.6 beta 17: the start's splash (bb-splash, splash/main.cpp).
+    {"Preparing the game",
+     "Preparando el juego"},
     {"Starting the engine",
      "Iniciando el motor"},
     {"Updating the shader cache for this version",
@@ -622,7 +624,9 @@ constexpr Entry kPortugueseBrazil[] = {
      "Somado ao detalhe de textura que o upscaler pede: a razão entre render e saída e um nível a mais, como NVIDIA e AMD recomendam. Abaixo de 0 texturas mais nítidas (mais cintilação), acima mais suaves. Ao vivo."},
     {"Anti-aliasing above runs instead. Select the upscaler again to retry.",
      "No lugar dele roda o anti-aliasing acima. Selecione o upscaler de novo para tentar outra vez."},
-    // 0.4.6 beta 17: the start's splash (shim/splash.cpp).
+    // 0.4.6 beta 17: the start's splash (bb-splash, splash/main.cpp).
+    {"Preparing the game",
+     "Preparando o jogo"},
     {"Starting the engine",
      "Iniciando o motor"},
     {"Updating the shader cache for this version",
@@ -932,7 +936,9 @@ constexpr Entry kFrench[] = {
      "S'ajoute au détail de texture que demande l'upscaler : le rapport rendu/sortie et un niveau de plus, comme le conseillent NVIDIA et AMD. Sous 0 textures plus nettes (plus de scintillement), au-dessus plus douces. En direct."},
     {"Anti-aliasing above runs instead. Select the upscaler again to retry.",
      "L'anticrénelage ci-dessus est utilisé à la place. Choisissez à nouveau l'upscaler pour réessayer."},
-    // 0.4.6 beta 17: the start's splash (shim/splash.cpp).
+    // 0.4.6 beta 17: the start's splash (bb-splash, splash/main.cpp).
+    {"Preparing the game",
+     "Préparation du jeu"},
     {"Starting the engine",
      "Démarrage du moteur"},
     {"Updating the shader cache for this version",
@@ -1242,7 +1248,9 @@ constexpr Entry kGerman[] = {
      "Wird zum Texturdetail addiert, das der Upscaler verlangt: das Verhältnis von Render zu Ausgabe und eine Stufe mehr, wie NVIDIA und AMD empfehlen. Unter 0 schärfere Texturen (mehr Flimmern), über 0 weichere. Sofort."},
     {"Anti-aliasing above runs instead. Select the upscaler again to retry.",
      "Stattdessen läuft die Kantenglättung oben. Den Upscaler erneut wählen, um es noch einmal zu versuchen."},
-    // 0.4.6 beta 17: the start's splash (shim/splash.cpp).
+    // 0.4.6 beta 17: the start's splash (bb-splash, splash/main.cpp).
+    {"Preparing the game",
+     "Spiel wird vorbereitet"},
     {"Starting the engine",
      "Engine wird gestartet"},
     {"Updating the shader cache for this version",
@@ -1553,7 +1561,9 @@ constexpr Entry kItalian[] = {
      "Si aggiunge al dettaglio delle texture che chiede l'upscaler: il rapporto tra render e output e un livello in più, come consigliano NVIDIA e AMD. Sotto 0 texture più nitide (più tremolio), sopra più morbide. Dal vivo."},
     {"Anti-aliasing above runs instead. Select the upscaler again to retry.",
      "Al suo posto funziona l'anti-aliasing qui sopra. Seleziona di nuovo l'upscaler per riprovare."},
-    // 0.4.6 beta 17: the start's splash (shim/splash.cpp).
+    // 0.4.6 beta 17: the start's splash (bb-splash, splash/main.cpp).
+    {"Preparing the game",
+     "Preparazione del gioco"},
     {"Starting the engine",
      "Avvio del motore"},
     {"Updating the shader cache for this version",
@@ -1862,7 +1872,9 @@ constexpr Entry kPolish[] = {
      "Dodawane do szczegółowości tekstur, której żąda upscaler: stosunek renderu do wyjścia i jeden poziom więcej, jak zalecają NVIDIA i AMD. Poniżej 0 ostrzejsze tekstury (więcej migotania), powyżej miększe. Na żywo."},
     {"Anti-aliasing above runs instead. Select the upscaler again to retry.",
      "Zamiast niego działa antyaliasing powyżej. Wybierz upscaler ponownie, aby spróbować jeszcze raz."},
-    // 0.4.6 beta 17: the start's splash (shim/splash.cpp).
+    // 0.4.6 beta 17: the start's splash (bb-splash, splash/main.cpp).
+    {"Preparing the game",
+     "Przygotowywanie gry"},
     {"Starting the engine",
      "Uruchamianie silnika"},
     {"Updating the shader cache for this version",
@@ -2170,7 +2182,9 @@ constexpr Entry kTurkish[] = {
      "Ölçekleyicinin istediği doku ayrıntısına eklenir: işleme/çıkış oranı ve NVIDIA ile AMD'nin önerdiği gibi bir seviye daha. 0'ın altı daha keskin dokular (daha çok titreşim), üstü daha yumuşak. Anında."},
     {"Anti-aliasing above runs instead. Select the upscaler again to retry.",
      "Bunun yerine yukarıdaki kenar yumuşatma çalışıyor. Yeniden denemek için ölçekleyiciyi tekrar seçin."},
-    // 0.4.6 beta 17: the start's splash (shim/splash.cpp).
+    // 0.4.6 beta 17: the start's splash (bb-splash, splash/main.cpp).
+    {"Preparing the game",
+     "Oyun hazırlanıyor"},
     {"Starting the engine",
      "Motor başlatılıyor"},
     {"Updating the shader cache for this version",

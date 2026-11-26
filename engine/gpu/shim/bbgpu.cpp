@@ -33,7 +33,6 @@
 #include <SDL3/SDL.h>
 #include "../bbgpu.h"
 #include "engine/startup.h"
-#include "splash.h"
 #include "common/elf_info.h"
 #include "shader_recompiler/native/table_plan.h"
 #include "common/logging/log.h"
@@ -419,11 +418,12 @@ extern "C" int bbgpu_init(const BbGpuConfig* config) {
     const s32 width = config->width, height = config->height;
     g_window_thread = std::thread([title, width, height] {
         Common::SetCurrentThreadName("bb:window");
-        // 0.4.6 beta 17: the start's splash first (splash.h); the game window hidden behind it until
-        // the game's first frame.
-        const bool splash = BbSplash::Open(title.c_str());
-        auto* window = new Frontend::WindowSDL(width, height, title.c_str(), splash);
-        if (!splash) {
+        // 0.4.6 beta 17: with the start's splash on the screen (bb-splash, startup.h) the game window
+        // stays hidden until the game's first frame.
+        bool hidden = BbStartup::SplashRunning();
+        auto splash_check = std::chrono::steady_clock::now();
+        auto* window = new Frontend::WindowSDL(width, height, title.c_str(), hidden);
+        if (!hidden) {
             BbStartup::NoteGameWindowShown();
         }
         {
@@ -436,13 +436,20 @@ extern "C" int bbgpu_init(const BbGpuConfig* config) {
         // keyboard input is handled as it arrives, and at most 2 ms still pass between rounds (as
         // with SDL_PollEvent, on the thread that created the window).
         while (window->PollEvents()) {
-            if (BbSplash::IsOpen()) {
-                if (BbStartup::FirstFrame()) {
+            // Shown for the first frame, or before it when the splash went (closed by the player, or
+            // it could not show): not a start with nothing on the screen.
+            if (hidden) {
+                const auto now = std::chrono::steady_clock::now();
+                bool show = BbStartup::FirstFrame();
+                if (!show && now >= splash_check) {
+                    splash_check = now + std::chrono::milliseconds(250);
+                    show = !BbStartup::SplashRunning();
+                }
+                if (show) {
+                    hidden = false;
                     window->Show();
                     BbStartup::NoteGameWindowShown();
-                    BbSplash::Close();
-                } else {
-                    BbSplash::Draw();
+                    BbStartup::CloseSplash();
                 }
             }
             SDL_WaitEventTimeout(nullptr, 2);

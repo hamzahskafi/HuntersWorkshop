@@ -2008,6 +2008,45 @@ splash the tester asked for the same day:**
 6. **The note while shaders build** (the tester): in the bottom right corner (above the FPS counter
    when that is there), a spinner at the end of its line.
 
+**Engine id 122 (the tester's 121 runs, 2026-11-26):**
+
+1. **The splash shows at Play, not at the shader work.** In 121 it opened with the engine's window
+   (`bbgpu_init`), after bb-start's work (mods, the boot image, patches) and bb-probe's loading of
+   the game: the tester saw nothing until the shaders started building. It is now a program of its
+   own, `bb-splash` (`gpu/splash/main.cpp`, built beside bb-probe), that bb-start starts right after
+   it has checked the game folder, and `run.sh` at the same point on Linux; the Steam shortcut runs
+   bb-start too, so both ways of starting show it at once. Its window, art, text and look are 121's.
+   - **What it shows comes from a status file** (`gpu/splash/status.h`, `status_file.h`): one
+     64-byte record, "serial step done total serial", written in place by bb-start (preparing the
+     game; starting the engine), `run.sh` (the same, with `printf`) and the engine (`BbStartup::SetStep`,
+     `SetProgress`: the cache steps, building shaders, starting the game; progress at most every
+     50 ms), and "close" once the game window shows. A record read half written has two serials
+     that differ and is passed over (`splash-status-test`, every cut of five pairs). The file is in
+     the temporary folder (`hunters-workshop-splash-<pid>.txt`), named to the engine by
+     `BB_SPLASH_STATUS`; bb-start makes it, the engine opens it for each write and never makes it.
+   - **The splash words the steps** in the menus' language (`BbSettings::ReadMenuLanguage`: config.ini's
+     `menu_language`, else the system's, nothing else read or written; the menus' translations, with
+     "Preparing the game" added in each; Chinese in English, the font having no CJK).
+   - **It closes** at "close", when the program that started it ends (bb-start on Windows; run.sh's
+     process on Linux, which becomes bb-probe), or when its window is closed, and removes the file.
+     Its log lines ("Splash: ... on display N", "Splash: closed after X s (why)") go to the session
+     log: bb-start hands it the log as its only inherited handle.
+   - **The game window stays hidden only while the splash's file is there**: a splash that could
+     not show, or that the player closed, removes it, and the window thread (checking four times a
+     second) shows the game window at once instead of a start with nothing on the screen.
+   - **Windows' focus:** the splash, in front, lets the next program take the foreground
+     (`AllowSetForegroundWindow`), so the game window comes to the front when it shows.
+   - Tested here: built with clang and gcc (`-Werror`) and checked with MinGW; run with SDL's
+     offscreen and dummy drivers under a script playing run.sh's part: the steps, a half-written
+     record passed over, "close" (closed after 1.3 s), the parent ending without one (0.6 s), the
+     file removed each time; frames dumped in Russian with the game's art. The 121 in-engine splash
+     (`shim/splash.cpp`), its `UiFont`, `GameDisplay`/`SetWindowIcon` and the event filter are gone.
+2. **Keys whose stages and key disagree on object motion are removed** at the warm-up
+   (`warmup_motion_disagrees`, in the warm-up's `dropped`, counted in its log line): they never load
+   (the records under their stages' names stay this cache's), and 46 of the catalog's were left out
+   at every start (the tester's 121 log). The lab's `--check-cache` has the warm-up's whole rule
+   (the key, the vertex stage and the fragment stage one choice) instead of its one case.
+
 ### The 0.4.6 release
 
 - **Switches:** each beta's switches, and `BB_COPY_HOLD` and `BB_COPY_MERGE` (kept through 0.4.5
