@@ -229,7 +229,10 @@ warm-up compared the start of every stage. `--fix-keys` at a rebuild gave those 
 with the matching start, but play went on finding the first one and saving the same keys again. Now
 one rule, `StageSpecialization::HasNoBindings`, serves play, the warm-up (`LoadGraphicsPipeline`),
 `--check-cache` and `--fix-keys` (which leaves such stages as they are): the warm-up builds what play
-builds, and `--check-cache`'s layout check covers those pipelines too.
+builds, and `--check-cache`'s layout check covers those pipelines too. The tester's run of engine id
+120 (`0cd9fa7c`): 560 of 560 keys built at the start after the rebuild, no pipeline compiled in play
+in the places of earlier sessions, 27 in an area new to the session; `--check-cache` afterwards: 587 of
+587, no layout mismatched.
 
 ## A catalog per GPU vendor (0.9.37 beta 9)
 
