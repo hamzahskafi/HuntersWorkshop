@@ -1840,6 +1840,25 @@ in play. Removed: `GpuCacheUnchanged` and `BB_GPU_CACHE_CHECK`, `bb-shader-lab -
 (`vk_pipeline_serialization.cpp` as before beta 17). An engine update rebuilds the cache, as before
 beta 17. Kept: part 2 and 117's change to the prep workers.
 
+**Its run (2026-11-26, `ddfbb225`, engine id 119): clean; 117's reading of "never taken" wrong.**
+
+- **The cache:** no rebuild (119's cache fingerprint is 116's: the files it hashes are the same), 553 of
+  559 pipelines built at the start, 6 left out. Not new: 5-6 are left out in every run since engine id
+  105 at least, except right after a rebuild (which drops them); keys the warm-up refuses by design
+  and compiles again in play.
+- **Never taken:** the same eight pixel shaders' variants as in 116, at the same moments. The prep
+  workers did leave the GPU thread's own passes (13,403-14,690 draws a 5 s report, about 12 a frame),
+  so those passes were prepared for nothing before 117, but they were not the cause: 117's reading
+  was wrong. What is known: for those draws a worker computes a specialization no module has, and the
+  GPU thread, at the same draw, computes one that a module has. Its inputs are the registers, the
+  draw's resource tables in the game's memory (read ahead of the GPU thread, before earlier commands
+  may have written them; the reason a prepared draw's user data is checked before use) and the
+  bindings' start; which one differs is not logged. The cost is small with 116's suppression: eight
+  translations on the compile threads once a session, then a set lookup per request (about 900 a
+  second). Left as it is; a line naming the differing input could find it if it ever matters.
+- Frame rate in play 175-297 FPS a report (most 185-250), as before; a clean exit. Translate-ahead used
+  once (the cache warm). The cold run is still to do.
+
 ### The 0.4.6 release
 
 - **Switches:** each beta's switches, and `BB_COPY_HOLD` and `BB_COPY_MERGE` (kept through 0.4.5
