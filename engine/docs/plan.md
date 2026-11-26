@@ -369,13 +369,15 @@ nightlies only have it, natively.
   (122), HDR output and the 480 Hz pacing: untested with its frame generation.
 - **d4r (the tester, 2026-11-27):** NVIDIA's DLSS (Super Resolution; Ray Reconstruction and frame
   generation experimental) on AMD RDNA2-4 through OptiScaler (shipped as `dxgi.dll`: OptiScaler
-  10.0.0-pre1 or a nightly, `d4r_boot.dll` loaded first "shows the game an NVIDIA GPU", a `d4r` folder
-  with NVIDIA's DLLs, `d3d12.dll`/`d3d12core.dll`). Made for DirectX 12 games; its nightlies run Vulkan
+  10.0.0-pre1 or a nightly, with `d4r_boot.dll`, a `d4r` folder with NVIDIA's DLLs,
+  `d3d12.dll`/`d3d12core.dll`). The NVIDIA GPU the game is shown is OptiScaler's spoofing (its
+  `[Spoofing]` keys: DXGI on by default on AMD and Intel, Vulkan off by default), which d4r relies on
+  and its package may turn on (the tester, 2026-11-27). Made for DirectX 12 games; its nightlies run Vulkan
   games through a native backend ("vkhip"; noted on RDNA3, Ray Reconstruction on RDNA4). For the engine:
   DLSS takes NGX from NVIDIA's driver only (`LoadCore`), so on AMD it never starts and OptiScaler gets no
   DLSS call (the launcher offers DLSS anywhere; the engine falls back to AMD FSR). Needed: with OptiScaler
-  loaded, NGX taken from its module. A risk to check: d4r's "NVIDIA GPU" shown to a Vulkan game would
-  steer the engine's vendor-dependent choices (AMD's workarounds, the shader profile and the cache, AMD
+  loaded, NGX taken from its module. A risk to check: OptiScaler's Vulkan spoofing, if turned on (d4r's
+  package may), would steer the engine's vendor-dependent choices (AMD's workarounds, the shader profile and the cache, AMD
   FSR's availability); the engine needs no disguise once NGX comes from OptiScaler.
 
 **The OptiScaler rework, designed for the tester's review (2026-11-27; the tester: "it's clear that
@@ -408,8 +410,8 @@ process; everything it needs from the engine done for it; the player told plainl
 - **E2, the real GPU:** the engine logs vendor, device and driver identity and says when they disagree
   (an NVIDIA vendor ID on AMD's driver: spoofed), and keeps its choices on the driver's identity; the
   driver cache's identity (vendor, device, driver) taken from what spoofing leaves alone, so turning a
-  spoof on or off does not throw the driver's cache away. What d4r's boot DLL changes on Vulkan is
-  read from the test run's log.
+  spoof on or off does not throw the driver's cache away. What OptiScaler's Vulkan spoofing changes
+  (its docs do not say which fields) is read from the test run's log, with d4r's settings.
 - **E3, every queue under the lock** while OptiScaler is loaded: the readback queue's submits take the
   queue lock as the graphics queue's and the presents do.
 - **E4, detection and report:** the module and version, the name it was installed as, OptiScaler.ini's
