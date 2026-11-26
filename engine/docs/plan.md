@@ -359,12 +359,24 @@ nightlies only have it, natively.
   be used there (on AMD it would add XeSS only; FSR 4.1.2 the engine runs itself). (2) OptiScaler may
   call `vkDeviceWaitIdle` in its NGX calls (held under the queue lock), but the readback queue
   (`FastReadback`, `buffer_cache.cpp`) submits without that lock: every queue must be held for it.
-  (3) The menu's advice "often as winmm.dll or dxgi.dll": the Vulkan loader takes the system's
-  dxgi.dll first, so OptiScaler as dxgi.dll likely loads late or not at all (the mode then off):
-  winmm.dll is the name that works, to confirm. (4) The texts on its frame generation describe 0.9's
+  (3) Corrected (the tester: OptiScaler is installed as winmm.dll or dxgi.dll): both load in time. SDL's
+  video start (the game window, before the Vulkan instance) loads `DXGI.DLL` by name
+  (`SDL_windowsvideo.c`), from the engine's folder first, so `Detect` finds OptiScaler as dxgi.dll too.
+  The helper programs' fault above then covers dxgi.dll as well (SDL in the splash and the capabilities
+  check; the splash's Direct3D 11 renderer loads it too). (4) The texts on its frame generation describe 0.9's
   D3D12 bridge; v10's is native. (5) The engine's own AMD FSR (0.4.4 beta 27, after the mode) and
   OptiScaler's FSR input hooks: untested together. (6) The game window hidden until its first frame
   (122), HDR output and the 480 Hz pacing: untested with its frame generation.
+- **d4r (the tester, 2026-11-27):** NVIDIA's DLSS (Super Resolution; Ray Reconstruction and frame
+  generation experimental) on AMD RDNA2-4 through OptiScaler (shipped as `dxgi.dll`: OptiScaler
+  10.0.0-pre1 or a nightly, `d4r_boot.dll` loaded first "shows the game an NVIDIA GPU", a `d4r` folder
+  with NVIDIA's DLLs, `d3d12.dll`/`d3d12core.dll`). Made for DirectX 12 games; its nightlies run Vulkan
+  games through a native backend ("vkhip"; noted on RDNA3, Ray Reconstruction on RDNA4). For the engine:
+  DLSS takes NGX from NVIDIA's driver only (`LoadCore`), so on AMD it never starts and OptiScaler gets no
+  DLSS call (the launcher offers DLSS anywhere; the engine falls back to AMD FSR). Needed: with OptiScaler
+  loaded, NGX taken from its module. A risk to check: d4r's "NVIDIA GPU" shown to a Vulkan game would
+  steer the engine's vendor-dependent choices (AMD's workarounds, the shader profile and the cache, AMD
+  FSR's availability); the engine needs no disguise once NGX comes from OptiScaler.
 
 **Phase D: the release candidate.**
 
