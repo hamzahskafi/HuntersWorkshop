@@ -1922,6 +1922,49 @@ work itself cheap, and ship a catalog.
 
 Translations ahead stay as they are (a small saving for what a catalog misses), not extended.
 
+**Lantern's catalogs, tested (2026-11-26; the tester: "we can use Lantern's catalog", community caches,
+no credits needed).** From `LanternEngine-v0.9.43-win64.zip` (v0.9.43, 2026-11-17, Lantern's last):
+`engine/shader-catalog/CUSA03173` (NVIDIA: RTX 5060, 1,113 states of 560 programs, 997 pipeline keys)
+and `amd/CUSA03173` (AMD: RX 7800 XT, 942 states of 520 programs, 771 keys). Their formats are
+HW's: `Shader::Profile` 72 bytes, records version 8, states capture version 5 (NVIDIA also 112 of
+versions 3 and 4), keys version 6 (the warm-up takes 5-7). Seeded by HW's lab (391ce93) into empty
+folders, by the builder session with the game's shader bundles:
+
+- AMD: 938 permutations added, 0 left out; `--check-cache` 771 of 771 keys, no layout mismatched.
+- NVIDIA: 974 added, 33 not in this game's files (their 120 keys removed); 869 of 877 keys, 8 left
+  out for motion vectors read by the fragment stage and not written by the vertex stage.
+- **Across vendors:** each seeded cache translated again with the other vendor's profile
+  (`--recompile-cache`): nothing left out, the same keys built. The states are the translations'
+  inputs and serve any GPU; only the SPIR-V is per profile. One catalog can serve every vendor.
+- Together: 1,230 states and 1,344 keys (424 keys in both). About 11 s a seed under Wine.
+
+**The design (engine id 121, for the tester's review):**
+
+1. **The engine settles the cache, at its warm-up** (`PipelineCache::WarmUp`), the one place that
+   knows this PC's profile:
+   - **Another profile** (a new GPU, a driver reporting a new feature, the profile's engine
+     switches): the new profile is written and `bb-shader-lab --recompile-cache` runs on the folder,
+     every state translated for it (what bb-start runs after an engine update: what no longer
+     specializes the same is left out, with the keys naming it). Then the warm-up as usual, the
+     folder listed again. The cache is deleted only when the lab is missing or fails.
+   - **The catalog** (`engine/shader-catalog/<game>`, once per catalog version, the marker as now):
+     seeded by the lab after the profile is settled, so with this GPU's profile. A first start: the
+     profile written, the catalog seeded (one translation pass), its pipelines built: the first
+     session has them, on any GPU. bb-start's catalog step (the vendor choice, the borrowed profile)
+     and the Linux start's (`scripts/gpu_cache.py`) are removed.
+   - The lab runs as a child process (a compiler crash ends the lab, not the game), without a
+     window; its summary lines go to the log with their time.
+2. **The lab seeds a catalog of any vendor** (`SeedCache`): each state translated for this GPU and
+   kept when its specialization comes out the same, as within one vendor now.
+3. **A pipeline the driver refuses, or a record that does not read, is dropped alone** (its key
+   removed); today either deletes the whole cache.
+4. **One catalog,** `engine/shader-catalog/CUSA03173`, Lantern's two merged by the builder session
+   (and the tester's cache later), kept in the repository; no vendor folders.
+
+Its cost: the translation pass (about 10-15 s for the merged catalog) at the first start, after a
+catalog update and after a profile change, instead of a cold session; then a warm-up of about 1,300
+pipelines at every start (560 take 0.6 s now with the driver's cache).
+
 ### The 0.4.6 release
 
 - **Switches:** each beta's switches, and `BB_COPY_HOLD` and `BB_COPY_MERGE` (kept through 0.4.5
