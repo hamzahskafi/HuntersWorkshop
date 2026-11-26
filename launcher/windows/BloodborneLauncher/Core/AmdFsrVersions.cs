@@ -61,7 +61,7 @@ namespace BloodborneLauncher.Core
         {
             try
             {
-                var tool = Path.Combine(Paths.EngineDir, "out", Paths.Program("bb-gpu-capabilities"));
+                var tool = Paths.Tool("bb-gpu-capabilities");
                 if (!File.Exists(tool)) return null;
                 var info = new System.Diagnostics.ProcessStartInfo(tool, "--fsr-versions")
                 {

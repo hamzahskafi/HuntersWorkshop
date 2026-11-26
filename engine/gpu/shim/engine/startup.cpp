@@ -170,6 +170,16 @@ std::filesystem::path ProgramDir() {
 #endif
 }
 
+std::filesystem::path ToolPath(const char* name) {
+    const std::filesystem::path out = ProgramDir();
+    if (out.empty()) return {};
+#ifdef _WIN32
+    return out / "tools" / (std::string(name) + ".exe");
+#else
+    return out / name;
+#endif
+}
+
 std::filesystem::path EnvPath(const char* name) {
 #ifdef _WIN32
     const std::wstring wide = Wide(name);

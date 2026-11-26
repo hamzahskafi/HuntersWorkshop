@@ -42,6 +42,10 @@ void NoteGameWindowShown();
 
 /// The folder this program is in (engine/out).
 std::filesystem::path ProgramDir();
+/// A helper program the engine runs ("bb-shader-lab"): engine\out\tools\<name>.exe on Windows (a
+/// folder of their own, with their own DLLs: a DLL put beside the game, as OptiScaler's dxgi.dll or
+/// winmm.dll, is never loaded into them), engine/out/<name> elsewhere. Empty when ProgramDir is.
+std::filesystem::path ToolPath(const char* name);
 /// A path in an environment variable (bb-start's BB_GAME_DIR...), read as wide text on Windows so a
 /// folder name outside the system's code page survives; empty when unset.
 std::filesystem::path EnvPath(const char* name);

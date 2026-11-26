@@ -36,12 +36,12 @@ namespace BloodborneLauncher.Core
         public static int Pipelines(string folder) =>
             Directory.Exists(folder) ? Directory.EnumerateFiles(folder, "*.key").Count() : 0;
 
-        private static string Lab => Path.Combine(Paths.EngineDir, "out", "bb-shader-lab.exe");
+        private static string Lab => Paths.Tool("bb-shader-lab");
 
         /// <summary>Runs the shader lab hidden; its exit code and output.</summary>
         private static (int Code, string Output) RunLab(params string[] args)
         {
-            if (!File.Exists(Lab)) throw new InvalidOperationException("the engine's shader lab is missing (engine\\out\\bb-shader-lab.exe)");
+            if (!File.Exists(Lab)) throw new InvalidOperationException("the engine's shader lab is missing (" + Lab + ")");
             var info = new System.Diagnostics.ProcessStartInfo(Lab)
             {
                 UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true,

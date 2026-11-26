@@ -75,7 +75,17 @@ fi
 cp -f out/gpu/bb-engine-assets* out/
 # The GPU cache settled at the engine's start (translated again, the catalog seeded: the engine runs
 # it, vk_pipeline_serialization.cpp SettleGpuCache), and the start's splash (gpu/splash/main.cpp).
-cp -f out/gpu/bb-shader-lab* out/gpu/bb-splash* out/ 2>/dev/null || true
+# Windows (0.4.6 beta 17): in out/tools with bb-gpu-capabilities, a folder of their own (the package
+# gives them their own copies of the DLLs they link to): Windows loads a DLL from a program's folder
+# first, so one put beside the game (OptiScaler as dxgi.dll or winmm.dll, which SDL loads) would be
+# loaded into them too. The engine, bb-start and the launcher look for them there.
+tools=out
+if [[ -n $windows ]]; then
+    tools=out/tools
+    mkdir -p "$tools"
+    rm -f out/bb-shader-lab.exe out/bb-splash.exe out/bb-gpu-capabilities.exe
+fi
+cp -f out/gpu/bb-shader-lab* out/gpu/bb-splash* "$tools"/ 2>/dev/null || true
 # The GPU cache's identity (SettleGpuCache, out/gpu-cache.id): a hash of the sources that decide
 # what the shader and pipeline caches hold - the shader recompiler, the register layouts in the
 # keys, the keys and their records, the shader patches. An engine update that leaves them alone
@@ -130,7 +140,7 @@ if [[ -n $windows ]]; then
         [[ ! -f $dependency ]] || gpu_inputs+=("$dependency")
     done
 fi
-if [[ -n $windows && -f out/bb-probe.exe && -f out/bb-gpu-capabilities.exe &&
+if [[ -n $windows && -f out/bb-probe.exe && -f $tools/bb-gpu-capabilities.exe &&
       -z $(find src gpu/bbgpu.h "${gpu_inputs[@]}" out/libatrac9.a build.sh \
                tools/gpu_capabilities.c -newer out/bb-probe.exe -print -quit) ]]; then
     echo "Up to date: $PWD/out/bb-probe.exe"
@@ -139,7 +149,7 @@ else
 echo "Built $PWD/out/bb-probe"
 # GPU and controller inventory; keep the Windows C dialect and include SDL headers.
 # --fsr-versions (0.4.4 beta 27c) reads AMD's FSR API headers (MIT, gpu/third_party/amd-fsr-sdk).
-"$CC" "${cstd[@]}" -O2 -Wall -Wextra -Werror "${includes[@]}" -Igpu/third_party/amd-fsr-sdk tools/gpu_capabilities.c "${libraries[@]}" -o out/bb-gpu-capabilities
+"$CC" "${cstd[@]}" -O2 -Wall -Wextra -Werror "${includes[@]}" -Igpu/third_party/amd-fsr-sdk tools/gpu_capabilities.c "${libraries[@]}" -o "$tools/bb-gpu-capabilities"
 fi
 # 0.4.6 beta 16: the Windows programs carry the engine's own FFmpeg (packaging/build-ffmpeg.sh); one
 # that imports an FFmpeg DLL linked a system FFmpeg instead (about 100 DLLs with it).
@@ -150,7 +160,7 @@ if [[ -n $windows ]]; then
     if [[ -z $objdump ]]; then
         echo 'Warning: no llvm-objdump or objdump found: the check that no program imports an FFmpeg DLL did not run' >&2
     else
-        for program in out/bb-probe.exe out/bb-shader-lab.exe out/bb-splash.exe; do
+        for program in out/bb-probe.exe "$tools"/bb-shader-lab.exe "$tools"/bb-splash.exe; do
             [[ -f $program ]] || continue
             if "$objdump" -p "$program" | grep -i -E 'DLL Name: (av(codec|format|util|device|filter)|sw(scale|resample)|postproc)-[0-9]+\.dll'; then
                 echo "$program imports an FFmpeg DLL: run packaging/build-ffmpeg.sh and build again (README, Build)" >&2

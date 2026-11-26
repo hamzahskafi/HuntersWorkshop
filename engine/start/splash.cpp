@@ -57,7 +57,9 @@ void Splash::Start(const fs::path& out, const fs::path& game) {
     // A restart's start (probe.c runtime_restart) has the last one's: that splash closed long ago.
     UnsetEnv("BB_SPLASH_STATUS");
     if (Env("BB_SPLASH", "1") == "0") return;
-    const fs::path program = out / "bb-splash.exe";
+    // Among the helpers in out\tools (their own folder: a DLL put beside the game, OptiScaler's
+    // dxgi.dll or winmm.dll, is never loaded into them).
+    const fs::path program = out / "tools" / "bb-splash.exe";
     std::error_code error;
     if (!fs::is_regular_file(program, error)) return;
     wchar_t temp[MAX_PATH + 1]{};

@@ -580,13 +580,9 @@ void SettleGpuCache(const Shader::Profile& profile) {
     // The archive, or the tone curve's own folder (the lab translates without the curve): as before.
     if (folder.empty() || Shader::Native::ToneCurveEnabled()) return;
     const fs::path out = BbStartup::ProgramDir();
-#ifdef _WIN32
-    const fs::path lab = out / "bb-shader-lab.exe";
-#else
-    const fs::path lab = out / "bb-shader-lab";
-#endif
+    const fs::path lab = BbStartup::ToolPath("bb-shader-lab");
     std::error_code error;
-    const bool have_lab = !out.empty() && fs::is_regular_file(lab, error);
+    const bool have_lab = !lab.empty() && fs::is_regular_file(lab, error);
     const std::string game = folder.filename().string();
     const auto since = [](std::chrono::steady_clock::time_point start) {
         return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
@@ -620,7 +616,7 @@ void SettleGpuCache(const Shader::Profile& profile) {
             }
         } else {
             std::printf("GPU cache %s: %s; started again\n", game.c_str(),
-                        have_lab ? "shader states off (BB_SHADER_STATES=0)" : "no bb-shader-lab beside the engine");
+                        have_lab ? "shader states off (BB_SHADER_STATES=0)" : "no bb-shader-lab among the engine's helpers");
         }
         if (!rebuilt) {
             database.Clear();

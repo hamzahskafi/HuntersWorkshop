@@ -222,13 +222,17 @@ HWND WindowHandle(SDL_Window* window) {
         SDL_GetPointerProperty(SDL_GetWindowProperties(window), SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr));
 }
 
-/// The game's icon (bloodborne.ico beside the engine's programs), as the game window has it.
+/// The game's icon (bloodborne.ico beside the engine's programs, engine\out: this program is in its
+/// tools folder), as the game window has it.
 void SetIcon(SDL_Window* window) {
     const HWND hwnd = WindowHandle(window);
     wchar_t exe[MAX_PATH]{};
     const DWORD n = GetModuleFileNameW(nullptr, exe, MAX_PATH);
     if (!hwnd || !n || n >= MAX_PATH) return;
-    const fs::path icon = fs::path(exe).parent_path() / L"bloodborne.ico";
+    const fs::path here = fs::path(exe).parent_path();
+    std::error_code error;
+    const fs::path icon = fs::is_regular_file(here / L"bloodborne.ico", error) ? here / L"bloodborne.ico"
+                                                                              : here.parent_path() / L"bloodborne.ico";
     for (const bool small : {false, true}) {
         const int cx = GetSystemMetrics(small ? SM_CXSMICON : SM_CXICON);
         const int cy = GetSystemMetrics(small ? SM_CYSMICON : SM_CYICON);

@@ -146,8 +146,9 @@ static int read_input(const char *kind) {
 /* --fsr-versions (0.4.4 beta 27c, the launcher's Graphics page): the AMD FSR versions AMD's FSR SDK
  * offers on the GPU the game uses, asked as the engine asks (vk_amd_fsr.cpp, a device of that GPU):
  * "gpu<tab>name<tab>driver version" and then "version<tab>name" per version, as AMD names it (" *":
- * provided by the driver). AMD's loader from BB_AMD_FSR_DIR, else the package's engine\amd-fsr (this
- * program is in engine\out). AMD's DLLs are only loaded and asked, as AMD's API documents. Windows only:
+ * provided by the driver). AMD's loader from BB_AMD_FSR_DIR, else an amd-fsr folder beside this program
+ * or above it: the package's engine\amd-fsr (this program is in engine\out\tools; engine\out before
+ * 0.4.6 beta 17). AMD's DLLs are only loaded and asked, as AMD's API documents. Windows only:
  * AMD's SDK has no Linux build. Exit 1 when it cannot tell. */
 static int fsr_versions(VkPhysicalDevice gpu) {
 #ifdef _WIN32
@@ -159,9 +160,13 @@ static int fsr_versions(VkPhysicalDevice gpu) {
         GetModuleFileNameW(NULL, dir, MAX_PATH);
         wchar_t *slash = wcsrchr(dir, L'\\');
         if (slash) *slash = 0;
-        swprintf(path, MAX_PATH * 2, L"%ls\\amd-fsr\\amd_fidelityfx_loader_vk.dll", dir);
-        wcsncat(dir, GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES ? L"\\amd-fsr" : L"\\..\\amd-fsr",
-                MAX_PATH - wcslen(dir) - 1);
+        static const wchar_t *const places[] = {L"\\amd-fsr", L"\\..\\amd-fsr", L"\\..\\..\\amd-fsr"};
+        size_t place = 0;
+        for (; place + 1 < sizeof places / sizeof places[0]; ++place) {
+            swprintf(path, MAX_PATH * 2, L"%ls%ls\\amd_fidelityfx_loader_vk.dll", dir, places[place]);
+            if (GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES) break;
+        }
+        wcsncat(dir, places[place], MAX_PATH - wcslen(dir) - 1);
     }
     swprintf(path, MAX_PATH * 2, L"%ls\\amd_fidelityfx_loader_vk.dll", dir);
     HMODULE loader = LoadLibraryExW(path, NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
