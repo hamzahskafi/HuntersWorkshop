@@ -82,7 +82,7 @@ The decisions that still stand. How each was reached is in [archive/plan-0.4.4.m
 | When AMD's or NVIDIA's runtime can't start | TAA, with a log line and a note in the game. |
 | Frame generation | Not offered, and its code removed in 0.4.4 beta 28 with Streamline's and Reflex's (the tester's calls, 2026-11-01 and 02). If it returns, it is AMD's on AMD's swapchain, not built on that code. |
 | NVIDIA Reflex | Not offered. If it returns, it is a design of its own on `VK_NV_low_latency2` directly (the sleep before the frame's work, markers with present IDs), measured against the 120 FPS cap first. |
-| OptiScaler | Set aside: the compatibility mode (`vk_optiscaler.h`) stays as it is, untested. Re-checked after the performance work. |
+| OptiScaler | Set aside: the compatibility mode (`vk_optiscaler.h`) stays as it is, untested. Re-checked after the performance work. Audited 2026-11-27 (the tester asked; below, "The OptiScaler audit"): the tester decides keep, fix or drop |
 | The upscaler at outputs other than 1080p | It stays on the game's finished frame (the tester's call, 2026-11-01). Taking it before tone mapping there would run the game's post-processing at the output size, a renderer split the game was not built for. |
 | Live resolution change | Off or On only; Off is recommended and the default (the tester's call, 2026-11-01). |
 | The follow camera | Fixed in HW's engine (0.4.4 beta 24): every per-frame weight converted each frame with the frame timer. FPS++ is that base plus only what Kyo changed. bbhost's weight list is a cross-check only. |
@@ -338,6 +338,33 @@ before the cleanup:
 - **Optional, the tester's call to run or drop:** phase A's A/B (`BB_LOAD_UPLOAD=0 BB_COPY_NOTICE=0`;
   the 2 s first frame has not come back since beta 15), beta 12's exact `m34` case, beta 11's
   `BB_IMAGE_OWNERS=0` A/B.
+
+**The OptiScaler audit (2026-11-27; the tester: "audit it, we've done a lot of work and never addressed
+it since").** The compatibility mode (0.9.37 beta 7, 2026-10-22; last touched 2026-11-03): OptiScaler
+found by a loaded module exporting NGX's Vulkan entry points (OptiScaler.ini beside it for a module
+named like the driver's core); with it on, the Vulkan instance and device made on a thread of their
+own, DLSS's NGX calls under the queue lock, and async submission off while its frame generation is on.
+OptiScaler now: 0.9.5 (FFX SDK 2.4 with FSR 4.1.2, XeSS 3.0.2), no frame generation on Vulkan; v10
+nightlies only have it, natively.
+
+- **New since then, a likely fault:** OptiScaler installed as `winmm.dll` or `version.dll` beside the
+  engine is loaded by every program there that imports those: `bb-shader-lab` (links winmm) and, through
+  SDL3 (which links winmm and version), `bb-splash` and `bb-gpu-capabilities`. Since engine ids 121-122 the
+  lab and the splash run at every start: OptiScaler starts in three processes it was not made for (its
+  hooks in the splash's Direct3D 11 window, its `OptiScaler.log` written by each, a lab that fails
+  leaving the GPU cache started again). Fix: those programs take winmm and version from the system
+  folder only.
+- **Since October, untested:** (1) DLSS needs NVIDIA's NGX core from the NVIDIA driver's own folder
+  (`vk_dlss.cpp` `LoadCore`): on AMD none, so DLSS is never offered and OptiScaler's DLSS inputs cannot
+  be used there (on AMD it would add XeSS only; FSR 4.1.2 the engine runs itself). (2) OptiScaler may
+  call `vkDeviceWaitIdle` in its NGX calls (held under the queue lock), but the readback queue
+  (`FastReadback`, `buffer_cache.cpp`) submits without that lock: every queue must be held for it.
+  (3) The menu's advice "often as winmm.dll or dxgi.dll": the Vulkan loader takes the system's
+  dxgi.dll first, so OptiScaler as dxgi.dll likely loads late or not at all (the mode then off):
+  winmm.dll is the name that works, to confirm. (4) The texts on its frame generation describe 0.9's
+  D3D12 bridge; v10's is native. (5) The engine's own AMD FSR (0.4.4 beta 27, after the mode) and
+  OptiScaler's FSR input hooks: untested together. (6) The game window hidden until its first frame
+  (122), HDR output and the 480 Hz pacing: untested with its frame generation.
 
 **Phase D: the release candidate.**
 
