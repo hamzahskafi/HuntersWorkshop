@@ -378,6 +378,74 @@ nightlies only have it, natively.
   steer the engine's vendor-dependent choices (AMD's workarounds, the shader profile and the cache, AMD
   FSR's availability); the engine needs no disguise once NGX comes from OptiScaler.
 
+**The OptiScaler rework, designed for the tester's review (2026-11-27; the tester: "it's clear that
+OptiScaler support needs a rework for us, whether it's for OptiScaler itself or users wishing to use
+tools like this").** OptiScaler's docs (README, OptiScaler.ini, Spoofing, Frame Generation Options,
+Manual Installation; v0.9.5's notes): installed as dxgi.dll (preferred), winmm, d3d12, dbghelp, version,
+wininet, winhttp or an .asi; on Vulkan it takes a game's DLSS calls (`EnableDlssInputs`, hooking
+nvngx), FSR 2 Vulkan calls (`UseFsr2VulkanInputs`); it outputs FSR 2.1/2.2, FFX (FSR 2.3/3.1), XeSS,
+FSR 4 through Direct3D 12 interop (native Vulkan FSR 4 still in progress) or DLSS (`VulkanUpscaler`);
+Vulkan GPU and extension spoofing off by default (`Vulkan`, `VulkanExtensionSpoofing`; which fields
+they change is not documented); its menu on Insert (`ShortcutKey`); frame generation on Vulkan only
+Nukem's DLSSG (needs the game's own DLSS-G calls) and, in v10 nightlies, its own. Tools such as d4r ride
+on it: DLSS calls in, their own work out. So one channel serves both: the engine's DLSS calls.
+
+What blocks it today, from the code: DLSS starts only with NVIDIA's NVX extensions on the device
+(`IsDlssCapable`) and NVIDIA's NGX core from the driver's folder (`LoadCore`); on AMD neither, so
+DLSS never starts and OptiScaler gets nothing (the launcher offers DLSS on any GPU; the engine falls
+back to AMD FSR). The helper programs load OptiScaler too. The readback queue is outside the lock its
+`vkDeviceWaitIdle` needs. Its menu key is ours.
+
+Principles: one channel (the engine's DLSS calls to OptiScaler's module when it is there, on any GPU);
+the engine keeps seeing the real GPU (no spoofing needed, and the engine's choices are made from the
+driver's identity, `driverID`, as the shader profile already is); OptiScaler only in the game's own
+process; everything it needs from the engine done for it; the player told plainly what runs.
+
+- **E1, DLSS through OptiScaler:** with OptiScaler loaded, NGX is taken from its module (the one
+  `Detect` found), on any GPU; the NVX-extension requirement and the driver's core are NVIDIA's own
+  path only. DLSS is available as OptiScaler answers (`SuperSampling.Available`). The parameter self-test
+  (`ParameterAbiOk`, custom keys) kept, a failure there reported as OptiScaler's.
+- **E2, the real GPU:** the engine logs vendor, device and driver identity and says when they disagree
+  (an NVIDIA vendor ID on AMD's driver: spoofed), and keeps its choices on the driver's identity; the
+  driver cache's identity (vendor, device, driver) taken from what spoofing leaves alone, so turning a
+  spoof on or off does not throw the driver's cache away. What d4r's boot DLL changes on Vulkan is
+  read from the test run's log.
+- **E3, every queue under the lock** while OptiScaler is loaded: the readback queue's submits take the
+  queue lock as the graphics queue's and the presents do.
+- **E4, detection and report:** the module and version, the name it was installed as, OptiScaler.ini's
+  `VulkanUpscaler`, spoofing keys, `ShortcutKey` and frame generation, and d4r (its boot DLL or folder):
+  one block in the log, the same in the in-game menu's OptiScaler section.
+- **E5, the Insert key:** both menus open on it by default. The tester's call: our menu moves off Insert
+  while OptiScaler is loaded with Insert (L3+R3 and another key stay), or OptiScaler's key is left to the
+  player with a warning.
+- **E6, frame generation:** the one submit thread kept while its frame generation is on; the texts say
+  what is true now (none on Vulkan in 0.9.5 but Nukem's, which needs DLSS-G calls the engine does not
+  make; v10's untested); its pacing and UI handling not designed for (after 0.4.6, if wanted).
+- **E7, the in-game menu with OptiScaler:** the DLSS rows say the upscaler that runs is chosen in
+  OptiScaler's own menu (its key named); a UI change, the tester's review.
+- **H1, the helper programs apart:** `bb-splash`, `bb-shader-lab`, `bb-gpu-capabilities` and
+  `bb-engine-assets` move to `engine/out/tools/` with their own copies of the libraries they need, so a
+  DLL put beside the game (`engine/out`) is never theirs: Windows takes a program's own folder first
+  for every DLL it loads, and SDL loads winmm, version and DXGI. Their callers (bb-start, the engine's
+  `RunTool`, the launcher's FSR versions and cache export, run.sh, build.sh, both packages) follow; an
+  update removes the old copies from `engine/out`. This also keeps the launcher's GPU check
+  (`bb-gpu-capabilities`) from seeing a spoofed GPU.
+- **L1, the launcher:** OptiScaler and d4r found in `engine\out` shown on the upscaler's settings (and
+  DLSS named "through OptiScaler" on AMD); OptiScaler's files put beside the launcher instead (the
+  package's top folder) named as misplaced; a UI change, the tester's review. **L2:** the crash report's
+  texts made current.
+- **D1, a player's guide:** OptiScaler or d4r into `engine\out` beside `bb-probe.exe` (not beside the
+  launcher), as `dxgi.dll` or `winmm.dll`; DLSS chosen in the launcher; OptiScaler's upscaler in its
+  own menu; spoofing left off; frame generation not supported yet; how to remove it. Windows only (the
+  Linux build is native: OptiScaler is for Windows programs).
+- **T1, tests:** native tests for the ini reading; the tester's runs: OptiScaler 0.9.5 as dxgi.dll with
+  DLSS chosen (its output FSR 4, then XeSS), d4r's nightly (DLSS on the RX 9070 XT), each with a load
+  and the warm-up; the helpers' isolation seen (OptiScaler's log written by the game only), the key, HDR.
+
+Order: H1 and E3 (faults whatever is decided), then E1, E2, E4, E6, then the tester's choices (E5, E7,
+L1) and D1, then T1. Not in it: OptiScaler's frame generation, its mip bias override against ours, a
+launcher installer for OptiScaler or d4r.
+
 **Phase D: the release candidate.**
 
 - The switches settled with the tester: every 0.4.6 switch (`BB_EMPTY_SURFACES`, `BB_TARGET_POOL`,
