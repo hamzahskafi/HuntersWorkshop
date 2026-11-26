@@ -219,6 +219,18 @@ had under their right stages too. The catalog was exported again after it:
 The 8 left are keys whose fragment shader reads the motion vectors their vertex shader does not
 write.
 
+**0.4.6 beta 17: a stage with no bindings at all.** The tester's cache left 6 of 560 keys out at
+every start (`--check-cache`: "a stage compiled after another fragment shader (binding start)") and
+built them again in play every session. They were made by the current engine: play reuses a stage
+with no bindings at all (no buffer, image, FMASK or sampler, the engine's own included) beside any
+fragment shader, since where its bindings start changes nothing in its module or the layout
+(`StageSpecialization::operator==`), and saves the key with the permutation it found first; the
+warm-up compared the start of every stage. `--fix-keys` at a rebuild gave those stages a permutation
+with the matching start, but play went on finding the first one and saving the same keys again. Now
+one rule, `StageSpecialization::HasNoBindings`, serves play, the warm-up (`LoadGraphicsPipeline`),
+`--check-cache` and `--fix-keys` (which leaves such stages as they are): the warm-up builds what play
+builds, and `--check-cache`'s layout check covers those pipelines too.
+
 ## A catalog per GPU vendor (0.9.37 beta 9)
 
 The catalogs: `engine\shader-catalog\<game>` (NVIDIA, as before) and

@@ -327,9 +327,11 @@ private:
     tsl::robin_map<GraphicsPipelineKey, std::unique_ptr<GraphicsPipeline>> graphics_pipelines;
     PipelineSelection sel{}; ///< GPU thread selection state
     /// bbport: the warm-up's loaded stages: where each one's bindings start (its specialization)
-    /// and how many it has; `warmup_mip_bindings`: one has an image bound per mip level, whose
+    /// and how many it has, and whether it has none at all (StageSpecialization::HasNoBindings: its
+    /// start does not matter); `warmup_mip_bindings`: one has an image bound per mip level, whose
     /// count needs the draw's descriptor.
     std::array<Shader::Backend::Bindings, MaxShaderStages> warmup_start{}, warmup_count{};
+    std::array<bool, MaxShaderStages> warmup_no_bindings{};
     bool warmup_mip_bindings = false;
     ComputePipelineKey compute_key{};
     u32 num_new_pipelines{}; // new pipelines added to the cache since the game start

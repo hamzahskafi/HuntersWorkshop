@@ -956,8 +956,8 @@ int FixKeys(const fs::path& dir) {
         StageSpecialization wanted = from.spec;
         wanted.start = start;
         const auto used = UsedPerms(dir, from.pgm);
-        // The start compared as the warm-up does: the specialization's own comparison leaves it out
-        // for a stage without guest resources.
+        // The start compared as the warm-up does (the specialization's comparison leaves it out only
+        // for a stage with no bindings at all, which never comes here).
         for (const size_t perm : used) {
             StageRecord* other = record(HashCombine(from.pgm, u64(perm)));
             if (other && other->pgm == from.pgm && other->spec == wanted &&
@@ -1025,7 +1025,10 @@ int FixKeys(const fs::path& dir) {
                 ok = ok && image.mip_fallback_mode != MipStorageFallbackMode::DynamicIndex;
             }
             if (!ok) break;
-            if (r->spec.start.unified != expected.unified || r->spec.start.buffer != expected.buffer) {
+            // A stage with no bindings at all is left as it is: it starts anywhere (HasNoBindings),
+            // and play forms its keys with the permutation it finds first (0.4.6 beta 17).
+            if (!r->spec.HasNoBindings() &&
+                (r->spec.start.unified != expected.unified || r->spec.start.buffer != expected.buffer)) {
                 const u64 target = with_start(*r, expected);
                 if (!target) {
                     ok = false;
@@ -1396,7 +1399,10 @@ int CheckCache(const fs::path& dir) {
                     why = "an image bound per mip level (built in play)";
                     break;
                 }
-                if (spec.start.unified != expected.unified || spec.start.buffer != expected.buffer) {
+                // A stage with no bindings at all starts anywhere (HasNoBindings, as play and the
+                // warm-up since 0.4.6 beta 17).
+                if (!spec.HasNoBindings() &&
+                    (spec.start.unified != expected.unified || spec.start.buffer != expected.buffer)) {
                     why = "a stage compiled after another fragment shader (binding start)";
                     break;
                 }

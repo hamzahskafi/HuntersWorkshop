@@ -385,9 +385,13 @@ bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar, u32 version
         // its binding count needs the draw's descriptor, which the warm-up does not have.
         // The layout is built from the program's Info (the first permutation loaded): it must
         // have the bindings of this permutation's own record.
+        // 0.4.6 beta 17: a stage with no bindings at all starts anywhere, as play reuses it
+        // (StageSpecialization::HasNoBindings): its pipelines were left out at every start and
+        // compiled again in play every session (6 of the tester's 560 keys).
         const auto& layout_info = *sel.infos[stage_idx];
-        if (warmup_mip_bindings || warmup_start[stage_idx].unified != expected.unified ||
-            warmup_start[stage_idx].buffer != expected.buffer ||
+        const bool start_differs = warmup_start[stage_idx].unified != expected.unified ||
+                                   warmup_start[stage_idx].buffer != expected.buffer;
+        if (warmup_mip_bindings || (start_differs && !warmup_no_bindings[stage_idx]) ||
             layout_info.buffers.size() != warmup_count[stage_idx].buffer ||
             layout_info.buffers.size() + layout_info.images.size() + layout_info.samplers.size() !=
                 warmup_count[stage_idx].unified) {
@@ -485,6 +489,7 @@ bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage, 
     if (stage < MaxShaderStages) {
         const auto& own = program->info;
         warmup_start[stage] = spec.start;
+        warmup_no_bindings[stage] = spec.HasNoBindings();
         warmup_count[stage] = {};
         warmup_count[stage].buffer = u32(own.buffers.size());
         warmup_count[stage].unified = u32(own.buffers.size() + own.images.size() + own.samplers.size());

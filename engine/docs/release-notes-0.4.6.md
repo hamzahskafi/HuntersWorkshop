@@ -369,6 +369,10 @@ without thread support although the movie player uses it from three threads.
   every frame behind it waited. Now the threads that prepare draws ahead notice it first and have it
   translated on the shader-building threads, side by side with others; the frame waits only for what
   is not ready yet. `BB_TRANSLATE_AHEAD=0` in Extra variables turns it off; safe mode turns it off.
+- **No more of the same few pipelines built again every session.** A handful of cached pipelines (6
+  in the tester's cache) were left out at every start and built again in play, in places visited
+  just before: a short wait and, for a moment, missing scene geometry. Their vertex shader uses no
+  resources, which play already knew to allow; the start's check now allows it too.
 
 ## Sharpening: one meaning, off by default (beta 16)
 
@@ -388,6 +392,10 @@ The reactive mask's line in the in-game menu now says whether the FSR version ru
 mask, by FSR's own answer (FSR 4.1.2 does not), instead of "FSR 4 may".
 
 ## Diagnostics
+
+- **`bb-shader-lab --check-cache <cache folder>`** (beta 17): prints again when run from a terminal on
+  Windows (it was built as a windowed program, so a terminal showed nothing). It says how many cached
+  pipelines the start would build, and why it would leave out the rest.
 
 - **AMD FSR's own view** (beta 16): "Show AMD FSR's own view (debug)" in the in-game menu, under Motion
   vectors, replaces the picture with AMD's diagnostic view: how FSR reads the motion vectors, where it
