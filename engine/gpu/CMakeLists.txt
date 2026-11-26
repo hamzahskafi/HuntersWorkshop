@@ -552,6 +552,9 @@ add_executable(splash-art-test EXCLUDE_FROM_ALL ../tests/test_splash_art.cpp shi
 target_compile_options(splash-art-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(splash-art-test PRIVATE shim)
 target_link_libraries(splash-art-test PRIVATE miniz::miniz)
+# Only miniz's own names (mz_*): its zlib-compatible wrappers are static functions the test never
+# calls, unused-function errors under -Werror.
+target_compile_definitions(splash-art-test PRIVATE MINIZ_NO_ZLIB_COMPATIBLE_NAMES)
 add_executable(translate-ahead-test EXCLUDE_FROM_ALL ../tests/test_translate_ahead.cpp)
 target_compile_options(translate-ahead-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(translate-ahead-test PRIVATE shadps4)
