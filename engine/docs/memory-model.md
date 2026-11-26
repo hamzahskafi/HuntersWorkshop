@@ -2161,6 +2161,21 @@ the start: ...". Always on (a lock and two set lookups a new pipeline); nothing 
 are built. What it decides: the waits of "both built" are what the rework would remove, about half of
 "one"'s; "neither" stays.
 
+**The tester's session (engine id 125, 2026-11-27):** 1,450 cached pipelines built at the start in 2.3 s;
+play into places new on this GPU (`m22`-`m28`); 38 pipelines new in play, 13 frames that waited for one
+(52-148 ms). By their parts: both built already 10, one 20 (19 of them the vertex stages' only: a new
+fragment shader), neither 8. The waits for them: 1.74 s in all; both built 0.29 s (17%), one 0.63 s
+(36%), neither 0.83 s (47%).
+
+**The decision: no parts rework.** At best (the part identity is an upper bound) the rework would remove
+the "both built" waits and about half of the "one" waits (a fragment shader's part, about 24 ms of the
+whole's 51): about a third of the waiting, and the frames that wait for a pipeline with a new fragment
+shader or no part built still pause, a little shorter. For that it would split the shared slot set
+(a second set written per draw, a cost on every draw at 230-470 FPS), add a second build path and the
+optimized pipeline behind it. Not worth it. What removes a pause is the pipeline being in the cache
+before play: the catalog, grown with the tester's full-game cache later. The measurement mode and the
+count go with the release candidate's research cleanup.
+
 ### The 0.4.6 release
 
 - **Switches:** each beta's switches, and `BB_COPY_HOLD` and `BB_COPY_MERGE` (kept through 0.4.5
