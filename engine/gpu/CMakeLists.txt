@@ -66,6 +66,19 @@ find_package(tsl-robin-map REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(XXHASH REQUIRED IMPORTED_TARGET libxxhash)
 pkg_check_modules(SDL3 REQUIRED IMPORTED_TARGET sdl3)
+# SDL3's pkg-config adds -mwindows on Windows (the GUI subsystem). Every engine program is a console
+# one: bb-shader-lab linked with it (through bbgpu) had no console, so run from a terminal it printed
+# nothing and the shell did not wait for it (bb-start reads it through pipes, which worked). bb-probe's
+# link drops it too (cmake/LinkClosure.cmake, build.sh).
+if (WIN32)
+    foreach(property INTERFACE_LINK_OPTIONS INTERFACE_LINK_LIBRARIES)
+        get_target_property(items PkgConfig::SDL3 ${property})
+        if (items)
+            list(REMOVE_ITEM items -mwindows)
+            set_target_properties(PkgConfig::SDL3 PROPERTIES ${property} "${items}")
+        endif()
+    endforeach()
+endif()
 find_package(Zydis REQUIRED)
 if (WIN32)
     # bbport: Windows (MSYS2 MINGW64). bbgpu is a static library linked into bb-probe.exe
