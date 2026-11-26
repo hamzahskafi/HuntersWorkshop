@@ -2061,6 +2061,26 @@ Linux package found three faults, fixed in the same engine id (Windows unchanged
 - **The package took the catalog from its template**, not the repository; SDL's controller mappings
   now come with their licence.
 
+**The catalog grown with the tester's caches (engine id 123, 2026-11-26).** Three of the tester's
+cache folders (an RTX 3070 Ti's, 23 October to 9 November; the RX 9070 XT's before the catalog, 10 to
+25 November; and today's) were stripped to catalog form here (a Python copy of `--export-catalog`,
+checked against the lab: the shipped catalog's 1,109 states came out byte for byte), handed to the
+builder session on a temporary branch (deleted), and seeded after the shipped catalog into one cache
+with the RX 9070 XT's profile (bb9a4cd, the builder's one-off push with the tester's go):
+
+| | Before | After |
+|---|---|---|
+| Programs, states | 578, 1,109 | 608, 1,196 |
+| Pipeline keys (built at the start) | 1,173 (1,127) | 1,471 (1,416) |
+| Size | 10.4 MB | 12.0 MB |
+
+The 3070 Ti cache added 112 permutations (73 left out: they no longer specialize the same, 70 of them
+"runtime"; 133 old keys made buildable); the November one 6, today's 42; 168 permutations were of
+shaders not in 1.09's files (another version or mods then). Of its 113 states in the older capture
+formats (3 and 4) all but one translate. A copy recompiled with the NVIDIA profile: nothing left out,
+the same 1,416 keys built. The 55 keys refused for object motion (46 before) stay until the next
+export (518617e: the export now leaves them out); the records and `profile.bin` are the RX 9070 XT's.
+
 ### The 0.4.6 release
 
 - **Switches:** each beta's switches, and `BB_COPY_HOLD` and `BB_COPY_MERGE` (kept through 0.4.5

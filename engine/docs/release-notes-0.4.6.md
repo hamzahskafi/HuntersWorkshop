@@ -376,7 +376,8 @@ without thread support although the movie player uses it from three threads.
   change. It works however you start the game: the launcher, the Steam shortcut or Linux.
   `BB_SPLASH=0` in Extra variables turns it off.
 - **Shaders built before you play, on any graphics card.** The engine now ships a shader catalog
-  (1,173 pipelines, from Lantern's community catalogs for AMD and NVIDIA): at the first start it is
+  (1,416 pipelines of 608 shader programs, from Lantern's community catalogs for AMD and NVIDIA and
+  the tester's own caches of a month's play on both): at the first start it is
   prepared for your graphics card and its pipelines are built before the game starts, so places you
   have never visited no longer stutter the first time, whatever card you have. Changing graphics card
   or driver no longer throws your shader cache away: it is prepared again for the new card instead,
