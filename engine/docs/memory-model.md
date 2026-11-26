@@ -2081,6 +2081,42 @@ formats (3 and 4) all but one translate. A copy recompiled with the NVIDIA profi
 the same 1,416 keys built. The 55 keys refused for object motion (46 before) stay until the next
 export (518617e: the export now leaves them out); the records and `profile.bin` are the RX 9070 XT's.
 
+### The pipeline measurement (the proposal's step 3; the tester: "sure", 2026-11-26)
+
+What a pipeline first seen in play costs to build, and what the cheaper ways would cost, measured on
+the tester's PC before anything changes how pipelines are built. `BB_PIPELINE_BENCH=1` in Extra
+variables (300 pipelines; a number for that many, `all` for every one); off by default, nothing else
+changes with it off (the cache's identity too: only `vk_graphics_pipeline.cpp`, `vk_pipeline_common.*`
+and `vk_instance.*` changed).
+
+- **When:** at the warm-up's end, after the last cached pipeline is built (the splash shows "Building
+  shaders" counting the measured ones); the game starts after it. The warm-up's own time line
+  includes it.
+- **How:** a sample spread over the cache, each built again one at a time on one thread, three ways:
+  whole as today; whole with `VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT` (what a quick build first,
+  the optimized one behind it, would cost at the draw); and in the graphics pipeline library's four
+  parts (vertex input, the stages before rasterization, the fragment shader, the fragment output;
+  one layout for all, as today's pipeline has), then their fast link. The two extensions it needs
+  (`VK_EXT_graphics_pipeline_library`, `pipelineCreationCacheControl`) are enabled only in this mode.
+- **The driver's own cache kept out:** every stage gets a specialization constant no shader declares
+  (ID `0x7FFFF00D`), a new value for each build: the code the GPU runs is the same, the build's
+  identity is not. The driver is asked first whether it has the pipeline
+  (`FAIL_ON_PIPELINE_COMPILE_REQUIRED`): the count it answered from its cache is in the log line, and
+  should be 0.
+- **Reuse:** over the whole cache, the pipelines whose fragment-shader part, and whose part before
+  rasterization, another pipeline has too: what a pipeline built from parts would find already built.
+  The part before rasterization by permutation (its slots after the fragment shader's, as compiled
+  today) and, at most, by program and runtime state (with slots of its own: the rework of the
+  proposal's step 4). Pre-rasterization state is left out of the second, so it is an upper bound.
+- **Read from the log:**
+  `Pipeline measurement (BB_PIPELINE_BENCH): N of the cache's M graphics pipelines ...`, then lines for
+  whole as today, whole without the driver's optimizations (with its median as a share of today's), the
+  parts' medians, the fast link, parts and link together, the refusals, and the shared parts.
+- **What decides:** if the unoptimized build is a small share of today's, the quick build first is
+  the modest change (step 3's answer); if the link is a few ms and the parts are mostly shared, the
+  parts' rework (step 4) is worth designing; neither, and the catalog stays the answer. Not measured
+  here: how much slower an unoptimized pipeline draws (it would be replaced within a second or so).
+
 ### The 0.4.6 release
 
 - **Switches:** each beta's switches, and `BB_COPY_HOLD` and `BB_COPY_MERGE` (kept through 0.4.5

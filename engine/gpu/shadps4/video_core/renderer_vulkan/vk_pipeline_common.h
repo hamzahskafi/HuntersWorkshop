@@ -75,6 +75,11 @@ u64 SkipUncompiledBudgetNs();
 /// Other draws and dispatches bind it on the recording threads, which wait for it there
 /// (BB_LATE_PIPELINE_BIND=0: the draw recording thread waits, as before).
 bool LatePipelineBindEnabled();
+
+/// 0.4.6 beta 17 (BB_PIPELINE_BENCH, a measurement for the tester's PC, docs/memory-model.md): how
+/// many of the cache's graphics pipelines the warm-up's end builds again, one at a time, whole and
+/// in parts, timed (1: 300; a number: that many; "all"). 0: off, the default.
+u32 PipelineBenchCount();
 /// One line at start saying which of these run, with whether the device offers
 /// VK_EXT_graphics_pipeline_library (not used: see the document).
 void LogPipelineCompileMode(const Instance& instance, bool late_binds_possible);

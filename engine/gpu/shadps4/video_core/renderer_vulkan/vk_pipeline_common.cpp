@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <span>
 #include <string>
 
@@ -81,6 +82,21 @@ u64 SkipUncompiledBudgetNs() {
         return ms * 1'000'000;
     }();
     return budget;
+}
+
+u32 PipelineBenchCount() {
+    static const u32 count = [] {
+        const char* env = std::getenv("BB_PIPELINE_BENCH");
+        if (!env || !env[0] || env[0] == '0') {
+            return u32{0};
+        }
+        if (std::strcmp(env, "all") == 0) {
+            return ~u32{0};
+        }
+        const unsigned long n = std::strtoul(env, nullptr, 10);
+        return n <= 1 ? u32{300} : u32(std::min<unsigned long>(n, ~u32{0}));
+    }();
+    return count;
 }
 
 bool LatePipelineBindEnabled() {

@@ -15,6 +15,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <utility>
 #include <boost/container/small_vector.hpp>
 #include <boost/container/static_vector.hpp>
@@ -23,7 +24,9 @@
 #include "bbport_log_level.h"
 #include "bbport_threads.h"
 #include "engine/frame_window.h"
+#include "engine/startup.h"
 #include "common/thread.h"
+#include "common/hash.h"
 #include "common/serdes.h"
 #include "common/assert.h"
 #include "shader_recompiler/backend/spirv/emit_spirv_discard_frag.h"
@@ -276,6 +279,339 @@ u32 PipelineBurstThreads() {
 u32 PipelineCompileThreads() {
     return PipelineCompiler::Get().threads;
 }
+
+// --- 0.4.6 beta 17: the pipeline measurement (BB_PIPELINE_BENCH; docs/memory-model.md, "The pipeline
+// measurement") --------------------------------------------------------------------------------------
+// At the warm-up's end, a sample of the cache's graphics pipelines is built again one at a time, each
+// three ways: whole as today, whole without the driver's optimizations, and in the pipeline library's
+// four parts with a fast link. The driver's own cache must not answer from an earlier build: every
+// stage gets a specialization constant no shader declares, with a new value each time (it changes
+// nothing the GPU runs, but the build's identity), and where the driver lets it be asked
+// (pipelineCreationCacheControl) whether it has the pipeline already, the answer is counted. Then,
+// over the whole cache, how many pipelines share their parts with another one: what a pipeline built
+// from parts would find already built.
+namespace {
+
+struct BenchEntry {
+    std::shared_ptr<PendingPipeline> job;
+    u64 fragment = 0;  ///< the fragment shader's permutation (0: none)
+    u64 pre_today = 0; ///< the stages before rasterization by permutation (slots after the fragment's)
+    u64 pre_own = 0;   ///< ... by program and runtime state (slots of their own)
+};
+
+struct Bench {
+    std::mutex mutex;
+    std::vector<BenchEntry> entries;
+    /// Program -> its distinct runtime states (an entry's `pre_own` names them by index).
+    std::unordered_map<u64, std::vector<Shader::RuntimeInfo>> runtimes;
+    std::atomic<u32> pushed{0}, done{0};
+    vk::Device device;
+    bool parts = false, cache_control = false;
+    u32 salt = 0;
+};
+
+Bench& TheBench() {
+    static Bench bench;
+    return bench;
+}
+
+constexpr u32 kSaltConstant = 0x7FFFF00Du; // a specialization constant ID no shader declares
+
+struct Built {
+    vk::Pipeline pipeline{};
+    double ms = -1.0;    ///< < 0: the driver refused it
+    bool cached = false; ///< the driver had it already (the salt did not hide it)
+};
+
+/// `info` built and timed. With shaders in it (`probe`), the driver is asked first whether it has it
+/// already (a part without shaders, or a link, needs no compile, and the answer would say nothing).
+Built Create(Bench& b, vk::GraphicsPipelineCreateInfo info, bool probe) {
+    Built built;
+    if (b.cache_control && probe) {
+        auto probe = info;
+        probe.flags |= vk::PipelineCreateFlagBits::eFailOnPipelineCompileRequired;
+        auto [result, pipeline] = b.device.createGraphicsPipeline({}, probe);
+        if (result == vk::Result::eSuccess) {
+            built.cached = true;
+            b.device.destroyPipeline(pipeline);
+        }
+    }
+    const auto start = std::chrono::steady_clock::now();
+    auto [result, pipeline] = b.device.createGraphicsPipeline({}, info);
+    const auto end = std::chrono::steady_clock::now();
+    if (result == vk::Result::eSuccess) {
+        built.pipeline = pipeline;
+        built.ms = std::chrono::duration<double, std::milli>(end - start).count();
+    }
+    return built;
+}
+
+using BenchStages = boost::container::static_vector<vk::PipelineShaderStageCreateInfo, MaxShaderStages>;
+
+/// The job's stages with `salt` as the unused specialization (stages with one of their own: as they are).
+BenchStages Salted(const PendingPipeline& j, const vk::SpecializationInfo& salt) {
+    BenchStages stages(j.stages.begin(), j.stages.end());
+    for (auto& stage : stages) {
+        if (!stage.pSpecializationInfo) {
+            stage.pSpecializationInfo = &salt;
+        }
+    }
+    return stages;
+}
+
+struct WholeTimes {
+    double optimized = -1.0, unoptimized = -1.0;
+    bool cached = false;
+};
+
+WholeTimes BuildWhole(Bench& b, const PendingPipeline& j) {
+    WholeTimes t;
+    for (const bool optimized : {true, false}) {
+        u32 value = ++b.salt;
+        const vk::SpecializationMapEntry entry{kSaltConstant, 0, sizeof(u32)};
+        const vk::SpecializationInfo salt{1, &entry, sizeof(u32), &value};
+        auto stages = Salted(j, salt);
+        auto info = j.info;
+        info.pStages = stages.data();
+        if (!optimized) {
+            info.flags |= vk::PipelineCreateFlagBits::eDisableOptimization;
+        }
+        const Built built = Create(b, info, true);
+        if (built.pipeline) {
+            b.device.destroyPipeline(built.pipeline);
+        }
+        (optimized ? t.optimized : t.unoptimized) = built.ms;
+        t.cached |= built.cached;
+    }
+    return t;
+}
+
+struct PartTimes {
+    double vertex_input = -1.0, pre_raster = -1.0, fragment = -1.0, output = -1.0, link = -1.0;
+    bool cached = false, skipped = false;
+};
+
+/// The pipeline library's four parts (one layout for all, as today's pipeline has), then the fast
+/// link (no link-time optimization).
+PartTimes BuildParts(Bench& b, const PendingPipeline& j) {
+    PartTimes t;
+    u32 value = ++b.salt;
+    const vk::SpecializationMapEntry entry{kSaltConstant, 0, sizeof(u32)};
+    const vk::SpecializationInfo salt{1, &entry, sizeof(u32), &value};
+    const auto stages = Salted(j, salt);
+    BenchStages pre, fragment;
+    for (const auto& stage : stages) {
+        (stage.stage == vk::ShaderStageFlagBits::eFragment ? fragment : pre).push_back(stage);
+    }
+    if (fragment.empty() || pre.empty()) { // depth only: no fragment shader to make a part of
+        t.skipped = true;
+        return t;
+    }
+    vk::PipelineRenderingCreateInfo rendering = j.rendering; // its chain: the job's own
+    std::array<Built, 4> parts{};
+    const auto part = [&](size_t index, vk::GraphicsPipelineLibraryFlagsEXT subset, vk::GraphicsPipelineCreateInfo info) {
+        vk::GraphicsPipelineLibraryCreateInfoEXT library{.pNext = &rendering, .flags = subset};
+        info.pNext = &library;
+        info.flags = j.info.flags | vk::PipelineCreateFlagBits::eLibraryKHR;
+        info.pDynamicState = j.info.pDynamicState;
+        parts[index] = Create(b, info, info.stageCount != 0);
+        t.cached |= parts[index].cached;
+        return parts[index].ms;
+    };
+    using Lib = vk::GraphicsPipelineLibraryFlagBitsEXT;
+    t.vertex_input = part(0, Lib::eVertexInputInterface,
+                          {.pVertexInputState = j.info.pVertexInputState,
+                           .pInputAssemblyState = j.info.pInputAssemblyState});
+    t.pre_raster = part(1, Lib::ePreRasterizationShaders,
+                        {.stageCount = u32(pre.size()),
+                         .pStages = pre.data(),
+                         .pTessellationState = j.info.pTessellationState,
+                         .pViewportState = j.info.pViewportState,
+                         .pRasterizationState = j.info.pRasterizationState,
+                         .layout = j.info.layout});
+    t.fragment = part(2, Lib::eFragmentShader,
+                      {.stageCount = u32(fragment.size()),
+                       .pStages = fragment.data(),
+                       .pMultisampleState = j.info.pMultisampleState,
+                       .pDepthStencilState = j.info.pDepthStencilState,
+                       .layout = j.info.layout});
+    t.output = part(3, Lib::eFragmentOutputInterface,
+                    {.pMultisampleState = j.info.pMultisampleState, .pColorBlendState = j.info.pColorBlendState});
+    if (std::ranges::all_of(parts, [](const Built& p) { return bool(p.pipeline); })) {
+        std::array<vk::Pipeline, 4> handles{};
+        for (size_t i = 0; i < parts.size(); ++i) {
+            handles[i] = parts[i].pipeline;
+        }
+        const vk::PipelineLibraryCreateInfoKHR libraries{.libraryCount = u32(handles.size()),
+                                                         .pLibraries = handles.data()};
+        const Built linked =
+            Create(b, {.pNext = &libraries, .flags = j.info.flags, .layout = j.info.layout}, false);
+        t.link = linked.ms;
+        t.cached |= linked.cached;
+        if (linked.pipeline) {
+            b.device.destroyPipeline(linked.pipeline);
+        }
+    }
+    for (const auto& p : parts) {
+        if (p.pipeline) {
+            b.device.destroyPipeline(p.pipeline);
+        }
+    }
+    return t;
+}
+
+/// "median 14.2 ms, 90% under 31.0, longest 88.0; 4.6 s in all" of the times measured (< 0: left out).
+std::string Spread(std::vector<double> v) {
+    std::erase_if(v, [](double x) { return x < 0.0; });
+    if (v.empty()) {
+        return "none measured";
+    }
+    std::sort(v.begin(), v.end());
+    double total = 0.0;
+    for (const double x : v) {
+        total += x;
+    }
+    return fmt::format("median {:.1f} ms, 90% under {:.1f}, longest {:.1f}; {:.1f} s in all ({})",
+                       v[v.size() / 2], v[std::min(v.size() - 1, v.size() * 9 / 10)], v.back(),
+                       total / 1000.0, v.size());
+}
+
+double Median(std::vector<double> v) {
+    std::erase_if(v, [](double x) { return x < 0.0; });
+    if (v.empty()) {
+        return 0.0;
+    }
+    std::sort(v.begin(), v.end());
+    return v[v.size() / 2];
+}
+
+void RunBench() {
+    auto& b = TheBench();
+    std::scoped_lock lock{b.mutex};
+    const size_t total = b.entries.size();
+    const size_t n = std::min<size_t>(PipelineBenchCount(), total);
+    if (!n) {
+        return;
+    }
+    b.salt = u32(std::chrono::steady_clock::now().time_since_epoch().count());
+    BbStartup::SetStep(BbStartup::Step::Shaders);
+    const auto start = std::chrono::steady_clock::now();
+    std::vector<double> optimized, unoptimized, vertex_input, pre_raster, fragment, output, link, parts_sum;
+    u32 cached = 0, refused = 0, part_refused = 0, skipped = 0;
+    for (size_t k = 0; k < n; ++k) {
+        const BenchEntry& e = b.entries[k * total / n];
+        const WholeTimes whole = BuildWhole(b, *e.job);
+        optimized.push_back(whole.optimized);
+        unoptimized.push_back(whole.unoptimized);
+        refused += whole.optimized < 0.0 || whole.unoptimized < 0.0;
+        bool was_cached = whole.cached;
+        if (b.parts) {
+            const PartTimes p = BuildParts(b, *e.job);
+            was_cached |= p.cached;
+            if (p.skipped) {
+                ++skipped;
+            } else {
+                vertex_input.push_back(p.vertex_input);
+                pre_raster.push_back(p.pre_raster);
+                fragment.push_back(p.fragment);
+                output.push_back(p.output);
+                link.push_back(p.link);
+                const bool all = p.vertex_input >= 0 && p.pre_raster >= 0 && p.fragment >= 0 && p.output >= 0 &&
+                                 p.link >= 0;
+                part_refused += !all;
+                parts_sum.push_back(all ? p.vertex_input + p.pre_raster + p.fragment + p.output + p.link : -1.0);
+            }
+        }
+        cached += was_cached;
+        BbStartup::SetProgress(k + 1, n);
+    }
+    // Parts shared across the whole cache: a pipeline whose part another pipeline has too.
+    std::unordered_map<u64, u32> fragment_uses, today_uses, own_uses;
+    for (const auto& e : b.entries) {
+        ++fragment_uses[e.fragment];
+        ++today_uses[e.pre_today];
+        ++own_uses[e.pre_own];
+    }
+    u32 with_fragment = 0, fragment_shared = 0, today_shared = 0, own_shared = 0, both_today = 0, both_own = 0;
+    for (const auto& e : b.entries) {
+        const bool frag = e.fragment && fragment_uses[e.fragment] > 1;
+        const bool today = today_uses[e.pre_today] > 1, own = own_uses[e.pre_own] > 1;
+        with_fragment += e.fragment != 0;
+        fragment_shared += frag;
+        today_shared += today;
+        own_shared += own;
+        both_today += frag && today;
+        both_own += frag && own;
+    }
+    const auto pct = [&](u32 part, size_t of) { return of ? 100.0 * part / double(of) : 0.0; };
+    const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+    std::printf("Pipeline measurement (BB_PIPELINE_BENCH): %zu of the cache's %zu graphics pipelines built "
+                "again one at a time in %.1f s, the driver's own cache kept out (%s: %u answered from it); "
+                "the warm-up's time above includes it\n",
+                n, total, seconds,
+                b.cache_control ? "asked first" : "it could not be asked", cached);
+    std::printf("  whole, as today: %s\n", Spread(optimized).c_str());
+    std::printf("  whole, without the driver's optimizations: %s; the median %.0f%% of the optimized one\n",
+                Spread(unoptimized).c_str(),
+                Median(optimized) > 0.0 ? 100.0 * Median(unoptimized) / Median(optimized) : 0.0);
+    if (b.parts) {
+        std::printf("  in parts (the pipeline library, one layout): vertex input %.1f ms, before "
+                    "rasterization %.1f ms, fragment shader %.1f ms, fragment output %.1f ms (medians); "
+                    "%u without a fragment shader not made in parts\n",
+                    Median(vertex_input), Median(pre_raster), Median(fragment), Median(output), skipped);
+        std::printf("  the fast link of built parts: %s\n", Spread(link).c_str());
+        std::printf("  parts and link together: %s\n", Spread(parts_sum).c_str());
+    } else {
+        std::printf("  in parts: not measured (the driver has no graphics pipeline library)\n");
+    }
+    std::printf("  refused by the driver: %u whole, %u in parts\n", refused, part_refused);
+    std::printf("  parts shared with another of the cache's %zu pipelines: the fragment shader's %.0f%% (of "
+                "%u with one); the stages before rasterization %.0f%% as compiled today (slots after the "
+                "fragment shader's), at most %.0f%% with slots of their own; both %.0f%% today, at most "
+                "%.0f%%\n",
+                total, pct(fragment_shared, with_fragment), with_fragment, pct(today_shared, total),
+                pct(own_shared, total), pct(both_today, total), pct(both_own, total));
+    std::fflush(stdout);
+}
+
+/// Warm-up, while the cache is read (one thread): `job` kept for the measurement.
+void BenchRegister(const Instance& instance, const std::shared_ptr<PendingPipeline>& job,
+                   const GraphicsPipelineKey& key, std::span<const Shader::Info* const> infos,
+                   std::span<const Shader::RuntimeInfo, MaxShaderStages> runtime_infos) {
+    auto& b = TheBench();
+    std::scoped_lock lock{b.mutex};
+    b.device = instance.GetDevice();
+    b.parts = instance.IsGraphicsPipelineLibraryEnabled();
+    b.cache_control = instance.IsPipelineCreationCacheControlEnabled();
+    BenchEntry e{.job = job, .fragment = key.stage_hashes[u32(Shader::SwStage::Fragment)]};
+    for (const auto stage : {Shader::SwStage::TessellationControl, Shader::SwStage::TessellationEval,
+                             Shader::SwStage::Vertex, Shader::SwStage::Geometry}) {
+        const u32 i = u32(stage);
+        if (!key.stage_hashes[i] || !infos[i]) {
+            continue;
+        }
+        e.pre_today = HashCombine(e.pre_today, u64(key.stage_hashes[i]));
+        auto& seen = b.runtimes[infos[i]->pgm_hash];
+        const auto it = std::ranges::find(seen, runtime_infos[i]);
+        const u64 index = u64(it - seen.begin());
+        if (it == seen.end()) {
+            seen.push_back(runtime_infos[i]);
+        }
+        e.pre_own = HashCombine(e.pre_own, HashCombine(infos[i]->pgm_hash, index + 1));
+    }
+    b.entries.push_back(std::move(e));
+    b.pushed.fetch_add(1, std::memory_order_relaxed);
+}
+
+/// Warm-up job ended: after the last one (the cache read whole first, then built), the measurement.
+void BenchJobDone() {
+    auto& b = TheBench();
+    if (b.done.fetch_add(1, std::memory_order_acq_rel) + 1 == b.pushed.load(std::memory_order_acquire)) {
+        RunBench();
+    }
+}
+
+} // namespace
 
 static constexpr std::array LogicalStageToStageBit = {
     vk::ShaderStageFlagBits::eFragment,
@@ -780,13 +1116,20 @@ GraphicsPipeline::GraphicsPipeline(
         // Anything this copy does not know how to own (a chain added later): created here.
         if (ok && warmup) {
             ready.store(false, std::memory_order_relaxed);
-            warmup->jobs.push_back([this, job, device, cache = pipeline_cache, name = debug_str] {
+            const bool bench = PipelineBenchCount() != 0;
+            if (bench) {
+                BenchRegister(instance, job, key, stages, runtime_infos);
+            }
+            warmup->jobs.push_back([this, job, device, cache = pipeline_cache, name = debug_str, bench] {
                 auto [result, created] = device.createGraphicsPipelineUnique(cache, job->info);
                 if (result == vk::Result::eSuccess) {
                     pipeline = std::move(created);
                     SetObjectName(device, *pipeline, "Graphics Pipeline {}", name);
                 }
                 MarkReady();
+                if (bench) {
+                    BenchJobDone();
+                }
                 return result == vk::Result::eSuccess;
             });
             return;

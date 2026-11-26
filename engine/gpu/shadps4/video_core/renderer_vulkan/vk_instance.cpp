@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <cstdio>
+#include <algorithm>
 #include <cstring>
 #include <thread>
 #if defined(__x86_64__)
@@ -21,6 +22,7 @@
 #include "bbport_toggles.h"
 #include "video_core/renderer_vulkan/vk_breadcrumbs.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
+#include "video_core/renderer_vulkan/vk_pipeline_common.h"
 #include "video_core/renderer_vulkan/vk_amd_fsr.h"
 #include "video_core/renderer_vulkan/vk_occlusion.h"
 #include "video_core/renderer_vulkan/vk_optiscaler.h"
@@ -378,6 +380,22 @@ bool Instance::CreateDevice() {
 
     // Optional
     maintenance_5 = add_extension(VK_KHR_MAINTENANCE_5_EXTENSION_NAME);
+    // bbport (0.4.6 beta 17): for the pipeline measurement only (BB_PIPELINE_BENCH): pipelines in
+    // parts, linked; a normal start enables neither.
+    if (PipelineBenchCount()) {
+        const auto gpl = physical_device.getFeatures2<vk::PhysicalDeviceFeatures2,
+                                                      vk::PhysicalDeviceGraphicsPipelineLibraryFeaturesEXT>();
+        graphics_pipeline_library =
+            gpl.get<vk::PhysicalDeviceGraphicsPipelineLibraryFeaturesEXT>().graphicsPipelineLibrary &&
+            std::ranges::find(available_extensions, std::string{VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME}) !=
+                available_extensions.end() &&
+            std::ranges::find(available_extensions, std::string{VK_EXT_GRAPHICS_PIPELINE_LIBRARY_EXTENSION_NAME}) !=
+                available_extensions.end();
+        if (graphics_pipeline_library) {
+            add_extension(VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME);
+            add_extension(VK_EXT_GRAPHICS_PIPELINE_LIBRARY_EXTENSION_NAME);
+        }
+    }
     maintenance_8 = add_extension(VK_KHR_MAINTENANCE_8_EXTENSION_NAME);
     // bbport: GPU breadcrumbs (vk_breadcrumbs.h).
     buffer_marker = add_extension(VK_AMD_BUFFER_MARKER_EXTENSION_NAME);
@@ -590,6 +608,7 @@ bool Instance::CreateDevice() {
     const auto vk11_features = feature_chain.get<vk::PhysicalDeviceVulkan11Features>();
     vk12_features = feature_chain.get<vk::PhysicalDeviceVulkan12Features>();
     vk13_features = feature_chain.get<vk::PhysicalDeviceVulkan13Features>();
+    pipeline_creation_cache_control = PipelineBenchCount() && vk13_features.pipelineCreationCacheControl;
     // 0.4.4 beta 27: AMD FSR through AMD's FSR SDK (vk_amd_fsr.cpp). With its DLLs in the package, the
     // features AMD's own Vulkan sample asks for are enabled where the GPU has them (partially bound
     // descriptors, typed storage-image reads, descriptor arrays; FP16, 16-bit storage, int8 and its dot
@@ -671,6 +690,7 @@ bool Instance::CreateDevice() {
         },
         vk::PhysicalDeviceVulkan13Features{
             .robustImageAccess = vk13_features.robustImageAccess,
+            .pipelineCreationCacheControl = pipeline_creation_cache_control,
             .shaderDemoteToHelperInvocation = vk13_features.shaderDemoteToHelperInvocation,
             .subgroupSizeControl = vk13_features.subgroupSizeControl,
             .computeFullSubgroups = vk13_features.computeFullSubgroups,
@@ -772,6 +792,9 @@ bool Instance::CreateDevice() {
         vk::PhysicalDeviceAddressBindingReportFeaturesEXT{
             .reportAddressBinding = true,
         },
+        vk::PhysicalDeviceGraphicsPipelineLibraryFeaturesEXT{
+            .graphicsPipelineLibrary = true,
+        },
     };
 
     if (!custom_border_color) {
@@ -837,6 +860,9 @@ bool Instance::CreateDevice() {
     }
     if (!shader_float8) {
         device_chain.unlink<vk::PhysicalDeviceShaderFloat8FeaturesEXT>();
+    }
+    if (!graphics_pipeline_library) {
+        device_chain.unlink<vk::PhysicalDeviceGraphicsPipelineLibraryFeaturesEXT>();
     }
 
     // bbport: with OptiScaler loaded, on a thread of its own (OptiScaler::OnCleanThread).
