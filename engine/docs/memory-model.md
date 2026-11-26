@@ -1859,6 +1859,69 @@ beta 17. Kept: part 2 and 117's change to the prep workers.
 - Frame rate in play 175-297 FPS a report (most 185-250), as before; a clean exit. Translate-ahead used
   once (the cache warm). The cold run is still to do.
 
+### First sight: what it costs and what to do (research for the tester, 2026-11-26)
+
+The tester, after 120's run: beta 17's translations ahead patched the bleeding; "do some research and
+get back to me with a proposal on what we need to do exactly". Two fixes agreed in principle: make the
+work itself cheap, and ship a catalog.
+
+**Where the time goes** (the tester's AMD runs; NVIDIA's from `pipeline_compiles.md`):
+
+- **An empty cache** (a new player, another GPU): the RX 9070 XT's first runs after the 3070 Ti waited
+  2,043 ms in the first load, then 157-484 ms frames at new areas (`m34`: 54 pipelines, 1,392 ms) and
+  35-76 ms frames in play; AMD's driver builds a pipeline in 10-26 ms, some 55-80 ms. The cold run of
+  105 (`27b942f1`): 447 pipelines built in play, frames of 45-180 ms, 450 ms of translation in its
+  first minute. NVIDIA with a cold driver cache: 100-300 ms a pipeline.
+- **The tester's warm cache:** since 120 nothing in places of earlier sessions; new content still
+  costs a pipeline's build at the draw (120's `m33`: an 86.7 ms frame, 12 pipelines, 119 ms of
+  building; 116: single pipelines of 80-100 ms).
+- **Building pipelines costs 3-5 times what translating does**, and only a pipeline's build makes a
+  frame wait long (translation is 1-6 ms a shader).
+
+**What the research found:**
+
+1. **Nothing during play can know a pairing before its draw.** The game creates its 13,277 shaders at
+   startup and pairs them in draws; a pixel shader's variant depends on its targets, a vertex shader's
+   on its inputs and on where its pixel shader's slots end. Work started at the draw (translations
+   ahead, pipelines ahead) is a frame early at most: it shortens a wait, it cannot remove it.
+2. **Making a build cheap (the graphics pipeline library) is blocked by the slot layout.** All stages
+   share one push descriptor set: the pixel shader's slots first, then the vertex shader's, whose
+   module is compiled for that offset (`GraphicsPipeline::BuildDescSetLayout`; one set per pipeline
+   layout can be a push set). Library parts must agree on their sets, so a part serves only its own
+   pairing (9% reuse in an 855-pipeline sample), and new shaders' parts would be compiled at the same
+   draw. Freeing the vertex shader needs slots of its own: a second set written per draw (the cost
+   that kept the push set) or its buffers read by address instead of slots. The payoff is not
+   measured: what a part costs against a whole pipeline on AMD's driver, and how many new pipelines
+   would find both parts built.
+3. **A profile change deletes the cache, the shader states with it** (`PipelineCache::WarmUp`:
+   `DataBase::Clear` removes every file). A GPU change does it, as do two engine switches and a driver
+   that reports a new feature. The states are the translations' inputs: they could rebuild it.
+4. **The catalog's machinery is there, no catalog is shipped.** bb-start seeds a catalog at the first
+   start (`SeedGpuCache`, `--seed-cache`: each state translated for this GPU, kept when its
+   specialization comes out the same; the game's code taken from the player's files, none shipped);
+   the launcher exports a cache as one (Settings, Shader catalog). One per GPU vendor: a catalog of
+   another vendor is refused, a caution about pipeline formats another driver lacks.
+
+**The proposal:**
+
+1. **Keep the cache across profile changes.** On a new profile, translate the stored states again
+   for it (what a rebuild after an update does) instead of deleting them. Small; no rendering change.
+2. **Ship Hunter's Workshop's catalog.** From the tester's cache (587 pipelines: the recent runs' `m21`, `m24_01`,
+   `m27`, `m32`, `m33`, and what else it holds), grown by playing the rest of the game and exporting it
+   again; older catalogs the tester may still have (0.9.37's: NVIDIA 1,085 pipelines, AMD 771) tried
+   too, if they read. Other GPUs: the seed already translates every shader for this GPU; check each
+   pipeline's formats against this driver instead of refusing another vendor's catalog, measured first
+   with the shader lab (how much of an AMD catalog an NVIDIA profile keeps). The first start's cost:
+   the seed's translation once (about 2 s per 1,000 shaders) and a longer build at every start (0.6 s
+   for 560 now; a few seconds for a whole game's catalog); the game may start while the rest builds.
+3. **Measure before changing how pipelines are built.** An engine mode for the tester's PC: each cached
+   pipeline built whole and as two parts with a link, the times compared; and from the cache, how
+   many pipelines would have found both parts already built. Only good numbers lead to the fourth.
+4. **If measured worth it: pipelines from parts** (vertex shader slots of their own, parts linked at
+   the draw, the optimized pipeline built behind them). A large change, designed on its own.
+
+Translations ahead stay as they are (a small saving for what a catalog misses), not extended.
+
 ### The 0.4.6 release
 
 - **Switches:** each beta's switches, and `BB_COPY_HOLD` and `BB_COPY_MERGE` (kept through 0.4.5
