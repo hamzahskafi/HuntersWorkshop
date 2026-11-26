@@ -178,6 +178,9 @@ protected:
     bool uses_push_descriptors{};
     /// bbport: the fragment shader reads Shader::Native::ToneCurvePush after the push data.
     bool uses_tone_curve{};
+    /// 0.4.6 beta 17: a graphics pipeline new in play: the parts the pipeline library would have
+    /// found built (PipelineCompileStats::parts_new's kinds), its waits counted by it; 0xFF: none.
+    std::uint8_t part_reuse = 0xFF;
     bool is_compute;
 };
 

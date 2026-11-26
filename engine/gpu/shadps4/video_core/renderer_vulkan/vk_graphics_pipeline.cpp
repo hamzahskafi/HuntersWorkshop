@@ -16,6 +16,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <boost/container/small_vector.hpp>
 #include <boost/container/static_vector.hpp>
@@ -280,6 +281,80 @@ u32 PipelineCompileThreads() {
     return PipelineCompiler::Get().threads;
 }
 
+// --- 0.4.6 beta 17: a pipeline's two parts, as the graphics pipeline library would make them
+// (docs/memory-model.md, "The pipeline measurement") -------------------------------------------------
+namespace {
+
+/// The fragment shader's part (its permutation; 0: none), and the stages before rasterization's: by
+/// permutation (`pre_today`: their slots after the fragment shader's, as compiled today) and by
+/// program and runtime state (`pre_own`: with slots of their own, the rework's; an upper bound, the
+/// rasterization state and vertex inputs left out).
+struct PartKeys {
+    u64 fragment = 0, pre_today = 0, pre_own = 0;
+};
+
+/// Every part of the graphics pipelines built so far (the warm-up's and play's).
+struct PartRegistry {
+    std::mutex mutex;
+    /// Program -> its distinct runtime states (`pre_own` names them by index).
+    std::unordered_map<u64, std::vector<Shader::RuntimeInfo>> runtimes;
+    std::unordered_set<u64> fragments, pre_own;
+};
+
+PartRegistry& Parts() {
+    static auto* registry = new PartRegistry; // used by compile threads until the process ends
+    return *registry;
+}
+
+/// Under the registry's lock.
+PartKeys ComputePartKeys(PartRegistry& r, const GraphicsPipelineKey& key,
+                         std::span<const Shader::Info* const> infos,
+                         std::span<const Shader::RuntimeInfo, MaxShaderStages> runtime_infos) {
+    PartKeys k{.fragment = key.stage_hashes[u32(Shader::SwStage::Fragment)]};
+    for (const auto stage : {Shader::SwStage::TessellationControl, Shader::SwStage::TessellationEval,
+                             Shader::SwStage::Vertex, Shader::SwStage::Geometry}) {
+        const u32 i = u32(stage);
+        if (!key.stage_hashes[i] || !infos[i]) {
+            continue;
+        }
+        k.pre_today = HashCombine(k.pre_today, u64(key.stage_hashes[i]));
+        auto& seen = r.runtimes[infos[i]->pgm_hash];
+        const auto it = std::ranges::find(seen, runtime_infos[i]);
+        const u64 index = u64(it - seen.begin());
+        if (it == seen.end()) {
+            seen.push_back(runtime_infos[i]);
+        }
+        k.pre_own = HashCombine(k.pre_own, HashCombine(infos[i]->pgm_hash, index + 1));
+    }
+    return k;
+}
+
+/// Every graphics pipeline made: its parts kept; one new in play (not `preloading`) counted first by
+/// the parts already built (the kind it returns; 0xFF for the warm-up's). A pipeline without a
+/// fragment shader needs no fragment-shader part of its own.
+std::pair<PartKeys, std::uint8_t> NoteParts(const GraphicsPipelineKey& key,
+                                             std::span<const Shader::Info* const> infos,
+                                             std::span<const Shader::RuntimeInfo, MaxShaderStages> runtime_infos,
+                                             bool preloading) {
+    auto& r = Parts();
+    std::scoped_lock lock{r.mutex};
+    const PartKeys k = ComputePartKeys(r, key, infos, runtime_infos);
+    std::uint8_t kind = 0xFF;
+    if (!preloading) {
+        const bool fragment = !k.fragment || r.fragments.contains(k.fragment);
+        const bool pre = r.pre_own.contains(k.pre_own);
+        kind = std::uint8_t((fragment ? 1 : 0) | (pre ? 2 : 0));
+        pipeline_compile_stats.NoteNewParts(kind);
+    }
+    if (k.fragment) {
+        r.fragments.insert(k.fragment);
+    }
+    r.pre_own.insert(k.pre_own);
+    return {k, kind};
+}
+
+} // namespace
+
 // --- 0.4.6 beta 17: the pipeline measurement (BB_PIPELINE_BENCH; docs/memory-model.md, "The pipeline
 // measurement") --------------------------------------------------------------------------------------
 // At the warm-up's end, a sample of the cache's graphics pipelines is built again one at a time, each
@@ -294,16 +369,12 @@ namespace {
 
 struct BenchEntry {
     std::shared_ptr<PendingPipeline> job;
-    u64 fragment = 0;  ///< the fragment shader's permutation (0: none)
-    u64 pre_today = 0; ///< the stages before rasterization by permutation (slots after the fragment's)
-    u64 pre_own = 0;   ///< ... by program and runtime state (slots of their own)
+    u64 fragment = 0, pre_today = 0, pre_own = 0; ///< PartKeys
 };
 
 struct Bench {
     std::mutex mutex;
     std::vector<BenchEntry> entries;
-    /// Program -> its distinct runtime states (an entry's `pre_own` names them by index).
-    std::unordered_map<u64, std::vector<Shader::RuntimeInfo>> runtimes;
     std::atomic<u32> pushed{0}, done{0};
     vk::Device device;
     bool parts = false, cache_control = false;
@@ -575,31 +646,13 @@ void RunBench() {
 }
 
 /// Warm-up, while the cache is read (one thread): `job` kept for the measurement.
-void BenchRegister(const Instance& instance, const std::shared_ptr<PendingPipeline>& job,
-                   const GraphicsPipelineKey& key, std::span<const Shader::Info* const> infos,
-                   std::span<const Shader::RuntimeInfo, MaxShaderStages> runtime_infos) {
+void BenchRegister(const Instance& instance, const std::shared_ptr<PendingPipeline>& job, const PartKeys& parts) {
     auto& b = TheBench();
     std::scoped_lock lock{b.mutex};
     b.device = instance.GetDevice();
     b.parts = instance.IsGraphicsPipelineLibraryEnabled();
     b.cache_control = instance.IsPipelineCreationCacheControlEnabled();
-    BenchEntry e{.job = job, .fragment = key.stage_hashes[u32(Shader::SwStage::Fragment)]};
-    for (const auto stage : {Shader::SwStage::TessellationControl, Shader::SwStage::TessellationEval,
-                             Shader::SwStage::Vertex, Shader::SwStage::Geometry}) {
-        const u32 i = u32(stage);
-        if (!key.stage_hashes[i] || !infos[i]) {
-            continue;
-        }
-        e.pre_today = HashCombine(e.pre_today, u64(key.stage_hashes[i]));
-        auto& seen = b.runtimes[infos[i]->pgm_hash];
-        const auto it = std::ranges::find(seen, runtime_infos[i]);
-        const u64 index = u64(it - seen.begin());
-        if (it == seen.end()) {
-            seen.push_back(runtime_infos[i]);
-        }
-        e.pre_own = HashCombine(e.pre_own, HashCombine(infos[i]->pgm_hash, index + 1));
-    }
-    b.entries.push_back(std::move(e));
+    b.entries.push_back({.job = job, .fragment = parts.fragment, .pre_today = parts.pre_today, .pre_own = parts.pre_own});
     b.pushed.fetch_add(1, std::memory_order_relaxed);
 }
 
@@ -635,6 +688,9 @@ GraphicsPipeline::GraphicsPipeline(
     std::ranges::copy(infos, stages.begin());
     BuildDescSetLayout(preloading);
     const auto debug_str = GetDebugString();
+    // 0.4.6 beta 17: its parts kept, and one new in play counted by those already built.
+    const auto [part_keys, part_kind] = NoteParts(key, stages, runtime_infos, preloading);
+    part_reuse = part_kind;
 
     // bbport: a composite with the tone curve extension reads its parameters after the push
     // data (native/tone_curve.h).
@@ -1118,7 +1174,7 @@ GraphicsPipeline::GraphicsPipeline(
             ready.store(false, std::memory_order_relaxed);
             const bool bench = PipelineBenchCount() != 0;
             if (bench) {
-                BenchRegister(instance, job, key, stages, runtime_infos);
+                BenchRegister(instance, job, part_keys);
             }
             warmup->jobs.push_back([this, job, device, cache = pipeline_cache, name = debug_str, bench] {
                 auto [result, created] = device.createGraphicsPipelineUnique(cache, job->info);

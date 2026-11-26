@@ -2149,6 +2149,18 @@ What it says:
   layout lets few share. The cache's share overstates play at a new area, whose shaders are new too.
   Next: that count in real play, no behaviour changed (register).
 
+**The count in play (engine id 125; the tester: "let's get this over with"):** every graphics pipeline
+made is kept by its two parts (`NoteParts`, `vk_graphics_pipeline.cpp`: the warm-up's from the cache,
+then play's), and each one new in play is counted, before its own parts join, by what the pipeline
+library would have found built: both, the fragment shader's only, the vertex stages' only, neither
+(the vertex stages with slots of their own, as the rework would compile them; an upper bound, their
+rasterization state and vertex inputs left out). The waits for those pipelines (the pauses) are
+summed by the same kinds. One line a statistics window beside "Pipelines:", "Pipeline parts (...):
+new N: both built already B, ... waits for them: both built ... ms, one ... ms, neither ... ms; since
+the start: ...". Always on (a lock and two set lookups a new pipeline); nothing changes how pipelines
+are built. What it decides: the waits of "both built" are what the rework would remove, about half of
+"one"'s; "neither" stays.
+
 ### The 0.4.6 release
 
 - **Switches:** each beta's switches, and `BB_COPY_HOLD` and `BB_COPY_MERGE` (kept through 0.4.5

@@ -63,6 +63,9 @@ void Pipeline::WaitReady() const noexcept {
     g_bb_compile_ns += waited;
     g_bb_compile_ns_total += waited;
     pipeline_compile_stats.NoteWait(waited);
+    if (part_reuse < 4) {
+        pipeline_compile_stats.NotePartWait(part_reuse, waited);
+    }
 }
 
 namespace {
