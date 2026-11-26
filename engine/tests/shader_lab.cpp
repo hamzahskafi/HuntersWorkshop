@@ -10,7 +10,8 @@
 //                                                 one capture, a CSV line on stdout
 //   bb-shader-lab --export-catalog <cache folder> <catalog folder>
 //                                                 a cache as a shader catalog: specializations,
-//                                                 pipeline keys and draw states, without code
+//                                                 pipeline keys and draw states, without code;
+//                                                 the keys --check-cache passes only
 //   bb-shader-lab --seed-cache <catalog folder> <cache folder> <game folder> <eboot.elf>
 //                                                 a catalog into a player's cache, the shader code
 //                                                 from their own game files, then recompiled
@@ -1383,7 +1384,9 @@ u32 LayoutMismatches(const std::map<u32, char>& used, const std::map<u32, std::p
     return bad;
 }
 
-int CheckCache(const fs::path& dir) {
+/// `unbuildable` (0.4.6 beta 17): the keys the warm-up would not build, or would build with a layout
+/// their shaders do not match, by file name (ExportCatalog leaves them out).
+int CheckCache(const fs::path& dir, std::set<std::string>* unbuildable = nullptr) {
     std::vector<fs::path> keys;
     std::error_code error;
     for (const auto& entry : fs::directory_iterator(dir, error)) {
@@ -1413,6 +1416,7 @@ int CheckCache(const fs::path& dir) {
         }
         if (!(version >= 5 && version <= 7) || is_compute > 1) { // PipelineKeyVersion 7, legacy 5 and 6
             ++reasons["key version " + std::to_string(version)];
+            if (unbuildable) unbuildable->insert(path.filename().string());
             continue;
         }
         std::string why;
@@ -1571,6 +1575,7 @@ int CheckCache(const fs::path& dir) {
                 }
                 if (w) {
                     ++warmup_bad;
+                    if (unbuildable) unbuildable->insert(path.filename().string());
                     if (warmup_examples.size() < 6) ++warmup_examples[path.filename().string() + ": " + first];
                     // BB_LAB_VERBOSE=1: the layout and what each stage's module uses.
                     if (const char* v = std::getenv("BB_LAB_VERBOSE"); v && v[0] == '1' && warmup_bad <= 4) {
@@ -1593,6 +1598,7 @@ int CheckCache(const fs::path& dir) {
             }
         } else {
             ++reasons[why];
+            if (unbuildable) unbuildable->insert(path.filename().string());
         }
     }
     std::printf("Cache check: %u of %zu pipeline keys would be built at the start\n", good, keys.size());
@@ -1791,7 +1797,20 @@ struct StateLayout {
 int ExportCatalog(const fs::path& cache, const fs::path& out) {
     std::error_code error;
     fs::create_directories(out, error);
-    u32 states = 0, metas = 0, keys = 0, dead_keys = 0;
+    u32 states = 0, metas = 0, keys = 0, dead_keys = 0, unbuildable_keys = 0;
+    // 0.4.6 beta 17: only keys the warm-up builds (CheckCache, its rules: the stages' records and
+    // SPIR-V, their binding starts, object motion, the layout): the catalog of 0.4.6 beta 17 shipped
+    // 46 that every player's first start removed, its merge with the tester's caches 55. A folder
+    // without SPIR-V (a catalog itself) is exported as it is.
+    std::set<std::string> unbuildable;
+    bool has_spirv = false;
+    for (const auto& entry : fs::directory_iterator(cache, error)) {
+        if (entry.path().extension() == ".spv") {
+            has_spirv = true;
+            break;
+        }
+    }
+    if (has_spirv) CheckCache(cache, &unbuildable);
     std::string listed; // files.txt: the files of this catalog, one a line
     const auto has_meta = [&](u64 hash) {
         char name[40];
@@ -1806,6 +1825,10 @@ int ExportCatalog(const fs::path& cache, const fs::path& out) {
             const auto hashes = KeyStageHashes(ReadAll(path));
             if (hashes.empty() || std::ranges::any_of(hashes, [&](u64 h) { return h && !has_meta(h); })) {
                 ++dead_keys;
+                continue;
+            }
+            if (unbuildable.contains(path.filename().string())) {
+                ++unbuildable_keys;
                 continue;
             }
         }
@@ -1856,8 +1879,8 @@ int ExportCatalog(const fs::path& cache, const fs::path& out) {
     // beside this one's: --seed-cache reads only the files listed here.
     WriteAtomically(out / "files.txt", listed.data(), listed.size());
     std::printf("Shader catalog: %u states, %u specializations, %u pipeline keys in %s (%u keys without "
-                "their shaders left out)\n",
-                states, metas, keys, out.string().c_str(), dead_keys);
+                "their shaders left out, %u the warm-up would not build)\n",
+                states, metas, keys, out.string().c_str(), dead_keys, unbuildable_keys);
     return 0;
 }
 
