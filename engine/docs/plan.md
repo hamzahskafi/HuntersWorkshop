@@ -322,10 +322,14 @@ before the cleanup:
 
 - **Online with other players, never run on beta 14's protocol** (phase A item 3, "Checks not made"):
   being summoned and summoning, joining another world (the Small Resonant Bell, an invasion). The
-  largest gap: The Hunter's Dream's co-op needs the peer protocol beta 14 ported, tested so far only
-  against bbhost's code.
+  tester (2026-11-27): not tested for 0.4.6; the release notes name it untested.
 - **What no run has covered since beta 9** (the memory betas changed how the engine follows the game's
-  memory): a boss, a cutscene, character creation.
+  memory): a boss and character creation. Cutscenes: covered by the FFmpeg runs (engine id 105, the
+  tester, 2026-11-27).
+- **The tester's asks first (2026-11-27):** a texture mip bias slider in the in-game menu to test the
+  upscalers with (one exists: Advanced, "Texture mip bias", -2 to +1, live, with FSR or DLSS; what it
+  lacks to be asked), and OptiScaler revisited (the compatibility mode untested since October;
+  OptiScaler 0.9.5 has FSR 4.1.2 and XeSS 3.0.2, its Vulkan frame generation only in v10 nightlies).
 - **Sharpening at an output other than 1080p** (engine id 107's one-pass copy into the UI image, never
   seen at work: "Upscaler: the UI image is ...").
 - **Beta 17's gate, to declare with the tester:** the cold start (a fresh folder: the catalog seeded,
