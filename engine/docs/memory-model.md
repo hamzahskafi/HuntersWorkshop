@@ -2117,6 +2117,38 @@ and `vk_instance.*` changed).
   parts' rework (step 4) is worth designing; neither, and the catalog stays the answer. Not measured
   here: how much slower an unoptimized pipeline draws (it would be replaced within a second or so).
 
+**The tester's run (engine id 124, RX 9070 XT, AMD driver 2.0.416, 2026-11-26):** 300 of the cache's
+1,130 graphics pipelines in 46.5 s; the driver answered none from its own cache (the salt held).
+
+| Built | Median | 90% under | Longest |
+|---|---|---|---|
+| Whole, as today | 51.4 ms | 84.1 ms | 114.1 ms |
+| Whole, unoptimized | 50.9 ms (99%) | 84.6 ms | 113.7 ms |
+| Part before rasterization | 32.6 ms | | |
+| Fragment shader part | 23.5 ms | | |
+| Vertex input, fragment output parts | 0.0 ms | | |
+| Fast link of built parts | 0.0 ms | 0.0 ms | 6.3 ms |
+| All parts and link | 57.5 ms | 88.5 ms | 118.4 ms |
+
+Shared with another of the cache's pipelines: the fragment shader's part 71%; the part before
+rasterization 77% by permutation, at most 86% with slots of its own; both 52% by permutation (an upper
+bound: today's shared slot set must also be identical for the parts to link, which the research's
+sample found for 9%), at most 58% with slots of their own. Nothing refused.
+
+What it says:
+- **A pipeline first seen costs about 50 ms on this driver** (90% under 84 ms), single-threaded, with
+  no cache: the 10-26 ms read from earlier logs were builds the driver's cache had helped. A draw that
+  cannot be left out waits that long: the pauses of 50-127 ms.
+- **The quick build first is no use here:** AMD's driver builds an unoptimized pipeline in 99% of the
+  time (the flag does not shorten its work). Not taken further.
+- **Linking built parts is free** (0.0 ms median): a pipeline whose two parts exist costs nothing at
+  its draw. Building both parts is a little dearer than the whole (57.5 against 51.4 ms), building one
+  saves the other's 23-33 ms.
+- **What decides the parts' rework is how often a pipeline new in play finds its parts built.** Over
+  the whole cache at most 58% would, with the vertex stages' slots of their own (the rework); today's
+  layout lets few share. The cache's share overstates play at a new area, whose shaders are new too.
+  Next: that count in real play, no behaviour changed (register).
+
 ### The 0.4.6 release
 
 - **Switches:** each beta's switches, and `BB_COPY_HOLD` and `BB_COPY_MERGE` (kept through 0.4.5
