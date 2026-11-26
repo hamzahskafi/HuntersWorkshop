@@ -19,13 +19,15 @@ namespace BloodborneLauncher.Core
 
         public static string CacheDir => Path.Combine(Paths.PortDir, "user", "cache");
 
-        /// <summary>What this engine stamps its caches with (start\main.cpp ResetStaleGpuCache).</summary>
+        /// <summary>What this engine stamps its caches with: "gpu " and engine\out\gpu-cache.id (the engine
+        /// writes it into each cache folder's engine.txt at its start since 0.4.6 beta 17; bb-start wrote
+        /// the cache's own engine.txt before).</summary>
         private static string Identity()
         {
-            var stamp = Path.Combine(CacheDir, "engine.txt");
-            if (File.Exists(stamp)) return File.ReadAllText(stamp).Trim();
             var id = Path.Combine(Paths.PortDir, "engine", "out", "gpu-cache.id");
-            return File.Exists(id) ? "gpu " + File.ReadAllText(id).Trim() : "";
+            if (File.Exists(id)) return "gpu " + File.ReadAllText(id).Trim();
+            var stamp = Path.Combine(CacheDir, "engine.txt");
+            return File.Exists(stamp) ? File.ReadAllText(stamp).Trim() : "";
         }
 
         private static bool Shared(string name) =>

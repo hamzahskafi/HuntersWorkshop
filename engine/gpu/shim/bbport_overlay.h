@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <span>
 #include <string>
 #include "common/types.h"
 #include "video_core/renderer_vulkan/vk_common.h"
@@ -17,6 +18,9 @@ class Instance;
 }
 
 namespace BbOverlay {
+
+/// The menus' font (DejaVu Sans, embedded): the start's splash draws with it too.
+std::span<const unsigned char> UiFont();
 
 /// Present thread, once: the ImGui context and its Vulkan backend.
 void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count);

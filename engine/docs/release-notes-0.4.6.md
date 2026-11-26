@@ -369,6 +369,20 @@ without thread support although the movie player uses it from three threads.
   every frame behind it waited. Now the threads that prepare draws ahead notice it first and have it
   translated on the shader-building threads, side by side with others; the frame waits only for what
   is not ready yet. `BB_TRANSLATE_AHEAD=0` in Extra variables turns it off; safe mode turns it off.
+- **A splash screen while the game starts.** From the moment the engine starts until the game shows its
+  first picture, a small window in the middle of your screen shows the game's own background art
+  (read from your game folder) and what is happening: starting the engine, building shaders with a
+  count and a bar, and the one-time steps after an update or a graphics card change. It works however
+  you start the game: the launcher, the Steam shortcut or Linux. `BB_SPLASH=0` in Extra variables
+  turns it off.
+- **Shaders built before you play, on any graphics card.** The engine now ships a shader catalog
+  (1,173 pipelines, from Lantern's community catalogs for AMD and NVIDIA): at the first start it is
+  prepared for your graphics card and its pipelines are built before the game starts, so places you
+  have never visited no longer stutter the first time, whatever card you have. Changing graphics card
+  or driver no longer throws your shader cache away: it is prepared again for the new card instead,
+  in seconds. `BB_SHADER_CATALOG=0` in Extra variables leaves the catalog out.
+- **"Building shaders" in the bottom right corner**, with a small spinner, where most games show such
+  a note.
 - **No more of the same few pipelines built again every session.** A handful of cached pipelines (6
   in the tester's cache) were left out at every start and built again in play, in places visited
   just before: a short wait and, for a moment, missing scene geometry. Their vertex shader uses no

@@ -32,6 +32,8 @@
 #include <vector>
 #include <SDL3/SDL.h>
 #include "../bbgpu.h"
+#include "engine/startup.h"
+#include "splash.h"
 #include "common/elf_info.h"
 #include "shader_recompiler/native/table_plan.h"
 #include "common/logging/log.h"
@@ -417,7 +419,13 @@ extern "C" int bbgpu_init(const BbGpuConfig* config) {
     const s32 width = config->width, height = config->height;
     g_window_thread = std::thread([title, width, height] {
         Common::SetCurrentThreadName("bb:window");
-        auto* window = new Frontend::WindowSDL(width, height, title.c_str());
+        // 0.4.6 beta 17: the start's splash first (splash.h); the game window hidden behind it until
+        // the game's first frame.
+        const bool splash = BbSplash::Open(title.c_str());
+        auto* window = new Frontend::WindowSDL(width, height, title.c_str(), splash);
+        if (!splash) {
+            BbStartup::NoteGameWindowShown();
+        }
         {
             std::scoped_lock lock{g_window_mutex};
             g_window = window;
@@ -428,6 +436,15 @@ extern "C" int bbgpu_init(const BbGpuConfig* config) {
         // keyboard input is handled as it arrives, and at most 2 ms still pass between rounds (as
         // with SDL_PollEvent, on the thread that created the window).
         while (window->PollEvents()) {
+            if (BbSplash::IsOpen()) {
+                if (BbStartup::FirstFrame()) {
+                    window->Show();
+                    BbStartup::NoteGameWindowShown();
+                    BbSplash::Close();
+                } else {
+                    BbSplash::Draw();
+                }
+            }
             SDL_WaitEventTimeout(nullptr, 2);
         }
         LOG_INFO(Frontend, "Window closed by user");

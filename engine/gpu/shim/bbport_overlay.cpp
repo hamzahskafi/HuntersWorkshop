@@ -75,6 +75,12 @@ extern "C" const unsigned char bb_font_cjk[];
 extern "C" const unsigned char bb_font_cjk_end[];
 #endif
 
+namespace BbOverlay {
+std::span<const unsigned char> UiFont() {
+    return {bb_font_ttf, size_t(bb_font_ttf_end - bb_font_ttf)};
+}
+} // namespace BbOverlay
+
 extern "C" void runtime_restart(void); // bb-probe (probe.c)
 extern "C" void bbnet_exit_begin(int timeout_ms); // bbnet_glue.cpp: out of a co-op room at exit
 extern "C" void bbnet_exit_wait(void);
@@ -1860,25 +1866,48 @@ bool CompileNoteActive() {
     return now < until;
 }
 
+// A small arc turning once every second, the size of a text line, at the cursor (the compile note's
+// "still working": 0.4.6 beta 17, the tester).
+void Spinner(ImU32 color) {
+    const float size = ImGui::GetTextLineHeight();
+    const ImVec2 at = ImGui::GetCursorScreenPos();
+    ImGui::Dummy(ImVec2(size, size));
+    const float radius = size * 0.36f;
+    const ImVec2 center(at.x + size * 0.5f, at.y + size * 0.5f);
+    constexpr float pi = 3.14159265f;
+    const float start = float(ImGui::GetTime()) * 2.0f * pi;
+    constexpr int segments = 20;
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    draw->PathClear();
+    for (int i = 0; i <= segments; ++i) {
+        const float angle = start + float(i) / float(segments) * pi * 1.5f;
+        draw->PathLineTo(ImVec2(center.x + std::cos(angle) * radius, center.y + std::sin(angle) * radius));
+    }
+    draw->PathStroke(color, ImDrawFlags_None, std::max(1.5f, size * 0.12f));
+}
+
 void CompileNote() {
     const u32 burst = Libraries::VideoOut::g_shader_late_count.load(std::memory_order_relaxed);
-    // Under the FPS counter (above it at the bottom), else in the top right corner, where the
-    // game's HUD has nothing.
+    // 0.4.6 beta 17 (the tester: where most games put it): in the bottom right corner, above the FPS
+    // counter when the counter is there too; a spinner at the end of the line.
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     const float pad = 12.0f * base_scale;
-    const bool beside_counter = fps_box_max.x > fps_box_min.x;
-    const bool bottom = beside_counter && fps_box_min.y > viewport->WorkPos.y + viewport->WorkSize.y * 0.5f;
-    const float x = beside_counter ? fps_box_max.x : viewport->WorkPos.x + viewport->WorkSize.x - pad;
-    const float y = !beside_counter ? viewport->WorkPos.y + pad
-                    : bottom        ? fps_box_min.y - pad * 0.5f
-                                    : fps_box_max.y + pad * 0.5f;
-    ImGui::SetNextWindowPos(ImVec2(x, y), ImGuiCond_Always, ImVec2(1.0f, bottom ? 1.0f : 0.0f));
+    const float right = viewport->WorkPos.x + viewport->WorkSize.x - pad;
+    const float bottom = viewport->WorkPos.y + viewport->WorkSize.y - pad;
+    const bool counter_below = fps_box_max.x > fps_box_min.x &&
+                               fps_box_min.y > viewport->WorkPos.y + viewport->WorkSize.y * 0.5f &&
+                               fps_box_min.x > viewport->WorkPos.x + viewport->WorkSize.x * 0.5f;
+    const float x = counter_below ? fps_box_max.x : right;
+    const float y = counter_below ? fps_box_min.y - pad * 0.5f : bottom;
+    ImGui::SetNextWindowPos(ImVec2(x, y), ImGuiCond_Always, ImVec2(1.0f, 1.0f));
     ImGui::SetNextWindowBgAlpha(0.55f);
     ImGui::Begin("##compile_note", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
                      ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav |
                      ImGuiWindowFlags_NoFocusOnAppearing);
     ImGui::Text("%s (%u)", BbSettings::MenuText("Building shaders", "Сборка шейдеров"), burst);
+    ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x);
+    Spinner(ImGui::GetColorU32(ImGuiCol_Text));
     ImGui::End();
 }
 

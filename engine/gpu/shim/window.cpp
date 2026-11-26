@@ -133,18 +133,7 @@ u32 DisplayRefreshHz() {
     return display_refresh_hz.load(std::memory_order_relaxed);
 }
 
-WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}, height{height_} {
-    // Gamepads are sampled by runtime_pad.c; their events are pumped here with the window's.
-    if (!SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
-        UNREACHABLE_MSG("Failed to initialize SDL video: {}", SDL_GetError());
-    }
-    // bbport: SDL makes a focused fullscreen window topmost, which put the launcher's trophy
-    // notification (a topmost window of its own) under the game: its sound played, nothing showed.
-    SDL_SetHint(SDL_HINT_WINDOW_ALLOW_TOPMOST, "0");
-    SDL_PropertiesID props = SDL_CreateProperties();
-    SDL_SetStringProperty(props, SDL_PROP_WINDOW_CREATE_TITLE_STRING, title);
-    SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_X_NUMBER, SDL_WINDOWPOS_CENTERED);
-    SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_Y_NUMBER, SDL_WINDOWPOS_CENTERED);
+SDL_DisplayID GameDisplay(bool log) {
     // The launcher resolves the saved Windows monitor on every launch. Select it before
     // creating the HWND and Vulkan surface, so fullscreen and HDR start on that display.
     if (const char* selection = std::getenv("BB_MONITOR_BOUNDS"); selection && *selection) {
@@ -158,18 +147,51 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}
             SDL_Rect bounds{};
             if (selected && SDL_GetDisplayBounds(selected, &bounds) &&
                 bounds.x == x && bounds.y == y && bounds.w == w && bounds.h == h) {
-                SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_X_NUMBER, SDL_WINDOWPOS_CENTERED_DISPLAY(selected));
-                SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_Y_NUMBER, SDL_WINDOWPOS_CENTERED_DISPLAY(selected));
-                const char* label = std::getenv("BB_MONITOR_LABEL");
-                SDL_Log("Monitor selection: %s; SDL display %u (%d,%d %dx%d)",
-                        label ? label : "selected monitor", static_cast<unsigned>(selected), x, y, w, h);
-            } else {
-                SDL_Log("Monitor selection: display disconnected; using primary monitor");
+                if (log) {
+                    const char* label = std::getenv("BB_MONITOR_LABEL");
+                    SDL_Log("Monitor selection: %s; SDL display %u (%d,%d %dx%d)",
+                            label ? label : "selected monitor", static_cast<unsigned>(selected), x, y, w, h);
+                }
+                return selected;
             }
-        } else {
+            if (log) SDL_Log("Monitor selection: display disconnected; using primary monitor");
+        } else if (log) {
             SDL_Log("Monitor selection: invalid bounds; using primary monitor");
         }
     }
+    return 0;
+}
+
+void SetWindowIcon([[maybe_unused]] SDL_Window* window) {
+#ifdef _WIN32
+    static void* big = nullptr;
+    static void* small = nullptr;
+    if (window) {
+        ApplyBloodborneWindowIcon(SDL_GetPointerProperty(SDL_GetWindowProperties(window),
+                                                         SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr),
+                                  big, small);
+    }
+#endif
+}
+
+WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title, bool hidden) : width{width_}, height{height_} {
+    // Gamepads are sampled by runtime_pad.c; their events are pumped here with the window's.
+    if (!SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
+        UNREACHABLE_MSG("Failed to initialize SDL video: {}", SDL_GetError());
+    }
+    // bbport: SDL makes a focused fullscreen window topmost, which put the launcher's trophy
+    // notification (a topmost window of its own) under the game: its sound played, nothing showed.
+    SDL_SetHint(SDL_HINT_WINDOW_ALLOW_TOPMOST, "0");
+    SDL_PropertiesID props = SDL_CreateProperties();
+    SDL_SetStringProperty(props, SDL_PROP_WINDOW_CREATE_TITLE_STRING, title);
+    SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_X_NUMBER, SDL_WINDOWPOS_CENTERED);
+    SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_Y_NUMBER, SDL_WINDOWPOS_CENTERED);
+    if (const SDL_DisplayID selected = GameDisplay(true)) {
+        SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_X_NUMBER, SDL_WINDOWPOS_CENTERED_DISPLAY(selected));
+        SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_Y_NUMBER, SDL_WINDOWPOS_CENTERED_DISPLAY(selected));
+    }
+    // 0.4.6 beta 17: behind the start's splash, shown just before its first frame (Show).
+    SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_HIDDEN_BOOLEAN, hidden);
     SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, width_);
     SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, height_);
     SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_RESIZABLE_BOOLEAN, true);
@@ -214,6 +236,17 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}
     UpdateDisplayRefresh(window);
     UpdateDisplayPeak(window);
     LOG_INFO(Frontend, "Window {}x{} on {}", w, h, driver);
+}
+
+void WindowSDL::Show() {
+    SDL_ShowWindow(window);
+    // The window shown (and, on Wayland, configured by the compositor) before its first frame.
+    SDL_SyncWindow(window);
+    SDL_RaiseWindow(window);
+    int w = 0, h = 0;
+    SDL_GetWindowSizeInPixels(window, &w, &h);
+    width = w;
+    height = h;
 }
 
 WindowSDL::~WindowSDL() {
@@ -287,6 +320,11 @@ bool WindowSDL::PollEvents() {
     }
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
+        // 0.4.6 beta 17: another window's (the start's splash): not the game window's size or focus.
+        if (event.type >= SDL_EVENT_WINDOW_FIRST && event.type <= SDL_EVENT_WINDOW_LAST &&
+            event.window.windowID != SDL_GetWindowID(window)) {
+            continue;
+        }
         BbInput::Event(event,text_active || BbOverlay::CapturesInput());
         if (event.type == SDL_EVENT_MOUSE_MOTION) {
             last_mouse_motion_ms = SDL_GetTicks();

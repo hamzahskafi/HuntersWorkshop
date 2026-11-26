@@ -1965,6 +1965,49 @@ Its cost: the translation pass (about 10-15 s for the merged catalog) at the fir
 catalog update and after a profile change, instead of a cold session; then a warm-up of about 1,300
 pipelines at every start (560 take 0.6 s now with the driver's cache).
 
+**Built (engine id 121; the tester: "If you're sure it works then it works", 2026-11-26), with the
+splash the tester asked for the same day:**
+
+1. **The engine settles the cache** (`SettleGpuCache` in `vk_pipeline_serialization.cpp`, before the
+   warm-up lists the folder): a new profile is written at once (`DataBase::SaveNow`); a new profile or
+   a new engine (`out/gpu-cache.id`, stamped in the folder's own `engine.txt` now) with states in the
+   folder runs `bb-shader-lab --recompile-cache` on it, the cache emptied only when the lab is missing
+   or fails; then the shipped catalog (`engine/shader-catalog/<game>`) is seeded once per catalog
+   (`catalog-<files>-<bytes>.applied`), the game's folder from `BB_GAME_MERGED`/`BB_GAME_DIR`. The
+   lab runs without a window (`BbStartup::RunTool`, `shim/engine/startup.cpp`), its summary lines in
+   the log. Skipped for the archive and the tone curve's folder (as before). bb-start's
+   `RecompileGpuCache`, `SeedGpuCache`, `ResetStaleGpuCache` and the Linux start's
+   `scripts/gpu_cache.py` (and its test) removed; `run.sh` exports `BB_GAME_MERGED`; the launcher's
+   cache sharing reads the identity from `gpu-cache.id` first.
+2. **The lab translates in parallel**: `RecompileCache` splits the permutations into slices, one child
+   at a time per slice on as many threads as the PC has less one (at most 16; `BB_LAB_JOBS`), a crash
+   leaving out that permutation as before, and prints `@PROGRESS done total` as they finish
+   (`RunSelfLines` hands a child's lines over as they come). Tested with a stand-in child: crashes at
+   the first and last permutation and on both sides of a slice's edge, changed results, progress to
+   the end. `--recompile-batch` takes an end (`<dir> <start> [<only>|-] [<end>]`).
+3. **The lab seeds any vendor's catalog** (`SeedCache`: the GPU check refuses only a profile of
+   another layout).
+4. **A refused pipeline or an unreadable record drops its key alone** (the warm-up's `dropped`,
+   removed after it, one log line), instead of the whole cache.
+5. **The splash** (`shim/splash.cpp`, `shim/engine/splash_art.cpp`; the tester's design: a small
+   centred window, the game's own art): on the window thread before the game window, on the game's
+   monitor (`Frontend::GameDisplay`, shared with the game window), about 42% of its width, 16:9; the
+   picture from the player's `sce_sys/pic1.png` (a PNG reader on miniz's inflate, every 8-bit colour
+   type, tested pixel for pixel), else `pic1.dds` (BC1, tested on the tester's), else dark; drawn with
+   SDL's renderer, apart from the game's Vulkan device; the menus' DejaVu Sans through stb_truetype.
+   "Hunter's Workshop" in a corner; at the bottom, over a darkening, the step and its count, a bar
+   (a sweep without a count) and a second line for the one-time steps. The steps
+   (`BbStartup::SetStep`, translated as the menus, Chinese in English: the font has no CJK):
+   starting the engine, updating the shader cache for this version / preparing it for this graphics
+   card / installing the shader catalog (each with the lab's progress), building shaders (the
+   warm-up's count), starting the game. The game window is made hidden behind it; the present thread,
+   before the first frame, asks the window thread to show it and waits until it shows (at most 3 s:
+   a frame put into a window not shown yet is an error on Wayland), and the splash closes. Window
+   events of the splash are kept out of the game window's state. `BB_SPLASH=0`: no splash (the game
+   window at once, as before). Previewed off-screen with SDL's software renderer.
+6. **The note while shaders build** (the tester): in the bottom right corner (above the FPS counter
+   when that is there), a spinner at the end of its line.
+
 ### The 0.4.6 release
 
 - **Switches:** each beta's switches, and `BB_COPY_HOLD` and `BB_COPY_MERGE` (kept through 0.4.5

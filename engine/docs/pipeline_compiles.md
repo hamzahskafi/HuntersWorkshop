@@ -236,6 +236,12 @@ in the places of earlier sessions, 27 in an area new to the session; `--check-ca
 
 ## A catalog per GPU vendor (0.9.37 beta 9)
 
+**Replaced in Hunter's Workshop 0.4.6 beta 17 (engine id 121):** one catalog for every vendor,
+`engine/shader-catalog/CUSA03173` (Lantern 0.9.43's NVIDIA and AMD catalogs merged: each lost nothing
+under the other's profile), seeded by the engine at its start with this PC's profile
+(`SettleGpuCache`, `memory-model.md`, "First sight"); a profile change translates the cache again
+instead of emptying it. What follows is the earlier design.
+
 The catalogs: `engine\shader-catalog\<game>` (NVIDIA, as before) and
 `engine\shader-catalog\amd\<game>`, made from a player's RX 7800 XT catalog (vendor 1002, device
 747E): seeded into an empty cache with its own profile (the lab compiles on the CPU; no AMD GPU

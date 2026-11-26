@@ -2,6 +2,7 @@
 // event pump runs on the port's window thread (see window.cpp).
 #pragma once
 #include <atomic>
+#include <cstdint>
 #include <mutex>
 #include <string>
 #include "common/types.h"
@@ -9,6 +10,12 @@
 struct SDL_Window;
 
 namespace Frontend {
+
+/// bbport: the monitor the launcher chose (BB_MONITOR_BOUNDS), 0 for none (the primary one); `log`:
+/// the choice is logged. After SDL's video is up.
+std::uint32_t GameDisplay(bool log); // an SDL_DisplayID
+/// bbport: the game's icon (bloodborne.ico beside the engine) on another window too (the splash).
+void SetWindowIcon(SDL_Window* window);
 
 /// bbport: the game window is not in front (unfocused or minimized): VideoOut caps the frame
 /// rate then (BB_BACKGROUND_FPS, default 30; 0 off; never in online sessions), so an alt-tabbed
@@ -30,7 +37,10 @@ struct WindowSystemInfo {
 
 class WindowSDL {
 public:
-    WindowSDL(s32 width, s32 height, const char* title);
+    /// `hidden`: not shown until Show (0.4.6 beta 17: behind the start's splash).
+    WindowSDL(s32 width, s32 height, const char* title, bool hidden = false);
+    /// Window thread: shows a window made hidden, in front, its size read again.
+    void Show();
     ~WindowSDL();
     s32 GetWidth() const { return width.load(std::memory_order_relaxed); }
     s32 GetHeight() const { return height.load(std::memory_order_relaxed); }

@@ -206,13 +206,10 @@ elif [[ -n ${scaled_output:-} ]]; then
 fi
 "$PYTHON" scripts/patches.py --out "$out" --fps "$fps" --extra "${BB_PATCHES:-}" --settings "$BB_CONFIG" --game-dir "$game" --render-res "${BB_RENDER_RES:-}" --output-res "${BB_OUTPUT_RES:-}" \
     --patches-dir "${BB_PATCHES_DIR:-$data/patches}" --patches-config "${BB_PATCHES_CONFIG:-$data/patches.json}"
-# The GPU cache as bb-start.exe keeps it on Windows: recompiled by bb-shader-lab when the shader
-# compiler changed, then the shipped shader catalog seeded, so pipelines are built at the start
-# instead of in play. Packages only (packaging/linux/bb-start sets BB_GPU_USER_DIR).
-if [[ -n ${BB_PREBUILT:-} && -n ${BB_GPU_USER_DIR:-} ]]; then
-    "$PYTHON" scripts/gpu_cache.py --cache "$BB_GPU_USER_DIR/cache" --engine . --out "$out" \
-        --package "$data/package.json" --game "$game" || echo 'GPU cache: not prepared (scripts/gpu_cache.py failed)' >&2
-fi
+# The GPU cache (translated again after an engine or GPU change, the shipped shader catalog seeded) is
+# settled by the engine at its start since 0.4.6 beta 17 (PipelineCache::WarmUp); it finds the game
+# folder for the catalog's shaders, and the start's splash its art, here.
+export BB_GAME_MERGED=$game
 # Background upload of the game's GPU memory into VRAM ahead of use (BufferCache::Preupload):
 # 1 = only memory already in VRAM that the game rewrote (no new VRAM), 2 = all of it (~3 GB more
 # VRAM), 0 = off.

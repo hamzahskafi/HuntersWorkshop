@@ -547,6 +547,11 @@ add_executable(watch-rules-test EXCLUDE_FROM_ALL ../tests/test_watch_rules.cpp)
 target_compile_options(watch-rules-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(watch-rules-test PRIVATE shim shadps4)
 # 0.4.6 beta 17 part 2: the registry of translations queued ahead and a job's progress (translate_ahead.h).
+# 0.4.6 beta 17: the start's splash's picture readers (PNG on miniz, BC1 DDS).
+add_executable(splash-art-test EXCLUDE_FROM_ALL ../tests/test_splash_art.cpp shim/engine/splash_art.cpp)
+target_compile_options(splash-art-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(splash-art-test PRIVATE shim)
+target_link_libraries(splash-art-test PRIVATE miniz::miniz)
 add_executable(translate-ahead-test EXCLUDE_FROM_ALL ../tests/test_translate_ahead.cpp)
 target_compile_options(translate-ahead-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(translate-ahead-test PRIVATE shadps4)

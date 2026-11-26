@@ -313,6 +313,23 @@ constexpr Entry kSpanish[] = {
      "Se suma al detalle de texturas que pide el escalador: la relación entre render y salida y un nivel más, como aconsejan NVIDIA y AMD. Por debajo de 0 texturas más nítidas (más parpadeo), por encima más suaves. En vivo."},
     {"Anti-aliasing above runs instead. Select the upscaler again to retry.",
      "En su lugar se usa el antialiasing de arriba. Vuelve a elegir el escalador para reintentarlo."},
+    // 0.4.6 beta 17: the start's splash (shim/splash.cpp).
+    {"Starting the engine",
+     "Iniciando el motor"},
+    {"Updating the shader cache for this version",
+     "Actualizando la caché de shaders para esta versión"},
+    {"Once after an update.",
+     "Una vez tras una actualización."},
+    {"Preparing the shader cache for this graphics card",
+     "Preparando la caché de shaders para esta tarjeta gráfica"},
+    {"Once after a graphics card or driver change.",
+     "Una vez tras un cambio de tarjeta gráfica o de controlador."},
+    {"Installing the shader catalog",
+     "Instalando el catálogo de shaders"},
+    {"Once for each catalog update.",
+     "Una vez por cada actualización del catálogo."},
+    {"Starting the game",
+     "Iniciando el juego"},
 };
 
 // Portuguese, Brazil (pt_BR)
@@ -605,6 +622,23 @@ constexpr Entry kPortugueseBrazil[] = {
      "Somado ao detalhe de textura que o upscaler pede: a razão entre render e saída e um nível a mais, como NVIDIA e AMD recomendam. Abaixo de 0 texturas mais nítidas (mais cintilação), acima mais suaves. Ao vivo."},
     {"Anti-aliasing above runs instead. Select the upscaler again to retry.",
      "No lugar dele roda o anti-aliasing acima. Selecione o upscaler de novo para tentar outra vez."},
+    // 0.4.6 beta 17: the start's splash (shim/splash.cpp).
+    {"Starting the engine",
+     "Iniciando o motor"},
+    {"Updating the shader cache for this version",
+     "Atualizando o cache de shaders para esta versão"},
+    {"Once after an update.",
+     "Uma vez após uma atualização."},
+    {"Preparing the shader cache for this graphics card",
+     "Preparando o cache de shaders para esta placa de vídeo"},
+    {"Once after a graphics card or driver change.",
+     "Uma vez após trocar de placa de vídeo ou de driver."},
+    {"Installing the shader catalog",
+     "Instalando o catálogo de shaders"},
+    {"Once for each catalog update.",
+     "Uma vez a cada atualização do catálogo."},
+    {"Starting the game",
+     "Iniciando o jogo"},
 };
 
 // French (fr)
@@ -898,6 +932,23 @@ constexpr Entry kFrench[] = {
      "S'ajoute au détail de texture que demande l'upscaler : le rapport rendu/sortie et un niveau de plus, comme le conseillent NVIDIA et AMD. Sous 0 textures plus nettes (plus de scintillement), au-dessus plus douces. En direct."},
     {"Anti-aliasing above runs instead. Select the upscaler again to retry.",
      "L'anticrénelage ci-dessus est utilisé à la place. Choisissez à nouveau l'upscaler pour réessayer."},
+    // 0.4.6 beta 17: the start's splash (shim/splash.cpp).
+    {"Starting the engine",
+     "Démarrage du moteur"},
+    {"Updating the shader cache for this version",
+     "Mise à jour du cache des shaders pour cette version"},
+    {"Once after an update.",
+     "Une fois après une mise à jour."},
+    {"Preparing the shader cache for this graphics card",
+     "Préparation du cache des shaders pour cette carte graphique"},
+    {"Once after a graphics card or driver change.",
+     "Une fois après un changement de carte graphique ou de pilote."},
+    {"Installing the shader catalog",
+     "Installation du catalogue de shaders"},
+    {"Once for each catalog update.",
+     "Une fois à chaque mise à jour du catalogue."},
+    {"Starting the game",
+     "Démarrage du jeu"},
 };
 
 // German (de)
@@ -1191,6 +1242,23 @@ constexpr Entry kGerman[] = {
      "Wird zum Texturdetail addiert, das der Upscaler verlangt: das Verhältnis von Render zu Ausgabe und eine Stufe mehr, wie NVIDIA und AMD empfehlen. Unter 0 schärfere Texturen (mehr Flimmern), über 0 weichere. Sofort."},
     {"Anti-aliasing above runs instead. Select the upscaler again to retry.",
      "Stattdessen läuft die Kantenglättung oben. Den Upscaler erneut wählen, um es noch einmal zu versuchen."},
+    // 0.4.6 beta 17: the start's splash (shim/splash.cpp).
+    {"Starting the engine",
+     "Engine wird gestartet"},
+    {"Updating the shader cache for this version",
+     "Shader-Cache wird für diese Version aktualisiert"},
+    {"Once after an update.",
+     "Einmal nach einem Update."},
+    {"Preparing the shader cache for this graphics card",
+     "Shader-Cache wird für diese Grafikkarte vorbereitet"},
+    {"Once after a graphics card or driver change.",
+     "Einmal nach einem Wechsel der Grafikkarte oder des Treibers."},
+    {"Installing the shader catalog",
+     "Shader-Katalog wird installiert"},
+    {"Once for each catalog update.",
+     "Einmal pro Katalog-Update."},
+    {"Starting the game",
+     "Spiel wird gestartet"},
 };
 
 // Italian (it)
@@ -1485,6 +1553,23 @@ constexpr Entry kItalian[] = {
      "Si aggiunge al dettaglio delle texture che chiede l'upscaler: il rapporto tra render e output e un livello in più, come consigliano NVIDIA e AMD. Sotto 0 texture più nitide (più tremolio), sopra più morbide. Dal vivo."},
     {"Anti-aliasing above runs instead. Select the upscaler again to retry.",
      "Al suo posto funziona l'anti-aliasing qui sopra. Seleziona di nuovo l'upscaler per riprovare."},
+    // 0.4.6 beta 17: the start's splash (shim/splash.cpp).
+    {"Starting the engine",
+     "Avvio del motore"},
+    {"Updating the shader cache for this version",
+     "Aggiornamento della cache degli shader per questa versione"},
+    {"Once after an update.",
+     "Una volta dopo un aggiornamento."},
+    {"Preparing the shader cache for this graphics card",
+     "Preparazione della cache degli shader per questa scheda video"},
+    {"Once after a graphics card or driver change.",
+     "Una volta dopo un cambio di scheda video o di driver."},
+    {"Installing the shader catalog",
+     "Installazione del catalogo degli shader"},
+    {"Once for each catalog update.",
+     "Una volta per ogni aggiornamento del catalogo."},
+    {"Starting the game",
+     "Avvio del gioco"},
 };
 
 // Polish (pl)
@@ -1777,6 +1862,23 @@ constexpr Entry kPolish[] = {
      "Dodawane do szczegółowości tekstur, której żąda upscaler: stosunek renderu do wyjścia i jeden poziom więcej, jak zalecają NVIDIA i AMD. Poniżej 0 ostrzejsze tekstury (więcej migotania), powyżej miększe. Na żywo."},
     {"Anti-aliasing above runs instead. Select the upscaler again to retry.",
      "Zamiast niego działa antyaliasing powyżej. Wybierz upscaler ponownie, aby spróbować jeszcze raz."},
+    // 0.4.6 beta 17: the start's splash (shim/splash.cpp).
+    {"Starting the engine",
+     "Uruchamianie silnika"},
+    {"Updating the shader cache for this version",
+     "Aktualizowanie pamięci podręcznej shaderów dla tej wersji"},
+    {"Once after an update.",
+     "Jednorazowo po aktualizacji."},
+    {"Preparing the shader cache for this graphics card",
+     "Przygotowywanie pamięci podręcznej shaderów dla tej karty graficznej"},
+    {"Once after a graphics card or driver change.",
+     "Jednorazowo po zmianie karty graficznej lub sterownika."},
+    {"Installing the shader catalog",
+     "Instalowanie katalogu shaderów"},
+    {"Once for each catalog update.",
+     "Jednorazowo przy każdej aktualizacji katalogu."},
+    {"Starting the game",
+     "Uruchamianie gry"},
 };
 
 // Turkish (tr)
@@ -2068,6 +2170,23 @@ constexpr Entry kTurkish[] = {
      "Ölçekleyicinin istediği doku ayrıntısına eklenir: işleme/çıkış oranı ve NVIDIA ile AMD'nin önerdiği gibi bir seviye daha. 0'ın altı daha keskin dokular (daha çok titreşim), üstü daha yumuşak. Anında."},
     {"Anti-aliasing above runs instead. Select the upscaler again to retry.",
      "Bunun yerine yukarıdaki kenar yumuşatma çalışıyor. Yeniden denemek için ölçekleyiciyi tekrar seçin."},
+    // 0.4.6 beta 17: the start's splash (shim/splash.cpp).
+    {"Starting the engine",
+     "Motor başlatılıyor"},
+    {"Updating the shader cache for this version",
+     "Bu sürüm için gölgelendirici önbelleği güncelleniyor"},
+    {"Once after an update.",
+     "Bir güncellemeden sonra bir kez."},
+    {"Preparing the shader cache for this graphics card",
+     "Bu ekran kartı için gölgelendirici önbelleği hazırlanıyor"},
+    {"Once after a graphics card or driver change.",
+     "Ekran kartı veya sürücü değişikliğinden sonra bir kez."},
+    {"Installing the shader catalog",
+     "Gölgelendirici kataloğu yükleniyor"},
+    {"Once for each catalog update.",
+     "Her katalog güncellemesinde bir kez."},
+    {"Starting the game",
+     "Oyun başlatılıyor"},
 };
 
 // Simplified Chinese (zh_CN). Lantern Menu SC (Noto Sans SC subset) supplies CJK glyphs.
