@@ -570,6 +570,10 @@ endif()
 add_executable(splash-status-test EXCLUDE_FROM_ALL ../tests/test_splash_status.cpp)
 target_compile_options(splash-status-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(splash-status-test PRIVATE splash)
+# What the engine reads from OptiScaler.ini (renderer_vulkan/optiscaler_ini.h).
+add_executable(optiscaler-ini-test EXCLUDE_FROM_ALL ../tests/test_optiscaler_ini.cpp)
+target_compile_options(optiscaler-ini-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(optiscaler-ini-test PRIVATE shadps4)
 # Its picture readers (PNG on miniz, BC1 DDS).
 add_executable(splash-art-test EXCLUDE_FROM_ALL ../tests/test_splash_art.cpp splash/splash_art.cpp)
 target_compile_options(splash-art-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)

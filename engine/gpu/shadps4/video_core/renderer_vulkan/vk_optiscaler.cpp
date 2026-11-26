@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <cwctype>
+#include <optional>
 #include <filesystem>
 #include <fstream>
 #include <string_view>
@@ -72,49 +72,6 @@ std::string FileVersion(const wchar_t* path) {
     return version;
 }
 
-std::string Lower(std::string text) {
-    for (auto& c : text) {
-        c = char(std::tolower(static_cast<unsigned char>(c)));
-    }
-    return text;
-}
-
-std::string Trim(const std::string& text) {
-    const auto first = text.find_first_not_of(" \t\r");
-    const auto last = text.find_last_not_of(" \t\r");
-    return first == std::string::npos ? std::string{} : text.substr(first, last - first + 1);
-}
-
-/// Its frame generation from OptiScaler.ini's [FrameGen]: FGOutput (v10: dlssg, fsrfg, xefg, ...)
-/// or FGType (0.9: optifg, nukems). Empty when it is off (nofg) or left to its default (auto).
-std::string FrameGeneration(const std::filesystem::path& ini) {
-    std::ifstream file(ini);
-    std::string line, section, output, type;
-    while (std::getline(file, line)) {
-        line = Trim(line);
-        if (line.empty() || line[0] == ';' || line[0] == '#') {
-            continue;
-        }
-        if (line[0] == '[') {
-            section = Lower(Trim(line.substr(1, line.find(']') - 1)));
-            continue;
-        }
-        const auto eq = line.find('=');
-        if (section != "framegen" || eq == std::string::npos) {
-            continue;
-        }
-        const std::string key = Lower(Trim(line.substr(0, eq)));
-        const std::string value = Lower(Trim(line.substr(eq + 1)));
-        if (key == "fgoutput") {
-            output = value;
-        } else if (key == "fgtype") {
-            type = value;
-        }
-    }
-    const std::string fg = output.empty() ? type : output;
-    return fg == "nofg" || fg == "auto" ? std::string{} : fg;
-}
-
 /// OptiScaler exports the NGX entry points under a proxy name (winmm.dll, dxgi.dll, version.dll,
 /// ...) and keeps OptiScaler.ini beside itself. The driver's own NGX core (_nvngx.dll / nvngx.dll)
 /// exports them too and counts only with that ini.
@@ -145,9 +102,16 @@ Info Find() {
         info.loaded = true;
         info.module = Narrow(entry.szModule);
         info.version = FileVersion(entry.szExePath);
+        info.handle = entry.hModule;
         if (ini) {
-            info.frame_generation = FrameGeneration(ini_path);
+            std::ifstream file(ini_path);
+            info.ini = ParseIni(file);
+            info.frame_generation = info.ini.frame_generation;
         }
+        // d4r (NVIDIA's DLSS on AMD through OptiScaler): its boot DLL, which its dxgi.dll loads first,
+        // or its folder beside OptiScaler.
+        info.d4r = GetModuleHandleW(L"d4r_boot.dll") != nullptr ||
+                   std::filesystem::is_directory(std::filesystem::path(entry.szExePath).parent_path() / L"d4r", ec);
     }
     CloseHandle(snapshot);
     return info;
@@ -158,35 +122,51 @@ Info Find() {
 }
 #endif
 
+/// A spoofing key's value: "on", "off" or "its default" (auto).
+const char* Said(const std::optional<bool>& flag) {
+    return !flag ? "its default" : *flag ? "on" : "off";
+}
+
 } // namespace
 
 const Info& Detect() {
     static const Info info = [] {
         Info found = Find();
         if (found.loaded) {
-            std::printf("OptiScaler: %s%s loaded as %s; compatibility mode: %s\n",
+            const bool dlss = found.ini.dlss_inputs.value_or(true);
+            std::printf("OptiScaler: %s%s loaded as %s; the engine's DLSS goes %s; compatibility mode: %s\n",
                         found.version.empty() ? "" : "v",
-                        found.version.empty() ? "(version unknown)" : found.version.c_str(),
-                        found.module.c_str(),
+                        found.version.empty() ? "(version unknown)" : found.version.c_str(), found.module.c_str(),
+                        dlss ? "through it" : "to NVIDIA's driver (EnableDlssInputs=false in OptiScaler.ini)",
                         CompatWanted()
-                            ? "on - submissions from one thread while its frame generation is on, "
-                              "NGX calls under the queue lock, the device made on a thread of its own; "
+                            ? "on - NGX calls and every queue under the queue lock, the Vulkan device made "
+                              "on a thread of its own, one submit thread while its frame generation is set; "
                               "optiscaler_compat=0 or BB_OPTISCALER_COMPAT=0 turns it off"
                             : "off (BB_OPTISCALER_COMPAT=0 or optiscaler_compat=0)");
+            if (dlss) {
+                std::printf("OptiScaler: its upscaler for Vulkan: %s (VulkanUpscaler in OptiScaler.ini, or "
+                            "its menu)%s\n",
+                            found.ini.vulkan_upscaler.empty() ? "its default" : found.ini.vulkan_upscaler.c_str(),
+                            found.d4r ? "; d4r beside it: NVIDIA's DLSS on this GPU through it" : "");
+            }
+            std::printf("OptiScaler: GPU spoofing: Vulkan %s, Vulkan extensions %s, DXGI %s (OptiScaler.ini "
+                        "[Spoofing]); the engine's DLSS needs none (the GPU lines say what the engine sees)\n",
+                        Said(found.ini.vulkan_spoofing), Said(found.ini.vulkan_extension_spoofing),
+                        Said(found.ini.dxgi_spoofing));
             if (!found.frame_generation.empty()) {
-                // Its Vulkan frame generation runs on a D3D12 device of its own (Vulkan w/Dx12),
-                // created when the first upscaled frame arrives. It needs its vkCreateDevice hook
-                // to prepare our device (OnCleanThread), and one submit thread.
-                std::printf("OptiScaler: its frame generation is on (FGOutput=%s in OptiScaler.ini): "
-                            "the Vulkan device is created where OptiScaler can prepare it, "
-                            "submissions from one thread; if the GPU "
-                            "is still lost, set Frame Generation to none in OptiScaler's menu\n",
+                std::printf("OptiScaler: its frame generation is set (%s in OptiScaler.ini): not supported "
+                            "by the engine yet; one submit thread while it is set\n",
                             found.frame_generation.c_str());
             }
         }
         return found;
     }();
     return info;
+}
+
+bool DlssThrough() {
+    const Info& info = Detect();
+    return info.loaded && info.handle && info.ini.dlss_inputs.value_or(true);
 }
 
 bool Compat() {

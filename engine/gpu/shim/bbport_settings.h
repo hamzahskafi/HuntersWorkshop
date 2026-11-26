@@ -286,6 +286,8 @@ struct Values {
     std::atomic<bool> fsr_running_driver{false};
     /// Set by DLSS at start (0.4.4 beta 27c): the version of the DLSS file it loads ("310.9.16"), or null.
     std::atomic<const char*> dlss_version{nullptr};
+    /// Set by DLSS at start (0.4.6 beta 17): its calls go to OptiScaler, whose menu chooses what runs.
+    std::atomic<bool> dlss_through_optiscaler{false};
     /// DLSS's render preset (DlssPreset*); live: its feature is created again (vk_dlss.cpp). Set by
     /// DLSS: the preset its feature runs (0 the DLL's default, a refused one included), -1 before.
     std::atomic<int> dlss_preset{DlssPresetAuto}, dlss_applied_preset{-1};

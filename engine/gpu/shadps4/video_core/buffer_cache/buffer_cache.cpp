@@ -28,6 +28,7 @@
 #include "video_core/buffer_cache/memory_tracker.h"
 #include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
+#include "video_core/renderer_vulkan/vk_optiscaler.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
 #include "video_core/renderer_vulkan/vk_gpu_savings.h"
 #include "video_core/renderer_vulkan/vk_runtime.h"
@@ -215,7 +216,16 @@ public:
             .commandBufferInfoCount = 1,
             .pCommandBufferInfos = &command,
         };
-        if (queue.submit2(submit, *fence) != vk::Result::eSuccess) {
+        vk::Result submitted;
+        {
+            // 0.4.6 beta 17: with OptiScaler loaded, under the lock every other queue's submits and
+            // presents take: its calls may wait for the whole device (vkDeviceWaitIdle), which needs
+            // every queue held. The fence wait below stays outside it.
+            const auto lock = Vulkan::OptiScaler::Compat() ? std::unique_lock{Vulkan::Scheduler::submit_mutex}
+                                                           : std::unique_lock<std::mutex>{};
+            submitted = queue.submit2(submit, *fence);
+        }
+        if (submitted != vk::Result::eSuccess) {
             return nullptr;
         }
         const auto result = device.waitForFences(*fence, vk::True, UINT64_MAX);

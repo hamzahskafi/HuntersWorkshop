@@ -32,6 +32,7 @@
 #include "video_core/host_shaders/sharpen_copy_comp.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
 #include "video_core/renderer_vulkan/vk_camera_motion.h"
+#include "video_core/renderer_vulkan/vk_optiscaler.h"
 #include "video_core/renderer_vulkan/vk_frame_capture.h"
 #include "video_core/renderer_vulkan/vk_hdr_native.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
@@ -316,8 +317,9 @@ TemporalUpscaler::TemporalUpscaler(const Instance& instance_, Scheduler& schedul
     : instance{instance_}, scheduler{scheduler_}, texture_cache{texture_cache_},
       runtime{runtime_}, camera_motion{camera_motion_}, scene_targets{scene_targets_},
       hdr_native{hdr_native_} {
-    // Reject unsupported upscalers before allocating resources or recording a frame.
-    if (instance.IsDlssCapable()) {
+    // Reject unsupported upscalers before allocating resources or recording a frame. DLSS: NVIDIA's
+    // driver on an RTX GPU, or OptiScaler on any GPU (vk_optiscaler.h).
+    if (instance.IsDlssCapable() || OptiScaler::DlssThrough()) {
         dlss = std::make_unique<DlssUpscaler>(instance, scheduler);
     }
     // 0.4.4 beta 27: AMD FSR through AMD's FSR SDK (vk_amd_fsr.h): its DLLs loaded and asked which FSR

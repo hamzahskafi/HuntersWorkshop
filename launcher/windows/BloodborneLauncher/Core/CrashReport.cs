@@ -41,13 +41,16 @@ namespace BloodborneLauncher.Core
             line.Contains("device lost", StringComparison.OrdinalIgnoreCase) ||
             line.Contains("ErrorDeviceLost", StringComparison.Ordinal);
 
-        /// <summary>OptiScaler's frame generation output from the engine's line
-        /// ("OptiScaler: its frame generation is on (FGOutput=dlssg in OptiScaler.ini): ..."); null when off.</summary>
+        /// <summary>OptiScaler's frame generation from the engine's line ("OptiScaler: its frame generation is
+        /// set (dlssg in OptiScaler.ini): ...", 0.4.6 beta 17; before it "... is on (FGOutput=dlssg ..."); null when off.</summary>
         private static string? OptiScalerFrameGeneration()
         {
-            const string start = "OptiScaler: its frame generation is on (FGOutput=";
-            var line = Tail(GameRunner.SessionLog, int.MaxValue).FirstOrDefault(l => l.StartsWith(start, StringComparison.Ordinal));
-            return line?[start.Length..].Split(' ')[0];
+            foreach (var start in new[] { "OptiScaler: its frame generation is set (", "OptiScaler: its frame generation is on (FGOutput=" })
+            {
+                var line = Tail(GameRunner.SessionLog, int.MaxValue).FirstOrDefault(l => l.StartsWith(start, StringComparison.Ordinal));
+                if (line != null) return line[start.Length..].Split(' ')[0];
+            }
+            return null;
         }
 
         /// <summary>OptiScaler's version from its own start line ("OptiScaler v0.9.5-pre4 (8dac650) ... loaded")

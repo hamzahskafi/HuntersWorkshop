@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// bbport: OptiScaler (a DLL players drop next to the executable, often as winmm.dll) hooks
-// vkCreateDevice, vkGetDeviceProcAddr, vkQueueSubmit and takes over the NGX entry points: our
-// DLSS runs through its own feature, which may call vkDeviceWaitIdle from the thread recording
-// the evaluate (a release, or a backend change from its menu). It is allowed; while it is loaded
-// a compatibility mode keeps the engine on the paths it handles: NGX calls under the queue lock,
-// the Vulkan instance and device made on a thread of their own, and one submit thread while its
-// frame generation is on. One switch for all of it (0.4.4 beta 28: its parts' own switches went):
-// optiscaler_compat in config.ini (the in-game menu, read at start), or BB_OPTISCALER_COMPAT=0
+// bbport: OptiScaler (a DLL players put beside the engine, as dxgi.dll or winmm.dll, with its
+// OptiScaler.ini) takes a game's DLSS calls and runs the upscaler chosen in its own menu (FSR, XeSS,
+// DLSS; tools such as d4r run NVIDIA's DLSS on AMD through it). 0.4.6 beta 17: with it loaded, the
+// engine's DLSS goes to its NGX entry points on any GPU (vk_dlss.cpp), not to NVIDIA's driver.
+// Its hooks (vkCreateDevice, vkGetDeviceProcAddr, vkQueueSubmit, the NGX calls) are allowed; while it
+// is loaded a compatibility mode keeps the engine on the paths they handle: NGX calls and every queue
+// under the queue lock (its calls may wait for the device), the Vulkan instance and device made on a
+// thread of their own, and one submit thread while its frame generation is set. One switch for all
+// of it: optiscaler_compat in config.ini (the in-game menu, read at start), or BB_OPTISCALER_COMPAT=0
 // (the launcher's Engine switch) for a run.
 #pragma once
 
@@ -15,17 +16,26 @@
 #include <thread>
 #include <utility>
 
+#include "video_core/renderer_vulkan/optiscaler_ini.h"
+
 namespace Vulkan::OptiScaler {
 
 struct Info {
     bool loaded = false;
     std::string module;  ///< the file name it was loaded as (winmm.dll, dxgi.dll, ...)
     std::string version; ///< from its version resource, empty when it has none
-    std::string frame_generation; ///< its frame generation output from OptiScaler.ini, empty when off
+    void* handle = nullptr; ///< its module (HMODULE): its NGX entry points
+    IniSettings ini;        ///< from OptiScaler.ini beside it
+    std::string frame_generation; ///< ini.frame_generation: its frame generation, empty when off
+    bool d4r = false; ///< d4r beside it (its boot DLL loaded, or its folder): NVIDIA's DLSS through it
 };
 
-/// Looks once for a loaded OptiScaler and prints one line about it and the compatibility mode.
+/// Looks once for a loaded OptiScaler and prints what was found and how the engine works with it.
+/// Called at the Vulkan instance's creation, after SDL's video start (which loads dxgi.dll).
 const Info& Detect();
+/// The engine's DLSS calls go to OptiScaler's NGX entry points: it is loaded and its DLSS inputs are
+/// not turned off in OptiScaler.ini (EnableDlssInputs=false leaves DLSS to NVIDIA's driver).
+bool DlssThrough();
 /// OptiScaler is loaded and its compatibility mode is on.
 bool Compat();
 /// One submit thread: Compat() with its frame generation on.
