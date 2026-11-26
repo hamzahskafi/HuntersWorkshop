@@ -315,6 +315,26 @@ Gate: no new problem; part 3 seen working; the A/B read.
     so an update changing those alone would have kept stale entries; a rebuild now loses nothing on
     the tester's cache. An engine update rebuilds the cache, as before beta 17.
 
+**Before phase D: the double check (the tester asked, 2026-11-27).** The building is done (phase A's
+FSR checks, phase B closed by engine id 113, phase C's catalog, splash and measurements), but runs the
+phases left open were never made, and a problem they find would mean more building, so they come
+before the cleanup:
+
+- **Online with other players, never run on beta 14's protocol** (phase A item 3, "Checks not made"):
+  being summoned and summoning, joining another world (the Small Resonant Bell, an invasion). The
+  largest gap: The Hunter's Dream's co-op needs the peer protocol beta 14 ported, tested so far only
+  against bbhost's code.
+- **What no run has covered since beta 9** (the memory betas changed how the engine follows the game's
+  memory): a boss, a cutscene, character creation.
+- **Sharpening at an output other than 1080p** (engine id 107's one-pass copy into the UI image, never
+  seen at work: "Upscaler: the UI image is ...").
+- **Beta 17's gate, to declare with the tester:** the cold start (a fresh folder: the catalog seeded,
+  its pipelines built, the splash) and the warm runs read in 121-125's logs; no translation spikes on
+  the GPU thread in them.
+- **Optional, the tester's call to run or drop:** phase A's A/B (`BB_LOAD_UPLOAD=0 BB_COPY_NOTICE=0`;
+  the 2 s first frame has not come back since beta 15), beta 12's exact `m34` case, beta 11's
+  `BB_IMAGE_OWNERS=0` A/B.
+
 **Phase D: the release candidate.**
 
 - The switches settled with the tester: every 0.4.6 switch (`BB_EMPTY_SURFACES`, `BB_TARGET_POOL`,
