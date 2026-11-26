@@ -2047,6 +2047,20 @@ splash the tester asked for the same day:**
    at every start (the tester's 121 log). The lab's `--check-cache` has the warm-up's whole rule
    (the key, the vertex stage and the fragment stage one choice) instead of its one case.
 
+**The tester's 122 run and the builder session's first Linux package (2026-11-26):** the splash
+showed fourth in the log, before the boot image was prepared, and closed after 9.7 s with the game
+window; the cache was translated again for the new engine (1,185 shaders, 1.6 s), 46 keys removed for
+object motion, 1,180 of 1,226 built at the start in 1.3 s; in play four stalls of building (52-127 ms,
+the worst after loading `m32`, `m27`, `m24`), 238 FPS on average, a clean exit. The builder session's
+Linux package found three faults, fixed in the same engine id (Windows unchanged):
+- **The lab left out every tessellation shader on Linux** (the catalog's 14 hull and 18 domain
+  shaders: "32 left out"). A state's tessellation constants are copied below 2^44, where a V#'s
+  address can point (`LowWords`); only Windows had that, so on Linux those states never loaded. Now
+  `mmap` at the same addresses (`MAP_FIXED_NOREPLACE`, the address checked for older kernels).
+- **The packaged lab did not start** (its RUNPATH named the build tree): `$ORIGIN/gpu`, as bb-splash.
+- **The package took the catalog from its template**, not the repository; SDL's controller mappings
+  now come with their licence.
+
 ### The 0.4.6 release
 
 - **Switches:** each beta's switches, and `BB_COPY_HOLD` and `BB_COPY_MERGE` (kept through 0.4.5

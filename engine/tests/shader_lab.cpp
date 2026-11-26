@@ -49,7 +49,11 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #else
+#include <sys/mman.h>
 #include <sys/wait.h>
+#ifndef MAP_FIXED_NOREPLACE
+#define MAP_FIXED_NOREPLACE 0x100000 // Linux 4.17; older C libraries do not name it
+#endif
 #endif
 
 #include "shader_recompiler/backend/bindings.h"
@@ -172,20 +176,39 @@ size_t CopyTrailerAt(const Bytes& b) {
 }
 
 /// Dwords below 2^44 (a V#'s address range), reused by the next capture: the heap is above it.
+/// 0.4.6 beta 17: on Linux too. Only Windows had it, so every hull and domain shader's state (the
+/// tessellation constants live here) failed to load there: the Linux lab left out the catalog's 32
+/// (the builder session, engine id 122).
 u32* LowWords(size_t count) {
     static u32* block = nullptr;
     static size_t capacity = 0;
     if (count <= capacity) return block;
+    const size_t bytes = (count * 4 + 0xFFFF) & ~size_t(0xFFFF);
 #ifdef _WIN32
     if (block) VirtualFree(block, 0, MEM_RELEASE);
     block = nullptr;
     capacity = 0;
-    const size_t bytes = (count * 4 + 0xFFFF) & ~size_t(0xFFFF);
     for (uintptr_t at = 0x10000000; at < (uintptr_t(1) << 40) && !block; at += 0x10000000) {
         block = static_cast<u32*>(VirtualAlloc(reinterpret_cast<void*>(at), bytes, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
     }
-    if (block) capacity = bytes / 4;
+#else
+    if (block) munmap(block, capacity * 4);
+    block = nullptr;
+    capacity = 0;
+    for (uintptr_t at = 0x10000000; at < (uintptr_t(1) << 40) && !block; at += 0x10000000) {
+        // Never over a mapping already there (MAP_FIXED_NOREPLACE; a kernel older than 4.17 takes
+        // the address as a hint only, so where it lands is checked too).
+        void* mapped = mmap(reinterpret_cast<void*>(at), bytes, PROT_READ | PROT_WRITE,
+                            MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+        if (mapped == MAP_FAILED) continue;
+        if (mapped != reinterpret_cast<void*>(at)) {
+            munmap(mapped, bytes);
+            continue;
+        }
+        block = static_cast<u32*>(mapped);
+    }
 #endif
+    if (block) capacity = bytes / 4;
     return block;
 }
 
