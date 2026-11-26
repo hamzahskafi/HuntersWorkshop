@@ -78,11 +78,11 @@ The decisions that still stand. How each was reached is in [archive/plan-0.4.4.m
 | Topic | Decision |
 |---|---|
 | FSR | AMD FSR SDK 2.4 (FidelityFX-SDK `v2.4.0`, 28 October 2026) on Windows: AMD's signed `amd_fidelityfx_loader_vk.dll` and `amd_fidelityfx_upscaler_vk.dll` with AMD's licence notice. Every unofficial FSR path was removed (0.4.4 beta 27). |
-| DLSS | The driver's NGX core, started with the shared application id 231313132 (`Init_Ext2`). No Project ID (the tester's call, 2026-11-01): the core's entry point that takes one is declared nowhere public, and learning it means disassembling NVIDIA's libraries, which their licence forbids (§4a). Not Streamline: with its core loaded, NVIDIA's Vulkan driver presents through DXGI and holds V-Sync On (latest frame) to two frames a refresh. NVIDIA's NGX loader library is not linked: the DLSS SDK licence (§2e) forbids use that puts the SDK under an open-source licence (HW is GPL). |
+| DLSS | The driver's NGX core, started with the shared application id 231313132 (`Init_Ext2`); with OptiScaler loaded, its module's NGX entry points on any GPU (engine id 126, "The OptiScaler rework"). No Project ID (the tester's call, 2026-11-01): the core's entry point that takes one is declared nowhere public, and learning it means disassembling NVIDIA's libraries, which their licence forbids (§4a). Not Streamline: with its core loaded, NVIDIA's Vulkan driver presents through DXGI and holds V-Sync On (latest frame) to two frames a refresh. NVIDIA's NGX loader library is not linked: the DLSS SDK licence (§2e) forbids use that puts the SDK under an open-source licence (HW is GPL). |
 | When AMD's or NVIDIA's runtime can't start | TAA, with a log line and a note in the game. |
 | Frame generation | Not offered, and its code removed in 0.4.4 beta 28 with Streamline's and Reflex's (the tester's calls, 2026-11-01 and 02). If it returns, it is AMD's on AMD's swapchain, not built on that code. |
 | NVIDIA Reflex | Not offered. If it returns, it is a design of its own on `VK_NV_low_latency2` directly (the sleep before the frame's work, markers with present IDs), measured against the 120 FPS cap first. |
-| OptiScaler | Set aside: the compatibility mode (`vk_optiscaler.h`) stays as it is, untested. Re-checked after the performance work. Audited 2026-11-27 (the tester asked; below, "The OptiScaler audit"): the tester decides keep, fix or drop |
+| OptiScaler | Audited and reworked (the tester, 2026-11-27: "it's clear that OptiScaler support needs a rework for us"; below, "The OptiScaler rework"). Engine id 126: the engine's DLSS calls go to OptiScaler on any GPU, every queue under the lock, the helpers in a folder of their own, the GPU's identity logged. Its frame generation and the rest after (the tester: "then we'll talk frame generation and everything else") |
 | The upscaler at outputs other than 1080p | It stays on the game's finished frame (the tester's call, 2026-11-01). Taking it before tone mapping there would run the game's post-processing at the output size, a renderer split the game was not built for. |
 | Live resolution change | Off or On only; Off is recommended and the default (the tester's call, 2026-11-01). |
 | The follow camera | Fixed in HW's engine (0.4.4 beta 24): every per-frame weight converted each frame with the frame timer. FPS++ is that base plus only what Kyo changed. bbhost's weight list is a cross-check only. |
@@ -447,6 +447,38 @@ process; everything it needs from the engine done for it; the player told plainl
 Order: H1 and E3 (faults whatever is decided), then E1, E2, E4, E6, then the tester's choices (E5, E7,
 L1) and D1, then T1. Not in it: OptiScaler's frame generation, its mip bias override against ours, a
 launcher installer for OptiScaler or d4r.
+
+The tester's calls (2026-11-27): E5 "don't do anything about it" (both menus stay on Insert); the
+wording of E7, L1, L2 and D1 shown before it is built ("sure"); "let's focus on cleaning up and making
+sure OptiScaler will work and that we are optimal, then we'll talk frame generation and everything else".
+
+**Built, engine id 126:**
+
+- **E1:** `OptiScaler::DlssThrough()` (loaded, its module found, `EnableDlssInputs` not false): the
+  upscaler makes DLSS on any GPU and `vk_dlss.cpp` takes NGX's entry points from OptiScaler's module (its
+  reference, never freed); NVIDIA's NVX extensions and driver core stay NVIDIA's own path. Its failures
+  are named as OptiScaler's; no DLSS file version is claimed (`dlss_through_optiscaler` for the menu).
+- **E2:** "GPU: identity: vendor, device, driver id, driver version", and a line when the vendor ID, the
+  driver id and an AMD-only extension (`VK_AMD_shader_core_properties`) disagree: a spoof. What
+  OptiScaler's Vulkan spoofing changes is still to be read from the tester's run; if it changes the
+  driver id too, the engine's choices (the shader profile) follow it, and the guide says leave it off.
+  The driver cache's identity left as it is: taking it from fields spoofing leaves alone would rebuild
+  every player's driver cache once, for players who turn spoofing on or off.
+- **E3:** the readback queue's submit under the queue lock with OptiScaler loaded (the graphics queue's
+  submits, the presents and the device waits already were); its fence wait outside it.
+- **E4, E6:** OptiScaler.ini read in one place (`optiscaler_ini.h`: `VulkanUpscaler`, `EnableDlssInputs`,
+  `[Spoofing]` Vulkan, VulkanExtensionSpoofing and Dxgi, `FGOutput` or `FGType`); d4r named when its
+  boot DLL or folder is beside it; the log's OptiScaler block says where DLSS goes, OptiScaler's Vulkan
+  upscaler, its spoofing, and its frame generation as not supported yet. The crash report reads the new
+  frame-generation line and the old.
+- **H1:** `bb-splash`, `bb-shader-lab` and `bb-gpu-capabilities` in `engine\out\tools` on Windows
+  (`BbStartup::ToolPath`, `Paths.Tool`, bb-start's splash; bb-start removes an older package's copies;
+  build.sh builds them there). `bb-engine-assets` stays beside the engine: it links zlib and shell32
+  only, none of the DLL names OptiScaler takes. Linux unchanged. The GPU cache's identity changes
+  (`vk_pipeline_serialization.cpp`): players' caches are translated again once (a few seconds).
+- **T1:** `optiscaler-ini-test` (the shipped ini, a player's, both frame-generation keys, keys of the
+  same names in other sections). The tester's runs still to come.
+- Left for the tester's review before they are built: E7, L1, L2, D1.
 
 **Phase D: the release candidate.**
 

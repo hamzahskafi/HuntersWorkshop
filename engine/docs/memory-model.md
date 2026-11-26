@@ -2174,7 +2174,22 @@ shader or no part built still pause, a little shorter. For that it would split t
 (a second set written per draw, a cost on every draw at 230-470 FPS), add a second build path and the
 optimized pipeline behind it. Not worth it. What removes a pause is the pipeline being in the cache
 before play: the catalog, grown with the tester's full-game cache later. The measurement mode and the
-count go with the release candidate's research cleanup.
+count go with the release candidate's research cleanup. Removed in engine id 126 (the tester: "let's
+focus on cleaning up"): `BB_PIPELINE_BENCH`, the parts count and the "Pipeline parts" line; the two
+extensions they enabled are no longer asked for. The results stay here and in the plan's register.
+
+### OptiScaler (engine id 126; the tester: "it's clear that OptiScaler support needs a rework for us")
+
+One channel: with OptiScaler loaded (found by `vk_optiscaler.cpp` as a loaded module exporting NGX's
+Vulkan entry points, OptiScaler.ini beside it), the engine's DLSS calls go to its module on any GPU
+(`DlssThrough`; `EnableDlssInputs=false` in its ini sends them to NVIDIA's driver as before), and it runs
+the upscaler chosen in its own menu. The engine needs no spoofing: it keeps its choices on the driver's
+id and logs the GPU's identity, with a line when it disagrees with itself. With OptiScaler loaded,
+every queue's submits go out under `Scheduler::submit_mutex` (its calls may wait for the whole device),
+the Vulkan instance and device are made on a thread of their own, and one submit thread runs while its
+frame generation is set (the compatibility mode). On Windows the helpers (`bb-splash`, `bb-shader-lab`,
+`bb-gpu-capabilities`) run from `engine\out\tools`, so a DLL put beside the game is loaded into the
+game alone. Its frame generation is not supported yet.
 
 ### The 0.4.6 release
 

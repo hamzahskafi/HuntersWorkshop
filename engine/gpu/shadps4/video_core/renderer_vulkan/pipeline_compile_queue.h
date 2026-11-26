@@ -6,7 +6,6 @@
 
 #pragma once
 
-#include <array>
 #include <algorithm>
 #include <atomic>
 #include <bit>
@@ -263,23 +262,6 @@ struct PipelineCompileStats {
         std::uint64_t longest = at.load(std::memory_order_relaxed);
         while (ns > longest && !at.compare_exchange_weak(longest, ns, std::memory_order_relaxed)) {
         }
-    }
-    /// 0.4.6 beta 17: graphics pipelines new in play by the parts the pipeline library would have
-    /// found built when they came (bit 1: the fragment shader's, bit 2: the stages before
-    /// rasterization's with slots of their own; vk_graphics_pipeline.cpp NoteParts), and the waits
-    /// for them: this window (exchanged) and since the start.
-    std::array<std::atomic<std::uint64_t>, 4> parts_new{}, parts_waits{}, parts_wait_ns{};
-    std::array<std::atomic<std::uint64_t>, 4> parts_new_total{}, parts_waits_total{}, parts_wait_ns_total{};
-
-    void NoteNewParts(unsigned kind) noexcept {
-        parts_new[kind].fetch_add(1, std::memory_order_relaxed);
-        parts_new_total[kind].fetch_add(1, std::memory_order_relaxed);
-    }
-    void NotePartWait(unsigned kind, std::uint64_t ns) noexcept {
-        parts_waits[kind].fetch_add(1, std::memory_order_relaxed);
-        parts_wait_ns[kind].fetch_add(ns, std::memory_order_relaxed);
-        parts_waits_total[kind].fetch_add(1, std::memory_order_relaxed);
-        parts_wait_ns_total[kind].fetch_add(ns, std::memory_order_relaxed);
     }
     void NoteWait(std::uint64_t ns) noexcept {
         waits.fetch_add(1, std::memory_order_relaxed);

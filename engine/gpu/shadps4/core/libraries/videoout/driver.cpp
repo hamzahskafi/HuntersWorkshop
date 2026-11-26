@@ -964,40 +964,6 @@ void VideoOutDriver::Flip(const Request& req) {
                                 static_cast<unsigned long long>(waits), wait_ns / 1e6,
                                 longest / 1e6);
                 }
-                // 0.4.6 beta 17 (docs/memory-model.md, "The pipeline measurement"): the pipelines new
-                // in play by the parts the pipeline library would have found built when they came,
-                // and their waits; kinds: 0 neither, 1 the fragment shader's, 2 the vertex stages',
-                // 3 both.
-                u64 made[4], waited[4], waited_ns[4];
-                for (int k = 0; k < 4; ++k) {
-                    made[k] = p.parts_new[k].exchange(0);
-                    waited[k] = p.parts_waits[k].exchange(0);
-                    waited_ns[k] = p.parts_wait_ns[k].exchange(0);
-                }
-                if (made[0] + made[1] + made[2] + made[3] + waited[0] + waited[1] + waited[2] + waited[3]) {
-                    const auto total = [&](auto& at, int k) {
-                        return static_cast<unsigned long long>(at[k].load());
-                    };
-                    std::printf("Pipeline parts (the pipeline library's two, the vertex stages with slots of "
-                                "their own; an upper bound): new %llu: both built already %llu, the fragment "
-                                "shader's only %llu, the vertex stages' only %llu, neither %llu; waits for "
-                                "them: both built %llu (%.1f ms), one %llu (%.1f ms), neither %llu (%.1f ms); "
-                                "since the start: new %llu (both %llu, one %llu, neither %llu), waits %.1f, "
-                                "%.1f, %.1f ms\n",
-                                static_cast<unsigned long long>(made[0] + made[1] + made[2] + made[3]),
-                                static_cast<unsigned long long>(made[3]), static_cast<unsigned long long>(made[1]),
-                                static_cast<unsigned long long>(made[2]), static_cast<unsigned long long>(made[0]),
-                                static_cast<unsigned long long>(waited[3]), waited_ns[3] / 1e6,
-                                static_cast<unsigned long long>(waited[1] + waited[2]),
-                                (waited_ns[1] + waited_ns[2]) / 1e6, static_cast<unsigned long long>(waited[0]),
-                                waited_ns[0] / 1e6,
-                                total(p.parts_new_total, 0) + total(p.parts_new_total, 1) +
-                                    total(p.parts_new_total, 2) + total(p.parts_new_total, 3),
-                                total(p.parts_new_total, 3), total(p.parts_new_total, 1) + total(p.parts_new_total, 2),
-                                total(p.parts_new_total, 0), p.parts_wait_ns_total[3].load() / 1e6,
-                                (p.parts_wait_ns_total[1].load() + p.parts_wait_ns_total[2].load()) / 1e6,
-                                p.parts_wait_ns_total[0].load() / 1e6);
-                }
             }
             VideoCore::PageManager::ReportFaultSites();
             if (const u64 notes = BbStats::cpu_write_notes.exchange(0)) {

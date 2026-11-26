@@ -222,16 +222,6 @@ public:
         return vertex_input_dynamic_state;
     }
 
-    /// bbport (0.4.6 beta 17): pipelines in parts (VK_EXT_graphics_pipeline_library) and the
-    /// driver's own cache asked first (pipelineCreationCacheControl); enabled only for the
-    /// pipeline measurement (BB_PIPELINE_BENCH).
-    bool IsGraphicsPipelineLibraryEnabled() const {
-        return graphics_pipeline_library;
-    }
-    bool IsPipelineCreationCacheControlEnabled() const {
-        return pipeline_creation_cache_control;
-    }
-
     /// Returns true when VK_KHR_fragment_shader_barycentric is supported.
     bool IsFragmentShaderBarycentricSupported() const {
         return fragment_shader_barycentric;
@@ -624,8 +614,6 @@ private:
     bool workgroup_memory_explicit_layout{};
     bool maintenance_5{};
     bool maintenance_8{};
-    bool graphics_pipeline_library{};
-    bool pipeline_creation_cache_control{};
     bool buffer_marker{};
     bool device_fault{};
     bool address_binding_report{};
