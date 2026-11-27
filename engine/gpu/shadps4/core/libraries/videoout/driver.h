@@ -9,6 +9,7 @@
 #include "common/debug.h"
 #include "common/polyfill_thread.h"
 #include "core/libraries/videoout/video_out.h"
+#include "bbport_timeline.h"
 
 #include <condition_variable>
 #include <mutex>
@@ -54,8 +55,15 @@ struct VideoOutPort {
     }
 
     void WaitVoLabel(auto&& pred) {
-        std::unique_lock lk{vo_mutex};
-        vo_cv.wait(lk, pred);
+        // BB_TIMELINE (engine id 132): stage A's wait for a display buffer the game renders into.
+        // Noted here, not at the call in liverpool.cpp: that file is part of the GPU cache's
+        // identity (build.sh), and a measurement must not change it.
+        BbTimeline::Note(BbTimeline::VoLabelWaitBegin);
+        {
+            std::unique_lock lk{vo_mutex};
+            vo_cv.wait(lk, pred);
+        }
+        BbTimeline::Note(BbTimeline::VoLabelWaitEnd);
     }
 
     void SignalVoLabel() {

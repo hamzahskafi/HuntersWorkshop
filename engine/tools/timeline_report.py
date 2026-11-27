@@ -17,8 +17,9 @@ the frame (PipeTask 5), and from there until the GPU had run it (the GPU's queue
 
 From engine id 132: the game's threads (GuestBlocked: their waits of 10 us or more in the runtime, and
 the kind of core each ran on when it woke), the thread that ends the game's frames first; and the
-flip's way (the presenter's PrepareFrame, the flip thread taking the flip and telling the game, the
-swap thread's present, stage A's waits for a display buffer).
+flip's way (the presenter's PrepareFrame, PipeTask 4, before its submission, PipeTask 5; the flip
+thread taking the flip and telling the game; the swap thread's present; stage A's waits for a display
+buffer).
 
 Usage: python3 -I tools/timeline_report.py <timeline file> [--frames N]
 """

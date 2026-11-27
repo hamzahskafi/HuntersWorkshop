@@ -910,6 +910,10 @@ online probe's timing line.
 
 ### Checks not made
 
+- **The runtime test under Wine** (the builder, engine id 132, 2026-11-27): `runtime-test` stops at
+  `tests/test_runtime.c:193`, a direct-memory map (`map(&y, length, 3, 0, a, 0)`). Its first run under
+  Wine; nothing in 132 touches mapping, so most likely Wine's placeholder mapping
+  (`MapViewOfFile3`). The game runs on Windows itself; looked at if a Wine run ever matters.
 - **The launcher's texts on screen:** at 100% and 150% scaling, in English, German and Japanese,
   in both Classic and Modern layouts, plus the in-game menu's (F1) Enhancements section.
 - **Launcher behaviour:**
