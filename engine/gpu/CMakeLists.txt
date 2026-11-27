@@ -615,7 +615,8 @@ target_compile_options(draw-pipe-handover-test PRIVATE -UNDEBUG -Wall -Wextra)
 target_include_directories(draw-pipe-handover-test PRIVATE shim shadps4 .)
 target_link_libraries(draw-pipe-handover-test PRIVATE Threads::Threads fmt::fmt)
 if (WIN32)
-    target_sources(draw-pipe-handover-test PRIVATE shim/bbport_platform.cpp)
+    target_sources(draw-pipe-handover-test PRIVATE shim/bbport_platform.cpp shim/bbport_roles.cpp
+        shim/bbport_cpu_layout.cpp)
     target_link_libraries(draw-pipe-handover-test PRIVATE psapi)
 endif()
 # 0.4.6 beta 18: the fork-join dispatcher's wait caves, run for real (x86-64, mmap: not on Windows).

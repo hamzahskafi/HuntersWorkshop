@@ -3,8 +3,9 @@
 // fence every 8 packets, with real threads. Stage A commits packets in bursts with pauses long
 // enough for stage B to go to sleep between them. Checked: every packet runs, in order; a burst
 // ended by Publish (as stage A does before it goes idle or waits) runs at once, with no late wake;
-// a burst left without one still runs, within the sleep's check interval, and counts as a late
-// wake; Drain and WaitForPacket return with everything before them run.
+// a burst left without one still runs at once, as the hand-over sees stage B asleep (and would
+// within the sleep's check interval if it didn't); Drain and WaitForPacket return with everything
+// before them run.
 #include "video_core/renderer_vulkan/vk_draw_pipe.h"
 
 #include <chrono>
@@ -12,9 +13,23 @@
 #include <random>
 #include <thread>
 
+// What the draw pipe's header reaches outside it (the engine's logger and assert handler, the
+// roles' clock on Windows), as the test has no engine library.
 namespace Common {
 void SetCurrentThreadName(const char*) {}
+namespace Log {
+bool ShouldLog(Level) {
+    return false;
+}
+void Write(std::string_view, Level, const char*, int, const char*, std::string&&) {}
+} // namespace Log
 } // namespace Common
+void assert_fail_impl() {
+    std::abort();
+}
+extern "C" std::uint64_t runtime_tsc_frequency() {
+    return 3'000'000'000ull;
+}
 
 namespace {
 
@@ -96,7 +111,7 @@ int main() {
     check(pipe.late_wakes.load() == 0, "published bursts need no late wake");
     check(g_out_of_order.load() == 0, "packets run in order");
 
-    // A burst stage A leaves without Publish while stage B sleeps: run by the sleep's own check.
+    // A burst stage A leaves without Publish while stage B sleeps: the hand-over sees the sleep.
     std::this_thread::sleep_for(std::chrono::milliseconds(5));
     const u64 before = g_next;
     g_worst_us = 0;
@@ -108,6 +123,7 @@ int main() {
                 static_cast<long long>(g_worst_us.load()),
                 static_cast<unsigned long long>(pipe.late_wakes.load()));
     check(g_worst_us.load() < 20000, "an unpublished burst runs within the sleep's check interval");
+    check(pipe.late_wakes.load() == 0, "a sleep announced before the burst is seen by the hand-over");
 
     // Drains and waits for a packet, back to back with commits.
     for (int round = 0; round < 2000; ++round) {

@@ -23,6 +23,7 @@
 #include <chrono>
 #include <cstring>
 #include <memory>
+#include <stop_token>
 #include <thread>
 #include <x86intrin.h>
 
@@ -89,7 +90,11 @@ public:
         reinterpret_cast<Header*>(ring.get() + head % Capacity)->payload = payload_size;
         head += pending_size;
         ++packets;
-        if (BatchedHandover() && ++unpublished < kPublishEvery) {
+        // A plain look at whether stage B (or the lookahead thread) is already asleep: then the
+        // fence and the wake at once, not up to 7 packets later.
+        if (BatchedHandover() && ++unpublished < kPublishEvery &&
+            !sleeping.load(std::memory_order_relaxed) &&
+            !ahead_sleeping.load(std::memory_order_relaxed)) {
             published.store(head, std::memory_order_release);
             return;
         }
@@ -106,6 +111,7 @@ public:
             return;
         }
         fenced_head = head;
+        fenced.store(head, std::memory_order_release); // before `published`: see LateWake
         published.store(head, std::memory_order_seq_cst);
         if (sleeping.load(std::memory_order_seq_cst)) {
             BbPark::Bump(wake);
@@ -124,8 +130,18 @@ public:
         return on;
     }
     /// Statistics: stage B's and the lookahead thread's sleeps that ended at kSleepCheckMs with a
-    /// packet there (a publish point stage A missed; expected 0).
+    /// packet there that stage A never published with the fence (a publish point it missed;
+    /// expected 0). A packet that was published with the fence, whose wake was still on its way
+    /// when the sleep ended, is not one (the builder saw those under Wine), and Commit publishes
+    /// with the fence at once when it sees the sleep announced.
     std::atomic<u64> late_wakes{0};
+    /// The sleep that ended at its timeout finds packets up to `seen` published: late when the
+    /// last fenced publish is before them.
+    void NoteTimeout(u64 seen_published) {
+        if (fenced.load(std::memory_order_acquire) < seen_published) {
+            late_wakes.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
 
     /// Why stage A drained (statistics): a PM4 opcode, or one of these.
     enum Reason : u32 {
@@ -263,10 +279,11 @@ public:
         if (published.load(std::memory_order_seq_cst) <= position && !stop.stop_requested()) {
             std::stop_callback on_stop{stop, [this] { BbPark::Bump(ahead_wake, true); }};
             while (ahead_wake.load(std::memory_order_seq_cst) == seen && !stop.stop_requested()) {
-                if (!BbPark::Wait(ahead_wake, seen, kSleepCheckMs) &&
-                    published.load(std::memory_order_seq_cst) > position) {
-                    late_wakes.fetch_add(1, std::memory_order_relaxed);
-                    break;
+                if (!BbPark::Wait(ahead_wake, seen, kSleepCheckMs)) {
+                    if (const u64 now = published.load(std::memory_order_seq_cst); now > position) {
+                        NoteTimeout(now);
+                        break;
+                    }
                 }
             }
         }
@@ -383,9 +400,11 @@ private:
                         while (published.load(std::memory_order_seq_cst) == at &&
                                wake.load(std::memory_order_seq_cst) == seen &&
                                !stop.stop_requested()) {
-                            if (!BbPark::Wait(wake, seen, kSleepCheckMs) &&
-                                published.load(std::memory_order_seq_cst) != at) {
-                                late_wakes.fetch_add(1, std::memory_order_relaxed);
+                            if (!BbPark::Wait(wake, seen, kSleepCheckMs)) {
+                                if (const u64 now = published.load(std::memory_order_seq_cst);
+                                    now != at) {
+                                    NoteTimeout(now);
+                                }
                             }
                         }
                         sleeping.store(false, std::memory_order_relaxed);
@@ -434,6 +453,7 @@ private:
     u32 unpublished = 0; ///< stage A: packets committed since the last Publish
     u64 fenced_head = 0; ///< stage A: head at the last Publish
     alignas(64) std::atomic<u64> published{0};
+    std::atomic<u64> fenced{0}; ///< stage A: `published` at the last Publish (late wakes)
     alignas(64) std::atomic<u64> consumed{0};
     std::atomic<u64> consumed_packets{0}; ///< packets stage B has run (NextPacket numbers)
     u64 running_end = 0; ///< stage B: the end of the packet it runs (PeekNext; its cache line)
