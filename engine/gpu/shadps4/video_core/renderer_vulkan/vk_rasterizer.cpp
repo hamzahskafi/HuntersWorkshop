@@ -486,6 +486,31 @@ void Rasterizer::QueueUnitEnd() {
     }
 }
 
+void Rasterizer::RequestHandOver() {
+    if (!gpu_queue) {
+        return;
+    }
+    if (!PipeSignals() || DrawPipeIdle()) {
+        HandOverNow();
+        return;
+    }
+    static constexpr u8 none = 0;
+    RunInOrder([](Rasterizer& self, const u8*) { self.HandOverNow(); }, &none, 0,
+               BbToggle::PipelinedTasks, false, "HandOver");
+}
+
+void Rasterizer::HandOverNow() {
+    // A queue closes its batch when the producer stops: the game stops here until the GPU retires
+    // its previous frame, so nothing would look at the queue again before the GPU ran out.
+    RecordUnitMark();
+    PublishSignals();
+    if (!scheduler.RecordedSinceSubmit()) {
+        return;
+    }
+    BbStats::queue_wait_flushes.fetch_add(1, std::memory_order_relaxed);
+    Flush();
+}
+
 int Rasterizer::RunReadySignals(bool wait) {
     auto* semaphore = scheduler.GetWorkSemaphore();
     const u32 word = gpu_queue ? progress.Read() : 0;

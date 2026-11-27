@@ -403,3 +403,47 @@ time, the passes' gaps, layout changes, the waves per draw). Then a design for w
   try-lock), while the signal thread waits for that lock. A signal that waited on the signal thread,
   or on something done after it, would deadlock the two. Today's early ones write memory, note it,
   and raise the GPU idle interrupt.
+
+## Engine id 140's run, and engine id 141 (2026-11-28)
+
+The tester's run of 140 (`20261128_013438`, frame statistics on; `_013656` without, 229.1 FPS):
+
+| | 140 | 139, cuts at pass ends | 139 default (beta 20) |
+|---|---|---|---|
+| Lamp spot | about 229.7 FPS, 2.0-2.8 submissions a frame | 231.0 | 229.3 (3.1) |
+| Busy view | about 201.6 | 201.0 | 199.8 (3.1-3.3) |
+| Slow area | about 228 (226 with its dips), 6-9 | 228.0 | 226.1 (5.5-7.3) |
+
+- **The fences:** 82-84% are written as the GPU passes their game submission at the lamp spot and in
+  the busy view, 72-75% in the slow area; none needed their submission's end for a reason (no
+  interrupts, clocks or GPU writes in place). Marks: 72 a frame at the lamp spot, 62 in the slow area.
+- **The hand-over did not do what the plan expected.** At a frame's end it submitted nothing (0.0 a
+  frame), and once a frame the GPU ran out with work waiting for it (0.9-1.0 a frame, then the
+  announcement's round trip: the signal thread, the GPU command thread and the recording thread before
+  the work reached it). The plan assumed the game a whole frame ahead. It is not: with frame overlap
+  (`BB_SUBMIT_AHEAD=2`, the game's two frame contexts) it waits for its previous frame right after its
+  third submission of a frame (`WaitPreviousFrameAtSubmit`), so it is two submissions ahead, not a
+  frame. Those submissions were held behind the frame the GPU ran (it had more than its last unit
+  ahead), and while the game waited no game submission ended to look again: the GPU ran out first. The
+  rest of the frame went with the presenter's submission at the flip, so the frame's end found nothing.
+  The round trip cost about what the switch saved: the lamp spot 0.6% below 139 with the same cuts.
+- **The queue's missing trigger:** a queue closes its batch when the producer stops, and the game stops
+  at its wait for the previous frame, not at its frame's end. **Engine id 141:** when the game starts
+  that wait (`GnmDriver::WaitPreviousFrame`, outside its lock), it tells the GPU command thread
+  (`Liverpool::GuestWaits`); once that thread has decoded everything before, the work waiting goes
+  (`Rasterizer::RequestHandOver`, `HandOverNow`), queued behind the frame the GPU runs. Not if the game
+  has stopped waiting meanwhile. Counted: "when the game waited for its previous frame".
+- **The model** (`gpu-queue-test`) now has the game's pacing: its wait after the third submission, the
+  game's wake-up after the frame retires (150 us), the announcement's round trip (100 us), and the
+  switch where the next submission starts (it hid short waits before). Without the hand-over at the
+  wait, the GPU waits about 100 us a frame for held work (140's case); with it, none. With the game
+  pausing mid-frame for longer than the GPU's remaining work, the work held still reaches it through
+  the announcement (counted as "when it ran out with work waiting"; in 140's slow area at most about
+  0.1 a frame besides the frame's one).
+- **Expected now, corrected:** the floor is two or three submissions a frame (the part before the game's
+  wait, the rest with the presenter's), not the two the plan said; the lamp spot and the busy view had
+  three already. So about one switch less a frame there and no round trip (about +1% over 139 with the
+  same cuts, about +1.5% over beta 20); the slow area keeps its submissions (the GPU catches up with the
+  game mid-frame there and takes the work as it comes), so only the round trip goes. The GPU cache's
+  identity changes: `1c63203f101f3d79` (`liverpool.{h,cpp}`).
+

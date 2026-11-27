@@ -254,6 +254,14 @@ void Liverpool::Process(std::stop_token stoken) {
         // announcement wakes it. Fence work
         // with nothing to announce it and the recording thread idle is submitted at once: a
         // trigger missing somewhere (counted, expected 0).
+        // 0.4.6 beta 21 (engine id 141, docs/gpu-fences.md): the game waits for its previous frame
+        // and everything it gave is decoded: the work waiting goes now (GuestWaits). Not if it has
+        // stopped waiting meanwhile (the GPU retired the frame and took the work then).
+        if (rasterizer && rasterizer->GpuQueue() && !(num_commands || num_submits || submit_done) &&
+            guest_waits.exchange(false, std::memory_order_acq_rel) &&
+            Libraries::GnmDriver::GuestWaitingForFrame()) {
+            rasterizer->RequestHandOver();
+        }
         if (rasterizer && Vulkan::Rasterizer::HonestLabels() &&
             !(num_commands || num_submits || submit_done)) {
             if (rasterizer->GpuAnnounced()) {

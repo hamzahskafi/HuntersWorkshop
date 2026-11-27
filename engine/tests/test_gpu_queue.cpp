@@ -47,12 +47,18 @@ struct Model {
     int pause_every = 0;         ///< a pause of `pause_us` after every n-th unit (0: none)
     int pause_us = 0;
     int switch_us = 70;          ///< the GPU between submissions
+    /// Engine id 141: where the game waits for its previous frame: 0 at its frame's end; n after its
+    /// n-th submission of a frame (the engine's BB_SUBMIT_AHEAD=2 has it wait at the third).
+    int wait_after_unit = 0;
+    bool handover_at_wait = true; ///< the work waiting goes when the game starts that wait
+    int announce_us = 0;          ///< the GPU out of work to the held work reaching it
+    int game_wake_us = 0;         ///< the frame retired to the game's next submission
     unsigned seed = 1;
 
     // Results.
     unsigned long long submissions = 0, written = 0, by_mark = 0, by_tick = 0;
     unsigned long long idle_with_work_held_us = 0, early_writes = 0, out_of_order = 0;
-    unsigned long long frame_end_submissions = 0, held = 0;
+    unsigned long long frame_end_submissions = 0, held = 0, wait_submissions = 0;
 
     void Run() {
         std::mt19937 r{seed};
@@ -73,6 +79,7 @@ struct Model {
         u32 recorded_marks = 0, submitted_marks = 0, handover = 0, word = 0;
         bool watch = false;
         int gpu_left = 0, gpu_switch = 0; // the running unit's time left; a switch in progress
+        bool switch_due = false;          // the next submission starts with a switch
         unsigned long long unit_index = 0;
         std::vector<unsigned long long> frame_tick(frames + 1, 0);
 
@@ -129,6 +136,7 @@ struct Model {
 
         int frame = 0, unit = 0, cpu_left = cpu_unit_us, waiting_for = -1;
         int pause_left = 0;
+        unsigned long long announce_at = 0;
         for (unsigned long long now = 0; frame < frames || !gpu_queue.empty() || gpu_left ||
                                          !signals.empty();
              ++now) {
@@ -146,17 +154,31 @@ struct Model {
                     if (gpu_queue.front().units.empty()) {
                         done_tick = gpu_queue.front().tick;
                         gpu_queue.pop_front();
-                        gpu_switch = switch_us;
+                        switch_due = true;
                         run_ready(true); // the signal thread at the submission's end
                         if (watch && done_tick >= tick - 1 && !recording.empty()) {
-                            flush(); // Announce, SubmitForGpu: the GPU ran out with work waiting
+                            // Announce, SubmitForGpu: the GPU ran out with work waiting, which
+                            // reaches it `announce_us` later (the threads' wake-ups between).
+                            announce_at = now + static_cast<unsigned long long>(announce_us);
                         }
                     }
                 }
             } else if (!gpu_queue.empty()) {
-                gpu_left = gpu_queue.front().units.front().gpu_us;
+                if (switch_due) {
+                    // The switch where the next submission starts: queued or late, it costs it.
+                    switch_due = false;
+                    gpu_switch = switch_us;
+                } else {
+                    gpu_left = gpu_queue.front().units.front().gpu_us;
+                }
             } else if (!recording.empty()) {
                 ++idle_with_work_held_us; // the GPU idle with work recorded and not given to it
+            }
+            if (announce_at && now >= announce_at) {
+                announce_at = 0;
+                if (!recording.empty() && done_tick >= tick - 1) {
+                    flush();
+                }
             }
             if (now > 100000000ull) {
                 check(false, "the model ends");
@@ -172,6 +194,7 @@ struct Model {
             if (waiting_for >= 0) {
                 if (done_tick >= frame_tick[waiting_for]) {
                     waiting_for = -1;
+                    pause_left = game_wake_us; // the retirement reaching the game
                 } else {
                     continue;
                 }
@@ -206,10 +229,23 @@ struct Model {
             if (pause_every && unit % pause_every == 0) {
                 pause_left = pause_us;
             }
+            const auto wait_for_previous = [&] {
+                waiting_for = frame > 0 ? frame - 1 : -1;
+                // Liverpool::GuestWaits: nothing more comes until the GPU retires that frame.
+                if (waiting_for >= 0 && done_tick < frame_tick[waiting_for] && handover_at_wait &&
+                    !recording.empty()) {
+                    ++wait_submissions;
+                    flush();
+                }
+            };
+            if (wait_after_unit != 0 && unit == wait_after_unit) {
+                wait_for_previous();
+            }
             if (frame_end) {
                 frame_tick[frame] = tick - 1;
-                // The game waits for its previous frame.
-                waiting_for = frame > 0 ? frame - 1 : -1;
+                if (wait_after_unit == 0) {
+                    wait_for_previous();
+                }
                 ++frame;
                 unit = 0;
             }
@@ -282,12 +318,21 @@ int main() {
     struct Case {
         const char* name;
         int cpu_unit_us, gpu_unit_us, pause_every, pause_us;
+        int wait_after_unit = 0;
+        bool handover_at_wait = true;
+        int announce_us = 0;
+        int game_wake_us = 0;
     };
     const Case cases[] = {
         {"GPU the limit", 100, 210, 0, 0},
         {"GPU the limit, the game pausing", 100, 210, 5, 600},
         {"the game the limit", 300, 150, 0, 0},
         {"the game the limit, pausing", 250, 150, 4, 900},
+        // Engine id 141: the game as it runs (its wait after the third submission), the work
+        // reaching an idle GPU 100 us after it ran out; engine id 140 had no hand-over at the wait.
+        {"the game's pacing, no hand-over at its wait (140)", 50, 210, 0, 0, 3, false, 100, 150},
+        {"the game's pacing, the hand-over at its wait", 50, 210, 0, 0, 3, true, 100, 150},
+        {"the game's pacing, the game pausing", 100, 210, 5, 300, 3, true, 100, 150},
     };
     for (const auto& c : cases) {
         Model m;
@@ -295,20 +340,35 @@ int main() {
         m.gpu_unit_us = c.gpu_unit_us;
         m.pause_every = c.pause_every;
         m.pause_us = c.pause_us;
+        m.wait_after_unit = c.wait_after_unit;
+        m.handover_at_wait = c.handover_at_wait;
+        m.announce_us = c.announce_us;
+        m.game_wake_us = c.game_wake_us;
         m.Run();
         const double frames = m.frames;
-        std::printf("  %s: %.2f submissions a frame (%.2f at the frame's end), the GPU idle with work "
-                    "held %.1f us a frame; fences written as the GPU passed their unit %.1f%%, at "
-                    "their submission's end %.1f%%\n",
+        std::printf("  %s: %.2f submissions a frame (%.2f at the frame's end, %.2f at the game's "
+                    "wait), the GPU idle with work held %.1f us a frame; fences written as the GPU "
+                    "passed their unit %.1f%%, at their submission's end %.1f%%\n",
                     c.name, m.submissions / frames, m.frame_end_submissions / frames,
+                    m.wait_submissions / frames,
                     m.idle_with_work_held_us / frames, 100.0 * m.by_mark / double(m.written),
                     100.0 * m.by_tick / double(m.written));
         check(m.written == static_cast<unsigned long long>(m.frames * m.units * m.fences_per_unit),
               "every fence is written");
         check(m.early_writes == 0, "no fence before the GPU has finished its unit");
         check(m.out_of_order == 0, "fences written in order");
-        if (c.cpu_unit_us * 2 <= c.gpu_unit_us && c.pause_every == 0) {
+        if (c.cpu_unit_us * 2 <= c.gpu_unit_us && c.pause_every == 0 && c.wait_after_unit == 0) {
             check(m.submissions / frames < 1.3, "with the GPU as the limit, about one submission a frame");
+        }
+        if (c.wait_after_unit != 0 && !c.handover_at_wait) {
+            check(m.idle_with_work_held_us / frames > 50,
+                  "without the hand-over at its wait, the GPU waits for held work each frame");
+        }
+        // With the game pausing mid-frame for longer than the GPU's remaining work, the work held
+        // reaches the GPU when it has run out (the announcement): that wait stays, and is counted.
+        if (c.handover_at_wait && c.announce_us != 0 && c.pause_every == 0) {
+            check(m.idle_with_work_held_us / frames < 5,
+                  "with the hand-over at the game's wait, the GPU never waits for held work");
         }
     }
     if (g_fail) {

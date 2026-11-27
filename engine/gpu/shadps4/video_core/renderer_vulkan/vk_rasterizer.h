@@ -331,6 +331,10 @@ public:
     /// Stage A (BB_PIPE_SIGNALS): the recording thread hands over its signals and submits the work
     /// they wait for, in order, when it gets there (one request in flight at a time).
     void RequestSignalFlush();
+    /// 0.4.6 beta 21 (engine id 141): stage A, nothing left to decode and the game waiting for its
+    /// previous frame: the work waiting goes to the GPU (here with the recording thread idle, else
+    /// on it after what it still has).
+    void RequestHandOver();
     u64 CurrentTick() const {
         return scheduler.CurrentTick();
     }
@@ -997,6 +1001,8 @@ private:
 
     /// The end of a game submission with the GPU queue: the mark, then the hand-over.
     void QueueUnitEnd();
+    /// The game waits (RequestHandOver): the mark, then the work recorded goes.
+    void HandOverNow();
     /// Writes the queued signals that are ready (their submission done, or plain and passed); `wait`
     /// false: not if another thread is at it (-1).
     int RunReadySignals(bool wait);

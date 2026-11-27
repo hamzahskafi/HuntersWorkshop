@@ -468,8 +468,10 @@ reuses memory by) when a whole piece had finished on the GPU.
   it). The game's fences are written as soon as the GPU has passed them, sooner than before and never
   too early, so the work no longer has to be cut up for them.
 - **The work is handed to the GPU as a queue:** it waits while the GPU has more than one piece ahead of
-  it, and goes when the GPU starts its last piece, when it runs out, or when the game finishes a frame.
-  With the GPU as the limit, each frame goes as one submission queued behind the one it is drawing.
+  it, and goes when the GPU starts its last piece, when the game stops to wait for its previous frame,
+  or when it finishes a frame. Each frame goes in two or three pieces, queued behind the one the GPU is
+  drawing (engine id 141: the first build waited for the game's frame end, which comes after that wait,
+  so the GPU ran out once a frame).
 - **Render passes are cut between the recording threads only where they end** (+0.6-0.8% measured on
   beta 20). `BB_CUT_IN_PASS=1` cuts inside them too, as before.
 - The quick check of the memory the queued draws write keeps working with up to 64 large writes live
