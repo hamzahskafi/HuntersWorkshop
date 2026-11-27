@@ -66,6 +66,11 @@ Nothing states what each thread is for, so each new thread or new machine needs 
    On a CPU of one kind every class is all of it, so the rule does nothing there by itself.
 4. **Priority follows who waits on whom.** A thread never sits above a thread it busy-waits on. Threads
    above others never busy-wait on them; they park.
+   - **Corrected after beta 19 (the gap, [chain-waits.md](chain-waits.md)):** through locks too. Beta 18
+     applied this to work handed between threads only, and the render chain (above normal) took a lock the
+     draw preparation's threads (idle) hold for large copies: about 12% of stage A in the tester's profile
+     of 135. No lock is shared between roles on the frame's path, and a thread a higher role waits on for
+     its job is raised for that wait.
 5. **Every wait parks on a word of its own, and is woken after the lock is let go.** Spinning, when
    there is any, is bounded and decided by the waiter's role.
 6. **Counters in hot paths are per thread,** summed when they are printed.
