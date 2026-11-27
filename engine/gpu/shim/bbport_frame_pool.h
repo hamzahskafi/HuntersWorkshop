@@ -4,8 +4,11 @@
 // here and give them back when done, instead of the heap: a frame was allocated under the
 // submission queue's lock by the game's submit, and freed on the GPU command thread, both through
 // the process heap's lock. A few sizes (the coroutines' frames), a few frames each; the rest goes
-// to the heap as before. BB_FRAME_POOL=0: the heap always.
+// to the heap as before. BB_FRAME_POOL=0: the heap always. 0.4.6 beta 20: its lock is role-aware
+// (bbport_role_lock.h): the game's submit (Frame) and the GPU command thread (Chain) share it.
 #pragma once
+
+#include "bbport_role_lock.h"
 
 #include <array>
 #include <cstddef>
@@ -18,7 +21,7 @@ namespace BbFramePool {
 namespace Detail {
 constexpr std::size_t kSizes = 6, kKept = 64;
 struct Pool {
-    std::mutex mutex;
+    BbRoles::Mutex mutex{"decode task frames"};
     std::array<std::size_t, kSizes> size{};
     std::array<std::array<void*, kKept>, kSizes> frames{};
     std::array<std::size_t, kSizes> count{};

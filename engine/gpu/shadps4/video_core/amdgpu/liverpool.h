@@ -18,15 +18,18 @@
 #include <vector>
 #include <queue>
 
+#include "bbport_role_lock.h"
 #include "common/assert.h"
 #include "common/slot_vector.h"
 #include "common/types.h"
 #include "common/unique_function.h"
 #include "video_core/amdgpu/cb_db_extent.h"
 #include "video_core/amdgpu/regs.h"
+#include "video_core/amdgpu/submit_queue.h"
 
 namespace Vulkan {
 class Rasterizer;
+struct PrepSubmission;
 }
 
 namespace Libraries::VideoOut {
@@ -269,8 +272,11 @@ private:
         std::size_t ccb_dwords{};
         std::chrono::steady_clock::time_point submitted;
     };
+    /// `prep`: the draw preparation's record of the buffer (0.4.6 beta 20: carried with the task, so
+    /// the GPU command thread doesn't look it up under the preparation's lock).
     Task ProcessGraphics(std::span<const u32> dcb, std::span<const u32> ccb, u64 seq = NoSeq,
-                         std::shared_ptr<SubmittedCopy> copy = {});
+                         std::shared_ptr<SubmittedCopy> copy = {},
+                         std::shared_ptr<Vulkan::PrepSubmission> prep = {});
     /// After a copied submission is decoded: whether the guest changed its command buffers since.
     static void CheckSubmittedCopy(const SubmittedCopy& copy, u64 seq);
     Task ProcessCeUpdate(std::span<const u32> ccb);
@@ -281,8 +287,11 @@ private:
     void Process(std::stop_token stoken);
 
     struct GpuQueue {
+        /// 0.4.6 beta 20 (docs/chain-waits.md, item 2): the game's submitting threads' lock among
+        /// themselves (numbering, the draw preparation's queue and the push in one order); the GPU
+        /// command thread reads `submits` without it (BB_SUBMIT_QUEUE=locked: with it, as before).
         std::mutex m_access{};
-        std::queue<Task::Handle> submits{};
+        SubmitQueue<Task::Handle> submits{};
         ComputeProgram cs_state{};
     };
     std::array<GpuQueue, NumTotalQueues> mapped_queues{};
@@ -351,7 +360,10 @@ private:
     u64 submissions_total = 0;
     std::atomic<u32> num_commands{};
     std::atomic<bool> submit_done{};
-    std::mutex submit_mutex;
+    /// 0.4.6 beta 20: role-aware (bbport_role_lock.h): the game's submit (the Frame role) holds it
+    /// for its counters, the GPU command thread takes it once a submission; a game thread set aside
+    /// while it holds it is raised to the chain's priority, and the wait counted.
+    BbRoles::Mutex submit_mutex{"submission counters"};
     std::condition_variable_any submit_cv;
     /// bbport 0.4.6 beta 19: the word the GPU command thread's idle wait sleeps on (BbPark,
     /// liverpool.cpp), bumped wherever submit_cv is notified for it; submit_cv stays for

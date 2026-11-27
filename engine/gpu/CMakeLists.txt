@@ -616,6 +616,11 @@ if (WIN32)
     target_sources(role-lock-test PRIVATE shim/bbport_platform.cpp)
     target_link_libraries(role-lock-test PRIVATE psapi)
 endif()
+# 0.4.6 beta 20: the submission queue the GPU command thread reads without a lock (submit_queue.h).
+add_executable(submit-queue-test EXCLUDE_FROM_ALL ../tests/test_submit_queue.cpp)
+target_compile_options(submit-queue-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(submit-queue-test PRIVATE shadps4)
+target_link_libraries(submit-queue-test PRIVATE Threads::Threads)
 # 0.4.6 beta 19: stage A's record of pending reads and writes (vk_pending.h).
 add_executable(pending-test EXCLUDE_FROM_ALL ../tests/test_pending.cpp)
 target_compile_options(pending-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)

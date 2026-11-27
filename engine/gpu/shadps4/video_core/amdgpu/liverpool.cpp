@@ -20,6 +20,7 @@
 #include "bbport_toggles.h"
 #include <atomic>
 #include <cstdio>
+#include <cstring>
 #include <boost/preprocessor/stringize.hpp>
 
 #include "common/assert.h"
@@ -132,6 +133,15 @@ static size_t UnreadableDwords(std::span<const u32> span) {
 
 namespace {
 bool ZpassInOrder(); // bbport: BB_ZPASS_IN_ORDER (RunZpassDump)
+/// BB_SUBMIT_QUEUE=locked (0.4.6 beta 20 only): the GPU command thread takes each queue's lock to
+/// read and pop it, as before (docs/chain-waits.md, item 2).
+bool LockedSubmitQueue() {
+    static const bool locked = [] {
+        const char* env = std::getenv("BB_SUBMIT_QUEUE");
+        return env && std::strcmp(env, "locked") == 0;
+    }();
+    return locked;
+}
 } // namespace
 
 Liverpool::Liverpool() : guest_markers_enabled{EmulatorSettings.IsVkGuestMarkersEnabled()} {
@@ -336,11 +346,14 @@ void Liverpool::Process(std::stop_token stoken) {
 
             Task::Handle task{};
             {
-                std::scoped_lock lock{queue.m_access};
-                if (queue.submits.empty()) {
+                // 0.4.6 beta 20 (docs/chain-waits.md, item 2): no lock on this side.
+                std::unique_lock lock{queue.m_access, std::defer_lock};
+                if (LockedSubmitQueue()) {
+                    lock.lock();
+                }
+                if (!queue.submits.Front(task)) {
                     continue;
                 }
-                task = queue.submits.front();
             }
             if (task.address() != last_decoded) {
                 last_decoded = task.address();
@@ -354,8 +367,11 @@ void Liverpool::Process(std::stop_token stoken) {
 
                 bool frame_end = false;
                 {
-                    std::scoped_lock lock{queue.m_access};
-                    queue.submits.pop();
+                    std::unique_lock lock{queue.m_access, std::defer_lock};
+                    if (LockedSubmitQueue()) {
+                        lock.lock();
+                    }
+                    queue.submits.Pop();
 
                     --num_submits;
                     std::scoped_lock lock2{submit_mutex};
@@ -1362,13 +1378,14 @@ void VerifyNativeDraw(std::span<const u32> packet, u64 address, u64 checksum_bef
 } // namespace
 
 Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<const u32> ccb,
-                                           u64 seq, std::shared_ptr<SubmittedCopy> copy) {
+                                           u64 seq, std::shared_ptr<SubmittedCopy> copy,
+                                           std::shared_ptr<Vulkan::PrepSubmission> prep) {
     FIBER_ENTER(dcb_task_name);
     // Top-level buffers enqueued for the draw preparation workers (nested IBs are not).
     Vulkan::DrawPreparation* draw_prep =
         seq != NoSeq && rasterizer ? &rasterizer->GetDrawPreparation() : nullptr;
     if (draw_prep) {
-        draw_prep->BeginSubmission(seq, regs, gfx_reg_checksum);
+        draw_prep->BeginSubmission(seq, regs, gfx_reg_checksum, std::move(prep));
         rasterizer->OcclusionSubmissionStart();
     }
     static const bool dcb_stats = EmulatorSettingsImpl::Flag("BB_DCB_STATS", false);
@@ -2017,7 +2034,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                 // instead and allow other tasks to run.
                 const u64* wait_addr = wait_reg_mem->Address<u64*>();
                 if (vo_port->IsVoLabel(wait_addr) &&
-                    num_submits == mapped_queues[GfxQueueId].submits.size()) {
+                    num_submits == mapped_queues[GfxQueueId].submits.Size()) {
                     if (rasterizer) {
                         rasterizer->DrainDrawPipe(static_cast<u32>(opcode));
                     }
@@ -2549,22 +2566,26 @@ void Liverpool::SubmitGfx(std::span<const u32> dcb, std::span<const u32> ccb) {
         std::scoped_lock lock{queue.m_access};
         if (draw_prep) {
             seq = gfx_submit_seq++;
-            draw_prep->Enqueue(seq, std::move(prep_submission), /*notify=*/false);
+            draw_prep->Enqueue(seq, prep_submission, /*notify=*/false);
         }
-        auto task = ProcessGraphics(dcb, ccb, seq, std::move(copy));
-        queue.submits.emplace(task.handle);
+        auto task = ProcessGraphics(dcb, ccb, seq, std::move(copy), std::move(prep_submission));
+        queue.submits.Push(task.handle);
     }
     if (draw_prep) {
         draw_prep->NotifyWorkers();
     }
     BbFreeCheck::NoteSubmit(seq, noted_dcb, dcb.size_bytes());
 
-    std::scoped_lock lk{submit_mutex};
-    ++num_submits;
-    ++submissions_total;
-    ++gfx_submitted;
-    BbTimeline::Note(BbTimeline::GuestSubmit, 0, submissions_total);
-    work_retired = false;
+    u64 total;
+    {
+        std::scoped_lock lk{submit_mutex};
+        ++num_submits;
+        total = ++submissions_total;
+        ++gfx_submitted;
+        work_retired = false;
+    }
+    // 0.4.6 beta 20: the wakes after the lock is let go (the GPU command thread takes it next).
+    BbTimeline::Note(BbTimeline::GuestSubmit, 0, total);
     submit_cv.notify_one();
     WakeDecoder();
 }
@@ -2652,14 +2673,16 @@ void Liverpool::SubmitAsc(u32 gnm_vqid, std::span<const u32> acb) {
     const auto& task = ProcessCompute(acb, vqid);
     {
         std::scoped_lock lock{queue.m_access};
-        queue.submits.emplace(task.handle);
+        queue.submits.Push(task.handle);
     }
 
-    std::scoped_lock lk{submit_mutex};
-    num_mapped_queues = std::max(num_mapped_queues, gnm_vqid + 1);
-    ++num_submits;
-    ++submissions_total;
-    work_retired = false;
+    {
+        std::scoped_lock lk{submit_mutex};
+        num_mapped_queues = std::max(num_mapped_queues, gnm_vqid + 1);
+        ++num_submits;
+        ++submissions_total;
+        work_retired = false;
+    }
     submit_cv.notify_one();
     WakeDecoder();
 }
