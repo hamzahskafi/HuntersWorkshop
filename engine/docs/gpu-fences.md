@@ -76,15 +76,27 @@ start, and devices without it keep today's path. That is a capability check, not
 GPU's pipeline at each fence. At 600 fences a frame that is 600 drains. Devices without the marker keep
 today's CPU-written fences.
 
-**4. Fences alone do not set the submission count.** Today the switches come from the policy "submit at
-a game submission's end when the GPU is down to its last submission". That is GPU feeding, gated on
-fences being pending. With fences off that path, a feeding rule of its own is needed, or the GPU would
-starve. The rule that gives the fewest switches: hold the recorded work while the GPU still has enough
-queued, measured in GPU time (each submission's GPU time is learned from when it finishes, as the signal
-thread already sees), and submit just before it runs out. Also submit at the frame end, and at once when
-the game stops submitting (it may be waiting on a fence in that work: today's idle submission). The
-labels are then written when the GPU gets to them, as soon as now or sooner, while the number of
-switches no longer depends on the game's submission pattern.
+**4. Fences alone do not set the submission count; the feeding rule does, and it needs no timing.**
+Today's rule ("submit at a game submission's end when the GPU is down to its last submission")
+ramps each frame up from small chunks: when the game starts a frame the GPU is finishing the
+previous one, so the first draws go at once; the GPU finishes that small chunk quickly, the next is a
+little bigger, and so on. That is 3.4-6.2 switches a frame. It is needed only because a fence becomes
+visible at a submission's end. With the GPU writing the fences, the rule can be:
+- submit at the frame's end (the game has handed over all of it): normally the whole frame in one
+  submission;
+- submit at once when the GPU has run out of work and something is recorded;
+- submit at once when the game stops submitting mid-frame (it may wait on a fence in that work:
+  today's idle submission, kept).
+There is no timing, no estimate and no holding back, only events the engine already sees. With the
+GPU as the limit (the tester's three spots: the game about a frame ahead, waiting 1.6-4 ms a frame
+for the previous one), each frame's submission is queued while the GPU still runs the previous frame:
+about 2 switches a frame, the frame and the presenter's own, with no gap between frames. Without the
+GPU as the limit (a frame cap, a CPU-heavy moment), the second rule feeds it as soon as it runs dry, as
+today. The fences reach the game as the GPU passes them whatever the submission size, which is what
+makes whole-frame submissions safe. (A first draft held the work by an estimate of the GPU time
+queued; the tester asked whether that added waiting, counting and delay. It did, and this rule
+needs none.) Devices without the marker keep today's rule, since their fences still need a
+submission's end.
 
 **5. Kept from before:** suspending and resuming passes across the recording threads' cuts was
 measured in 0.4.4 (betas 14 and 20/21): a cut pass costs a few microseconds, halving the cuts changed
@@ -99,8 +111,9 @@ Three facts decide how much of the idea applies. None can be read from the logs 
 2. **What kind:** 32-bit, 64-bit, clock or counter; with or without an interrupt; after work that wrote
    the game's memory in place.
 3. **Whether the game blocks on fences mid-frame:** how often the GPU command thread runs out of work
-   with fences pending and the game resumes submitting right after one is written. A label written
-   later than today would cost there; written sooner, it gains.
+   with fences pending and the game resumes submitting right after one is written. With whole-frame
+   submissions such a wait is released by the third rule (the game stopped submitting), so how often
+   and how long matters.
 
 Also counted: distinct fence addresses a frame and back-to-back fences (no work between them), for the
 marker count's cost.
@@ -110,7 +123,7 @@ three spots answers them.
 
 ## Expected, if the counts are favorable
 
-- Switches: from 3.4-6.2 a frame to about 2 (the frame end and the feeding rule), on devices with the
+- Switches: from 3.4-6.2 a frame to about 2 (the frame and the presenter's), on devices with the
   marker. The GPU idle between submissions falls by about two thirds: about 0.1 ms a frame at the
   lamp spot, 0.2 in the busy view, 0.3 in the slow area (profiled figures). The slow area gains most.
 - The game sees its fences sooner. The signal thread does a few writes a frame instead of 600.
