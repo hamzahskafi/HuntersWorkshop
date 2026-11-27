@@ -44,6 +44,15 @@ void bbgpu_timeline_wait(int kind, uint64_t ns);
  * game thread (FMOD's, 256-300, Audio; every other Frame); < 0: one of the runtime's own, by the
  * engine's table. 1 when its role set its host priority, 0 with BB_THREAD_ROLES=0. */
 int bbgpu_thread_named(const char *name, int ps4_priority);
+/* 0.4.6 beta 20 (gpu/shim/bbport_role_lock.h): a runtime lock that tells the roles who holds it.
+ * After taking it exclusively: holder = bbgpu_role_locked(); before letting go: holder = NULL, then
+ * bbgpu_role_unlocked() after. A thread that finds it held: bbgpu_role_contended(name, holder)
+ * before it waits, bbgpu_role_acquired() once it has it (a lower-role holder is raised meanwhile and
+ * the wait counted in the Roles: line). */
+void *bbgpu_role_locked(void);
+void bbgpu_role_unlocked(void);
+void bbgpu_role_contended(const char *lock, void *holder);
+void bbgpu_role_acquired(void);
 /* BB_TEST_CPUS=<n>: the process keeps n logical processors, fastest first (a measurement). */
 void bbgpu_test_cpus(void);
 /* Number of symbols registered by the vendored libraries (diagnostics). */

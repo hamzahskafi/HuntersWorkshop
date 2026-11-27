@@ -46,6 +46,8 @@ static inline void host_read_lock(HostRwlock *l) { AcquireSRWLockShared(l); }
 static inline void host_read_unlock(HostRwlock *l) { ReleaseSRWLockShared(l); }
 static inline void host_write_lock(HostRwlock *l) { AcquireSRWLockExclusive(l); }
 static inline void host_write_unlock(HostRwlock *l) { ReleaseSRWLockExclusive(l); }
+static inline int host_try_read_lock(HostRwlock *l) { return TryAcquireSRWLockShared(l) != 0; }
+static inline int host_try_write_lock(HostRwlock *l) { return TryAcquireSRWLockExclusive(l) != 0; }
 
 typedef CONDITION_VARIABLE HostCond;
 #define HOST_COND_INIT CONDITION_VARIABLE_INIT
@@ -136,6 +138,8 @@ static inline void host_read_lock(HostRwlock *l) { pthread_rwlock_rdlock(l); }
 static inline void host_read_unlock(HostRwlock *l) { pthread_rwlock_unlock(l); }
 static inline void host_write_lock(HostRwlock *l) { pthread_rwlock_wrlock(l); }
 static inline void host_write_unlock(HostRwlock *l) { pthread_rwlock_unlock(l); }
+static inline int host_try_read_lock(HostRwlock *l) { return pthread_rwlock_tryrdlock(l) == 0; }
+static inline int host_try_write_lock(HostRwlock *l) { return pthread_rwlock_trywrlock(l) == 0; }
 
 typedef pthread_cond_t HostCond;
 #define HOST_COND_INIT PTHREAD_COND_INITIALIZER

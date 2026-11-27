@@ -3,6 +3,7 @@
 
 #include "bbport_roles.h"
 #include "bbport_counter.h"
+#include "bbport_role_lock.h"
 #include "bbport_cpu_layout.h"
 #include "bbport_threads.h"
 #include "bbport_toggles.h"
@@ -17,6 +18,7 @@
 #include <set>
 #include <string>
 #include <vector>
+#include <x86intrin.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -92,6 +94,12 @@ struct Thread {
     /// 0.4.6 beta 19: the game's main and render threads, shown on their own in the line.
     bool tracked = false;
     std::atomic<std::uint64_t> wakes[3]{}; // by core class; written by the thread itself
+    /// 0.4.6 beta 20 (bbport_role_lock.h): raised by a waiter on a lock it holds; the raise's number.
+    std::atomic<bool> lock_raised{false};
+    int lock_priority = 0;
+    int lock_saved = kKeep; ///< a role without its own priority (service): what it had before the raise
+    std::uint64_t lock_generation = 0;
+    bool alive = true; ///< records stay after a thread ends (a lock may still name its holder)
 };
 
 std::mutex g_mutex;
@@ -164,8 +172,11 @@ struct Want {
     int priority, qos, cores;
 };
 Want Mapping(const Thread& t) {
-    if (t.raised) {
-        return {t.raised_priority, kQosHigh, kCoresAny};
+    const bool by_lock = t.lock_raised.load(std::memory_order_relaxed);
+    if (t.raised || by_lock) {
+        // A burst raise (Raise) and a lock's (bbport_role_lock.h) are kept apart: either can end first.
+        const int burst = t.raised ? t.raised_priority : THREAD_PRIORITY_IDLE;
+        return {by_lock ? std::max(burst, t.lock_priority) : burst, kQosHigh, kCoresAny};
     }
     switch (t.role) {
     case Role::Pacing:
@@ -281,6 +292,8 @@ void Assign(const char* name, Role role, bool game) {
         std::scoped_lock lock{g_mutex};
         g_threads.push_back(std::move(made));
         t_self = t;
+        LockDetail::self = t;
+        LockDetail::raised_flag = &t->lock_raised;
     }
     std::scoped_lock lock{t->mutex};
     t->name = name;
@@ -408,6 +421,207 @@ bool Raise(void* handle, int priority) {
     return false;
 }
 
+// ---- 0.4.6 beta 20: the lock that carries priority (bbport_role_lock.h) ----------------------------
+
+namespace LockDetail {
+thread_local constinit void* self = nullptr;
+thread_local constinit std::atomic<bool>* raised_flag = nullptr;
+thread_local constinit unsigned depth = 0;
+
+struct Stats {
+    const char* name = nullptr;
+    std::atomic<std::uint64_t> contended{0}, inversions{0}, ticks{0}, raises{0};
+};
+
+namespace {
+constexpr std::size_t kMaxLocks = 96;
+Stats g_locks[kMaxLocks];
+std::atomic<std::size_t> g_lock_count{0};
+std::mutex g_register;
+
+bool InheritOn() {
+    static const bool on = [] {
+        const char* env = std::getenv("BB_LOCK_INHERIT");
+        return !(env && env[0] == '0');
+    }();
+    return on;
+}
+
+/// How important a role's work is, for "a lower role holds what a higher one waits for" (t.mutex
+/// held). A waiter that is raised (a burst thread a frame waits on, a holder of a lock the chain
+/// waits on) works for the chain: it passes its raise on to whoever holds what it waits for.
+int Rank(const Thread& t, bool as_waiter) {
+    if (as_waiter && (t.raised || t.lock_raised.load(std::memory_order_relaxed))) {
+        return 5;
+    }
+    switch (t.role) {
+    case Role::Pacing:
+        return 6;
+    case Role::Chain:
+        return 5;
+    case Role::Audio:
+        return AudioHigh() ? 4 : 3;
+    case Role::Frame:
+        return 3;
+    case Role::Assist:
+        return 2;
+    case Role::Background:
+        return Loading() ? 3 : 1;
+    default:
+        return 0;
+    }
+}
+
+#ifdef _WIN32
+/// The priority a holder is raised to for a waiter: the waiter's own (Pacing keeps the one it set
+/// itself, so its holder gets the highest). (waiter.mutex held.)
+int RaisePriorityFor(const Thread& waiter) {
+    const int p = Mapping(waiter).priority;
+    return p == kKeep ? THREAD_PRIORITY_HIGHEST : p;
+}
+#endif
+
+/// Back from a lock's raise (t.mutex held).
+void Restore(Thread& t) {
+    t.lock_raised.store(false, std::memory_order_relaxed);
+    t.priority = kKeep; // applied anew
+    if (!t.handle) {
+        return;
+    }
+#ifdef _WIN32
+    if (Mapping(t).priority == kKeep && t.lock_saved != kKeep &&
+        SetThreadPriority(static_cast<HANDLE>(t.handle), t.lock_saved)) {
+        t.priority = t.lock_saved;
+    }
+#endif
+    Apply(t);
+}
+} // namespace
+
+Stats* Register(const char* name) {
+    std::scoped_lock lock{g_register};
+    const std::size_t n = g_lock_count.load(std::memory_order_relaxed);
+    for (std::size_t i = 0; i < n; ++i) {
+        if (g_locks[i].name == name || std::strcmp(g_locks[i].name, name) == 0) {
+            return &g_locks[i]; // several locks of one kind (per object) count together
+        }
+    }
+    if (n == kMaxLocks) {
+        return &g_locks[kMaxLocks - 1];
+    }
+    g_locks[n].name = name;
+    g_lock_count.store(n + 1, std::memory_order_release);
+    return &g_locks[n];
+}
+
+std::uint64_t Contended(Stats* stats, void* holder, std::uint64_t& start) {
+    stats->contended.fetch_add(1, std::memory_order_relaxed);
+    auto* const waiter = static_cast<Thread*>(self);
+    auto* const held = static_cast<Thread*>(holder);
+    if (!waiter || !held || held == waiter) {
+        return 0;
+    }
+    // One record's mutex at a time: the waiter's, then the holder's (a raise of the waiter by
+    // another lock in between only makes it rank higher).
+    int rank;
+#ifdef _WIN32
+    int priority;
+#endif
+    {
+        std::scoped_lock lock{waiter->mutex};
+        rank = Rank(*waiter, true);
+#ifdef _WIN32
+        priority = RaisePriorityFor(*waiter);
+#endif
+    }
+    std::scoped_lock lock{held->mutex};
+    if (Rank(*held, false) >= rank) {
+        return 0;
+    }
+    stats->inversions.fetch_add(1, std::memory_order_relaxed);
+    start = __rdtsc();
+    if (!InheritOn() || !On()) {
+        return 0;
+    }
+#ifdef _WIN32
+    if (!held->handle || !held->alive) {
+        return 0;
+    }
+    if (held->raised && held->raised_priority >= priority) {
+        return 0; // a burst thread raised as high already
+    }
+    if (!held->lock_raised.load(std::memory_order_relaxed)) {
+        const int had = GetThreadPriority(static_cast<HANDLE>(held->handle));
+        held->lock_saved = had == THREAD_PRIORITY_ERROR_RETURN ? kKeep : had;
+    } else if (held->lock_priority >= priority) {
+        return 0; // raised as high already, by another waiter
+    }
+    held->lock_priority = priority;
+    held->lock_raised.store(true, std::memory_order_relaxed);
+    held->priority = kKeep; // applied anew
+    Apply(*held);
+    stats->raises.fetch_add(1, std::memory_order_relaxed);
+    return ++held->lock_generation;
+#else
+    // Linux: threads keep their own priorities (Apply does nothing); counted only.
+    return 0;
+#endif
+}
+
+void Acquired(Stats* stats, void* holder, std::uint64_t generation, std::uint64_t start) {
+    if (start) {
+        stats->ticks.fetch_add(__rdtsc() - start, std::memory_order_relaxed);
+    }
+    if (generation) {
+        // The holder has let go: if it hasn't gone back by itself yet, back now.
+        auto* const held = static_cast<Thread*>(holder);
+        std::scoped_lock lock{held->mutex};
+        if (held->lock_raised.load(std::memory_order_relaxed) && held->lock_generation == generation) {
+            Restore(*held);
+        }
+    }
+}
+
+void RestoreSelf() {
+    auto* const t = static_cast<Thread*>(self);
+    if (!t) {
+        return;
+    }
+    std::scoped_lock lock{t->mutex};
+    if (t->lock_raised.load(std::memory_order_relaxed)) {
+        Restore(*t);
+    }
+}
+} // namespace LockDetail
+
+void ReportLockInversions(double seconds, char* out, std::size_t size) {
+    out[0] = 0;
+    if (seconds <= 0 || size == 0) {
+        return;
+    }
+    const double hz = static_cast<double>(runtime_tsc_frequency());
+    std::size_t used = 0;
+    const std::size_t n = LockDetail::g_lock_count.load(std::memory_order_acquire);
+    for (std::size_t i = 0; i < n && used + 1 < size; ++i) {
+        auto& l = LockDetail::g_locks[i];
+        const std::uint64_t inversions = l.inversions.exchange(0, std::memory_order_relaxed);
+        const std::uint64_t ticks = l.ticks.exchange(0, std::memory_order_relaxed);
+        const std::uint64_t raises = l.raises.exchange(0, std::memory_order_relaxed);
+        l.contended.exchange(0, std::memory_order_relaxed);
+        if (!inversions) {
+            continue;
+        }
+        const int w = std::snprintf(out + used, size - used, "%s %s %.0f/s %.2f ms/s (raised %llu)",
+                                    used ? "," : "", l.name, inversions / seconds,
+                                    hz > 0 ? ticks * 1e3 / hz / seconds : 0.0,
+                                    static_cast<unsigned long long>(raises));
+        if (w < 0) {
+            break;
+        }
+        used = std::min(size - 1, used + static_cast<std::size_t>(w));
+    }
+}
+
 void NoteWake() {
     if (!BbStats::enabled) {
         return;
@@ -473,12 +687,10 @@ void Report(double seconds) {
             if (!listed && t.game && game_names.find(t.name) == std::string::npos) {
                 game_names += (game_names.empty() ? "" : ", ") + t.name;
             }
-            if (!alive) {
-#ifdef _WIN32
-                CloseHandle(static_cast<HANDLE>(t.handle));
-#endif
-                thread_lock.unlock();
-                it = g_threads.erase(it);
+            if (!alive || !t.alive) {
+                // Kept: a lock may still name it as its holder (bbport_role_lock.h).
+                t.alive = false;
+                ++it;
                 continue;
             }
             ++rows[role].threads;
@@ -512,6 +724,10 @@ void Report(double seconds) {
     if (!tracked.empty()) {
         line += " of them" + tracked;
     }
+    // 0.4.6 beta 20: waits on a lock held by a thread of a lower role (expected none on the chain).
+    char inversions[512];
+    ReportLockInversions(seconds, inversions, sizeof(inversions));
+    line += inversions[0] ? std::string(" waited on lower roles:") + inversions + ";" : std::string(" waited on lower roles: none;");
     if (line.back() != ';') {
         return;
     }
@@ -594,4 +810,34 @@ extern "C" void bbgpu_test_cpus(void) {
         std::printf("Roles: BB_TEST_CPUS=%d: the process runs on %d logical processors (a test)\n", n, n);
     }
 #endif
+}
+
+// 0.4.6 beta 20: the runtime's own locks (src/, C) tell the roles who holds them.
+extern "C" void* bbgpu_role_locked(void) {
+    return BbRoles::LockDetail::Locked();
+}
+extern "C" void bbgpu_role_unlocked(void) {
+    BbRoles::LockDetail::AfterUnlock();
+}
+namespace {
+struct CWait {
+    BbRoles::LockDetail::Stats* stats = nullptr;
+    void* holder = nullptr;
+    std::uint64_t generation = 0, start = 0;
+};
+thread_local CWait t_c_wait;
+} // namespace
+extern "C" void bbgpu_role_contended(const char* lock, void* holder) {
+    auto& w = t_c_wait;
+    w.stats = BbRoles::LockDetail::Register(lock);
+    w.holder = holder;
+    w.start = 0;
+    w.generation = BbRoles::LockDetail::Contended(w.stats, holder, w.start);
+}
+extern "C" void bbgpu_role_acquired(void) {
+    auto& w = t_c_wait;
+    if (w.stats) {
+        BbRoles::LockDetail::Acquired(w.stats, w.holder, w.generation, w.start);
+        w = {};
+    }
 }

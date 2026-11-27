@@ -605,6 +605,17 @@ if (WIN32)
     target_include_directories(roles-test PRIVATE shim)
     target_link_libraries(roles-test PRIVATE psapi Threads::Threads)
 endif()
+# 0.4.6 beta 20: the lock that carries priority (bbport_role_lock.h), with real threads. The counts
+# everywhere; the raise on Windows (or Wine).
+add_executable(role-lock-test EXCLUDE_FROM_ALL ../tests/test_role_lock.cpp shim/bbport_roles.cpp
+    shim/bbport_cpu_layout.cpp)
+target_compile_options(role-lock-test PRIVATE -UNDEBUG -Wall -Wextra)
+target_include_directories(role-lock-test PRIVATE shim)
+target_link_libraries(role-lock-test PRIVATE Threads::Threads)
+if (WIN32)
+    target_sources(role-lock-test PRIVATE shim/bbport_platform.cpp)
+    target_link_libraries(role-lock-test PRIVATE psapi)
+endif()
 # 0.4.6 beta 19: stage A's record of pending reads and writes (vk_pending.h).
 add_executable(pending-test EXCLUDE_FROM_ALL ../tests/test_pending.cpp)
 target_compile_options(pending-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
