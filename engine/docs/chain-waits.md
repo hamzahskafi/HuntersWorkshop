@@ -45,8 +45,33 @@ The same shape, smaller or waiting to happen:
   lower role's side is made so that it holds nothing the higher role takes.
 - A thread a higher role waits on for its job is raised for that wait (one mechanism in the roles module,
   generalizing the burst threads' raise).
-- The check: in every stage profile, a wait of a Chain thread that lands on a lock is a violation, named
-  with its caller by the sampler. Each beta's profile shows whether one slipped in.
+- The check, built in: the role-aware lock counts every contended acquire where the holder's role is below
+  the waiter's, per lock name, with the time waited; the `Roles:` line prints them ("waited on lower roles:
+  ..."), so any tester's log on any CPU shows a violation, not only a profile. The sampler stays the second
+  check: a Chain thread's wait that lands on a lock the type doesn't cover shows with its caller.
+
+## The audit: every lock the chain shares with a lower role
+
+The profile shows the locks that cost something at three spots on one PC. A lower-role holder is only a
+problem when the system sets it aside while it holds the lock, which happens more the busier the CPU is: on
+a CPU with fewer cores the same locks cost more. So the audit is of the code, every lock a Chain (or
+Pacing) thread takes that a lower role also takes:
+
+| Lock | Chain or Pacing side | Lower side | Seen in the profile |
+|---|---|---|---|
+| The draw preparation's (`vk_draw_prep`) | stage A, twice a submission | the preparation threads (Assist, idle): 208 KB copies and wakes under it | yes, about 12% of stage A |
+| The submission queue's (`queue.m_access`) | stage A | the game's submit (Frame) | yes, about 5% |
+| The decode tasks' frame pool (`bbport_frame_pool.h`, beta 19) | stage A | the game's submit (Frame) | not yet |
+| The runtime's memory map lock (`runtime_memory_clamp`, `_region`) | stage A, every constant binding | the game's threads mapping memory (Frame) | not yet |
+| The shader programs' lock (`programs_mutex`) | stage A | the preparation threads (Assist) | not yet |
+| The pipeline compile queue's lock | stages A and B | the compile threads (Frame), the burst threads (Background) | not yet |
+| The buffer cache's map-hook, load-upload and unmap locks | stage B | the game's threads (Frame) | not yet |
+| The texture cache's prepared-textures lock | stage B | the game's create calls, `bb:GxPrepare` (Frame) | not yet |
+| The video out port's and flip locks | the flip thread (Pacing) | the game's flip calls (Frame) | not yet |
+| Host copies and pipeline compiles waited for | stages A and B | the copy and compile threads (Frame) | partly (stage B's waits) |
+
+Converting each to a lock-free form would be case by case again, and the next lock someone adds would
+reopen the gap. So the fix has a structural part and a general part.
 
 ## Part 1: no lock shared between roles (the gap, at its source)
 
@@ -65,7 +90,16 @@ The same shape, smaller or waiting to happen:
 2. **The submission queue without a lock on stage A's side.** The game's threads that submit keep a lock
    among themselves (one role: numbering, the draw preparation's queue and the push stay in one order).
    Stage A takes from each queue through a single-consumer, lock-free list. Expected: about 5%.
-3. **Raise on wait, one mechanism.** `BbRoles` gains a scoped raise for "a Chain thread is about to block on
+3. **A lock that carries priority (the general part).** One lock type in the roles module,
+   `BbRoles::Mutex` (and a shared variant), for every lock in the table and any added later on the frame
+   path. On acquiring, it notes its holder (one plain store). Only when a thread finds it held does it look:
+   if the holder's role is below the waiter's, the waiter raises the holder to its own priority (and high QoS,
+   any core: the roles' raise) for the rest of the hold, and the holder goes back to its role when it lets
+   go. Windows' locks lack this priority inheritance; it costs nothing until there is contention. The
+   runtime's memory map lock (C) gets the same through a small hook into the roles module. The locks taken
+   on stage A's own per-draw path (items 1 and 2) are removed instead, as even an inherited wait costs a
+   wake.
+4. **Raise on wait, one mechanism.** `BbRoles` gains a scoped raise for "a Chain thread is about to block on
    this thread's job": the host-copy wait raises the copy threads that hold its copies, a draw waiting for a
    pipeline raises the compile thread compiling it (standing or burst), each only if the wait blocks past its
    spin, and back at the end. The burst threads' raise becomes a user of it.
@@ -73,27 +107,27 @@ The same shape, smaller or waiting to happen:
 ## Part 2: the chain's cost a draw
 
 Stage A:
-4. **The pending write record as a filter.** A counting filter over 64 KB pages of the writes stage B hasn't
+5. **The pending write record as a filter.** A counting filter over 64 KB pages of the writes stage B hasn't
    reached (incremented when one is noted, decremented when it's pruned) answers most constant lookups
    with one or two loads; only a hit scans the list. The list grows to 1,024 entries, so the hashed table
    is not needed in play (it filled the 64-entry list 31-34 thousand times a second). Expected: most of
    4-7%.
-5. **The statistics' thread times** read once a second instead of every submission (statistics on only).
+6. **The statistics' thread times** read once a second instead of every submission (statistics on only).
 
 Stage B:
-6. **The packet count** with a release store instead of a sequentially consistent add on every packet. The
+7. **The packet count** with a release store instead of a sequentially consistent add on every packet. The
    check for a sleeping stage A gets its fence before stage B waits for packets itself, so a wake is at
    most one packet late, never lost (as item 2 of beta 19 did for the other direction).
-7. **No system call to ask whether the signal thread exists** (`jthread::joinable()` calls into the
+8. **No system call to ask whether the signal thread exists** (`jthread::joinable()` calls into the
    kernel on Windows): a flag set when it starts. About 1%.
-8. **No heap allocation a draw:** the draw record's and the vertex attributes' buffers reused. About 1.5%.
-9. **Textures touched once a frame:** the texture cache's LRU and the image's barrier state are updated
+9. **No heap allocation a draw:** the draw record's and the vertex attributes' buffers reused. About 1.5%.
+10. **Textures touched once a frame:** the texture cache's LRU and the image's barrier state are updated
    once a frame per image, not once a draw. Part of 4%.
-10. **The recorder woken only when it sleeps and work waits for it:** the hand-over's wake system call
+11. **The recorder woken only when it sleeps and work waits for it:** the hand-over's wake system call
    (1.7%) goes to the thread that will record next, and that thread spins a little longer before it parks
    (its spin is set by role, as beta 18 planned).
 
-Each item has a switch this beta, as before.
+Each item has a switch this beta, as before (the role-aware lock's inheritance too: off, it only counts).
 
 ## Expected
 
