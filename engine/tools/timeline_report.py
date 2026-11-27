@@ -15,6 +15,11 @@ And the way of each frame after the game submitted its end (GuestSubmitDone) to 
 (FrameRetired): until the GPU command thread went idle (stage A done), until the presenter submitted
 the frame (PipeTask 5), and from there until the GPU had run it (the GPU's queue and work).
 
+From engine id 132: the game's threads (GuestBlocked: their waits of 10 us or more in the runtime, and
+the kind of core each ran on when it woke), the thread that ends the game's frames first; and the
+flip's way (the presenter's PrepareFrame, the flip thread taking the flip and telling the game, the
+swap thread's present, stage A's waits for a display buffer).
+
 Usage: python3 -I tools/timeline_report.py <timeline file> [--frames N]
 """
 import bisect
@@ -23,7 +28,9 @@ import sys
 
 EVENTS = ["GuestSubmit", "GuestSubmitDone", "GuestWaitBegin", "GuestWaitEnd", "DecodeBegin", "DecodeEnd",
           "PipeTask", "VulkanSubmit", "GpuDone", "FrameRetired", "DecoderIdleBegin", "DecoderIdleEnd",
-          "StageBWait"]
+          "StageBWait", "GuestBlocked", "FlipTaken", "FlipShown", "VoLabelWaitBegin", "VoLabelWaitEnd",
+          "PresentBegin", "PresentEnd"]
+BLOCK_KINDS = ["condition variables", "mutexes", "semaphores", "sleeps"]
 E = {name: i for i, name in enumerate(EVENTS)}
 
 
@@ -123,6 +130,101 @@ def ms(ns):
     return ns / 1e6
 
 
+def thread_rows(entries, ends):
+    """The game's threads from their waits (GuestBlocked) and the frame-ending thread (GuestSubmitDone's
+    tag): per thread, its waits by kind and the share of its wakings on an efficiency core."""
+    by_thread = {}
+    for ns, event, arg, arg2 in entries:
+        if event != E["GuestBlocked"]:
+            continue
+        tid, kind, efficient = arg2 >> 32, (arg2 >> 24) & 0xff, (arg2 >> 16) & 1
+        t = by_thread.setdefault(tid, {"waits": [], "kinds": [0] * len(BLOCK_KINDS), "count": 0, "efficient": 0})
+        t["waits"].append((ns - arg * 1000, ns))
+        if kind < len(BLOCK_KINDS):
+            t["kinds"][kind] += arg * 1000
+        t["count"] += 1
+        t["efficient"] += efficient
+    tags = [arg2 for ns, event, arg, arg2 in entries if event == E["GuestSubmitDone"] and arg2]
+    if not by_thread and not tags:
+        return None
+    ender = max(set(t >> 32 for t in tags), key=[t >> 32 for t in tags].count) if tags else None
+    ender_efficient = sum((t >> 16) & 1 for t in tags if t >> 32 == ender) / max(1, len(tags))
+    for t in by_thread.values():
+        t["intervals"] = Intervals(t["waits"])
+    return {"threads": by_thread, "ender": ender, "ender_efficient": ender_efficient, "ends": ends}
+
+
+def print_threads(info, entries):
+    if not info:
+        return
+    span = entries[-1][0] - entries[0][0]
+    threads, ender = info["threads"], info["ender"]
+    def line(tid, t):
+        blocked = t["intervals"].overlap(entries[0][0], entries[-1][0])
+        kinds = ", ".join(f"{name} {ms(ns) / (span / 1e9):.0f} ms/s"
+                          for name, ns in zip(BLOCK_KINDS, t["kinds"]) if ns)
+        print(f"  thread {tid}: not waiting {1 - blocked / span:.0%}, {t['count'] / (span / 1e9):.0f} waits/s "
+              f"({kinds or 'none'}); woke on an efficiency core {t['efficient'] / max(1, t['count']):.0%}")
+    print("The game's threads (waits of 10 us or more in the runtime; \"not waiting\" counts being "
+          "preempted as running):")
+    if ender is not None:
+        print(f"  the frame-ending thread {ender} ended {info['ender_efficient']:.0%} of the frames on an "
+              f"efficiency core")
+        if ender in threads:
+            t = threads[ender]
+            per = [t["intervals"].overlap(a, b) for (a, _), (b, _) in zip(info["ends"], info["ends"][1:])]
+            print(f"  it waited {ms(statistics.median(per)):.3f} ms of the median frame "
+                  f"({ms(statistics.mean(per)):.3f} mean)")
+            line(ender, t)
+    busiest = sorted((tid for tid in threads if tid != ender),
+                     key=lambda tid: threads[tid]["intervals"].overlap(entries[0][0], entries[-1][0]))[:6]
+    if busiest:
+        print("  the busiest other threads:")
+        for tid in busiest:
+            line(tid, threads[tid])
+
+
+def flip_rows(entries, ends):
+    """Per frame: PrepareFrame, the flip thread taking the flip and telling the game, the swap thread's
+    present, stage A's waits for a display buffer."""
+    prepares = [ns for ns, event, arg, _ in entries if event == E["PipeTask"] and arg == 4]
+    taken = [ns for ns, event, _, _ in entries if event == E["FlipTaken"]]
+    shown = [ns for ns, event, _, _ in entries if event == E["FlipShown"]]
+    presents = spans(entries, E["PresentBegin"], E["PresentEnd"])
+    present_starts = [start for start, _ in presents]
+    labels = Intervals(spans(entries, E["VoLabelWaitBegin"], E["VoLabelWaitEnd"]))
+    if not taken:
+        return None
+    rows = []
+    for (a, _), (b, _) in zip(ends, ends[1:]):
+        i = bisect.bisect_left(prepares, a)
+        if i >= len(prepares) or prepares[i] >= b:
+            continue
+        p = prepares[i]
+        j = bisect.bisect_left(taken, p)
+        k = bisect.bisect_left(shown, p)
+        if j >= len(taken) or k >= len(shown):
+            continue
+        n = bisect.bisect_left(present_starts, taken[j])
+        present = presents[n][1] - presents[n][0] if n < len(presents) else 0
+        rows.append({
+            "PrepareFrame to the flip taken": taken[j] - p,
+            "to the game told": shown[k] - taken[j],
+            "the swap thread's present": present,
+            "stage A's display buffer waits": labels.overlap(a, b),
+        })
+    return rows
+
+
+def print_flips(rows):
+    if not rows:
+        return
+    print(f"The flip's way, median (mean) in ms, {len(rows)} frames:")
+    for key in rows[0]:
+        values = [r[key] for r in rows]
+        print(f"  {key:32} {ms(statistics.median(values)):8.3f} ({ms(statistics.mean(values)):.3f})")
+
+
 def main(argv):
     if len(argv) < 2:
         print(__doc__)
@@ -170,6 +272,8 @@ def main(argv):
             "the GPU's queue and work": done - presented,
             "in all": done - a,
         })
+    threads = thread_rows(entries, ends)
+    flips = flip_rows(entries, ends)
     if limit:
         rows, ways = rows[:limit], ways[:limit]
     if not rows:
@@ -197,6 +301,8 @@ def main(argv):
             print(f"  {key:30} {ms(statistics.median(values)):8.3f} ({ms(statistics.mean(values)):.3f})")
     else:
         print("No frame's way could be followed (no stage A idle or presenter submission after its end).")
+    print_threads(threads, entries)
+    print_flips(flips)
     return 0
 
 

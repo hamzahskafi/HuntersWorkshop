@@ -1978,7 +1978,9 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                     if (rasterizer) {
                         rasterizer->DrainDrawPipe(static_cast<u32>(opcode));
                     }
+                    BbTimeline::Note(BbTimeline::VoLabelWaitBegin);
                     vo_port->WaitVoLabel([&] { return wait_reg_mem->Test(regs.reg_array); });
+                    BbTimeline::Note(BbTimeline::VoLabelWaitEnd);
                     break;
                 }
                 // bbport: a fence handed to the draw recording thread counts as written: that

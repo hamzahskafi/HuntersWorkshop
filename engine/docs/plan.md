@@ -808,6 +808,32 @@ rank what to cut. Part 2, from that ranking: the engine's own GPU work first (th
 interrupt a render pass 37 times a frame, the barriers that wait for all commands, the presenter's passes),
 then the game's hottest shaders (step 2). The ceiling at this spot is the 10% above.
 
+**Two more captures (the tester, 2026-11-27).** The first one above had OptiScaler and DLAA on.
+- A second spot (`98217950`, OptiScaler and DLAA off; the tester's GPU monitor at 85-86%): 5.08 ms
+  frames, steady. The game almost never waits for its previous frame (0.08 ms a frame), stage A is
+  idle 25%, the GPU's queue held work 96% of the time. The game's own frame (5.0 ms) is the limit.
+- The lamp spot, standing still the whole run (`05080b94`, log `20261127_064043`, FSR 4.1.2 at
+  1920x1080). Before a jump about 4.5 minutes in (the session lasted about 6): 204 FPS, 1,345 draws,
+  stage A idle 2-5% (3.1 us a draw: 4.2 ms of a 4.85 ms frame), the game waiting 0.64 ms. After it:
+  220 FPS, 1,296 draws, the game waiting 1.6 ms, stage A idle 2%. At the jump the game's own frame
+  fell from about 4.15 to 2.9 ms; stage A, already near its limit, then holds the frame at 4.5 ms
+  (H1, for stage A). Its time a draw: 1.4 us in draw packets, 2.5 us in all packets, 3.0-3.2 in all.
+- The flip: in 91-97% of frames the game starts submitting only after the presenter prepared the
+  frame before. But in play the game does not wait on flip events (`FlipEventQueue 0.0 waits`), so
+  that order is the game's own.
+
+So the limit moves with the scene and the settings: the GPU (DLAA through d4r), the game's own frame,
+stage A. Two of them are the engine's to change: stage A's time a draw, and, if the game's threads run
+on the CPU's efficiency cores, where they run (the jump, a 1.3 ms drop in the game's own frame without
+a change of scene beyond 49 draws, fits a thread moved to a performance core). Engine id 132 measures
+the second: every game thread's waits (10 us or more) and the kind of core it wakes on, the thread
+that ends the frames, and the flip's way (the flip thread, the swap thread's present, stage A's waits
+for a display buffer).
+
+**Proposal, revised (for the tester's review):** beta 18 is stage A's cost a draw. If 132's run shows
+the game's threads on efficiency cores, keeping them on the performance cores comes first: smaller,
+and it lifts the game's own frame. The GPU-profile part above waits until the GPU is the limit again.
+
 ### Performance, in 0.4.6 (moved in, 2026-11-27)
 
 The tester (2026-11-27): "I wanted the Performance part to mostly be completed in 0.4.6!" and, of the

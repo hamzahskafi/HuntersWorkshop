@@ -21,6 +21,7 @@
 #include "precise_pacing.h"
 #include "bbport_toggles.h"
 #include "bbport_heap_sites.h"
+#include "bbport_timeline.h"
 #include "bbport_wait_trace.h"
 #include "bbport_freeze.h"
 #include "video_core/renderer_vulkan/vk_frame_capture.h"
@@ -583,10 +584,13 @@ static void LogLoad(double seconds, u64 flips, double worst_ms, u64 slow) {
 
 void VideoOutDriver::Flip(const Request& req) {
     BbFreeze::NoteFlip();
+    BbTimeline::Note(BbTimeline::FlipTaken, u64(std::max(req.index, -1) + 1));
     // Update HDR status before presenting, then present the frame (bbport: on the swap thread).
     RunPresenter([this, frame = req.frame, hdr = req.port->is_hdr] {
+        BbTimeline::Note(BbTimeline::PresentBegin);
         presenter->SetHDR(hdr);
         presenter->Present(frame);
+        BbTimeline::Note(BbTimeline::PresentEnd);
     });
     Vulkan::FrameCapture::OnFlip(req.index >= 0 ? req.port->buffer_slots[req.index].address_left
                                                 : 0);
@@ -1134,6 +1138,7 @@ void VideoOutDriver::Flip(const Request& req) {
                                         (req.flip_arg << 16)));
         }
     }
+    BbTimeline::Note(BbTimeline::FlipShown, u64(std::max(req.index, -1) + 1));
 }
 
 void VideoOutDriver::DrawBlankFrame() {

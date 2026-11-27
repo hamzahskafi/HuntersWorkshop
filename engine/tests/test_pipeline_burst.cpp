@@ -30,7 +30,7 @@ void check(bool ok, const char* what) {
 void Add(BbCpu::Layout& l, unsigned cores, unsigned threads, std::uint8_t cls, unsigned& next_core) {
     for (unsigned c = 0; c < cores; ++c, ++next_core) {
         for (unsigned t = 0; t < threads; ++t) {
-            l.logical.push_back({static_cast<std::uint32_t>(256 + l.logical.size()), next_core, cls});
+            l.logical.push_back({static_cast<std::uint32_t>(256 + l.logical.size()), next_core, cls, 0});
         }
     }
     l.known = true;

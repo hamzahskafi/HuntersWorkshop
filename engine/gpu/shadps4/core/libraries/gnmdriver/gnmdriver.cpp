@@ -2532,7 +2532,8 @@ s32 PS4_SYSV_ABI sceGnmSubmitCommandBuffers(u32 count, const u32* dcb_gpu_addrs[
 s32 PS4_SYSV_ABI sceGnmSubmitDone() {
     HLE_TRACE;
     BbStats::submit_done_calls.fetch_add(1, std::memory_order_relaxed);
-    BbTimeline::Note(BbTimeline::GuestSubmitDone, u64(frames_submitted) + 1);
+    BbTimeline::Note(BbTimeline::GuestSubmitDone, u64(frames_submitted) + 1,
+                     BbTimeline::On() ? BbTimeline::ThreadTag() : 0);
     LOG_DEBUG(Lib_GnmDriver, "called");
     std::scoped_lock lk{m_submit_lock};
     if (SubmitLockOnDecode()) {

@@ -24,6 +24,7 @@ struct Logical {
     std::uint32_t set_id = 0;     ///< its CPU set (Windows), to steer a thread to it
     std::uint32_t core = 0;       ///< its physical core: logical processors sharing one share this
     std::uint8_t efficiency = 0;  ///< efficiency class: the higher, the faster (all equal on one kind)
+    std::uint16_t processor = 0;  ///< its group << 8 | its logical processor number in the group
 };
 
 struct Layout {
@@ -74,6 +75,10 @@ inline Summary Summarize(const Layout& layout) {
     }
     return s;
 }
+
+/// Whether a logical processor (group << 8 | number, as Logical::processor) is one of a hybrid CPU's
+/// efficiency cores (the lowest efficiency class); false on a CPU of one kind or when not known.
+bool OnEfficiencyCore(std::uint16_t processor);
 
 struct BurstPlan {
     unsigned threads = 0;

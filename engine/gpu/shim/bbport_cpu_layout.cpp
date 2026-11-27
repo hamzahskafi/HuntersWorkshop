@@ -38,7 +38,8 @@ Layout Read() {
         }
         if (info->Type == CpuSetInformation) {
             const auto& set = info->CpuSet;
-            const Logical l{set.Id, (std::uint32_t(set.Group) << 8) | set.CoreIndex, set.EfficiencyClass};
+            const Logical l{set.Id, (std::uint32_t(set.Group) << 8) | set.CoreIndex, set.EfficiencyClass,
+                            std::uint16_t((std::uint32_t(set.Group) << 8) | set.LogicalProcessorIndex)};
             all.push_back(l);
             // The affinity mask is the process's group's (one group up to 64 logical processors).
             if (set.Group == 0 && set.LogicalProcessorIndex < sizeof(DWORD_PTR) * 8 &&
@@ -65,6 +66,28 @@ bool PrioritiesReversible(const char** why) {
         return false;
     }
     return true;
+}
+
+bool OnEfficiencyCore(std::uint16_t processor) {
+    static const std::vector<std::uint16_t> efficient = [] {
+        std::vector<std::uint16_t> out;
+        const Layout layout = Read();
+        if (!layout.known) {
+            return out;
+        }
+        std::uint8_t lowest = 255, highest = 0;
+        for (const auto& l : layout.logical) {
+            lowest = std::min(lowest, l.efficiency);
+            highest = std::max(highest, l.efficiency);
+        }
+        for (const auto& l : layout.logical) {
+            if (lowest != highest && l.efficiency == lowest) {
+                out.push_back(l.processor);
+            }
+        }
+        return out;
+    }();
+    return std::find(efficient.begin(), efficient.end(), processor) != efficient.end();
 }
 
 bool SteerCurrentThread(const std::vector<std::uint32_t>& sets) {
@@ -99,6 +122,8 @@ bool PrioritiesReversible(const char** why) {
 }
 
 bool SteerCurrentThread(const std::vector<std::uint32_t>&) { return false; }
+
+bool OnEfficiencyCore(std::uint16_t) { return false; }
 
 } // namespace BbCpu
 

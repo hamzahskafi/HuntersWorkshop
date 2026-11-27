@@ -37,6 +37,9 @@ int bbgpu_text_input_poll(char *out_utf8, uint64_t size);
 int bbgpu_overlay_captures_input(void);
 /* Patches the loaded image before the game runs (image still writable): libGnm entry hooks. */
 void bbgpu_patch_image(unsigned char *image, uint64_t size);
+/* BB_TIMELINE: a guest thread's wait in the runtime ended (kind 0 condition variable, 1 mutex,
+ * 2 semaphore, 3 sleep; ns its length): runtime_wait_note passes it on. */
+void bbgpu_timeline_wait(int kind, uint64_t ns);
 /* Number of symbols registered by the vendored libraries (diagnostics). */
 unsigned bbgpu_symbol_count(void);
 #ifdef __cplusplus
