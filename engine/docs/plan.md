@@ -910,6 +910,12 @@ rates sit below the usual (206 and 181 FPS): their breakdowns hold, not their li
   against 10.3 at the lamp spot.
 Neither diagnostic shows how the main thread's time splits between the game's code and the engine's;
 that stays the open measurement.
+The measurement needs no build: `BB_SAMPLE_THREADS` (`bbport_sampler.cpp`, in the engine since 0.4.5's
+loading work) samples named threads every 2 ms and reports every 5 s the share in game code, in each
+host module (the engine is `bb-probe.exe`; waits show as `ntdll`/`KernelBase`) and the hottest sites.
+The tester's run (2026-11-27): `BB_SAMPLE_THREADS=main,GXRenderThread,GXWorker`, `BB_SAMPLE_TOP=12`, the
+GPU profile and render stage timings off, the slower spot then the lamp spot past its jump. The
+engine's sites are named afterwards from 132's executable (the builder).
 
 ### Performance, in 0.4.6 (moved in, 2026-11-27)
 
