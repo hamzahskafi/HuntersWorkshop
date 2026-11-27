@@ -80,7 +80,7 @@ The decisions that still stand. How each was reached is in [archive/plan-0.4.4.m
 | FSR | AMD FSR SDK 2.4 (FidelityFX-SDK `v2.4.0`, 28 October 2026) on Windows: AMD's signed `amd_fidelityfx_loader_vk.dll` and `amd_fidelityfx_upscaler_vk.dll` with AMD's licence notice. Every unofficial FSR path was removed (0.4.4 beta 27). |
 | DLSS | The driver's NGX core, started with the shared application id 231313132 (`Init_Ext2`); with OptiScaler loaded, its module's NGX entry points on any GPU (engine id 126, "The OptiScaler rework"). No Project ID (the tester's call, 2026-11-01): the core's entry point that takes one is declared nowhere public, and learning it means disassembling NVIDIA's libraries, which their licence forbids (§4a). Not Streamline: with its core loaded, NVIDIA's Vulkan driver presents through DXGI and holds V-Sync On (latest frame) to two frames a refresh. NVIDIA's NGX loader library is not linked: the DLSS SDK licence (§2e) forbids use that puts the SDK under an open-source licence (HW is GPL). |
 | When AMD's or NVIDIA's runtime can't start | TAA, with a log line and a note in the game. |
-| Frame generation | Not offered, and its code removed in 0.4.4 beta 28 with Streamline's and Reflex's (the tester's calls, 2026-11-01 and 02). If it returns, it is AMD's on AMD's swapchain, not built on that code. |
+| Frame generation | Not offered, and its code removed in 0.4.4 beta 28 with Streamline's and Reflex's (the tester's calls, 2026-11-01 and 02). Deferred, the last item after 0.4.6 (the tester, 2026-11-27: "defer Frame Generation until a later date. I would like to implement it on both AMD and nVidia, which also means moving nVidia to streamline. This is a last thing to do"): AMD's through its SDK on AMD's swapchain (designed: "AMD's frame generation, designed for the tester's review"), NVIDIA's through Streamline, with NVIDIA's DLSS moved to Streamline too. Open when it is taken up: uncapped with frame generation (a cap at the display's refresh rate proposed, with a warning under the version's minimum real rate). |
 | NVIDIA Reflex | Not offered. If it returns, it is a design of its own on `VK_NV_low_latency2` directly (the sleep before the frame's work, markers with present IDs), measured against the 120 FPS cap first. |
 | OptiScaler | Audited and reworked (the tester, 2026-11-27: "it's clear that OptiScaler support needs a rework for us"; below, "The OptiScaler rework"). Engine id 126: the engine's DLSS calls go to OptiScaler on any GPU, every queue under the lock, the helpers in a folder of their own, the GPU's identity logged. Its frame generation and the rest after (the tester: "then we'll talk frame generation and everything else") |
 | The upscaler at outputs other than 1080p | It stays on the game's finished frame (the tester's call, 2026-11-01). Taking it before tone mapping there would run the game's post-processing at the output size, a renderer split the game was not built for. |
@@ -487,7 +487,8 @@ sure OptiScaler will work and that we are optimal, then we'll talk frame generat
   without the switch (done in engine id 128). **E7, L1 and D1 dropped** (the menu's OptiScaler lines stay
   as they are).
 
-**Frame generation, back on the table (2026-11-27).** The tester: "it's not for me honestly, people are
+**Frame generation, back on the table (2026-11-27), then deferred the same day to the last item after
+0.4.6 (Decisions).** The tester: "it's not for me honestly, people are
 requesting it", "it's the nVidia users that requested it. But we can start with AMD then take it from
 there." NVIDIA's own (DLSS Frame Generation) is offered only through Streamline, with Reflex required,
 and brings back what removed Streamline in 0.4.4 beta 28 (NVIDIA's Vulkan driver presenting through
@@ -755,9 +756,10 @@ the PC memory model), fixed, removed, or not the cause in 0.4.4's logs.
 
 ### Features and fixes, after 0.4.6
 
-- AMD FSR frame generation through the SDK, on AMD's swapchain: only if the tester brings frame
-  generation back (Decisions).
-- OptiScaler checked again, then kept or dropped.
+- **Last of all: frame generation on AMD and NVIDIA** (Decisions): AMD's through its SDK (the design
+  above), NVIDIA's through Streamline with its DLSS moved to Streamline, Reflex with it.
+- The splash statically linked in a folder of its own, if OptiScaler beside the game ever breaks it
+  (the builder's check: SDL3 alone, about 7 MB).
 - A proper DLSS test, then its cost table.
 - The SSR patch's tuning writes measured (bbhost: 7.8 ms against the game's 6.1).
 - Less detail when the startup resolution patch renders below 1080.
@@ -794,7 +796,7 @@ the PC memory model), fixed, removed, or not the cause in 0.4.4's logs.
 ### Checks not made
 
 - **The launcher's texts on screen:** at 100% and 150% scaling, in English, German and Japanese,
-  in both Classic and Modern layouts, plus the Insert menu's Enhancements section.
+  in both Classic and Modern layouts, plus the in-game menu's (F1) Enhancements section.
 - **Launcher behaviour:**
   - Suggested settings with two monitors;
   - a Share code exported and imported on another PC;
@@ -806,7 +808,8 @@ the PC memory model), fixed, removed, or not the cause in 0.4.4's logs.
 
 ### Open decisions
 
-- NVIDIA Reflex on `VK_NV_low_latency2` without Streamline: whether, and when.
+- NVIDIA Reflex: with Streamline when frame generation is taken up (the tester's call, 2026-11-27),
+  no longer a design of its own on `VK_NV_low_latency2`.
 - The GPU-path tracers that overlap.
 - The System menu's PC pages under one parent entry, if the game's menu code allows it.
 - Sharpening's default: decided 2026-11-25 (the tester), built in beta 16: off by default.
