@@ -39,6 +39,23 @@ threads each, 8 efficiency cores, 20 logical processors), at 1920x1080.
 So at the slower spot the frame is a chain of short handoffs: the main thread hands out work, and each
 handoff ends in a block and a wake. That is where the spare CPU and GPU time goes.
 
+**The main thread's spin is the game's fork-join barrier.** The builder disassembled 1.09 at `+0x21b8890`:
+- The function at `0x21b8710` dispatches a job group.
+- The main thread runs its own share, then wakes the group's other N-1 workers with one signal of count
+  N-1 (`0x263b0d0`, most likely `sceKernelSignalSema`: the runtime's semaphore).
+- It then busy-waits, with no `pause` instruction, until a counter reaches N-1 (every worker done),
+  then on each worker's state word.
+
+So the 10% is the main thread waiting for its own workers to wake and finish. With today's semaphore
+(below), those workers start one after another.
+
+**The engine's share of the main thread is mostly a shared counter.** The builder symbolized the
+sampler's engine sites against 132's executable. `guest_memcpy` and `guest_memset` (`src/runtime.c`)
+are sampled right after a locked increment of one global counter (`memory_calls`). Every guest memcpy,
+memset, memmove and memcmp of every thread does that increment, and the counter is printed only at
+exit. The draw records' counter (`BbNativeCalls::NoteWritten`) is the same pattern, on every draw a
+thread writes. That cache line moves between all the game's threads.
+
 ## Part 1: the handoffs (the runtime's semaphores and read/write locks)
 
 ### What is wrong now
@@ -58,6 +75,9 @@ are per object, over Windows SRW locks and condition variables, and are not part
 5. **Contended game locks end up here too.** The engine replaces the game's `DLAdaptiveMutex::Lock`
    (every heap, GX and queue lock: `gpu/shim/engine/job_pool.cpp`). A contended one spins for its budget,
    then sleeps on its semaphore through this same wait.
+6. **The fork-join barrier pays twice.** A signal of count N-1 wakes N-1 waiters, each under the shared
+   lock. Each woken worker must then take that lock back in turn, so the workers start one after
+   another while the main thread spins (above).
 
 **Read/write locks** (`src/runtime_rwlock.c`): 214,000 operations a second on 8 live locks (the log's
 Load line: the game's busiest locks).
@@ -66,6 +86,13 @@ Load line: the game's busiest locks).
 - **Each unlock** takes it again and frees that record.
 
 That's about 640,000 acquisitions of one lock a second, across every thread that touches a game heap.
+
+**Shared counters in the game's hottest calls:**
+- `memory_calls` takes a locked increment in every guest memcpy, memset, memmove and memcmp
+  (`src/runtime.c`).
+- `written_records` and `written_fallback` take one per draw record (`bbport_native_calls.cpp`).
+
+One cache line is written by every game thread, and the samples land on those increments.
 
 ### Design
 
@@ -110,6 +137,20 @@ That's about 640,000 acquisitions of one lock a second, across every thread that
   in).
 - **The same Windows SRW lock underneath.** Timed acquires keep today's try, yield and sleep loop.
 
+**The shared counters:**
+- `memory_calls` is dropped. It is an exit-time total nobody reads in play; the sampler measures the
+  same thing better.
+- The draw record counters become per-thread counts, summed when the statistics line is printed.
+- The statistics stay the same.
+
+**The barrier's spin gets a `pause`**, as a game fix beside the existing "job lock spins with pause".
+- The loop at `0x21b8890` keeps its logic; it gains a `pause` per pass.
+- A spin without one takes a hyperthreaded core's resources from the thread beside it. That thread can
+  be one of the workers being waited for, or stage A.
+- `pause` costs about 140 cycles a pass on these cores (Intel's figure, about 30-50 ns), nothing next
+  to a worker's wake-up.
+- Checked against 1.09's code like the other fixes, and left out when the code differs.
+
 **Alternatives considered:**
 
 | Alternative | Why not |
@@ -120,9 +161,11 @@ That's about 640,000 acquisitions of one lock a second, across every thread that
 
 ### What it should change
 
+- **Per job batch:** the workers start together instead of one after another, and the barrier's spin
+  shortens accordingly.
 - **Per semaphore handoff:** one wake instead of two, no list walk, no environment lock.
 - **Across the whole game:** no thread queued behind another thread's unrelated semaphore or
-  read/write lock. About 640,000 shared-lock acquisitions and 214,000 allocations a second go away.
+  read/write lock. About 640,000 shared-lock acquisitions and 214,000 allocations a second go away. So do the locked increments in every memcpy and every draw record.
 
 How much frame time that is can't be computed beforehand. At the slower spot the main thread waits
 1.3-1.7 ms a frame and spins 0.55 ms; the run decides.
@@ -186,6 +229,14 @@ threads.
 - **The game's two threads are found by their names** (`main`, `GXRenderThread`). Their names are logged
   once.
 
+**The barrier's workers.** The game's fork-join workers are on the critical path while the main thread waits
+for them (Microsoft: a job thread becomes frame-critical while it holds the frame up). Keeping them on
+the performance cores as well is measured as a variant, not made the default:
+- it would put about 10 threads on 12 performance-core slots;
+- Microsoft's guidance is that job threads float.
+They are found by name: the GXWorker threads, the likely members of this group. The variant also
+confirms which threads the group uses, since their waits and the barrier line up in the timeline.
+
 **Everything else stays as it is.**
 - Workers stay normal and float everywhere: the game's job threads (GXWorker, Havok, EzWorkPool,
   character and cloth threads), lookahead, GPU signals, the swap thread, GX prepare. Per Microsoft's
@@ -217,9 +268,10 @@ candidate:
 `BB_SAMPLE_THREADS=main` on:
 1. both off;
 2. part 1 only (`BB_THREAD_PLACEMENT=0`);
-3. both on.
+3. both on;
+4. both on, with the barrier's workers on the performance cores (`BB_THREAD_PLACEMENT=workers`).
 
-And the lamp spot once with both on.
+And the lamp spot once with the best of these.
 
 **Compared:**
 - FPS;
@@ -229,12 +281,10 @@ And the lamp spot once with both on.
 
 Part 2 is kept only if it helps on its own, or at least helps the 1% lows.
 
-## Open: the main thread's spin at `+0x21b8890`
+## Resolved: the main thread's spin at `+0x21b8890`
 
-About 10% of the main thread is a spin in the game's own code, not the engine's lock replacement (that one
-is at `0x20368c0`). What it waits on is not known yet: the builder has been asked to disassemble it if the
-game files are at hand. If it waits for a worker to wake, part 1 shortens it as well. If it is something
-else, it is a separate item.
+The game's fork-join barrier (above, from the builder's disassembly of 1.09). Part 1 shortens it, with
+the workers woken together and the spin given a `pause`.
 
 ## Sources
 
