@@ -121,9 +121,13 @@ Notes on these choices:
     work: compiles, draw preparation, the file thread.
   - So the mapping takes the phase as well as the role: while loading or settling, Background maps to
     normal priority and high QoS, and to any core.
-  - The engine already knows the phases (`engine/loading.h`, the cache settle at start). The roles
-    module is told when one begins and ends, and re-applies the mapping to Background's threads then.
-    That's a few calls per load, as Intel advises against changing affinity often.
+  - The engine already knows when a loading screen begins and ends (`engine/loading.h`). The roles
+    module is told, and re-applies the mapping to Background's threads then. That's a few calls per
+    load, as Intel advises against changing affinity often.
+  - The start is covered the same way: the engine's own warm-up compiles count as loading.
+  - The GPU cache's settle itself (recompile and catalog seed) runs in its own process, the shader
+    lab (`RunLab`, `vk_pipeline_serialization.cpp`). It's outside the roles and keeps its normal
+    priority, as today.
   - Without this, eco clocks on the efficiency cores would make loads and the first start slower.
 - **Linux.** Raising needs privileges there, but lowering doesn't. So the same order comes from
   Background at `SCHED_IDLE` with the rest at normal, and preferred cores by `sched_setaffinity`
