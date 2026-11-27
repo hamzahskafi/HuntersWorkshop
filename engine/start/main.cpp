@@ -155,7 +155,7 @@ const SwitchGroup kSwitchGroups[] = {
          {"BB_AUDIO_THREAD_PRIORITY", "0"}, {"BB_NATIVE_SHADERS", "0"}, {"BB_SLEEP_SPIN_US", "600"},
          {"BB_ASYNC_PIPELINES", "0"}, {"BB_OCCLUSION", "0"}, {"BB_MODS_ENABLED", "0"},
          {"BB_FAST_DRAWS", "0"}, {"BB_COMPILE_SKIP", "0"}, {"BB_VRAM_MANAGER", "1"},
-         {"BB_EMPTY_SURFACES", "0"}, {"BB_TARGET_POOL", "0"},
+         {"BB_EMPTY_SURFACES", "0"},
          {"BB_WATCH_GAME_TEXTURES", "1"}, {"BB_IMAGE_OWNERS", "0"},
          {"BB_WATCH_GAME_BUFFERS", "1"}, {"BB_PIPELINE_BURST", "0"}, {"BB_LOAD_UPLOAD", "0"},
          {"BB_READY_SURFACES", "0"}, {"BB_COPY_NOTICE", "0"}, {"BB_TRANSLATE_AHEAD", "0"}}},

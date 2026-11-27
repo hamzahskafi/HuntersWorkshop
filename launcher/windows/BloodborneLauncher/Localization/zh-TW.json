@@ -1,4 +1,6 @@
 {
+  "The engine could not start: a DLL it needs is missing from engine\\out. Reinstall the package to put it back.": "引擎無法啟動：engine\\out 中缺少它需要的一個 DLL。請重新安裝套件以恢復它。",
+  "OptiScaler {0} was loaded with its frame generation set ({1}), which the engine does not support yet. Set Frame Generation to none in OptiScaler's menu, then play again.": "已載入 OptiScaler {0}，且其畫格生成已開啟（{1}），引擎尚不支援。請在 OptiScaler 選單中將 Frame Generation 設為 none，然後重新開始遊戲。",
   "OptiScaler {0} was loaded: it hooks the game's GPU submissions and runs DLSS itself. If the crash comes back, take OptiScaler's files out of engine\\out to rule it out.": "已載入 OptiScaler {0}：它會攔截遊戲的 GPU 提交並自行執行 DLSS。若仍會當機，請將 OptiScaler 的檔案移出 engine\\out 以排除它。",
   "{0}\n\nLogged to:\n{1}": "{0}\n\n已記錄至：\n{1}",
   "Unexpected error": "發生未預期的錯誤",
@@ -209,7 +211,6 @@
   "bad memory access": "不正確的記憶體存取",
   "illegal instruction": "不合法的指令",
   "division by zero": "除以零",
-  "OptiScaler {0} was loaded with its own frame generation on ({1}); on Vulkan it runs through a D3D12 bridge that loses the GPU. Set Frame Generation to none in OptiScaler's menu (FGOutput=nofg in OptiScaler.ini) and use the launcher's frame generation instead.": "已載入 OptiScaler {0}，且開啟了它自己的畫格生成（{1}）；在 Vulkan 上，它透過 D3D12 橋接執行，會導致 GPU 遺失。請在 OptiScaler 的選單中將 Frame Generation 設為無（OptiScaler.ini 中 FGOutput=nofg），改用啟動器的畫格生成。",
   "Windows was nearly out of memory ({0} MiB of {1} MiB free, {2} MiB commit left): closing other programs or a larger page file helps.": "Windows 的記憶體幾乎用盡（{1} MiB 中剩 {0} MiB 可用，認可剩餘 {2} MiB）：關閉其他程式或加大分頁檔會有幫助。",
   "RAM: game {0} MiB at the start, {1} MiB at the end ": "RAM：遊戲開始時 {0} MiB，結束時 {1} MiB ",
   "({0} → {1} MiB committed, peak {2} MiB); ": "（認可 {0} → {1} MiB，峰值 {2} MiB）； ",

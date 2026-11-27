@@ -1,4 +1,6 @@
 {
+  "The engine could not start: a DLL it needs is missing from engine\\out. Reinstall the package to put it back.": "엔진을 시작할 수 없습니다: 필요한 DLL이 engine\\out에 없습니다. 패키지를 다시 설치하여 복구하세요.",
+  "OptiScaler {0} was loaded with its frame generation set ({1}), which the engine does not support yet. Set Frame Generation to none in OptiScaler's menu, then play again.": "OptiScaler {0}이(가) 프레임 생성이 설정된 상태({1})로 로드되었습니다. 엔진은 아직 이를 지원하지 않습니다. OptiScaler 메뉴에서 Frame Generation을 none으로 설정한 뒤 다시 플레이하세요.",
   "OptiScaler {0} was loaded: it hooks the game's GPU submissions and runs DLSS itself. If the crash comes back, take OptiScaler's files out of engine\\out to rule it out.": "OptiScaler {0}이(가) 로드되었습니다. 게임의 GPU 제출을 후킹하고 DLSS를 직접 실행합니다. 충돌이 다시 발생하면 engine\\out에서 OptiScaler 파일을 빼서 원인에서 배제하세요.",
   "{0}\n\nLogged to:\n{1}": "{0}\n\n기록 위치:\n{1}",
   "Unexpected error": "예기치 않은 오류",
@@ -209,7 +211,6 @@
   "bad memory access": "잘못된 메모리 접근",
   "illegal instruction": "잘못된 명령어",
   "division by zero": "0으로 나누기",
-  "OptiScaler {0} was loaded with its own frame generation on ({1}); on Vulkan it runs through a D3D12 bridge that loses the GPU. Set Frame Generation to none in OptiScaler's menu (FGOutput=nofg in OptiScaler.ini) and use the launcher's frame generation instead.": "OptiScaler {0}이(가) 자체 프레임 생성을 켠 상태로 로드되었습니다({1}). Vulkan에서는 GPU를 잃는 D3D12 브리지를 통해 실행됩니다. OptiScaler 메뉴에서 Frame Generation을 none으로 설정하고(OptiScaler.ini의 FGOutput=nofg) 대신 런처의 프레임 생성을 사용하세요.",
   "Windows was nearly out of memory ({0} MiB of {1} MiB free, {2} MiB commit left): closing other programs or a larger page file helps.": "Windows 메모리가 거의 부족했습니다({1} MiB 중 {0} MiB 사용 가능, 커밋 여유 {2} MiB). 다른 프로그램을 닫거나 페이지 파일을 늘리면 도움이 됩니다.",
   "RAM: game {0} MiB at the start, {1} MiB at the end ": "RAM: 게임 시작 시 {0} MiB, 종료 시 {1} MiB ",
   "({0} → {1} MiB committed, peak {2} MiB); ": "(커밋 {0} → {1} MiB, 최대 {2} MiB), ",

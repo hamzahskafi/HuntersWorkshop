@@ -1,4 +1,6 @@
 {
+  "The engine could not start: a DLL it needs is missing from engine\\out. Reinstall the package to put it back.": "Die Engine konnte nicht starten: Eine DLL, die sie braucht, fehlt in engine\\out. Installieren Sie das Paket neu, um sie wiederherzustellen.",
+  "OptiScaler {0} was loaded with its frame generation set ({1}), which the engine does not support yet. Set Frame Generation to none in OptiScaler's menu, then play again.": "OptiScaler {0} war mit eingestellter Frame-Generierung ({1}) geladen, die die Engine noch nicht unterstützt. Stellen Sie Frame Generation in OptiScalers Menü auf none und spielen Sie dann erneut.",
   "OptiScaler {0} was loaded: it hooks the game's GPU submissions and runs DLSS itself. If the crash comes back, take OptiScaler's files out of engine\\out to rule it out.": "OptiScaler {0} war geladen: Es hängt sich in die GPU-Übermittlungen des Spiels ein und führt DLSS selbst aus. Kehrt der Absturz zurück, entfernen Sie die Dateien von OptiScaler aus engine\\out, um es auszuschließen.",
   "{0}\n\nLogged to:\n{1}": "{0}\n\nProtokolliert in:\n{1}",
   "Unexpected error": "Unerwarteter Fehler",
@@ -209,7 +211,6 @@
   "bad memory access": "ungültiger Speicherzugriff",
   "illegal instruction": "ungültige Anweisung",
   "division by zero": "Division durch null",
-  "OptiScaler {0} was loaded with its own frame generation on ({1}); on Vulkan it runs through a D3D12 bridge that loses the GPU. Set Frame Generation to none in OptiScaler's menu (FGOutput=nofg in OptiScaler.ini) and use the launcher's frame generation instead.": "OptiScaler {0} war mit eigener Frame-Generierung aktiv ({1}); unter Vulkan läuft sie über eine D3D12-Brücke, die die GPU verliert. Stellen Sie Frame Generation im Menü von OptiScaler auf none (FGOutput=nofg in OptiScaler.ini) und verwenden Sie stattdessen die Frame-Generierung des Launchers.",
   "Windows was nearly out of memory ({0} MiB of {1} MiB free, {2} MiB commit left): closing other programs or a larger page file helps.": "Windows hatte fast keinen Speicher mehr ({0} MiB von {1} MiB frei, {2} MiB Commit übrig): Andere Programme zu schließen oder eine größere Auslagerungsdatei hilft.",
   "RAM: game {0} MiB at the start, {1} MiB at the end ": "RAM: Spiel {0} MiB beim Start, {1} MiB am Ende ",
   "({0} → {1} MiB committed, peak {2} MiB); ": "({0} → {1} MiB zugesichert, Spitze {2} MiB); ",

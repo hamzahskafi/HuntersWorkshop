@@ -236,45 +236,20 @@ bool EmptySurfaces() {
     }();
     return on;
 }
-// 0.4.6 beta 8, part 3 (BB_TARGET_POOL=0: off): a new surface takes the Vulkan image of a dead target of
-// its shape (TextureCache::TakeDeadDonor) instead of allocating one.
-bool DeadTargetPool() {
-    static const bool on = [] {
-        const char* env = std::getenv("BB_TARGET_POOL");
-        return !(env && env[0] == '0');
-    }();
-    return on;
-}
 // 0.4.6 beta 8, part 4; beta 9 the default: the pages of the game's targets (surfaces made without data
 // for the GPU, textures with a render-target or depth view) are not write-protected: the game's calls tell
 // what writes them (beta 8's runs: none of them written by the CPU). 0.4.6 beta 10 the default: textures
 // made with their data are not either (beta 9's run: their CPU writes are the create call's own copy, told
 // by the created event, ProcessGxCreated, and asset loads, told by Rasterizer::NoteAssetWrite).
 // BB_WATCH_GAME_TEXTURES=1 watches every image as before; =0 is the default; =targets is beta 9's.
-using Unwatch = WatchRules::Unwatch;
-Unwatch UnwatchKinds() {
-    static const Unwatch kinds = [] {
-        const char* env = std::getenv("BB_WATCH_GAME_TEXTURES");
-        if (env && env[0] == '1') {
-            return Unwatch::None;
-        }
-        return env && std::strcmp(env, "targets") == 0 ? Unwatch::Targets : Unwatch::TargetsAndData;
-    }();
-    return kinds;
-}
-// 0.4.6 beta 16 (watch_rules.h): Scaleform's planes (BB_WATCH_SCALEFORM=1: watched as before) and every
-// image in YEBIS's pool (YEBIS by its calls; BB_WATCH_YEBIS=1: watched as before beta 16) left to their
-// calls too; the texture net (BB_TEXTURE_NET=0: off) checks the images left to the calls that the CPU fills.
+// Which images are left to the game's calls (watch_rules.h): BB_WATCH_GAME_TEXTURES=1 (safe mode) watches
+// every image, as in 0.4.5; the texture net (BB_TEXTURE_NET=0: off) checks the images left to the calls
+// that the CPU fills.
 const WatchRules::Settings& WatchSettings() {
     static const WatchRules::Settings settings = [] {
-        const auto on = [](const char* name) {
-            const char* env = std::getenv(name);
-            return env && env[0] == '1';
-        };
+        const char* env = std::getenv("BB_WATCH_GAME_TEXTURES");
         WatchRules::Settings s;
-        s.kinds = UnwatchKinds();
-        s.watch_yebis = on("BB_WATCH_YEBIS");
-        s.watch_scaleform = on("BB_WATCH_SCALEFORM");
+        s.watch_all = env && env[0] == '1';
         return s;
     }();
     return settings;
@@ -282,15 +257,6 @@ const WatchRules::Settings& WatchSettings() {
 bool TextureNetEnabled() {
     static const bool on = [] {
         const char* env = std::getenv("BB_TEXTURE_NET");
-        return !(env && env[0] == '0');
-    }();
-    return on;
-}
-// 0.4.6 beta 16, YEBIS by its calls, part 2 (BB_DMA_TELLS_TEXTURES=0: off): the engine's own DMA stores
-// tell the texture cache (NoteEngineStore).
-bool DmaTellsTextures() {
-    static const bool on = [] {
-        const char* env = std::getenv("BB_DMA_TELLS_TEXTURES");
         return !(env && env[0] == '0');
     }();
     return on;
@@ -329,15 +295,6 @@ bool KeptByGuess(const Image& image, VAddr skip_at) {
                                : BbEngine::GxResources::LiveTextureOverlaps(
                                      image.info.guest_address, image.info.guest_address + image.info.guest_size,
                                      skip_at);
-}
-// 0.4.6 beta 9 (BB_TAKE_EARLIER_WRITES=0: off; on by default): a surface whose memory the GPU wrote as a
-// buffer before the game made it takes those writes (another owner's) at its first use, as before.
-bool TakeEarlierWrites() {
-    static const bool on = [] {
-        const char* env = std::getenv("BB_TAKE_EARLIER_WRITES");
-        return !(env && env[0] == '0');
-    }();
-    return on;
 }
 } // namespace
 
@@ -1362,12 +1319,13 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
     if (!image_id) {
         view_mip = view_slice = -1;
         TraceOverlap(info, desc.type, {}, nullptr, "create", "no candidate covers requested view");
-        // 0.4.6 beta 8 (part 3): a new surface takes a dead target's Vulkan image of its shape. The
-        // game's destroys and creates are taken first, so a target re-created over the same memory has
-        // had its old image handed over (beta 7) before any is given to another address.
+        // 0.4.6 beta 8 (part 3): a new surface takes a dead target's Vulkan image of its shape
+        // (TakeDeadDonor), with surfaces started empty (BB_EMPTY_SURFACES=0: neither). The game's destroys
+        // and creates are taken first, so a target re-created over the same memory has had its old image
+        // handed over (beta 7) before any is given to another address.
         ImageId donor_id{};
         UniqueImage donated{};
-        const bool surface = DeadTargetPool() && EmptySurfaces() && BbEngine::GxResources::Following() &&
+        const bool surface = EmptySurfaces() && BbEngine::GxResources::Following() &&
                              BbEngine::GxResources::SurfaceAt(info.guest_address,
                                                               info.guest_address + std::max<u64>(info.guest_size, 1))
                                  .found;
@@ -1628,28 +1586,13 @@ bool TextureCache::StartSurface(Image& image) {
         image.info.pixel_format == vk::Format::eUndefined || !image.HasMemory()) {
         return false;
     }
-    // The GPU wrote this memory as a buffer before (a compute shader, a copy): the fill takes that, as
-    // bbhost's target takes a texture a shader stored there first.
-    bool skip_earlier = false;
+    // The GPU wrote this memory as a buffer (a compute shader, a copy), since the game made it or before
+    // (its memory's previous owner's writes): the fill takes that, as bbhost's target takes a texture a
+    // shader stored there first. (0.4.6 beta 9 told the two apart for BB_TAKE_EARLIER_WRITES=0, which
+    // started such a surface empty: a test, gone since; both are taken.)
     if (buffer_cache.IsRegionGpuModified(image.info.guest_address, image.info.guest_size)) {
-        // 0.4.6 beta 9: writes made before the resource was (its memory's previous owner's) or since.
-        if (BbEngine::GxResources::CreatedWaiting()) {
-            ProcessGxDestroyed();
-            ProcessGxCreated();
-        }
-        const auto at = created_gpu_version.find(image.info.guest_address);
-        const bool earlier = at != created_gpu_version.end() && at->second.first == image.surface_ns &&
-                             buffer_cache.GpuWriteVersion(image.info.guest_address, image.info.guest_size) ==
-                                 at->second.second;
-        if (!earlier) {
-            NoteSurfaceStart(owner, SurfaceStart::Taken, bytes);
-            return false;
-        }
-        if (TakeEarlierWrites()) {
-            NoteSurfaceStart(owner, SurfaceStart::TakenEarlier, bytes);
-            return false;
-        }
-        skip_earlier = true;
+        NoteSurfaceStart(owner, SurfaceStart::Taken, bytes);
+        return false;
     }
     if (!StillLive(image.info.guest_address, image.surface_ns)) {
         image.surface_ns = 0; // its resource is gone: the image is filled and followed as any other
@@ -1675,7 +1618,7 @@ bool TextureCache::StartSurface(Image& image) {
     image.hashes_deferred = false;
     image.mip_hashes_current = false;
     RefreshTrace::Refresh(image, entry_flags, "started empty: a surface the game made without its data");
-    NoteSurfaceStart(owner, skip_earlier ? SurfaceStart::EarlierSkipped : how, bytes);
+    NoteSurfaceStart(owner, how, bytes);
     return true;
 }
 
@@ -2299,17 +2242,6 @@ void TextureCache::ProcessGxCreated() {
         const VAddr made_end = made.memory + std::max<u64>(made.bytes, 1);
         u64 bytes = 0, images = 0, kept = 0, kept_bytes = 0, written = 0, written_bytes = 0, surfaces_kept = 0;
         u64 handed = 0, handed_bytes = 0;
-        // 0.4.6 beta 9: the GPU's newest write to its memory when the game made it (StartSurface tells
-        // the writes since from those of the memory's previous owner).
-        if (EmptySurfaces()) {
-            if (created_gpu_version.size() > 65536) {
-                created_gpu_version.clear();
-            }
-            const u64 version = buffer_cache.IsRegionGpuModified(made.memory, std::max<u64>(made.bytes, 1))
-                                    ? buffer_cache.GpuWriteVersion(made.memory, std::max<u64>(made.bytes, 1))
-                                    : 0;
-            created_gpu_version[made.memory] = {made.ns, version};
-        }
         ForEachImageInRegion(made.memory, std::max<u64>(made.bytes, 1), [&](ImageId image_id, Image& image) {
             // 0.4.6 beta 10: made with its data: the create call copied that data into the memory, a CPU
             // write the images there hear of whether their pages are watched or not (since beta 9 a
@@ -2465,7 +2397,7 @@ void TextureCache::ProcessWritten() {
 }
 
 void TextureCache::NoteEngineStore(VAddr address, u64 size) {
-    if (!DmaTellsTextures() || size == 0) {
+    if (size == 0) {
         return;
     }
     std::scoped_lock lock{mutex};
@@ -2520,9 +2452,6 @@ void TextureCache::FreeDeadImages(u64 second) {
         // The game is done with it: not stored back even if the GPU drew it (that memory is the next
         // texture's).
         const u64 bytes = image.backing ? image.GetHostImageSize() : 0;
-        if (ImageOwners() && OwnedImage(image) && KeptByGuess(image, 0)) {
-            BbEngine::GxResources::NoteOwnerRetired(bytes, false); // beta 11: the old rules kept it
-        }
         ++gc_evictions;
         ++gc_freed_destroyed;
         BbStats::gc_freed_images.fetch_add(1, std::memory_order_relaxed);
@@ -2556,9 +2485,6 @@ ImageId TextureCache::TakeDeadDonor(const ImageInfo& info) {
         // Dead and the GPU done with it; a YEBIS texture's grace is over by now for this purpose (the
         // game's creates were taken first: none re-created over its memory with its shape).
         if (DeadImageState(d, 0, true) == Dead::Free) {
-            if (ImageOwners() && OwnedImage(d) && KeptByGuess(d, 0)) {
-                BbEngine::GxResources::NoteOwnerRetired(d.backing ? d.GetHostImageSize() : 0, true);
-            }
             return donor_id;
         }
     }

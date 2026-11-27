@@ -85,7 +85,7 @@ struct PendingPipeline {
 /// in, first out: the draw that needs a pipeline first gets it first. Never stopped: pipelines
 /// destroyed at exit wait for their job (Pipeline::WaitReady).
 /// 0.4.6 beta 15 part 1: burst threads beside them (BB_PIPELINE_BURST, bbport_cpu_layout.h): at
-/// idle priority, on the efficiency cores where there are any (BB_CPU_SETS=0: anywhere), taking
+/// idle priority, on the efficiency cores where there are any, taking
 /// jobs only in a backlog, raised while a thread waits for theirs.
 class PipelineCompiler {
 public:
@@ -155,9 +155,7 @@ private:
         }
         const char* why = "";
         const bool reversible = BbCpu::PrioritiesReversible(&why);
-        const char* sets_env = std::getenv("BB_CPU_SETS");
-        const bool steer = !(sets_env && sets_env[0] == '0');
-        const BbCpu::BurstPlan plan = BbCpu::PlanBursts(cpu, threads, forced, reversible, steer, why);
+        const BbCpu::BurstPlan plan = BbCpu::PlanBursts(cpu, threads, forced, reversible, why);
         std::printf("%s\n", BbCpu::Describe(cpu, threads, plan).c_str());
         std::fflush(stdout);
         burst_threads = std::min<u32>(plan.threads, PipelineJobQueue::kMaxBurstThreads);

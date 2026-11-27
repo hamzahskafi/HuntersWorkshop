@@ -2344,12 +2344,7 @@ void BufferCache::NoteEngineStore(VAddr addr, u64 size) {
 }
 
 void BufferCache::NoteBackingStore(VAddr addr, u64 size) {
-    // BB_LABEL_CHECK=0: as before beta 13, such stores never reach the buffer cache.
-    static const bool on = [] {
-        const char* env = std::getenv("BB_LABEL_CHECK");
-        return !(env && env[0] == '0');
-    }();
-    if (!on || size == 0) {
+    if (size == 0) {
         return;
     }
     BbStats::backing_stores.fetch_add(1, std::memory_order_relaxed);

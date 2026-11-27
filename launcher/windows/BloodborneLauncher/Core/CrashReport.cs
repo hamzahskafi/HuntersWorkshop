@@ -29,7 +29,7 @@ namespace BloodborneLauncher.Core
                 // first upscaled frames (the engine prints FGOutput from OptiScaler.ini).
                 var fg = OptiScalerFrameGeneration();
                 why += " " + (fg != null
-                    ? L.F($"OptiScaler {opti} was loaded with its own frame generation on ({fg}); on Vulkan it runs through a D3D12 bridge that loses the GPU. Set Frame Generation to none in OptiScaler's menu (FGOutput=nofg in OptiScaler.ini) and use the launcher's frame generation instead.")
+                    ? L.F($"OptiScaler {opti} was loaded with its frame generation set ({fg}), which the engine does not support yet. Set Frame Generation to none in OptiScaler's menu, then play again.")
                     : L.F($"OptiScaler {opti} was loaded: it hooks the game's GPU submissions and runs DLSS itself. If the crash comes back, take OptiScaler's files out of engine\\out to rule it out."));
             }
             return why;
@@ -133,6 +133,8 @@ namespace BloodborneLauncher.Core
                 0xC0000005 => L.T("The engine crashed on a bad memory access (0xC0000005)."),
                 0xC0000409 => L.T("The engine stopped on a failed safety check (0xC0000409)."),
                 0xC00000FD => L.T("The engine ran out of stack (0xC00000FD)."),
+                // A DLL the engine links was not found where Windows looks (its own folder, the system's).
+                0xC0000135 => L.T("The engine could not start: a DLL it needs is missing from engine\\out. Reinstall the package to put it back."),
                 > 0xFFFF => L.F($"The game closed unexpectedly (0x{code:X8})."),
                 _ => L.F($"The game closed unexpectedly (exit code {code}).")
             };

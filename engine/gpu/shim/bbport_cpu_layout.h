@@ -86,8 +86,9 @@ constexpr unsigned kBurstMax = 8, kBurstForcedMax = 16;
 /// `standing`: the standing compile threads. `forced`: BB_PIPELINE_BURST (-1: not set).
 /// `reversible`: a lowered thread priority can be raised again here (Windows itself; not under
 /// Wine, where priorities apply only with a system limit or permission most installs lack, nor on
-/// Linux without privileges). `steer`: BB_CPU_SETS is not 0.
-inline BurstPlan PlanBursts(const Summary& s, unsigned standing, int forced, bool reversible, bool steer,
+/// Linux without privileges). On a hybrid CPU they run on its efficiency cores (0.4.6: BB_CPU_SETS=0,
+/// anywhere, went with the betas).
+inline BurstPlan PlanBursts(const Summary& s, unsigned standing, int forced, bool reversible,
                             const char* not_reversible_why) {
     BurstPlan p;
     if (forced >= 0) {
@@ -96,7 +97,7 @@ inline BurstPlan PlanBursts(const Summary& s, unsigned standing, int forced, boo
     } else if (!reversible) {
         p.why = std::string{not_reversible_why} + "; BB_PIPELINE_BURST=N forces them";
         return p;
-    } else if (s.hybrid && steer) {
+    } else if (s.hybrid) {
         p.threads = std::min(s.efficiency_cores, kBurstMax);
     } else {
         p.threads = s.cores > standing ? std::min(s.cores - standing, kBurstMax) : 0;
@@ -104,7 +105,7 @@ inline BurstPlan PlanBursts(const Summary& s, unsigned standing, int forced, boo
             p.why = "no core beyond the standing compile threads";
         }
     }
-    p.on_efficiency = p.threads != 0 && s.hybrid && steer && !s.efficiency_sets.empty();
+    p.on_efficiency = p.threads != 0 && s.hybrid && !s.efficiency_sets.empty();
     return p;
 }
 

@@ -48,26 +48,24 @@ void Layouts() {
     check(s.logical == 20 && s.cores == 14, "20 logical, 14 cores");
     check(s.performance_cores == 6 && s.performance_logical == 12 && s.efficiency_cores == 8, "6 + 8");
     check(s.efficiency_sets.size() == 8 && s.efficiency_sets.front() == 256 + 12, "the efficiency cores' sets");
-    BurstPlan p = PlanBursts(s, 4, -1, true, true, "");
+    BurstPlan p = PlanBursts(s, 4, -1, true, "");
     check(p.threads == 8 && p.on_efficiency, "8 burst threads on the efficiency cores");
     check(Describe(s, 4, p) ==
               "CPU: 14 cores, 20 logical: 6 performance (2 threads each), 8 efficiency; compile threads 4, "
               "burst threads 8 on the efficiency cores, idle priority",
           "the start line");
-    p = PlanBursts(s, 4, -1, true, false, "");
-    check(p.threads == 8 && !p.on_efficiency, "BB_CPU_SETS=0: cores less the standing threads, anywhere");
     // 8 performance, 12 efficiency: at most 8.
     Layout k7;
     core = 0;
     Add(k7, 8, 2, 1, core);
     Add(k7, 12, 1, 0, core);
-    check(PlanBursts(Summarize(k7), 4, -1, true, true, "").threads == 8, "i7-14700K: at most 8");
+    check(PlanBursts(Summarize(k7), 4, -1, true, "").threads == 8, "i7-14700K: at most 8");
     // 6 performance, 4 efficiency (i5-12600K): one per efficiency core.
     Layout k12;
     core = 0;
     Add(k12, 6, 2, 1, core);
     Add(k12, 4, 1, 0, core);
-    const BurstPlan p12 = PlanBursts(Summarize(k12), 4, -1, true, true, "");
+    const BurstPlan p12 = PlanBursts(Summarize(k12), 4, -1, true, "");
     check(p12.threads == 4 && p12.on_efficiency, "i5-12600K: 4, on the efficiency cores");
 
     // Ryzens: physical cores less the standing threads.
@@ -77,7 +75,7 @@ void Layouts() {
         core = 0;
         Add(l, r[0], 2, 0, core);
         const Summary sr = Summarize(l);
-        const BurstPlan pr = PlanBursts(sr, r[1], -1, true, true, "");
+        const BurstPlan pr = PlanBursts(sr, r[1], -1, true, "");
         char what[64];
         std::snprintf(what, sizeof what, "%u cores x 2: %u burst threads", r[0], r[2]);
         check(!sr.hybrid && sr.cores == r[0] && pr.threads == r[2] && !pr.on_efficiency, what);
@@ -85,32 +83,32 @@ void Layouts() {
     Layout eight;
     core = 0;
     Add(eight, 8, 2, 0, core);
-    check(Describe(Summarize(eight), 4, PlanBursts(Summarize(eight), 4, -1, true, true, "")) ==
+    check(Describe(Summarize(eight), 4, PlanBursts(Summarize(eight), 4, -1, true, "")) ==
               "CPU: 8 cores, 16 logical (2 threads each); compile threads 4, burst threads 4, idle priority",
           "a Ryzen's line");
 
     // Where an idle thread cannot be raised again: none, unless forced.
-    p = PlanBursts(s, 4, -1, false, true, "under Wine");
+    p = PlanBursts(s, 4, -1, false, "under Wine");
     check(p.threads == 0 && p.why == "under Wine; BB_PIPELINE_BURST=N forces them", "none under Wine");
-    p = PlanBursts(s, 4, 3, false, true, "under Wine");
+    p = PlanBursts(s, 4, 3, false, "under Wine");
     check(p.threads == 3 && p.on_efficiency && p.why == "BB_PIPELINE_BURST", "forced under Wine");
-    p = PlanBursts(s, 4, 0, true, true, "");
+    p = PlanBursts(s, 4, 0, true, "");
     check(p.threads == 0 && Describe(s, 4, p).ends_with("burst threads none (BB_PIPELINE_BURST=0)"),
           "BB_PIPELINE_BURST=0: the standing threads only");
-    check(PlanBursts(s, 4, 99, true, true, "").threads == kBurstForcedMax, "forced: at most 16");
+    check(PlanBursts(s, 4, 99, true, "").threads == kBurstForcedMax, "forced: at most 16");
 
     // Not read: half the logical processors taken as cores.
     Layout unknown;
     unknown.count = 12;
     const Summary su = Summarize(unknown);
-    check(!su.known && su.cores == 6 && PlanBursts(su, 4, -1, true, true, "").threads == 2, "layout not read");
-    check(Describe(su, 4, PlanBursts(su, 4, -1, true, true, "")).starts_with("CPU: 12 logical processors (layout not read)"),
+    check(!su.known && su.cores == 6 && PlanBursts(su, 4, -1, true, "").threads == 2, "layout not read");
+    check(Describe(su, 4, PlanBursts(su, 4, -1, true, "")).starts_with("CPU: 12 logical processors (layout not read)"),
           "its line");
     // A 4-core CPU with as many standing threads: none.
     Layout four;
     core = 0;
     Add(four, 4, 1, 0, core);
-    p = PlanBursts(Summarize(four), 4, -1, true, true, "");
+    p = PlanBursts(Summarize(four), 4, -1, true, "");
     check(p.threads == 0 && p.why == "no core beyond the standing compile threads", "no core to spare");
 }
 

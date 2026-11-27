@@ -7,29 +7,27 @@
 // missed. Plain code (tests/test_watch_rules.cpp).
 //
 //   0.4.6 beta 8-9: surfaces the game made without data for the GPU, render and depth targets.
-//   0.4.6 beta 10: GX textures made with their data (BB_WATCH_GAME_TEXTURES=targets keeps them watched).
-//   0.4.6 beta 16 part 2: Scaleform's planes (BB_WATCH_SCALEFORM=1), told by Scaleform's unmap.
+//   0.4.6 beta 10: GX textures made with their data.
+//   0.4.6 beta 16 part 2: Scaleform's planes, told by Scaleform's unmap.
 //   0.4.6 beta 16, YEBIS by its calls (memory-model.md; in place of part 1's rule for YEBIS's registered
 //   textures and step 2's for images over no game resource in its heap): every image in YEBIS's pool, the
-//   heap all of YEBIS's memory comes from (BB_WATCH_YEBIS=1 watches them as before beta 16). The CPU never
+//   heap all of YEBIS's memory comes from. The CPU never
 //   writes a YEBIS texture's memory in place: its data is staged in a block YEBIS has just taken from the
 //   pool and copied in by the GPU, and the staging blocks are what the copy passes read; so YEBIS taking
 //   memory is the call that tells (a written event for the new block), and the GPU's copies are replayed
 //   by the engine. Where the pool is not known (not 1.09's code, or YEBIS's allocations not followed),
 //   nothing would tell: YEBIS's textures are watched, as before beta 16.
+//   The release (0.4.6): one switch left, safe mode's BB_WATCH_GAME_TEXTURES=1, every image watched as in
+//   0.4.5 (BB_WATCH_GAME_TEXTURES=targets, BB_WATCH_SCALEFORM and BB_WATCH_YEBIS, the betas' steps back,
+//   went with the betas).
 #pragma once
 
 #include "engine/gx_resources.h"
 
 namespace VideoCore::WatchRules {
 
-/// BB_WATCH_GAME_TEXTURES: 1 watches everything (safe mode), "targets" beta 9's set, else the default.
-enum class Unwatch { None, Targets, TargetsAndData };
-
 struct Settings {
-    Unwatch kinds = Unwatch::TargetsAndData;
-    bool watch_yebis = false;     ///< BB_WATCH_YEBIS=1: YEBIS's pool watched
-    bool watch_scaleform = false; ///< BB_WATCH_SCALEFORM=1
+    bool watch_all = false; ///< BB_WATCH_GAME_TEXTURES=1 (safe mode): every image watched, as in 0.4.5
 };
 
 /// What the texture cache knows of an image's memory at its registration.
@@ -44,11 +42,11 @@ struct Image {
 /// Whether the game's calls tell this image's writes, so its pages are not watched.
 inline bool ByCalls(const Image& image, const Settings& s) {
     using BbEngine::GxResources::Owner;
-    if (s.kinds == Unwatch::None) {
+    if (s.watch_all) {
         return false;
     }
     // YEBIS's pool: whatever lies there (its textures, its staging blocks, nothing registered).
-    if (image.yebis_pool && s.kinds == Unwatch::TargetsAndData && !s.watch_yebis) {
+    if (image.yebis_pool) {
         return true;
     }
     if (!image.whole) {
@@ -57,14 +55,10 @@ inline bool ByCalls(const Image& image, const Settings& s) {
     if (image.surface || image.owner == Owner::RenderTarget || image.owner == Owner::DepthTarget) {
         return true;
     }
-    if (s.kinds != Unwatch::TargetsAndData) {
-        return false;
-    }
     switch (image.owner) {
     case Owner::TextureData:
-        return true;
     case Owner::Scaleform:
-        return !s.watch_scaleform;
+        return true;
     default:
         return false; // a YEBIS texture outside its known pool: nothing would tell
     }

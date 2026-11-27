@@ -479,7 +479,7 @@ sure OptiScaler will work and that we are optimal, then we'll talk frame generat
 - **T1:** `optiscaler-ini-test` (the shipped ini, a player's, both frame-generation keys, keys of the
   same names in other sections). The tester's runs still to come.
 - The tester's review of the drafts (2026-11-27): "Fine for the crash report, everything else is mostly
-  unnecessary. Mark it, no need to do it right now". **L2 approved, to build later:** with OptiScaler's
+  unnecessary. Mark it, no need to do it right now". **L2 approved, built in engine id 130:** with OptiScaler's
   frame generation set, "…its frame generation set ({fg}), which the engine does not support yet. Set
   Frame Generation to none in OptiScaler's menu, then play again." (today's text points at a launcher
   frame generation that does not exist); 0xC0000135, "The engine could not start: a DLL it needs is
@@ -566,6 +566,19 @@ OptiScaler (G8).
 
 **Phase D: the release candidate.**
 
+- **Settled, engine id 130 (the tester: "Use your own judgement ... Consider all angles"):** none of
+  them is in the launcher (Extra variables and safe mode only). Removed, each default proven and its other
+  value a test or a step back nothing needs: `BB_COPY_HOLD`, `BB_COPY_MERGE`, `BB_TAKE_EARLIER_WRITES`
+  (with its test path and the map that told earlier writes apart for a log count), `BB_LABEL_CHECK` (the
+  fix stays), `BB_CPU_SETS`, `BB_WATCH_YEBIS`, `BB_WATCH_SCALEFORM`, `BB_DMA_TELLS_TEXTURES` (on, kept),
+  `BB_SHARPEN_FSR_OWN` (with AMD FSR's own sharpening path), `BB_TARGET_POOL` (`BB_EMPTY_SURFACES=0` turns
+  it off too), `BB_WATCH_GAME_TEXTURES=targets`; and the owner rule's comparison count with the old
+  guesses (beta 11's, done). Kept for safe mode: `BB_EMPTY_SURFACES`, `BB_WATCH_GAME_TEXTURES=1`,
+  `BB_IMAGE_OWNERS`, `BB_WATCH_GAME_BUFFERS=1`, `BB_PIPELINE_BURST`, `BB_LOAD_UPLOAD`, `BB_READY_SURFACES`,
+  `BB_COPY_NOTICE`, `BB_TRANSLATE_AHEAD`, `BB_VRAM_MANAGER` (Use less VRAM's too); safe mode's list without
+  `BB_TARGET_POOL`. Kept for troubleshooting: `BB_GX_FOLLOW=0` (0.4.5's texture handling in one go),
+  `BB_GX_RESOURCES=0`, `BB_SPLASH=0`, `BB_SHADER_CATALOG=0`, and `BB_TEXTURE_NET` until the performance
+  work decides the net (slow, and it has found nothing). The approved crash-report texts built with it.
 - The switches settled with the tester: every 0.4.6 switch (`BB_EMPTY_SURFACES`, `BB_TARGET_POOL`,
   `BB_WATCH_GAME_TEXTURES`, `BB_TAKE_EARLIER_WRITES`, `BB_IMAGE_OWNERS`, `BB_WATCH_GAME_BUFFERS`,
   `BB_LABEL_CHECK`, `BB_PIPELINE_BURST`, `BB_CPU_SETS`, `BB_LOAD_UPLOAD`, `BB_READY_SURFACES`,

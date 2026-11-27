@@ -125,7 +125,7 @@ public:
     /// 0.4.6 beta 12: the engine wrote guest memory on the CPU for a GPU command (WRITE_DATA, a DMA
     /// fill or copy, occlusion counts): marked to upload, as a fault on a watched page would have.
     void NoteEngineStore(VAddr addr, u64 size);
-    /// 0.4.6 beta 13 (BB_LABEL_CHECK=0: off): the engine stored through the backing view (a label, an
+    /// 0.4.6 beta 13 (BB_LABEL_CHECK=0 turned it off until the release): the engine stored through the backing view (a label, an
     /// occlusion result), which never faults: a page holding an uploaded copy is marked to upload,
     /// pages the GPU wrote are left. Counted (BbStats::backing_stores*).
     void NoteBackingStore(VAddr addr, u64 size);

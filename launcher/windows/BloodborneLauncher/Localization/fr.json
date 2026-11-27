@@ -1,4 +1,6 @@
 {
+  "The engine could not start: a DLL it needs is missing from engine\\out. Reinstall the package to put it back.": "Le moteur n'a pas pu démarrer : une DLL dont il a besoin manque dans engine\\out. Réinstallez le paquet pour la remettre.",
+  "OptiScaler {0} was loaded with its frame generation set ({1}), which the engine does not support yet. Set Frame Generation to none in OptiScaler's menu, then play again.": "OptiScaler {0} était chargé avec sa génération d'images activée ({1}), que le moteur ne prend pas encore en charge. Réglez Frame Generation sur none dans le menu d'OptiScaler, puis rejouez.",
   "OptiScaler {0} was loaded: it hooks the game's GPU submissions and runs DLSS itself. If the crash comes back, take OptiScaler's files out of engine\\out to rule it out.": "OptiScaler {0} était chargé : il intercepte les soumissions GPU du jeu et exécute DLSS lui-même. Si le plantage revient, retirez les fichiers d'OptiScaler de engine\\out pour l'écarter.",
   "{0}\n\nLogged to:\n{1}": "{0}\n\nConsigné dans :\n{1}",
   "Unexpected error": "Erreur inattendue",
@@ -209,7 +211,6 @@
   "bad memory access": "accès mémoire invalide",
   "illegal instruction": "instruction illégale",
   "division by zero": "division par zéro",
-  "OptiScaler {0} was loaded with its own frame generation on ({1}); on Vulkan it runs through a D3D12 bridge that loses the GPU. Set Frame Generation to none in OptiScaler's menu (FGOutput=nofg in OptiScaler.ini) and use the launcher's frame generation instead.": "OptiScaler {0} était chargé avec sa propre génération d'images activée ({1}) ; sous Vulkan, elle passe par un pont D3D12 qui perd le GPU. Réglez Frame Generation sur none dans le menu d'OptiScaler (FGOutput=nofg dans OptiScaler.ini) et utilisez plutôt la génération d'images du lanceur.",
   "Windows was nearly out of memory ({0} MiB of {1} MiB free, {2} MiB commit left): closing other programs or a larger page file helps.": "Windows manquait presque de mémoire ({0} Mio libres sur {1} Mio, {2} Mio de mémoire validée restants) : fermer d'autres programmes ou agrandir le fichier d'échange aide.",
   "RAM: game {0} MiB at the start, {1} MiB at the end ": "RAM : jeu {0} Mio au début, {1} Mio à la fin ",
   "({0} → {1} MiB committed, peak {2} MiB); ": "({0} → {1} Mio validés, pic {2} Mio) ; ",

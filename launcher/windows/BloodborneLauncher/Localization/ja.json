@@ -1,4 +1,6 @@
 {
+  "The engine could not start: a DLL it needs is missing from engine\\out. Reinstall the package to put it back.": "エンジンを起動できませんでした: 必要な DLL が engine\\out にありません。パッケージを再インストールして元に戻してください。",
+  "OptiScaler {0} was loaded with its frame generation set ({1}), which the engine does not support yet. Set Frame Generation to none in OptiScaler's menu, then play again.": "OptiScaler {0} がフレーム生成を有効にした状態 ({1}) で読み込まれていました。エンジンはこれにまだ対応していません。OptiScaler のメニューで Frame Generation を none にしてから、もう一度プレイしてください。",
   "OptiScaler {0} was loaded: it hooks the game's GPU submissions and runs DLSS itself. If the crash comes back, take OptiScaler's files out of engine\\out to rule it out.": "OptiScaler {0} が読み込まれていました: ゲームの GPU 送信をフックし、DLSS を独自に実行します。それでもクラッシュする場合は、OptiScaler のファイルを engine\\out から取り除いて原因を切り分けてください。",
   "{0}\n\nLogged to:\n{1}": "{0}\n\nログの保存先:\n{1}",
   "Unexpected error": "予期しないエラー",
@@ -209,7 +211,6 @@
   "bad memory access": "不正なメモリアクセス",
   "illegal instruction": "不正な命令",
   "division by zero": "ゼロ除算",
-  "OptiScaler {0} was loaded with its own frame generation on ({1}); on Vulkan it runs through a D3D12 bridge that loses the GPU. Set Frame Generation to none in OptiScaler's menu (FGOutput=nofg in OptiScaler.ini) and use the launcher's frame generation instead.": "OptiScaler {0} が独自のフレーム生成を有効にした状態で読み込まれていました ({1})。Vulkan では D3D12 ブリッジ経由で動作するため、GPU が失われます。OptiScaler のメニューで Frame Generation を none に設定し (OptiScaler.ini の FGOutput=nofg)、代わりにランチャーのフレーム生成を使用してください。",
   "Windows was nearly out of memory ({0} MiB of {1} MiB free, {2} MiB commit left): closing other programs or a larger page file helps.": "Windows のメモリがほぼ不足していました (空き {0} MiB / {1} MiB、残りコミット {2} MiB): ほかのプログラムを閉じるか、ページファイルを大きくすると改善します。",
   "RAM: game {0} MiB at the start, {1} MiB at the end ": "RAM: ゲーム 開始時 {0} MiB、終了時 {1} MiB ",
   "({0} → {1} MiB committed, peak {2} MiB); ": "(コミット {0} → {1} MiB、ピーク {2} MiB)、 ",

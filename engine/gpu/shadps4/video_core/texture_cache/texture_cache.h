@@ -184,7 +184,7 @@ public:
 
     /// 0.4.6 beta 16 (YEBIS by its calls, part 2): the engine stored [address, address + size) on the CPU
     /// for a DMA copy or fill: the images left to the calls whose contents come from memory over it are
-    /// marked written (WatchRules::StoreTells; BB_DMA_TELLS_TEXTURES=0: off).
+    /// marked written (WatchRules::StoreTells; 0.4.6 beta 16, YEBIS by its calls, part 2).
     void NoteEngineStore(VAddr address, u64 size);
 
     /// Evicts any images that overlap the unmapped range.
@@ -689,9 +689,6 @@ private:
     std::vector<BbEngine::GxResources::Gone> gx_gone, gx_created;
     /// Beta 16: images of textures the game destroyed, waiting for the GPU to be done with them.
     std::vector<std::pair<ImageId, u64>> dead_images;
-    /// 0.4.6 beta 9: the GPU's newest write to a resource's memory when the game made it (memory ->
-    /// creation time, GpuWriteVersion); StartSurface tells the writes since from older ones.
-    std::unordered_map<VAddr, std::pair<u64, u64>> created_gpu_version;
     /// 0.4.6 beta 9: the textures the CPU wrote through their own calls (GxResources::TakeWritten).
     std::vector<BbEngine::GxResources::Gone> gx_written;
     /// Beta 16: textures to build ahead (BuildAhead), and where each was built: its info, for the

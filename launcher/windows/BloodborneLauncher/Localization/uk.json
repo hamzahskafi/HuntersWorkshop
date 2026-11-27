@@ -1,4 +1,6 @@
 {
+  "The engine could not start: a DLL it needs is missing from engine\\out. Reinstall the package to put it back.": "Рушій не зміг запуститися: у engine\\out бракує потрібної йому DLL. Перевстановіть пакет, щоб її повернути.",
+  "OptiScaler {0} was loaded with its frame generation set ({1}), which the engine does not support yet. Set Frame Generation to none in OptiScaler's menu, then play again.": "OptiScaler {0} було завантажено з увімкненою генерацією кадрів ({1}), яку рушій поки не підтримує. Виберіть none для Frame Generation у меню OptiScaler і запустіть гру знову.",
   "OptiScaler {0} was loaded: it hooks the game's GPU submissions and runs DLSS itself. If the crash comes back, take OptiScaler's files out of engine\\out to rule it out.": "Було завантажено OptiScaler {0}: він перехоплює надсилання GPU-команд гри й сам запускає DLSS. Якщо збій повториться, приберіть файли OptiScaler з engine\\out, щоб виключити його.",
   "{0}\n\nLogged to:\n{1}": "{0}\n\nЗаписано в журнал:\n{1}",
   "Unexpected error": "Неочікувана помилка",
@@ -209,7 +211,6 @@
   "bad memory access": "неприпустимий доступ до пам'яті",
   "illegal instruction": "недопустима інструкція",
   "division by zero": "ділення на нуль",
-  "OptiScaler {0} was loaded with its own frame generation on ({1}); on Vulkan it runs through a D3D12 bridge that loses the GPU. Set Frame Generation to none in OptiScaler's menu (FGOutput=nofg in OptiScaler.ini) and use the launcher's frame generation instead.": "OptiScaler {0} було завантажено з увімкненою власною генерацією кадрів ({1}); у Vulkan вона працює через міст D3D12, який втрачає GPU. Встановіть Frame Generation на none у меню OptiScaler (FGOutput=nofg в OptiScaler.ini) і натомість використовуйте генерацію кадрів лаунчера.",
   "Windows was nearly out of memory ({0} MiB of {1} MiB free, {2} MiB commit left): closing other programs or a larger page file helps.": "Windows майже вичерпала пам'ять (вільно {0} МіБ із {1} МіБ, залишок виділення {2} МіБ): допоможе закриття інших програм або більший файл підкачки.",
   "RAM: game {0} MiB at the start, {1} MiB at the end ": "RAM: гра {0} МіБ на початку, {1} МіБ наприкінці ",
   "({0} → {1} MiB committed, peak {2} MiB); ": "(виділено {0} → {1} МіБ, пік {2} МіБ); ",

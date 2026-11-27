@@ -1,4 +1,6 @@
 {
+  "The engine could not start: a DLL it needs is missing from engine\\out. Reinstall the package to put it back.": "O motor não conseguiu iniciar: falta em engine\\out uma DLL de que ele precisa. Reinstale o pacote para recuperá-la.",
+  "OptiScaler {0} was loaded with its frame generation set ({1}), which the engine does not support yet. Set Frame Generation to none in OptiScaler's menu, then play again.": "O OptiScaler {0} foi carregado com a geração de quadros ativada ({1}), que o motor ainda não suporta. Defina Frame Generation como none no menu do OptiScaler e jogue de novo.",
   "OptiScaler {0} was loaded: it hooks the game's GPU submissions and runs DLSS itself. If the crash comes back, take OptiScaler's files out of engine\\out to rule it out.": "O OptiScaler {0} foi carregado: ele intercepta os envios do jogo para a GPU e executa o DLSS por conta própria. Se o travamento voltar, tire os arquivos do OptiScaler de engine\\out para descartá-lo.",
   "{0}\n\nLogged to:\n{1}": "{0}\n\nRegistrado em:\n{1}",
   "Unexpected error": "Erro inesperado",
@@ -209,7 +211,6 @@
   "bad memory access": "acesso inválido à memória",
   "illegal instruction": "instrução ilegal",
   "division by zero": "divisão por zero",
-  "OptiScaler {0} was loaded with its own frame generation on ({1}); on Vulkan it runs through a D3D12 bridge that loses the GPU. Set Frame Generation to none in OptiScaler's menu (FGOutput=nofg in OptiScaler.ini) and use the launcher's frame generation instead.": "O OptiScaler {0} foi carregado com sua própria geração de quadros ligada ({1}); no Vulkan ela passa por uma ponte D3D12 que perde a GPU. Defina Frame Generation como none no menu do OptiScaler (FGOutput=nofg no OptiScaler.ini) e use a geração de quadros do launcher.",
   "Windows was nearly out of memory ({0} MiB of {1} MiB free, {2} MiB commit left): closing other programs or a larger page file helps.": "O Windows estava quase sem memória ({0} MiB de {1} MiB livres, {2} MiB de commit restantes): fechar outros programas ou um arquivo de paginação maior ajuda.",
   "RAM: game {0} MiB at the start, {1} MiB at the end ": "RAM: jogo {0} MiB no início, {1} MiB no fim ",
   "({0} → {1} MiB committed, peak {2} MiB); ": "({0} → {1} MiB em commit, pico {2} MiB); ",

@@ -236,8 +236,7 @@ private:
     /// (RecordSharpenCopy does it otherwise).
     void ExtraSharpen(vk::Image target, u32 w, u32 h, u32 encoding, float strength);
     /// 0.4.6 beta 16: the strength the engine's sharpening applies after any upscaler (0: none): the
-    /// menu's percentage of RCAS's maximum, as a share; none when AMD FSR sharpened this frame itself
-    /// (BB_SHARPEN_FSR_OWN=1, RecordFrameUpscaler) or TAA's diagnostic view is on.
+    /// menu's percentage of RCAS's maximum, as a share; none when TAA's diagnostic view is on.
     [[nodiscard]] float ExtraSharpenAmount() const;
     /// 0.4.6 beta 16: one line once the sharpening has changed and held for a second (who sharpens,
     /// how strongly, on what); a dragged slider wrote one a step (1,272 lines in the tester's
@@ -394,13 +393,10 @@ private:
     vk::UniqueDescriptorSetLayout fsr4_encode_desc_layout;
     vk::UniquePipelineLayout fsr4_encode_pipeline_layout;
     vk::UniquePipeline fsr4_encode_pipeline;
-    /// 0.4.6 beta 16: AMD FSR sharpened the last frame itself (BB_SHARPEN_FSR_OWN=1).
-    bool fsr_sharpened = false;
     /// 0.4.6 beta 16: ReportSharpening's last state, since when it holds, and whether it was said.
     struct SharpenState {
         int percent = -1, upscaler = -1;
         u32 encoding = 0;
-        bool fsr_own = false;
         bool operator==(const SharpenState&) const = default;
     } sharpen_state;
     std::chrono::steady_clock::time_point sharpen_since{};

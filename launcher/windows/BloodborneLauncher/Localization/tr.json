@@ -1,4 +1,6 @@
 {
+  "The engine could not start: a DLL it needs is missing from engine\\out. Reinstall the package to put it back.": "Motor başlatılamadı: ihtiyaç duyduğu bir DLL engine\\out klasöründe eksik. Geri getirmek için paketi yeniden kurun.",
+  "OptiScaler {0} was loaded with its frame generation set ({1}), which the engine does not support yet. Set Frame Generation to none in OptiScaler's menu, then play again.": "OptiScaler {0}, kare oluşturma açık ({1}) olarak yüklenmişti; motor bunu henüz desteklemiyor. OptiScaler menüsünde Frame Generation'ı none yapın, sonra yeniden oynayın.",
   "OptiScaler {0} was loaded: it hooks the game's GPU submissions and runs DLSS itself. If the crash comes back, take OptiScaler's files out of engine\\out to rule it out.": "OptiScaler {0} yüklüydü: oyunun GPU gönderimlerine kanca atar ve DLSS'i kendisi çalıştırır. Çökme tekrar ederse olasılığı elemek için OptiScaler dosyalarını engine\\out klasöründen çıkarın.",
   "{0}\n\nLogged to:\n{1}": "{0}\n\nKayıt dosyası:\n{1}",
   "Unexpected error": "Beklenmeyen hata",
@@ -209,7 +211,6 @@
   "bad memory access": "hatalı bellek erişimi",
   "illegal instruction": "geçersiz komut",
   "division by zero": "sıfıra bölme",
-  "OptiScaler {0} was loaded with its own frame generation on ({1}); on Vulkan it runs through a D3D12 bridge that loses the GPU. Set Frame Generation to none in OptiScaler's menu (FGOutput=nofg in OptiScaler.ini) and use the launcher's frame generation instead.": "OptiScaler {0}, kendi kare oluşturması açık olarak yüklüydü ({1}); Vulkan'da bu, GPU'yu kaybeden bir D3D12 köprüsü üzerinden çalışır. OptiScaler menüsünde Frame Generation'ı none yapın (OptiScaler.ini içinde FGOutput=nofg) ve bunun yerine başlatıcının kare oluşturmasını kullanın.",
   "Windows was nearly out of memory ({0} MiB of {1} MiB free, {2} MiB commit left): closing other programs or a larger page file helps.": "Windows'un belleği neredeyse tükenmişti ({1} MiB'ın {0} MiB'ı boş, {2} MiB taahhüt kaldı): diğer programları kapatmak veya daha büyük bir disk belleği dosyası yardımcı olur.",
   "RAM: game {0} MiB at the start, {1} MiB at the end ": "RAM: oyun başlangıçta {0} MiB, sonda {1} MiB ",
   "({0} → {1} MiB committed, peak {2} MiB); ": "({0} → {1} MiB taahhüt edildi, en yüksek {2} MiB); ",

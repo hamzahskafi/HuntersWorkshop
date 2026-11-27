@@ -54,13 +54,6 @@ u32 TaaDiagnostics() {
     return diagnostics;
 }
 
-/// 0.4.6 beta 16: AMD's sharpness for the menu's percentage of RCAS's maximum, for AMD FSR's own
-/// sharpening (BB_SHARPEN_FSR_OWN=1): FSR 2 and 3 run RCAS 2 - 2s stops below its maximum, so their
-/// weakest, 0, is 25% (FSR 4's own mapping is not published).
-float FsrSharpness(int percent) {
-    return percent >= 25 ? 1.0f + 0.5f * std::log2(float(percent) / 100.0f) : 0.0f;
-}
-
 /// One of the upscaler's own images: one level and layer, unwritten (undefined layout), and a
 /// view of all of it. `view` is released first: it may be a view of the image replaced.
 void MakeImage(const Instance& instance, VideoCore::UniqueImage& image, vk::UniqueImageView& view,
@@ -1163,10 +1156,10 @@ float TemporalUpscaler::ExtraSharpenAmount() const {
     // percentage of RCAS's maximum. Until beta 15, AMD FSR's own RCAS sharpened up to 1 and this pass
     // above it, up to 2, and for DLSS this pass alone (NVIDIA retired DLSS's sharpening): AMD FSR's
     // RCAS works on the light it upscales, linear on the 1080p path, where it sharpened about half as
-    // much on strong edges and nothing beside a value above 1. BB_SHARPEN_FSR_OWN=1: AMD FSR's own
-    // instead, for comparison (RecordFrameUpscaler). Not over TAA's diagnostic view.
+    // much on strong edges and nothing beside a value above 1 (BB_SHARPEN_FSR_OWN=1 compared it with
+    // this one until the release). Not over TAA's diagnostic view.
     const auto& settings = BbSettings::Get();
-    if (fsr_sharpened || (settings.upscaler == BbSettings::UpscalerTaa && TaaDiagnostics())) {
+    if (settings.upscaler == BbSettings::UpscalerTaa && TaaDiagnostics()) {
         return 0.0f;
     }
     return settings.sharpen ? float(std::clamp(settings.sharpening.load(), 0, 100)) / 100.0f : 0.0f;
@@ -1174,12 +1167,10 @@ float TemporalUpscaler::ExtraSharpenAmount() const {
 
 void TemporalUpscaler::ReportSharpening(float strength, u32 encoding) {
     const auto& settings = BbSettings::Get();
-    const int percent = std::clamp(settings.sharpening.load(), 0, 100);
     const SharpenState state{
-        .percent = fsr_sharpened ? percent : int(std::lround(strength * 100.0f)),
+        .percent = int(std::lround(strength * 100.0f)),
         .upscaler = settings.upscaler.load(),
         .encoding = encoding,
-        .fsr_own = fsr_sharpened,
     };
     const auto now = std::chrono::steady_clock::now();
     if (!(state == sharpen_state)) {
@@ -1196,11 +1187,7 @@ void TemporalUpscaler::ReportSharpening(float strength, u32 encoding) {
         "the HDR scene (tone mapped reversibly, gamma 2.0)", "linear light (gamma 2.0)",
         "the display-encoded frame"};
     const std::string who = BackendName();
-    if (state.fsr_own) {
-        std::printf("Upscaler: sharpening: AMD FSR's own RCAS at %d%% (BB_SHARPEN_FSR_OWN=1; AMD's "
-                    "sharpness %.2f), on the light it upscales\n",
-                    percent, FsrSharpness(percent));
-    } else if (state.percent > 0) {
+    if (state.percent > 0) {
         std::printf("Upscaler: sharpening: RCAS at %d%% after %s, on %s\n",
                     state.percent, who.c_str(), kHolds[std::min(encoding, 2u)]);
     } else {
@@ -2898,13 +2885,7 @@ bool TemporalUpscaler::RecordFrameUpscaler(vk::CommandBuffer cmdbuf, UpscaleInpu
     const float sign = settings.fsr_invert_jitter.load() ? -1.0f : 1.0f;
     const bool use_dlss = settings.upscaler == BbSettings::UpscalerDlss && dlss;
     // 0.4.6 beta 16: AMD FSR's own RCAS off, the engine's sharpening after it as after DLSS
-    // (ExtraSharpenAmount). BB_SHARPEN_FSR_OWN=1: AMD FSR's own instead, for comparison.
-    static const bool fsr_own = [] {
-        const char* env = std::getenv("BB_SHARPEN_FSR_OWN");
-        return env && env[0] == '1';
-    }();
-    const int sharpen_percent = std::clamp(settings.sharpening.load(), 0, 100);
-    fsr_sharpened = !use_dlss && fsr_own && settings.sharpen && sharpen_percent > 0;
+    // (ExtraSharpenAmount).
     UpscaleInput::Frame frame{
         .cmdbuf = cmdbuf,
         .color = color,
@@ -2920,8 +2901,6 @@ bool TemporalUpscaler::RecordFrameUpscaler(vk::CommandBuffer cmdbuf, UpscaleInpu
         .near_plane = camera_motion.Near(),
         .far_plane = 3000.0f,
         .vertical_fov = camera_motion.VerticalFov(),
-        .sharpness = FsrSharpness(sharpen_percent),
-        .sharpen = fsr_sharpened,
         .reset = reset,
         .hdr = hdr,
     };

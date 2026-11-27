@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // 0.4.6 beta 16 (shadps4/video_core/texture_cache/watch_rules.h): which images the texture cache leaves to
-// the game's calls instead of watching their pages, under each setting, which of those the texture net
+// the game's calls instead of watching their pages, by default and in safe mode, which of those the texture net
 // checks and in which lane, which an engine DMA store marks written, and the net's verdict on a look. Every
 // owner kind, with and without its data, surface or not, whole or not, in YEBIS's pool or not (YEBIS by its
 // calls).
@@ -35,14 +35,8 @@ Image InPool(Owner owner = Owner::None, bool whole = false, bool with_data = fal
 
 int main() {
     const Settings beta16{};
-    Settings watch_yebis{};
-    watch_yebis.watch_yebis = true;
-    Settings watch_scaleform{};
-    watch_scaleform.watch_scaleform = true;
-    Settings targets{};
-    targets.kinds = Unwatch::Targets;
     Settings safe{};
-    safe.kinds = Unwatch::None;
+    safe.watch_all = true;
 
     // Beta 8-10, unchanged: surfaces and targets; GX textures made with their data; buffers and memory
     // the game made nothing at stay watched.
@@ -59,8 +53,7 @@ int main() {
           "an image inside a texture (not at its start) stays watched");
     check(!ByCalls({Owner::RenderTarget, false, true, false, false}, beta16), "a target not at its start stays watched");
 
-    // YEBIS by its calls: every image in YEBIS's pool is left to the calls, whatever the registry has there
-    // (BB_WATCH_YEBIS=1 watches them as before beta 16).
+    // YEBIS by its calls: every image in YEBIS's pool is left to the calls, whatever the registry has there.
     check(ByCalls(InPool(Owner::Yebis, true, true), beta16), "a YEBIS texture made with its data is left to the calls");
     check(ByCalls(InPool(Owner::Yebis, true, false), beta16), "a YEBIS texture made without its data is left to the calls");
     check(ByCalls(InPool(Owner::Yebis, true, false, true), beta16), "a YEBIS surface is left to the calls");
@@ -70,25 +63,10 @@ int main() {
     check(!ByCalls(Whole(Owner::Yebis, true), beta16), "a YEBIS texture outside a known pool stays watched");
     check(!ByCalls(Whole(Owner::Yebis, false), beta16), "a YEBIS texture made without data outside the pool stays watched");
     check(ByCalls(Whole(Owner::Yebis, false, true), beta16), "a YEBIS surface outside the pool is left to the calls (beta 9)");
-    // BB_WATCH_YEBIS=1: as before beta 16 (surfaces and targets left to the calls, the rest watched).
-    check(!ByCalls(InPool(Owner::Yebis, true, true), watch_yebis), "BB_WATCH_YEBIS=1 watches YEBIS's textures");
-    check(!ByCalls(InPool(), watch_yebis), "BB_WATCH_YEBIS=1 watches its staging blocks");
-    check(ByCalls(InPool(Owner::Yebis, true, false, true), watch_yebis), "BB_WATCH_YEBIS=1 leaves its surfaces to the calls");
-    check(ByCalls(Whole(Owner::Scaleform), watch_yebis), "BB_WATCH_YEBIS=1 leaves Scaleform's planes alone");
-    check(ByCalls(Whole(Owner::TextureData, true), watch_yebis), "BB_WATCH_YEBIS=1 leaves GX's textures alone");
-
-    // Beta 16 part 2: Scaleform's planes; BB_WATCH_SCALEFORM=1.
+    // Beta 16 part 2: Scaleform's planes.
     check(ByCalls(Whole(Owner::Scaleform), beta16), "a Scaleform plane is left to the calls");
-    check(!ByCalls(Whole(Owner::Scaleform), watch_scaleform), "BB_WATCH_SCALEFORM=1 watches Scaleform's planes");
-    check(ByCalls(InPool(Owner::Yebis, true, true), watch_scaleform), "BB_WATCH_SCALEFORM=1 leaves YEBIS's pool alone");
 
-    // BB_WATCH_GAME_TEXTURES=targets: beta 9's set only; =1 (safe mode): everything watched.
-    check(ByCalls(Whole(Owner::RenderTarget), targets), "targets: a render target is left to the calls");
-    check(!ByCalls(Whole(Owner::TextureData, true), targets), "targets: a GX texture made with its data is watched");
-    check(!ByCalls(InPool(Owner::Yebis, true, true), targets), "targets: a YEBIS texture is watched");
-    check(!ByCalls(InPool(), targets), "targets: a staging block is watched");
-    check(ByCalls(InPool(Owner::Yebis, true, false, true), targets), "targets: a YEBIS surface is left to the calls");
-    check(!ByCalls(Whole(Owner::Scaleform), targets), "targets: a Scaleform plane is watched");
+    // BB_WATCH_GAME_TEXTURES=1 (safe mode): everything watched.
     for (int o = 0; o < int(Owner::kCount); ++o) {
         for (int bits = 0; bits < 16; ++bits) {
             const Image image{Owner(o), (bits & 8) != 0, (bits & 2) != 0, (bits & 1) != 0, (bits & 4) != 0};
@@ -104,10 +82,7 @@ int main() {
     check(NetChecks(InPool(Owner::Yebis, true, false), beta16), "the net checks a YEBIS texture made without its data");
     check(NetChecks(InPool(), beta16), "the net checks a staging block");
     check(NetChecks(Whole(Owner::Scaleform), beta16), "the net checks a Scaleform plane");
-    check(!NetChecks(InPool(Owner::Yebis, true, true), watch_yebis), "the net leaves a watched YEBIS texture");
-    check(!NetChecks(InPool(), watch_yebis), "the net leaves a watched staging block");
     check(!NetChecks(Whole(Owner::Yebis, true), beta16), "the net leaves a YEBIS texture outside the pool (watched)");
-    check(!NetChecks(Whole(Owner::Scaleform), watch_scaleform), "the net leaves a watched Scaleform plane");
     check(!NetChecks(Whole(Owner::RenderTarget), beta16), "the net leaves a render target");
     check(!NetChecks(Whole(Owner::DepthTarget), beta16), "the net leaves a depth target");
     check(!NetChecks(Whole(Owner::TextureNoData, false, true), beta16), "the net leaves a surface");
@@ -117,7 +92,7 @@ int main() {
     check(!NetChecks({Owner::None, false, false, false, false}, beta16),
           "the net leaves memory over no resource outside the pool");
     // Whatever the net checks is left to the calls, and every image has a lane.
-    const Settings* const all[] = {&beta16, &watch_yebis, &watch_scaleform, &targets};
+    const Settings* const all[] = {&beta16, &safe};
     for (int o = 0; o < int(Owner::kCount); ++o) {
         for (int bits = 0; bits < 16; ++bits) {
             const Image image{Owner(o), (bits & 4) != 0, (bits & 2) != 0, (bits & 1) != 0, (bits & 8) != 0};

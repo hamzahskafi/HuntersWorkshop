@@ -444,8 +444,7 @@ struct Counts {
         overlap_base{}, overlap_part{};
     std::atomic<int> overlap_logged{0};
     std::atomic<std::uint64_t> creation_writes{0}, creation_write_bytes{0}, creation_surfaces_kept{0},
-        dead_taken_destroyed{0}, owner_handed{0}, owner_handed_bytes{0}, owner_retired{0},
-        owner_retired_bytes{0}, owner_retired_pooled{0},
+        dead_taken_destroyed{0}, owner_handed{0}, owner_handed_bytes{0},
         dead_taken_reused{0}, dead_taken_hand_over{0}, dead_taken_refuse{0}, dead_taken_bytes{0},
         copies_memory{0}, copies_memory_owned_destination{0}, copies_memory_both_owned{0};
     // 0.4.6 beta 12: the memory events given to the buffer cache, pages kept writable for the calls (a
@@ -831,7 +830,7 @@ bool YebisPoolRange(std::uint64_t* begin, std::uint64_t* end) {
             g_yebis_pool_end = e;
             g_yebis_pool_found.store(true, std::memory_order_release);
             host_log("GX memory: YEBIS's pool is %#llx-%#llx (%.0f MiB), read from the game's graphics object; the "
-                     "images in it are left to YEBIS's calls (BB_WATCH_YEBIS=1: watched)",
+                     "images in it are left to YEBIS's calls (BB_WATCH_GAME_TEXTURES=1: watched)",
                      (unsigned long long)b, (unsigned long long)e, double(e - b) / (1 << 20));
         }
     }
@@ -1512,7 +1511,7 @@ void NoteImageWatchFault(const WatchedImage& w) {
         g_counts.image_faults_past.fetch_add(1, std::memory_order_relaxed);
     }
     // 0.4.6 beta 16 (YEBIS by its calls): whether the image lies in YEBIS's pool (left to the calls unless
-    // BB_WATCH_YEBIS=1).
+    // every image is watched, BB_WATCH_GAME_TEXTURES=1).
     std::uint64_t pool_begin = 0, pool_end = 0;
     const bool pool_known = YebisPoolRange(&pool_begin, &pool_end);
     const bool in_pool = pool_known && w.memory >= pool_begin && w.memory < pool_end;
@@ -1799,14 +1798,6 @@ void NoteDeadImageTaken(bool destroyed, bool hand_over, bool refuse, std::uint64
 void NoteOwnerHandOver(std::uint64_t images, std::uint64_t bytes) {
     g_counts.owner_handed.fetch_add(images, std::memory_order_relaxed);
     g_counts.owner_handed_bytes.fetch_add(bytes, std::memory_order_relaxed);
-}
-
-void NoteOwnerRetired(std::uint64_t bytes, bool pooled) {
-    g_counts.owner_retired.fetch_add(1, std::memory_order_relaxed);
-    g_counts.owner_retired_bytes.fetch_add(bytes, std::memory_order_relaxed);
-    if (pooled) {
-        g_counts.owner_retired_pooled.fetch_add(1, std::memory_order_relaxed);
-    }
 }
 
 void NoteOwnerGuess(OwnerGuess guess, std::uint64_t bytes) {
@@ -2428,10 +2419,8 @@ void LogMinute() {
              (unsigned long long)take(g_counts.shaders[3]), (unsigned long long)take(g_counts.shaders_loading));
     // 0.4.6 beta 8: surfaces, first fills, CPU writes, the pool and the unwatched images; then shaders.
     static const char* const kStartNames[] = {"empty", "depth cleared", "depth cleared under the game's clear",
-                                              "taken from the GPU's writes as a buffer since it was made",
-                                              "filled from memory (its resource gone)",
-                                              "taken from the GPU's writes from before it was made",
-                                              "started empty, the GPU's earlier writes left out"};
+                                              "taken from the GPU's writes as a buffer",
+                                              "filled from memory (its resource gone)"};
     std::string starts, fills, writes;
     for (std::size_t h = 0; h < std::size_t(SurfaceStart::kCount); ++h) {
         std::string owners;
@@ -2533,11 +2522,8 @@ void LogMinute() {
         }
     }
     host_log("GX memory, the owner rule this minute (beta 11): images handed to a texture other than YEBIS's made "
-             "over them without data, of their shape, %llu (%.0f MiB); retired that the old guesses kept %llu (%.0f "
-             "MiB), of them taken by a new surface as its Vulkan image %llu",
-             (unsigned long long)take(g_counts.owner_handed), Mib(take(g_counts.owner_handed_bytes)),
-             (unsigned long long)take(g_counts.owner_retired), Mib(take(g_counts.owner_retired_bytes)),
-             (unsigned long long)take(g_counts.owner_retired_pooled));
+             "over them without data, of their shape, %llu (%.0f MiB)",
+             (unsigned long long)take(g_counts.owner_handed), Mib(take(g_counts.owner_handed_bytes)));
     {
         auto ev = [&](MemoryEvent e) { return (unsigned long long)take(g_counts.memory_events[std::size_t(e)]); };
         auto evb = [&](MemoryEvent e) { return Mib(take(g_counts.memory_event_bytes[std::size_t(e)])); };

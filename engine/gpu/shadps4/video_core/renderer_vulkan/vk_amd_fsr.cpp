@@ -640,8 +640,8 @@ struct AmdFsr::Impl {
         d.motionVectorScale = {1.0f, flip_y ? -1.0f : 1.0f};
         d.renderSize = {f.render_width, f.render_height};
         d.upscaleSize = {f.output.width, f.output.height};
-        d.enableSharpening = f.sharpen;
-        d.sharpness = std::clamp(f.sharpness, 0.0f, 1.0f);
+        d.enableSharpening = false; // the engine's own sharpening runs after every upscaler (0.4.6 beta 16)
+        d.sharpness = 0.0f;
         d.frameTimeDelta = f.frame_ms;
         d.preExposure = 1.0f;
         d.reset = f.reset;

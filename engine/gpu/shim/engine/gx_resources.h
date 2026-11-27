@@ -206,10 +206,8 @@ enum class SurfaceStart : std::uint8_t {
     Empty,       // cleared (colour to zero)
     DepthEmpty,  // a depth target cleared (depth 1, stencil 0), no game clear pending in its HTILE
     DepthCleared, // the same, with the game's clear pending (it lands on top)
-    Taken,       // the GPU had written its memory as a buffer since it was made: filled from that
+    Taken,       // the GPU had written its memory as a buffer (since it was made or before): filled from that
     Gone,        // its resource was no longer the live one there: filled from memory as before
-    TakenEarlier,   // 0.4.6 beta 9: the GPU's writes there are older than the resource: filled from them
-    EarlierSkipped, // the same left out (BB_TAKE_EARLIER_WRITES=0): started empty
     kCount
 };
 void NoteSurfaceStart(Owner owner, SurfaceStart how, std::uint64_t bytes);
@@ -284,10 +282,9 @@ void NoteUntoldWrite(std::uint64_t address, std::uint64_t bytes, std::uint64_t k
 // edge, a page beside a live resource, a live texture by its owner) for the minute line.
 void NoteWriteFault(std::uint64_t address, unsigned watched);
 // 0.4.6 beta 11 (the owner rule): images handed to a texture of the game's other than YEBIS's made over
-// their memory without data, with their shape; images retired that the old guesses kept, and of them
-// those a new surface took as its Vulkan image.
+// their memory without data, with their shape. (Until the release also the images retired that the old
+// guesses would have kept: a comparison for beta 11, done.)
 void NoteOwnerHandOver(std::uint64_t images, std::uint64_t bytes);
-void NoteOwnerRetired(std::uint64_t bytes, bool pooled);
 // Where today's rules guess and the owner rule would retire instead: a dead image kept because another
 // live texture overlaps it, or because it was used just before its memory's new resource was made; and
 // a stale image the collector freed that had an owner (the owner rule retires it when its texture goes).
