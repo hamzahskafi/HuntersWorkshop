@@ -221,7 +221,14 @@ The tester's two runs: `20261128_000941` (`BB_GPU_PROFILE=1`) and `20261128_0014
    at its own pace (a short timer, not a spin): the CPU cost stays small.
 3. **The queue design stands:** units collect while the GPU is busy, an idle GPU takes the next at
    once, a completed frame goes. With fences off the submissions, nothing else asks for a submission.
-4. **The pass cuts:** decided by an unprofiled run.
+4. **The pass cuts: cut only where a pass ends.** The unprofiled runs (`20261128_003226` default,
+   `20261128_002730` with `BB_CUT_IN_PASS=0`): FPS 229.3 to 231.0 at the lamp spot (+0.7%), 199.8 to 201.0
+   in the busy view (+0.6%), 226.1 to 228.0 in the slow area (+0.8%); the same direction at all three, about
+   the size of the run-to-run spread for a single run. Cuts a second 3,400-4,900 to 430-940, command
+   buffers a submission halved, stage B's busy share and stage A's idle unchanged: the recording keeps up
+   with the long passes on one thread. So the simplest form, with no suspend and resume needed: the
+   recording threads cut only where a pass ends (and inside one only past 8 segments' size). The
+   profiled runs had shown +1.2-2.4%, inflated by the profiler's own pass ends and timestamps at each cut.
 
 ## Expected, if the counts are favorable
 
