@@ -17,6 +17,7 @@
 
 #include "bbport_copy.h"
 #include "bbport_platform.h"
+#include "bbport_roles.h"
 #include "bbport_sections.h"
 #include "video_core/renderer_vulkan/vk_gpu_profiler.h"
 #include "bbport_toggles.h"
@@ -111,11 +112,7 @@ namespace {
 /// from 12. One thread records ~75% of a core at 200 FPS (4 cores / 8 threads); the segments
 /// let the stream use more than one.
 u32 RecordingThreadCount() {
-    if (const char* env = std::getenv("BB_VK_RECORD_THREADS")) {
-        return std::clamp(std::atoi(env), 1, 8);
-    }
-    const unsigned available = BbThreads::Available();
-    return available >= 12 ? 3 : available >= 8 ? 2 : 1;
+    return BbRoles::PoolSize(BbRoles::Pool::Recording); // BB_VK_RECORD_THREADS
 }
 
 vk::CommandBuffer BeginCommandBuffer(CommandPool& pool) {

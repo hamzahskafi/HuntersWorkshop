@@ -17,7 +17,6 @@ static size_t handler_count, handler_capacity, calls_init, calls_atexit, calls_c
 static uint64_t capabilities;
 static _Atomic size_t guards_acquired, guards_released;
 static uint64_t stack_canary;
-static _Atomic size_t memory_calls;
 /* Dynamic TLS of linked modules: module IDs 2..7 (1 is the eboot's static TLS). */
 #define TLS_MODULES 8
 static struct { const void *data; uint64_t filesz, memsz; } tls_modules[TLS_MODULES];
@@ -96,7 +95,6 @@ void runtime_report(void) {
     runtime_pad_report();
     runtime_savedata_report();
     runtime_file_report();
-    printf("Runtime: memory operations=%zu\n", (size_t)memory_calls);
 }
 static ABI void init_env(void) {
     /* prepare.py verified the supplied libc export consists of exactly C3. */
@@ -174,21 +172,12 @@ static ABI __attribute__((noreturn)) void stack_fail(void) {
     fputs("STOP: guest stack protector detected corruption\n", stderr);
     exit(22);
 }
-static ABI void *guest_memset(void *dst, int value, size_t size) {
-    atomic_fetch_add_explicit(&memory_calls,1,memory_order_relaxed);
-    memset(dst, value, size); return dst;
-}
-static ABI void *guest_memcpy(void *dst, const void *src, size_t size) {
-    atomic_fetch_add_explicit(&memory_calls,1,memory_order_relaxed);
-    memcpy(dst, src, size); return dst;
-}
-static ABI void *guest_memmove(void *dst, const void *src, size_t size) {
-    atomic_fetch_add_explicit(&memory_calls,1,memory_order_relaxed);
-    memmove(dst, src, size); return dst;
-}
-static ABI int guest_memcmp(const void *a, const void *b, size_t size) {
-    atomic_fetch_add_explicit(&memory_calls,1,memory_order_relaxed); return memcmp(a, b, size);
-}
+/* 0.4.6 beta 18: no shared count here any more (the "memory operations" line): one atomic add to a
+ * cache line every game thread wrote, on every guest memcpy, where the thread sampler found them. */
+static ABI void *guest_memset(void *dst, int value, size_t size) { memset(dst, value, size); return dst; }
+static ABI void *guest_memcpy(void *dst, const void *src, size_t size) { memcpy(dst, src, size); return dst; }
+static ABI void *guest_memmove(void *dst, const void *src, size_t size) { memmove(dst, src, size); return dst; }
+static ABI int guest_memcmp(const void *a, const void *b, size_t size) { return memcmp(a, b, size); }
 static ABI size_t guest_strlen(const char *text) { return strlen(text); }
 static ABI __attribute__((noreturn)) void guest_libc_exit(int status) {
     printf("Runtime: guest requested exit(%d)\n", status);

@@ -24,6 +24,7 @@
 #include "engine_hooks.h"
 #include "engine_state.h"
 #include "loading.h"
+#include "bbport_roles.h"
 
 #include <algorithm>
 #include <array>
@@ -335,6 +336,7 @@ void WorkerLoop() {
 #else
     pthread_setname_np(pthread_self(), "bb:GxPrepare");
 #endif
+    BbRoles::NamedEngine("bb:GxPrepare"); // 0.4.6 beta 18
     ThreadSlot& slot = CurrentSlot();
     for (;;) {
         Ahead job;

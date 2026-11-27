@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // bbport: direct calls, stage 2 (see bbport_native_calls.h).
 #include "bbport_native_calls.h"
+#include "bbport_counter.h"
 #include "bbport_log_level.h"
 
 #include <atomic>
@@ -64,8 +65,9 @@ void Unlock(Slot& s) {
     s.lock.store(0, std::memory_order_release);
 }
 
-// Statistics: game threads write the atomics, the GPU thread the plain counters and prints.
-std::atomic<u64> written_records{0}, written_fallback{0};
+// Statistics: game threads add to the counters (a slot each, beta 18: no shared cache line on every
+// draw record), the GPU thread to the plain ones and prints.
+BbStats::Counter written_records, written_fallback;
 u64 verified = 0, mismatches = 0, unrecorded = 0, trace_trailers = 0, decoded = 0;
 u64 window_draws = 0, packet_ticks = 0, draw_ticks = 0, timed_draws = 0;
 u64 window_tsc = 0;
@@ -169,7 +171,7 @@ void ReportMismatch(const char* what, u64 address, const DrawRecord& record, con
 }
 
 void NoteWritten(bool as_record) {
-    (as_record ? written_records : written_fallback).fetch_add(1, std::memory_order_relaxed);
+    (as_record ? written_records : written_fallback).Add();
 }
 
 void NoteDecoded() {
@@ -221,8 +223,8 @@ void MaybeReport() {
         // Every 5 s: with the frame statistics or from the detailed log level on.
         std::printf("Native calls: %llu draws as records (%llu written, %llu kept as PM4)\n",
                     (unsigned long long)decoded,
-                    (unsigned long long)written_records.exchange(0, std::memory_order_relaxed),
-                    (unsigned long long)written_fallback.exchange(0, std::memory_order_relaxed));
+                    (unsigned long long)written_records.Exchange(),
+                    (unsigned long long)written_fallback.Exchange());
     }
     if (timing && ticks_per_us > 0.0 && timed_draws) {
         std::printf("Native calls (%s) GPU command thread: %.0f draws/s, draw packets %.3f us/draw, "

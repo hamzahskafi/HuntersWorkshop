@@ -10,6 +10,7 @@
 #include <cstring>
 
 #include "bbport_native_calls.h"
+#include "bbport_roles.h"
 #include "bbport_threads.h"
 #include "bbport_toggles.h"
 #include "common/thread.h"
@@ -56,18 +57,8 @@ void ForEachPacket(std::span<const u32> commands, Func&& func) {
 }
 
 u32 DefaultWorkerCount() {
-    if (const char* env = std::getenv("BB_PREP_WORKERS")) {
-        return static_cast<u32>(std::clamp(std::atoi(env), 0, 16));
-    }
-    // Workers are SCHED_IDLE (Windows: THREAD_PRIORITY_IDLE) and claim whole buffers. Below 16
-    // hardware threads idle ones still share cores with the render chain (GPU command thread,
-    // draw recording, Vulkan recording and copy threads) and the game's threads: a quarter of
-    // them (8 threads 2, 12 threads 3). From 16 on, 3/8 of them, 6 to 8.
-    const u32 available = BbThreads::Available();
-    if (available < 16) {
-        return std::max<u32>(available / 4, 1);
-    }
-    return std::clamp<u32>(available * 3 / 8, 6, 8);
+    // BB_PREP_WORKERS. Workers are idle priority (the Assist role) and claim whole buffers.
+    return BbRoles::PoolSize(BbRoles::Pool::DrawPrep);
 }
 
 /// Flattened user data of one submission: chunks never move, so the GPU thread can read a

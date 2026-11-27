@@ -21,6 +21,7 @@
 
 #include "bbport_cpu_layout.h"
 #include "bbport_log_level.h"
+#include "bbport_roles.h"
 #include "bbport_threads.h"
 #include "engine/frame_window.h"
 #include "common/thread.h"
@@ -118,10 +119,7 @@ public:
 
 private:
     PipelineCompiler() {
-        threads = std::clamp<u32>(BbThreads::Available() / 3, 1, 4);
-        if (const char* env = std::getenv("BB_PIPELINE_THREADS"); env && env[0]) {
-            threads = std::clamp(std::atoi(env), 1, 16);
-        }
+        threads = BbRoles::PoolSize(BbRoles::Pool::Compile); // BB_PIPELINE_THREADS
         for (u32 i = 0; i < threads; ++i) {
             std::thread([this, i] {
                 Common::SetCurrentThreadName(("bb:Pipeline" + std::to_string(i)).c_str());
@@ -163,7 +161,9 @@ private:
         for (u32 i = 0; i < burst_threads; ++i) {
             std::thread([this, i, sets] {
                 Common::SetCurrentThreadName(("bb:PipelineBurst" + std::to_string(i)).c_str());
-                if (!sets.empty() && !BbCpu::SteerCurrentThread(sets) && i == 0) {
+                // 0.4.6 beta 18: under roles the Background role keeps them on the efficiency
+                // cores (and off them while loading).
+                if (!BbRoles::On() && !sets.empty() && !BbCpu::SteerCurrentThread(sets) && i == 0) {
                     std::printf("Pipelines: burst threads could not be kept on the efficiency cores\n");
                 }
                 burst_handles[i] = BbThreads::SelfHandle();

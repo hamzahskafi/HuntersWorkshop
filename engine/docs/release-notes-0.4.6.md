@@ -390,6 +390,28 @@ without thread support although the movie player uses it from three threads.
   just before: a short wait and, for a moment, missing scene geometry. Their vertex shader uses no
   resources, which play already knew to allow; the start's check now allows it too.
 
+## Threads: each with a role, and quicker handoffs (beta 18)
+
+- **Every thread says what it is for, once.** The engine's threads and the game's each get a role:
+  the render chain, the game's frame work, work ahead, background work, sound, or left to Windows. One
+  place turns a role into what Windows understands: priority, how important the thread's speed is
+  (Windows' power throttling, which decides between fast and efficient cores and clocks), and on a CPU
+  with two kinds of core, which kind it prefers. Background work (shader backlogs, file read-ahead)
+  runs on the efficient cores while you play, and at full speed on any core during a loading screen
+  and at the start, when you are waiting for exactly that work.
+- **Quicker handoffs between the game's threads.** The game hands work between its threads tens of
+  thousands of times a second through semaphores and read/write locks. Each of those used to go
+  through one lock shared by all of them, and a woken thread often had to wait again right away. Each
+  now has its own state, and a woken thread runs at once.
+- **The game's main thread waits more politely for its workers.** When it hands out a job list it
+  waited in a tight loop. It now pauses between looks, and after 50 microseconds lets a worker that is
+  waiting for a core have this one.
+- New log lines with the frame statistics: `Roles:` (each role's threads, CPU time and, on a CPU with
+  two kinds of core, where they woke) and `Fork-join waits:`.
+- For this beta's measurements only, `BB_THREAD_ROLES=0`, `BB_RUNTIME_SYNC=0` and
+  `BB_GAME_FIXES_SKIP=job_barrier` turn each part off, and `BB_TEST_CPUS=8` runs the game as on a CPU
+  with 8 hardware threads.
+
 ## Sharpening: one meaning, off by default (beta 16)
 
 The sharpening slider meant different things depending on the upscaler, so the same value could be

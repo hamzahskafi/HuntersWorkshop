@@ -14,6 +14,7 @@
 #include "common/error.h"
 #include "common/logging/log.h"
 #include "common/thread.h"
+#include "bbport_roles.h"
 #include "precise_pacing.h"
 // bbport: common/ntapi.h (ntdll entry points) is not used by the vendored code.
 #ifdef __APPLE__
@@ -195,6 +196,7 @@ bool AccurateSleep(const std::chrono::nanoseconds duration, std::chrono::nanosec
 void SetCurrentThreadName(const char* name) {
     // bbport: guest thread names are kept by the C runtime.
     SetThreadDescription(GetCurrentThread(), UTF8ToUTF16W(name).data());
+    BbRoles::NamedEngine(name); // 0.4.6 beta 18: the thread's role from its name
 }
 
 void SetThreadName(void* thread, const char* name) {
@@ -224,6 +226,7 @@ void SetCurrentThreadName(const char* name) {
 #else
     pthread_setname_np(pthread_self(), name);
 #endif
+    BbRoles::NamedEngine(name); // 0.4.6 beta 18: the thread's role from its name
 }
 
 void SetThreadName(void* thread, const char* name) {

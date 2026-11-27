@@ -5,6 +5,7 @@
  * Paths containing ".." components are rejected rather than normalized. */
 #define _GNU_SOURCE
 #include "runtime.h"
+#include "gpu/bbgpu.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -397,7 +398,8 @@ static void prefetch_dir(const char *dir,unsigned char *buffer) {
 static void *prefetch_main(void *unused) {
     (void)unused;
     runtime_win_set_thread_name("bb:Prefetch");
-    SetThreadPriority(GetCurrentThread(),THREAD_PRIORITY_BELOW_NORMAL);
+    /* 0.4.6 beta 18: a Background thread (gpu/shim/bbport_roles.cpp); BB_THREAD_ROLES=0: as before. */
+    if (!bbgpu_thread_named("bb:Prefetch",-1)) SetThreadPriority(GetCurrentThread(),THREAD_PRIORITY_BELOW_NORMAL);
     /* Low memory priority (ThreadMemoryPriority = 0, MEMORY_PRIORITY_LOW = 2): what it reads
      * leaves the file cache before the game's other cached pages. */
     typedef BOOL (WINAPI *SetInfo)(HANDLE,int,LPVOID,DWORD);

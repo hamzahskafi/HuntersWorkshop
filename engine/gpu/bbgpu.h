@@ -40,6 +40,12 @@ void bbgpu_patch_image(unsigned char *image, uint64_t size);
 /* BB_TIMELINE: a guest thread's wait in the runtime ended (kind 0 condition variable, 1 mutex,
  * 2 semaphore, 3 sleep; ns its length): runtime_wait_note passes it on. */
 void bbgpu_timeline_wait(int kind, uint64_t ns);
+/* 0.4.6 beta 18 (gpu/shim/bbport_roles.cpp): the calling thread was named. ps4_priority >= 0: a
+ * game thread (FMOD's, 256-300, Audio; every other Frame); < 0: one of the runtime's own, by the
+ * engine's table. 1 when its role set its host priority, 0 with BB_THREAD_ROLES=0. */
+int bbgpu_thread_named(const char *name, int ps4_priority);
+/* BB_TEST_CPUS=<n>: the process keeps n logical processors, fastest first (a measurement). */
+void bbgpu_test_cpus(void);
 /* Number of symbols registered by the vendored libraries (diagnostics). */
 unsigned bbgpu_symbol_count(void);
 #ifdef __cplusplus

@@ -7,6 +7,7 @@
 #include "loading.h"
 #include "engine_hooks.h"
 #include "bbport_platform.h"
+#include "bbport_roles.h"
 #include <cstdlib>
 #include <cstring>
 #include <atomic>
@@ -166,9 +167,11 @@ void Tick(std::uint64_t flipper) {
         }
         std::printf("Loading: begins; pacer mode %u, %u vblank(s) a frame, target %.1f ms\n", p.mode, p.vblanks,
                     p.target * 1000.0f);
+        BbRoles::SetLoading(true); // 0.4.6 beta 18: background work is what the player waits for
         char earlier[8];
         runtime_file_take_maps(earlier, sizeof(earlier)); // from here on, this load's maps
     } else if (!loading && was) {
+        BbRoles::SetLoading(false);
         const double seconds = std::chrono::duration<double>(now - g_began).count();
         std::uint64_t remo = 0, man = 0, queued = 0;
         std::uint32_t running = 0;

@@ -3,6 +3,7 @@
 // window (engine/startup.h).
 
 #include "engine/startup.h"
+#include "bbport_roles.h"
 
 #include "../../splash/status_file.h"
 
@@ -138,6 +139,7 @@ void CloseSplash() {
 
 void FirstFrameReady(int timeout_ms) {
     g_first_frame.store(true, std::memory_order_release);
+    BbRoles::FirstFrame(); // 0.4.6 beta 18: the start's loading phase ends
     std::unique_lock lock{g_shown_mutex};
     g_shown_cv.wait_for(lock, std::chrono::milliseconds(timeout_ms), [] { return g_shown; });
 }

@@ -18,6 +18,7 @@
 #endif
 #include "common/assert.h"
 #include "bbport_platform.h"
+#include "bbport_roles.h"
 #include "precise_pacing.h"
 #include "bbport_toggles.h"
 #include "bbport_heap_sites.h"
@@ -52,6 +53,7 @@ extern "C" uint64_t runtime_heap_growths(void);
 #include "video_core/vram_policy.h"
 #include "engine/gx_resources.h"
 #include "engine/frame_window.h"
+#include "engine/job_barrier.h"
 #include "engine/loading.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
@@ -1064,6 +1066,8 @@ void VideoOutDriver::Flip(const Request& req) {
                                 sleep_ns / (frames * 1e6));
                 }
             }
+            BbRoles::Report(window); // 0.4.6 beta 18: per role, threads, CPU time, where they woke
+            BbEngine::JobBarrier::Report(frames, window); // 0.4.6 beta 18: the game's fork-join waits
             if (const u64 allocs = BbStats::gpu_range_allocs.exchange(0)) {
                 std::printf("Guest GPU memory: %.0f ranges/s handed out, %.2f MB/s\n", allocs / window,
                             BbStats::gpu_range_alloc_bytes.exchange(0) / (window * 1e6));

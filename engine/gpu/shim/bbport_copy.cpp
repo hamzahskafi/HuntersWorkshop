@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "bbport_copy.h"
+#include "bbport_roles.h"
 #include "bbport_threads.h"
 
 #include <algorithm>
@@ -28,10 +29,7 @@ public:
     Pool() {
         // Copies are on the critical path (fences wait for them): normal priority, a quarter
         // of the hardware threads available to the process (Steam Deck 2).
-        unsigned count = std::clamp(BbThreads::Available() / 4, 1u, 4u);
-        if (const char* env = std::getenv("BB_COPY_THREADS")) {
-            count = static_cast<unsigned>(std::clamp(std::atoi(env), 0, 16));
-        }
+        const unsigned count = BbRoles::PoolSize(BbRoles::Pool::Copy); // BB_COPY_THREADS
         epochs.emplace_back();
         for (unsigned i = 0; i < count; ++i) {
             threads.emplace_back([this, i] { Loop(i); });

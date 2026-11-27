@@ -7,6 +7,7 @@
 #include "engine_hooks.h"
 #include "engine_state.h"
 #include "fmod_ring.h"
+#include "job_barrier.h"
 #include "job_pool.h"
 #include "skip_list.h"
 #include <array>
@@ -22,9 +23,20 @@ namespace BbEngine::GameFixes {
 namespace {
 #define GUEST_ABI __attribute__((sysv_abi))
 
-enum Fix { kJobLock, kJobNodes, kJobSlots, kBlurSamples, kFmodRing, kHitCap, kGxQuery, kDeflate, kFixCount };
-constexpr const char* kFixNames[kFixCount] = {"job_lock",  "job_nodes", "job_slots", "blur_samples", "fmod_ring",
-                                              "hit_cap",   "gx_query",  "deflate"};
+enum Fix {
+    kJobLock,
+    kJobNodes,
+    kJobSlots,
+    kBlurSamples,
+    kFmodRing,
+    kHitCap,
+    kGxQuery,
+    kDeflate,
+    kJobBarrier,
+    kFixCount
+};
+constexpr const char* kFixNames[kFixCount] = {"job_lock", "job_nodes", "job_slots", "blur_samples", "fmod_ring",
+                                              "hit_cap",  "gx_query",  "deflate",   "job_barrier"};
 
 // The first few, then at powers of two.
 bool Report(unsigned n) {
@@ -179,6 +191,31 @@ bool Install(std::uint8_t* image, std::size_t size) {
     } else {
         prepare(kFmodRing, {{FmodRing::kPoolFree, FmodRing::kPoolFreePrologue, FmodRing::PoolFree}},
                 "FMOD's sound ring guarded");
+    }
+
+    // 0.4.6 beta 18: the fork-join dispatcher's two waits, each a cave calling the engine's wait (pause,
+    // then a yield on each pass): both or neither (job_barrier.h).
+    if (on[kJobBarrier] && !JobBarrier::Ready(image, size, &why)) {
+        host_log("Game fixes: job_barrier left out: %s", why);
+    } else if (on[kJobBarrier]) {
+        const auto base = reinterpret_cast<std::uint64_t>(image);
+        std::uint8_t count_cave[JobBarrier::kCaveSize], slots_cave[JobBarrier::kCaveSize];
+        const std::size_t count_size =
+            JobBarrier::CountCave(base, reinterpret_cast<std::uint64_t>(&JobBarrier::CountWait), count_cave);
+        const std::size_t slots_size =
+            JobBarrier::SlotsCave(base, reinterpret_cast<std::uint64_t>(&JobBarrier::SlotsWait), slots_cave);
+        Hook count, slots;
+        if (Divert(count, image, size, JobBarrier::kCountWait, JobBarrier::kCountWaitCode,
+                   std::span<const std::uint8_t>(count_cave, count_size)) &&
+            Divert(slots, image, size, JobBarrier::kSlotsWait, JobBarrier::kSlotsWaitCode,
+                   std::span<const std::uint8_t>(slots_cave, slots_size))) {
+            hooks.push_back(count);
+            hooks.push_back(slots);
+            placed.emplace_back("fork-join waits spin with pause, then yield");
+        } else {
+            if (count.stub) Discard(count);
+            host_log("Game fixes: job_barrier left out: a wait's code differs from 1.09");
+        }
     }
 
     // Havok's hit collectors capped (a cave on their growth), and the GX occlusion queries: their creation

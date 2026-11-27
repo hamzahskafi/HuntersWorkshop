@@ -828,6 +828,7 @@ static char **main_argv;
 static unsigned __stdcall loader_thread(void *unused) {
     (void)unused;
     runtime_win_set_thread_name("main"); /* the game's main loop (BB_SAMPLE_THREADS=main) */
+    bbgpu_thread_named("main",700); /* 0.4.6 beta 18: a game thread (Frame), at the game's priority */
     return (unsigned)loader_main(main_argc, main_argv);
 }
 int main(int argc, char **argv) {
@@ -864,6 +865,7 @@ int main(int argc, char **argv) {
 #endif
     if (argc == 2 && !strcmp(argv[1], "--vulkan-only")) return vulkan_smoke();
     check_cpu();
+    bbgpu_test_cpus(); /* 0.4.6 beta 18: BB_TEST_CPUS=<n>, before any thread or count is made */
     int cpu_only = 0, strict_imports = 0;
     unsigned timeout_seconds = 10;
     const char *content_profile=NULL, *app0=NULL, *user_dir=NULL, *patch_file=NULL;

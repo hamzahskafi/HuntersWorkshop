@@ -7,6 +7,7 @@
  * priorities raises the host thread's priority (apply_priority). */
 #define _GNU_SOURCE
 #include "runtime.h"
+#include "gpu/bbgpu.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -298,10 +299,12 @@ static void set_host_name(const char *name) {
  * them; it is mostly asleep. BB_AUDIO_THREAD_PRIORITY=1 (the launcher's "Sound threads first"): that;
  * unset, all at normal priority (0.4.4 beta 28: the default, as the launcher had it). */
 #define HIGH_PRIO_LAST 300
-static void apply_priority(int prio) {
+/* 0.4.6 beta 18: `role`: the thread's role (gpu/shim/bbport_roles.cpp: FMOD's threads Audio, by
+ * this same rule, every other Frame) set its host priority; 0 with BB_THREAD_ROLES=0, as before. */
+static void apply_priority(int prio,int role) {
     static int enabled=-1;
     if (enabled<0) { const char *e=getenv("BB_AUDIO_THREAD_PRIORITY"); enabled=e && e[0]=='1'; }
-    if (enabled) host_thread_set_high_priority(prio<=HIGH_PRIO_LAST);
+    if (enabled && !role) host_thread_set_high_priority(prio<=HIGH_PRIO_LAST);
     static int noted;
     if (prio<=HIGH_PRIO_LAST && !__atomic_exchange_n(&noted,1,__ATOMIC_RELAXED))
         printf("Runtime: audio threads (priority %d-%d) %s\n",256,HIGH_PRIO_LAST,
@@ -344,7 +347,8 @@ static void *host_start(void *p) {
     runtime_ps4_fpu();
     attach(t);
     set_host_name(t->name);
-    if (t->attr.prio<=HIGH_PRIO_LAST) apply_priority(t->attr.prio);
+    const int role=bbgpu_thread_named(t->name,t->attr.prio);
+    if (t->attr.prio<=HIGH_PRIO_LAST) apply_priority(t->attr.prio,role);
     if (!EXIT_SET(t->exit_jump)) t->result=t->entry(t->argument);
     runtime_thread_keys_cleanup();
     host_lock(&lock); t->finished=1; ++exited; host_unlock(&lock);
@@ -426,7 +430,8 @@ static ABI int32_t thread_get_prio(GuestThread *t,int *prio) {
 static ABI int32_t thread_set_prio(GuestThread *t,int prio) {
     if (!find_thread(t)) return ERR(3);
     /* Only the calling thread's own host priority can change here (others' handles may be gone). */
-    if (t==current && (prio<=HIGH_PRIO_LAST)!=(t->attr.prio<=HIGH_PRIO_LAST)) apply_priority(prio);
+    if (t==current && (prio<=HIGH_PRIO_LAST)!=(t->attr.prio<=HIGH_PRIO_LAST))
+        apply_priority(prio,bbgpu_thread_named(t->name,prio));
     t->attr.prio=prio; return 0;
 }
 static ABI int32_t thread_set_affinity(GuestThread *t,uint64_t mask) {
@@ -442,7 +447,7 @@ static ABI int32_t thread_rename(GuestThread *t,const char *name) {
     if (!find_thread(t)) return ERR(3);
     if (!name) return ERR(22);
     snprintf(t->name,sizeof(t->name),"%s",name);
-    if (t==current) set_host_name(t->name);
+    if (t==current) { set_host_name(t->name); bbgpu_thread_named(t->name,t->attr.prio); }
     return 0;
 }
 static ABI int32_t thread_equal(GuestThread *a,GuestThread *b) { return a==b; }

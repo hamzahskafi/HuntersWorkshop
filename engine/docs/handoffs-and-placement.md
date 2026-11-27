@@ -74,33 +74,40 @@ Nothing states what each thread is for, so each new thread or new machine needs 
 
 ## 1. Roles
 
-One module, `bbport_roles.{h,cpp}`. The rest of the engine calls `BbRoles::Assign(Role)` once, at a
-thread's start, and `BbRoles::Promote` while a frame waits on a background thread. That replaces
-`MakeCritical`, `MakeBackground`, `MakeNormal`, `SetPriority`, `CapSpinUs`, the burst threads' CPU-set
-steering and the runtime's audio priority.
+One module, `bbport_roles.{h,cpp}`. A thread gets its role when it is named: the engine's threads by
+their name, through one table, in `Common::SetCurrentThreadName` (and the three threads that name
+themselves directly); the game's threads by their PS4 priority, when the runtime names them. No thread
+start site changes. The old helpers stay as the beta's switch-off path and defer to the roles while
+they are on: `MakeCritical` leaves the role's priority, `MakeBackground` puts a Background or Assist
+thread back at its role, `SetPriority` (a raise while a frame waits) goes through the role. The burst
+threads' CPU-set steering and the runtime's audio priority are the roles' under them.
 
 | Role | What it is | Engine threads | Game threads |
 |---|---|---|---|
 | **Pacing** | Tiny, deadline-driven, must never be late | flip thread (`shadPS4:PresentThread`), vblank watch | - |
-| **Chain** | The engine's frame chain: work nothing else can do, every frame | stage A (`shadPS4:GpuCommandProcessor`), stage B (`bb:DrawRec`), `bb:VkRecorder` x3, `bb:Copy` x4, `bb:GpuSignals` (fences the game waits on), `bb:Present` (swap) | - |
-| **Frame** | The game's frame work, its fork-join workers included, and work-ahead that only helps if it runs now | `bb:DrawAhead`, `bb:GxPrepare`, `bb:ReadySurfaces` | `main`, `GXRenderThread`, `GXWorker:*`, `HavokWorkerThread`, `CSChrThread`, `CSClothThread`, `EzWorkPool_Type`, every game thread not listed |
-| **Background** | Work ahead that nobody waits for this frame; a frame that needs it does it itself or promotes it | `bb:Pipeline*` (compiles), `bb:PipelineBurst*`, `bb:DrawPrep*`, `bb:DrawScan`, `shadPS4:PipelineCacheIO`, the runtime's file read thread | - |
+| **Chain** | The engine's frame chain: work nothing else can do, every frame | stage A (`shadPS4:GpuCommandProcessor`), stage B (`bb:DrawRec`), `bb:VkRecorder` x3, `bb:GpuSignals` (fences the game waits on), `bb:Present` (swap) | - |
+| **Frame** | The game's frame work, its fork-join workers included, work a frame may wait on, and work-ahead that only helps if it runs now | `bb:Pipeline*` (compiles), `bb:Copy*` (host copies), `bb:DrawAhead`, `bb:GxPrepare`, `bb:ReadySurfaces` | `main`, `GXRenderThread`, `GXWorker:*`, `HavokWorkerThread`, `CSChrThread`, `CSClothThread`, `EzWorkPool_Type`, every game thread not FMOD's |
+| **Assist** | Work ahead that the chain uses only if it is done in time | `bb:DrawPrep*`, `bb:DrawScan` (draw preparation) | - |
+| **Background** | Work ahead that nobody waits for this frame; a frame that needs it raises it | `bb:PipelineBurst*`, `shadPS4:PipelineCacheIO`, `bb:Prefetch` (the runtime's file read thread) | - |
 | **Audio** | Periodic, short, deadline-driven | - | FMOD's threads (the game's PS4 priorities 256-300) |
 | **Service** | Everything with its own pace | `bb:window`, `bb:kernel_service`, network, the watch threads, the sampler, video playback threads | - |
 
-The game's threads are recognized by name, through one data table, when the runtime names them
-(`thread_rename`, `pthread_setname`). A name not in the table is Frame, which is today's treatment.
+The game's threads get their role from their PS4 priority when the runtime names them (at their start
+and at `thread_rename`, `thread_set_prio`): FMOD's (256-300) are Audio, every other is Frame, which is
+today's treatment. An engine thread whose name is not in the table is left as the system has it and
+named once in the log.
 
 ### What a role means to the system
 
 | Role | Windows priority | Windows QoS (`ThreadPowerThrottling`) | Preferred cores | Linux |
 |---|---|---|---|---|
-| Pacing | highest | high | any | normal |
-| Chain | above normal | high | the fastest class, if it holds the role | normal |
+| Pacing | its own (the flip thread sets time-critical itself) | high | any | as it sets |
+| Chain | above normal (normal with `BB_GPU_THREAD_PRIORITY=0`) | high | the fastest class, if it holds the role | normal |
 | Frame | normal | high | any | normal |
+| Assist | idle | high | any | `SCHED_IDLE` (as before) |
 | Audio | normal; highest with the launcher's "Sound threads first" | high | any | normal |
-| Service | normal | system's choice | any | normal |
-| Background | idle | eco | the most efficient class, if it holds the role | `SCHED_IDLE` |
+| Service | untouched | untouched | untouched | untouched |
+| Background | idle | eco | the most efficient class, if it holds the role | `SCHED_IDLE` (as before) |
 
 Notes on these choices:
 - **QoS** is Windows' documented way to say how important a thread is (Microsoft's GDK guide).
@@ -114,8 +121,12 @@ Notes on these choices:
   - The chain is above the game today already, except stage A, which now joins it.
   - So no machine can get a raised thread spinning on a lower one, the risk the first draft solved with
     a special case.
-- **Background promotion.** A frame that waits on a background thread promotes it to Chain until its
-  job is done (`Promote`: today's `RaiseRunning` for compiles), with QoS and priority together.
+- **Background promotion.** A frame that waits on a background thread raises it to the waiting
+  thread's priority until its next job (today's `RaiseRunning` for compiles), with high QoS and any core
+  together.
+- **Assist** (added while building). Draw preparation runs ahead for stage A, which uses its work only
+  if it is done in time. Eco clocks or the efficiency cores would make it late more often, so it keeps
+  high QoS and any core; idle priority keeps it from taking a core from anything else.
 - **Phases** (found on review). Background is background only while the game plays.
   - During a loading screen and while the GPU cache settles at start, the player waits on exactly that
     work: compiles, draw preparation, the file thread.
@@ -129,9 +140,9 @@ Notes on these choices:
     lab (`RunLab`, `vk_pipeline_serialization.cpp`). It's outside the roles and keeps its normal
     priority, as today.
   - Without this, eco clocks on the efficiency cores would make loads and the first start slower.
-- **Linux.** Raising needs privileges there, but lowering doesn't. So the same order comes from
-  Background at `SCHED_IDLE` with the rest at normal, and preferred cores by `sched_setaffinity`
-  through the same rule. Linux builds are paused; the module keeps the shape.
+- **Linux.** Raising needs privileges there, and a thread lowered to `SCHED_IDLE` cannot be raised
+  again without them. So on Linux the threads keep what they set themselves today (draw preparation and
+  the burst threads at `SCHED_IDLE`); the roles name and count them. Linux builds are paused.
 
 ### The core preference rule
 
@@ -220,12 +231,18 @@ wake meant for a thread that has gone is harmless.
   semaphore, which the game's own unlock signals. It stays semaphore-based, and gains through the
   semaphore fix.
 - **The fork-join barrier** (`0x21b8710`, the loop at `0x21b8890`) becomes a checked game fix, like
-  "job lock spins with pause":
+  "job lock spins with pause" (`job_barrier`; `BB_GAME_FIXES_SKIP=job_barrier` leaves it out):
   - `pause` on each pass;
   - after about 50 us, a yield on each pass (`SwitchToThread`), so a worker can take the core when
     cores are scarce;
   - where cores are spare, the yield finds nobody and costs nothing.
   With Frame threads at one level (principle 4), the yield always reaches the workers.
+  - As built (`gpu/shim/engine/job_barrier.h`): the dispatcher waits twice, first for the group's
+    counter to reach N-1 (`0x21b8890`, or until the byte at `0x56a6c31` says more work arrived), then
+    for each worker's slot to read 2 (`0x21b8940`). Each loop becomes a 14-byte jump to a cave that
+    calls the engine's wait and leaves by the game's own exits, after the same conditions in the same
+    order. The whole dispatcher is checked against 1.09 (FNV-1a over its 0x282 bytes), and the
+    builder's scan of its branches found none landing inside either site.
 - **A compromise, named as one.** The main thread stays at Frame's level because it busy-waits on its
   workers.
   - On a small CPU, an unraised main thread can also wait its turn behind other game threads. That's
@@ -268,24 +285,51 @@ For example, `Chain 9 threads, 2.8 cores, 96% on the fastest class; Frame 44, 3.
 Background 24, 0.3 cores, 93% on the most efficient class`. Any tester's log then shows whether the
 placement holds on their machine.
 
-Coverage in beta 18: the core shares come from wake-ups through the parking primitive. Only the
-game's threads park there in beta 18, through the runtime's semaphores. The engine's threads park there
-from beta 19, so in beta 18 their roles show CPU time but no core share. The line says so.
+Coverage in beta 18: the core shares come from the game's threads' wake-ups in the runtime (condition
+variables, mutexes, semaphores, sleeps; `runtime_wait_note`), while the statistics are on. The engine's
+threads join from beta 19, when their waits move onto the parking primitive, so in beta 18 their roles
+show CPU time but no core share. On a CPU of one kind there is no share to show.
+
+The barrier fix adds a `Fork-join waits:` line: the dispatcher's waits per frame, their time (the count
+wait and the slot wait), the share that went past 50 us, and the yields per frame. It is the number
+beta 19's parking barrier would remove.
 
 ## What changes in the code
 
 | Where | Change |
 |---|---|
-| `gpu/shim/bbport_roles.{h,cpp}` (new) | Roles, the mapping to the system, the core rule, pool sizes, promotion, the `Roles:` line |
-| `gpu/shim/bbport_threads.h`, `bbport_platform.cpp` | `MakeCritical`, `MakeBackground`, `MakeNormal` and the priority helpers removed; `SpinLimitUs` stays |
-| about 25 thread start sites (`vk_scheduler`, `vk_draw_pipe`, `liverpool`, `vk_rasterizer`, `vk_draw_prep`, `vk_graphics_pipeline`, `bbport_copy`, `driver.cpp`, `precise_pacing`, `gx_resources`, `cache_storage`, `ready_surfaces`, `bbgpu`, `freeze`, `avplayer`) | One `Assign(Role)` call each |
-| `pipeline_compile_queue.h` | `RaiseRunning` through `Promote` |
-| `src/runtime_thread.c` | The game's name table at rename; FMOD's range as Audio |
+As built:
+
+| Where | Change |
+|---|---|
+| `gpu/shim/bbport_roles.{h,cpp}` (new) | Roles, the name table, the mapping to the system, the core rule, the phases, raises, pool sizes, the `Roles:` line, `BB_TEST_CPUS` |
+| `gpu/shadps4/common/thread.cpp` (`SetCurrentThreadName`), `gx_resources.cpp` | The engine's threads take their role from their name |
+| `gpu/shim/bbport_platform.cpp` | `MakeCritical`, `MakeBackground`, `SetPriority` defer to the roles while they are on |
+| `vk_scheduler`, `bbport_copy`, `vk_graphics_pipeline`, `vk_draw_prep` | Pool sizes from `BbRoles::PoolSize` (today's values); the burst threads' CPU sets from their role |
+| `engine/loading.cpp`, `engine/startup.cpp` | The loading phase: each loading screen, and the start up to the first frame |
+| `src/runtime_thread.c`, `src/runtime_file.c`, `src/probe.c` | The game's threads by PS4 priority, the file read thread, the main thread; `BB_TEST_CPUS` at start |
 | `src/host_sync.h` | `host_park` / `host_unpark` |
-| `src/runtime_sema.c`, `src/runtime_rwlock.c` | Rebuilt (section 2) |
+| `src/runtime_sema.c`, `src/runtime_rwlock.c` | Rebuilt (section 2), the old code kept under `BB_RUNTIME_SYNC=0` |
 | `src/runtime.c` | `memory_calls` dropped |
-| `gpu/shim/engine/game_fixes.cpp`, `job_pool.*` | The barrier fix |
-| `gpu/shim/bbport_toggles.h` and users | Hot-path counters as `BbStats::Counter` |
+| `gpu/shim/engine/job_barrier.{h,cpp}` (new), `game_fixes.cpp` | The barrier fix (`job_barrier`), its `Fork-join waits:` line |
+| `gpu/shim/bbport_counter.h` (new), `bbport_native_calls.cpp` | `BbStats::Counter`; the draw record counters on it |
+| `tests/test_sync.c`, `tests/test_job_barrier.cpp`, `tests/test_roles.cpp` | The primitives under stress; both barrier caves run for real; the roles on Windows |
+
+### Changed while building
+
+- **Copy threads are Frame, not Chain.** The engine learned in 0.4.4 that raising them above the game
+  on small CPUs took the cores the game needed while an area streams in (`MakeCritical`'s `bulk`).
+- **Compile threads (`bb:Pipeline*`) are Frame, not Background.** Draws wait on them; their queue
+  already runs first in, first out for that. The burst threads stay Background.
+- **Draw preparation gets a role of its own, Assist** (above).
+- **The flip thread keeps its own priority** (it sets time-critical itself); Pacing adds high QoS only.
+- **Service threads are left entirely as the system has them.**
+- **No per-site `Assign` calls**: the name table at the one naming function covers every engine thread,
+  and a new thread with a new name shows in the log as having no role.
+- **`BB_GPU_THREAD_PRIORITY=0`** (the launcher's experiment and safe mode) keeps the chain at normal under
+  roles too.
+- **The barrier fix covers both of the dispatcher's waits**: the count wait the sampler found, and the
+  per-worker slot wait after it (`0x21b8940`), the same loop without `pause` (job_barrier.h).
 
 ## Staging
 

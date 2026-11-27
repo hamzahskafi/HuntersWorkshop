@@ -11,6 +11,7 @@
 #include <windows.h>
 #include <psapi.h>
 #include "bbport_platform.h"
+#include "bbport_roles.h"
 #include "bbport_threads.h"
 
 namespace BbPlatform {
@@ -157,6 +158,9 @@ unsigned Available() {
 }
 
 void MakeBackground() {
+    if (BbRoles::LowerSelf()) { // 0.4.6 beta 18: a Background or Assist thread back at its role
+        return;
+    }
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_IDLE);
 }
 
@@ -176,6 +180,9 @@ bool Raising() {
 } // namespace
 
 void MakeCritical(bool bulk) {
+    if (BbRoles::On()) { // 0.4.6 beta 18: the thread's role (set when it named itself) decides
+        return;
+    }
     if (Raising() && (!bulk || Available() >= 16)) {
         SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
     }
@@ -195,6 +202,9 @@ int CurrentPriority() {
 }
 
 bool SetPriority(void* thread, int priority) {
+    if (BbRoles::Raise(thread, priority)) { // 0.4.6 beta 18: with high QoS and any core
+        return true;
+    }
     return thread && SetThreadPriority(static_cast<HANDLE>(thread), priority);
 }
 

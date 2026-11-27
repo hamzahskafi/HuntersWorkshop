@@ -4,6 +4,7 @@
 
 #include "bbport_timeline.h"
 #include "bbport_cpu_layout.h"
+#include "bbport_roles.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -35,6 +36,7 @@ std::uint64_t ThreadTag() {
 /// The runtime's guest waits (src/runtime_kernel.c, runtime_wait_note): kind 0 a condition variable,
 /// 1 a mutex, 2 a semaphore, 3 a sleep; `ns` how long it took. Waits under 10 us are left out.
 extern "C" void bbgpu_timeline_wait(int kind, std::uint64_t ns) {
+    BbRoles::NoteWake(); // 0.4.6 beta 18: on which kind of core the thread woke (statistics on)
     static const bool on = BbTimeline::On();
     if (!on || ns < 10000) {
         return;

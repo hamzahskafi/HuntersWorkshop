@@ -597,6 +597,21 @@ if (NOT WIN32)
     target_compile_options(copy-cave-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
     target_include_directories(copy-cave-test PRIVATE ..)
 endif()
+# 0.4.6 beta 18: the thread roles on Windows (or Wine): priorities by role, the loading phase, raises.
+if (WIN32)
+    add_executable(roles-test EXCLUDE_FROM_ALL ../tests/test_roles.cpp shim/bbport_roles.cpp
+        shim/bbport_cpu_layout.cpp shim/bbport_platform.cpp)
+    target_compile_options(roles-test PRIVATE -UNDEBUG -Wall -Wextra)
+    target_include_directories(roles-test PRIVATE shim)
+    target_link_libraries(roles-test PRIVATE psapi Threads::Threads)
+endif()
+# 0.4.6 beta 18: the fork-join dispatcher's wait caves, run for real (x86-64, mmap: not on Windows).
+if (NOT WIN32)
+    add_executable(job-barrier-test EXCLUDE_FROM_ALL ../tests/test_job_barrier.cpp)
+    target_compile_options(job-barrier-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+    target_include_directories(job-barrier-test PRIVATE ..)
+    target_link_libraries(job-barrier-test PRIVATE Threads::Threads)
+endif()
 # Local game-derived native menu assets. No game data is embedded in this tool.
 find_package(ZLIB REQUIRED)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
