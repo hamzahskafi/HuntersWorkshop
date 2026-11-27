@@ -174,7 +174,7 @@ std::filesystem::path ToolPath(const char* name) {
     const std::filesystem::path out = ProgramDir();
     if (out.empty()) return {};
 #ifdef _WIN32
-    return out / "tools" / (std::string(name) + ".exe");
+    return out / (std::string(name) + ".exe");
 #else
     return out / name;
 #endif

@@ -2188,9 +2188,11 @@ id and logs the GPU's identity, with a line when it disagrees with itself. With 
 every queue's submits go out under `Scheduler::submit_mutex` (its calls may wait for the whole device),
 the Vulkan instance and device are made on a thread of their own, and one submit thread runs while its
 frame generation is set (the compatibility mode: always, with it loaded, since engine id 128). The
-in-game menu opens on F1 (OptiScaler's keys: Insert, End, Page Up, Page Down). On Windows the helpers (`bb-splash`, `bb-shader-lab`,
-`bb-gpu-capabilities`) run from `engine\out\tools`, so a DLL put beside the game is loaded into the
-game alone. Its frame generation is not supported yet. Engine id 127: the engine runs in its own folder
+in-game menu opens on F1 (OptiScaler's keys: Insert, End, Page Up, Page Down). Engines 126 to 128
+ran the helpers (`bb-splash`, `bb-shader-lab`, `bb-gpu-capabilities`) from `engine\out\tools`, so a
+DLL put beside the game would load into the game alone; engine id 129 has them beside the engine again
+(the tester's call: that risk never showed, while the second set of DLLs did harm once). Its frame
+generation is not supported yet. Engine id 127: the engine runs in its own folder
 (`engine\out`), as a game does: tools beside it give paths from there (d4r's `NvngxPath=d4r\nvngx.dll`,
 which OptiScaler resolves from the working folder).
 

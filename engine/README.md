@@ -60,14 +60,10 @@ The engine builds in [MSYS2](https://www.msys2.org)'s CLANG64 environment.
    `deps/ffmpeg`, in a minute or two. MSYS2's own FFmpeg package is not used (it brought about 100
    DLLs with it); one left installed does no harm.
 4. In this folder, run `bash build.sh`. The programs land in `out/`: `bb-start.exe` (prepares the
-   game and starts it), `bb-probe.exe` (the engine itself) and `bb-engine-assets.exe`; the helpers
-   the engine, bb-start and the launcher run are in `out/tools/`: `bb-splash.exe` (the start's
-   splash, which bb-start shows until the game's first frame), `bb-shader-lab.exe` and
-   `bb-gpu-capabilities.exe`. A folder of their own, so a DLL a player puts beside the game
-   (OptiScaler as `dxgi.dll` or `winmm.dll`) is never loaded into them: Windows takes a program's
-   own folder first. `bb-probe.exe` needs the CLANG64 DLLs it links to (SDL3, the Vulkan loader,
-   libc++ and their dependencies) next to it, and each program in `out/tools/` the ones it links to
-   in `out/tools/`.
+   game and starts it), `bb-probe.exe` (the engine itself), `bb-splash.exe` (the start's splash,
+   which bb-start shows until the game's first frame), and the tools `bb-engine-assets.exe`,
+   `bb-shader-lab.exe` and `bb-gpu-capabilities.exe`. `bb-probe.exe` and `bb-splash.exe` need the
+   CLANG64 DLLs they link to (SDL3, the Vulkan loader, libc++ and their dependencies) next to them.
 
 A cross build for Windows (clang aimed at `x86_64-w64-windows-gnu` with a CLANG64 sysroot) builds
 the same FFmpeg with `BB_FFMPEG_TARGET=x86_64-w64-windows-gnu` (and `BB_FFMPEG_SYSROOT`); the script

@@ -59,12 +59,9 @@ namespace BloodborneLauncher.Core
             name + ".exe";
 #endif
 
-        /// <summary>One of the engine's helper programs (bb-gpu-capabilities, bb-shader-lab): engine\out\tools
-        /// on Windows, a folder of their own with their own DLLs, so a DLL put beside the game (OptiScaler as
-        /// dxgi.dll or winmm.dll) is never loaded into them; engine/out in the Linux package.</summary>
-        public static string Tool(string name) =>
-            OperatingSystem.IsWindows() ? Path.Combine(EngineDir, "out", "tools", name + ".exe")
-                                        : Path.Combine(EngineDir, "out", name);
+        /// <summary>One of the engine's helper programs (bb-gpu-capabilities, bb-shader-lab), beside the
+        /// engine in engine\out (engines 126 to 128 had them in engine\out\tools).</summary>
+        public static string Tool(string name) => Path.Combine(EngineDir, "out", Program(name));
 
         /// <summary>A package's engine folder: its engine\, or the folder itself when it is the engine.</summary>
         public static string EngineDirOf(string dir) =>

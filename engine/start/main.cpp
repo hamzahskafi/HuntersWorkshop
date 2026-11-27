@@ -306,14 +306,22 @@ int Main(std::vector<std::wstring> arguments) {
     const fs::path original = fs::canonical(game_dir);
     WriteText(remembered, Utf8(original));
     SetEnv("BB_GAME_DIR", Utf8(original));
-    // 0.4.6 beta 17: the helper programs are in out\tools, a folder of their own with their own DLLs:
-    // Windows loads a DLL from a program's folder first, so one put beside the game (OptiScaler as
-    // dxgi.dll or winmm.dll, which SDL loads) would be loaded into them too. An update copies the new
-    // files over the old and removes none: the old copies beside the engine go here.
-    for (const wchar_t* helper : {L"bb-splash.exe", L"bb-shader-lab.exe", L"bb-gpu-capabilities.exe"}) {
-        if (fs::is_regular_file(out / L"tools" / helper, error) && fs::exists(out / helper, error)) {
-            fs::remove(out / helper, error);
+    // 0.4.6 beta 17: the helper programs are beside the engine again (engines 126 to 128 had them in
+    // out\tools with their own DLLs; the tester's call: the risk it guarded against never showed). An
+    // update copies the new files over the old and removes none: that folder goes once the helpers
+    // beside the engine are in place (their programs and DLLs; the folder itself only when empty).
+    if (const fs::path tools = out / L"tools";
+        fs::is_directory(tools, error) && fs::is_regular_file(out / L"bb-splash.exe", error)) {
+        std::vector<fs::path> old;
+        for (auto it = fs::directory_iterator(tools, error); !error && it != fs::directory_iterator(); it.increment(error)) {
+            const std::string name = Lower(Utf8(it->path().filename()));
+            if (Lower(Utf8(it->path().extension())) == ".dll" || name == "bb-splash.exe" || name == "bb-shader-lab.exe" ||
+                name == "bb-gpu-capabilities.exe")
+                old.push_back(it->path());
         }
+        for (const auto& file : old) fs::remove(file, error);
+        fs::remove(tools, error);
+        error.clear();
     }
     // 0.4.6 beta 17: the start's splash, from here until the game's first frame (splash.h); the
     // engine writes its steps into the splash's file too.
