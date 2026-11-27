@@ -176,6 +176,53 @@ counts and time, and the `Recording:` line show the effect.
 The run: the three spots with `BB_GPU_PROFILE=1`, then the same with `BB_GPU_PROFILE=1` and
 `BB_CUT_IN_PASS=0`. The GPU cache's identity changes (`liverpool.cpp`): `ce835392748d8a45`.
 
+## The counting build's results (engine id 139)
+
+The tester's two runs: `20261128_000941` (`BB_GPU_PROFILE=1`) and `20261128_001438` (the same with
+`BB_CUT_IN_PASS=0`), the three spots each; read with the 138 slow-area timeline (`20261127_231846`).
+
+| | Fences a frame | 64-bit / 32-bit | In the GX region in place | The game's pauses mid-frame |
+|---|---|---|---|---|
+| Lamp spot | about 603 | 450 / 150 | 0% | about 1.5 a frame, 0.1 ms |
+| Busy view | about 627 | 470 / 155 | 0% | about 0.6 a frame, 0.02 ms |
+| Slow area | about 410 | 265 / 150 | 0% | about 3.5 a frame, 1.6 ms |
+
+- Almost all are end-of-pipe (about 2 a frame end-of-shader, none from compute). No interrupts, no clock
+  or counter values. About a quarter come right after another fence. Every fence a frame writes its
+  own address (distinct addresses about equal to fences).
+- **None of the fences' values are in the GX region the GPU reads and writes in place.** The GPU cannot
+  write them directly through the import as drafted; they live in the game's other memory.
+- The "after GPU writes into the game's memory" figure equals the fence count: the fence's own label is
+  noted as a pending GPU write (`NotePendingFences`), so the next fence always counts. Not meaningful as
+  built.
+- **The game does not wait on fences mid-frame at these spots.** In the slow area's long pauses of the
+  GPU command thread (200 us or more, about 1.7 a frame, median 0.86 ms, 34% of the time) the game's
+  busiest thread (35400) was blocked 3% of the time, so it was working; the frame-ending thread (14160)
+  waited on a condition variable 96% (for the game's own threads); the five job workers half. The slow
+  area pauses because the game has more CPU work there, not on fences. Fences matter for when the game
+  can reuse memory, not for the frame's progress.
+- The pass cuts: `BB_CUT_IN_PASS=0` halved the command buffers a submission (lamp 7.2 to 3.7, busy view
+  5-6 to 2.5-3.1, slow area 4-5 to 2.0-2.6); FPS +1.2% at the lamp spot (228.3 to 231.0), +2.4% in the
+  busy view (191.4 to 195.9), +1.5% in the slow area (221.5 to 224.8); GPU time a frame 4.37 to 4.33, 5.22
+  to 5.09, 4.49 to 4.43 ms. But the profiler ends a pass at each of its timestamps (`WriteTimestamp`,
+  outside passes) and stamps each pass a cut resumes, so with the profiler on every cut costs a pass end
+  and a timestamp more than it does in play (the "begun again after a recording cut" figure reads 0 in
+  both runs for that reason). A run without the profiler, with and without the switch, decides it.
+
+## What it changes in the design
+
+1. **The fences are not where the GPU can write them in place.** Writing the game's fences from the GPU
+   directly would need that memory imported too. A design that needs no import: the GPU writes one
+   marker word of the engine's own, in stream order, the number of the last fence it passed
+   (`vkCmdWriteBufferMarker2AMD` after each fence's work: non-stalling, ordered). The signal thread reads
+   that word and writes the game's fences up to it, as now on the CPU, but as the GPU passes them rather
+   than when the whole submission ends. Fences are then independent of submissions wherever they live.
+2. **Fence latency does not gate the game's frame here,** so the signal thread can read the marker word
+   at its own pace (a short timer, not a spin): the CPU cost stays small.
+3. **The queue design stands:** units collect while the GPU is busy, an idle GPU takes the next at
+   once, a completed frame goes. With fences off the submissions, nothing else asks for a submission.
+4. **The pass cuts:** decided by an unprofiled run.
+
 ## Expected, if the counts are favorable
 
 - Switches: from 3.4-6.2 a frame to about 2 (the frame and the presenter's), on devices with the
