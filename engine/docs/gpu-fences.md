@@ -1,7 +1,7 @@
 # Beta 21 research: the GPU writes the game's fences
 
-Status: research, proposed to the tester (2026-11-27); not built. The tester liked the idea and asked
-for more research first; this is that research.
+Status: research (2026-11-27), counted in engine id 139, and a plan for beta 21 proposed to the tester
+(2026-11-28, the last section); not built.
 
 ## Why
 
@@ -66,11 +66,14 @@ source (`chapters/copies.adoc` in KhronosGroup/Vulkan-Docs):
   execution performance." At 600 a frame this must be measured. The PS4 GPU runs the same 600 with its
   own end-of-pipe writes, and AMD's hardware does the same thing today.
 
-**2. Support is not universal.** AMD's Windows driver exposes the extension (its extension lists).
-Mesa's RADV has it, and Mesa's Qualcomm driver implemented it for crash debugging. NVIDIA had not
-implemented it when the D3D12-on-Vulkan translator vkd3d built `WriteBufferImmediate` on it (2019), and
-no current source here says otherwise. Intel's Windows driver: not found. So the engine checks for it at
-start, and devices without it keep today's path. That is a capability check, not a vendor rule.
+**2. Support: both of the tester's GPUs have it.** AMD's Windows driver exposes the extension, and
+Mesa's RADV has it. **NVIDIA's Windows driver has it too** (corrected 2026-11-28): the engine's GPU
+breadcrumbs are built on it and are on whenever it exists (`vk_breadcrumbs.cpp`), and they ran on the
+tester's RTX 3070 Ti (driver 617.42, `engine-map.md` 2.3); 0.4.4 beta 20 measured them there,
+`BB_BREADCRUMBS=0` taking 0.10 ms a frame off the GPU's busy time for about 3,600 markers a frame (about
+28 ns each, half of it on the copy shader's 62 dispatches). The 2019 vkd3d note this item first relied
+on is out of date. Intel's Windows driver: not found. So the engine checks for it at start, and devices
+without it keep today's path. That is a capability check, not a vendor rule.
 
 **3. The core-Vulkan fallback proposed first is not viable.** A barrier plus a buffer write stops the
 GPU's pipeline at each fence. At 600 fences a frame that is 600 drains. Devices without the marker keep
@@ -217,8 +220,8 @@ The tester's two runs: `20261128_000941` (`BB_GPU_PROFILE=1`) and `20261128_0014
    (`vkCmdWriteBufferMarker2AMD` after each fence's work: non-stalling, ordered). The signal thread reads
    that word and writes the game's fences up to it, as now on the CPU, but as the GPU passes them rather
    than when the whole submission ends. Fences are then independent of submissions wherever they live.
-2. **Fence latency does not gate the game's frame here,** so the signal thread can read the marker word
-   at its own pace (a short timer, not a spin): the CPU cost stays small.
+2. **Fence latency does not gate the game's frame here,** so the word needs no timer and no thread of
+   its own: it is read at points the engine passes anyway (the plan below, part 2).
 3. **The queue design stands:** units collect while the GPU is busy, an idle GPU takes the next at
    once, a completed frame goes. With fences off the submissions, nothing else asks for a submission.
 4. **The pass cuts: cut only where a pass ends.** The unprofiled runs (`20261128_003226` default,
@@ -237,3 +240,71 @@ The tester's two runs: `20261128_000941` (`BB_GPU_PROFILE=1`) and `20261128_0014
   lamp spot, 0.2 in the busy view, 0.3 in the slow area (profiled figures). The slow area gains most.
 - The game sees its fences sooner. The signal thread does a few writes a frame instead of 600.
 - Devices without the marker: unchanged.
+
+## The plan for beta 21 (proposed to the tester, 2026-11-28; not built)
+
+**1. The GPU reports how far it has got, in one word.** At start, where the device has
+`VK_AMD_buffer_marker` (both of the tester's GPUs), the engine makes one 4-byte word of its own in host
+memory (host-visible and coherent, as the breadcrumbs' buffer). The recording numbers the fences it meets
+and the end of each of the game's submissions with one count, and at each one's place in the command
+stream writes that number into the word (`writeBufferMarkerAMD`, bottom of the pipe: after all earlier
+work, inside or outside a pass, holding up nothing after it). The word then always reads "everything
+before mark N is done". About 450-700 marks a frame (the fences and 20-70 submission ends); the
+breadcrumbs already write about 1,800 (one per command), and 3,600 cost 0.10 ms a frame on the 3070 Ti,
+so about 0.02 ms is expected. A profiled run measures it.
+
+**2. Fences written as the GPU passes them.** Each plain fence (a value to write, no interrupt: all of
+them in the 139 counts) goes into a ring with its mark, address, value and size, in place of a function
+on the signal thread's list. The ring is written on the CPU, in order and exactly once per fence, at two
+points the engine passes anyway: the end of each of the game's submissions (the GPU command thread reads
+the word, one memory read, and writes what it has passed) and the end of each of the GPU's submissions
+(the signal thread, which waits for it as now). No timer, no thread of its own, no extra wake. A fence is
+then seen once the GPU has passed it and the game next submits, or its submission ends: earlier than
+today (its whole submission's end plus the signal thread's wake), never before the GPU has passed it.
+Kept on today's path (written when the submission ends): fences with an interrupt or another action, the
+clock and counter values, and a fence after GPU writes into the game's memory in place (those need the
+writes visible, which only the submission's end gives). 139 found none of these in play; counted. The
+CPU writes the game's 64-bit values whole, so the word's 32 bits limit nothing.
+
+**3. The hand-over: a queue with one consumer.** The units are the game's submissions, recorded in order.
+The GPU's queue is the units submitted that it has not started. As in any such queue, work waits while
+the consumer has more than one item ahead of it, and the consumer takes all the waiting work when it
+starts its last item, so it never waits for work that is ready. The word shows at each unit's end
+whether the GPU has started its last unit. The waiting units go as one submission:
+- at a unit's end, when the GPU has started its last unit or finished everything;
+- when the game completes a frame (after it the game waits for its previous frame, so no unit end would
+  look again until the GPU had run out);
+- when the GPU finishes everything with units waiting (the signal thread, which wakes at that end now:
+  the game paused for longer than the GPU's remaining work, so the GPU has time to spare);
+- at the batch limit of 64 command buffers (there now).
+With the GPU as the limit (the three spots), the GPU runs the previous frame while the game records the
+next; that frame's units wait and go when it completes, queued behind: about 2 switches a frame (the
+frame's and the presenter's) against 3.4-6.2. When the GPU catches up with the game (the slow area's
+pauses), it takes the work in pieces as large as it can without waiting. Gone: the decision at each
+game submission from the GPU's submissions (`SubmitForSignalsNow`), the watch and the announcement
+(`ArmWatch`, `Announce`, `SubmitForGpu`), the GPU command thread's idle-time checks and the safety net;
+they stay only for devices without the marker.
+
+**4. Passes cut only where they end:** `BB_CUT_IN_PASS=0`'s behaviour by default (+0.6-0.8%, measured);
+`BB_CUT_IN_PASS=1` for today's.
+
+**5. The pending write list keeps up to 64 wide writes live** (16 now; the busy view had up to 17).
+
+**Devices without the marker:** today's path whole, so nothing changes on them; the log says which path
+runs. `BB_GPU_FENCES=cpu`: today's path on any device, for the comparison.
+
+**Counted** (frame statistics): submissions and switches a frame, the submissions by cause (the GPU on
+its last unit, a frame completed, the GPU out of work, the batch limit); fences written at a game
+submission against at a submission's end; fences on today's path by reason; marks a frame.
+
+**Checked here:** a unit test of the ring and the queue against a model GPU (order, exactly once, both
+writers, the count wrapping round: compared as a difference, 8 hours at this rate before it wraps);
+the existing suites; the MinGW build. The risk is a fence seen early (0.4.4 beta 6's flicker): the
+marker cannot be written before the work, so the risk is in the numbering, which the test covers.
+
+**The run:** the three spots without the profiler, default and then `BB_GPU_FENCES=cpu`; then once with
+`BB_GPU_PROFILE=1` for the switches and the marks' cost. Version 0.4.6-beta.21, engine id 140.
+
+Expected: the profile put the switches at 0.19-0.49 ms of a 4.3-5.2 ms frame; with two thirds of them
+gone, a few percent, the slow area most. The game sees its fences sooner, and the signal thread wakes
+about twice a frame.
