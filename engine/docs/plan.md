@@ -891,6 +891,26 @@ the pace (5.0 of 5.08 ms, almost no wait for the engine): most likely the same m
 do. The efficiency-core question for it is answered by the lamp spot's frames (no effect), so no 132
 capture there is needed for that.
 
+**The diagnostics runs (the tester, 2026-11-27; logs `20261127_170032` lamp spot and `_170807` the other
+area; FSR 4.1.2 at 1920x1080, GPU profile and render stage timings on).** The render stage timings slow
+stage B to 96% busy (64% without them), so stage A waits for it (5.3% and 12.1%) and these runs' frame
+rates sit below the usual (206 and 181 FPS): their breakdowns hold, not their limits.
+- GPU, profiled (the profiler's marks add idle between submissions): the lamp spot 4.87 ms a frame,
+  of which 0.79 ms idle between submissions (11 gaps), the G-buffer passes about 1.0 ms, FSR 4's
+  evaluation 0.50 ms, the copy shaders 0.15 ms (57 a frame); the other area 5.47 ms, idle 1.30 ms (19.5
+  gaps), the G-buffer about 1.6 ms (more passes, begun again more often), FSR 0.47 ms, the copy shaders
+  0.17 ms (61). So about 4.1 ms of GPU work a frame in both.
+- Stage A a draw (the draw packet's parts): 1.56 us at the lamp spot (constants 0.63, pipeline 0.28,
+  packet 0.22, inputs 0.13) and 1.79 us in the other area (0.73, 0.33, 0.22, 0.19); all packets 2.9 and
+  3.2 us a draw. The constants step is the largest known part: about 0.85-0.95 ms a frame at 1,300
+  draws. A candidate if stage A becomes the limit.
+- Stage B a packet: 1.74 and 2.42 us (draw 1.36 and 1.99, of which binding 0.46 and 0.74, textures 0.24
+  and 0.42, ObtainBuffer 0.26 and 0.37); the upscaler's dispatch takes 169 us of stage B a frame.
+- The other area makes 17.8 Vulkan submissions a frame (16.8 at the game's fenced submission ends)
+  against 10.3 at the lamp spot.
+Neither diagnostic shows how the main thread's time splits between the game's code and the engine's;
+that stays the open measurement.
+
 ### Performance, in 0.4.6 (moved in, 2026-11-27)
 
 The tester (2026-11-27): "I wanted the Performance part to mostly be completed in 0.4.6!" and, of the
