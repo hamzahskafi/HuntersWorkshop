@@ -76,27 +76,42 @@ start, and devices without it keep today's path. That is a capability check, not
 GPU's pipeline at each fence. At 600 fences a frame that is 600 drains. Devices without the marker keep
 today's CPU-written fences.
 
-**4. Fences alone do not set the submission count; the feeding rule does, and it needs no timing.**
-Today's rule ("submit at a game submission's end when the GPU is down to its last submission")
-ramps each frame up from small chunks: when the game starts a frame the GPU is finishing the
-previous one, so the first draws go at once; the GPU finishes that small chunk quickly, the next is a
-little bigger, and so on. That is 3.4-6.2 switches a frame. It is needed only because a fence becomes
-visible at a submission's end. With the GPU writing the fences, the rule can be:
-- submit at the frame's end (the game has handed over all of it): normally the whole frame in one
-  submission;
-- submit at once when the GPU has run out of work and something is recorded;
-- submit at once when the game stops submitting mid-frame (it may wait on a fence in that work:
-  today's idle submission, kept).
-There is no timing, no estimate and no holding back, only events the engine already sees. With the
-GPU as the limit (the tester's three spots: the game about a frame ahead, waiting 1.6-4 ms a frame
-for the previous one), each frame's submission is queued while the GPU still runs the previous frame:
-about 2 switches a frame, the frame and the presenter's own, with no gap between frames. Without the
-GPU as the limit (a frame cap, a CPU-heavy moment), the second rule feeds it as soon as it runs dry, as
-today. The fences reach the game as the GPU passes them whatever the submission size, which is what
-makes whole-frame submissions safe. (A first draft held the work by an estimate of the GPU time
-queued; the tester asked whether that added waiting, counting and delay. It did, and this rule
-needs none.) Devices without the marker keep today's rule, since their fences still need a
-submission's end.
+**4. The hand-over to the GPU: a queue, not rules.** The tester (2026-11-27): "this appears to be a
+design and queuing problem more so than rules and gates and conditionals". Today there is no queue
+between the recording and the GPU. At each of the game's 20-70 submission ends a frame the engine
+decides whether the work goes now (the GPU's progress, a watch on its last submission, the
+announcement, holds, a safety net: `gpu-memory.md`, 0.4.4 betas 9-12). That is needed because one
+mechanism carries two things: the game's fences, visible only at a submission's end, and feeding the
+GPU. Each frame then ramps up from small chunks (the GPU is finishing the previous frame when the
+game starts one, so the first draws go at once, then a little more, and so on): 3.4-6.2 switches a
+frame.
+
+The design separates them:
+- The fences are in the GPU's command stream (items 1 and 2); they constrain the hand-over in no way.
+- The hand-over is a queue between the recording threads and the GPU, with the game's own submissions
+  as its units, as on the PS4. While the GPU is busy, units collect into one batch. When the GPU has
+  nothing queued, the next unit goes to it at once. When the game completes a frame (its submit-done),
+  that batch is complete and goes. A batch holds at most 64 recorded command buffers, and a full one
+  goes.
+That is a queue with one consumer: items wait while it is busy, and an idle consumer takes the next at
+once. There is nothing to decide per submission and nothing to estimate. What follows from it:
+- With the GPU as the limit (the tester's three spots: the game about a frame ahead, waiting 1.6-4 ms
+  a frame for the previous one), each frame goes as one batch, queued behind the frame the GPU runs,
+  with no gap: about 2 switches a frame (the frame and the presenter's).
+- With the CPU as the limit or a frame cap, the GPU is often idle and takes units as they come, as
+  today.
+- A mid-frame fence wait needs nothing of its own. If the game waits for a fence in its current
+  frame, the GPU finishes the previous frame, finds the queue holding that work, takes it, and writes
+  the fence.
+- Gone: the decisions at each game submission end, the watch and the announcement, the holds, the
+  safety net.
+(Drafts before this: holding work by an estimate of the GPU time queued, which added waiting, counting
+and delay; then three submission rules. The tester asked for the design instead.)
+
+Devices without the marker can keep fences out of the submissions too, with Vulkan events (core,
+non-stalling: `vkCmdSetEvent2` at the fence, read by the signal thread with `vkGetEventStatus`, which
+then writes the fence on the CPU). That gives the same queue everywhere; its cost (a thread reading
+the events while fences are pending) is to be checked.
 
 **5. Passes cut between the recording threads' command buffers: measured afresh, not taken from 0.4.4.**
 0.4.4 (betas 14, 20, 21) found a cut pass cost a few microseconds and halving the cuts changed
@@ -130,9 +145,9 @@ Three facts decide how much of the idea applies. None can be read from the logs 
 2. **What kind:** 32-bit, 64-bit, clock or counter; with or without an interrupt; after work that wrote
    the game's memory in place.
 3. **Whether the game blocks on fences mid-frame:** how often the GPU command thread runs out of work
-   with fences pending and the game resumes submitting right after one is written. With whole-frame
-   submissions such a wait is released by the third rule (the game stopped submitting), so how often
-   and how long matters.
+   with fences pending and the game resumes submitting right after one is written; and how often the
+   GPU runs empty mid-frame today. With the queue, such a wait is released when the GPU finishes the
+   previous frame and takes the waiting work, so how often and how long matters.
 
 Also counted: distinct fence addresses a frame and back-to-back fences (no work between them), for the
 marker count's cost. And the switch of item 5 (no cuts inside a pass), for one run with it and one
