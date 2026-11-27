@@ -449,6 +449,9 @@ priority on to the thread holding the lock.
 - **Less work on every draw:** a quicker check of the memory the queued draws write, no memory
   fence on the drawing thread for every draw, no system call to check a thread exists, and no
   memory allocation for each draw.
+- On Linux through Wine or Proton the drawing thread keeps its fence on every draw (their process-wide
+  fence does nothing), and a waiting thread looks again every 2 ms, so a missed wake-up can never freeze
+  the game (engine id 137).
 - The shader cache is rebuilt once on the first start of this beta (its identity changed).
 - For this beta's measurements only, `BB_PREP_HANDOVER=old`, `BB_SUBMIT_QUEUE=locked`,
   `BB_LOCK_INHERIT=0`, `BB_RAISE_ON_WAIT=0`, `BB_PENDING_FILTER=0`, `BB_STATS_USAGE_EVERY=1` and

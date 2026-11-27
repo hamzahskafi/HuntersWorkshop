@@ -1817,14 +1817,17 @@ void Rasterizer::PrintPipeStats() {
     static u64 last_sleeps = 0;
     std::printf("Draw pipe: %.0f draws/s pipelined, %.0f drains/s that waited (%.1f/s slept), "
                 "stage A waited %.1f%%, stage B busy %.1f%%; hand-over %s, late wakes %llu "
-                "(expected 0)\n",
+                "(expected 0); stage B's count %s, stage A's missed wakes %llu (expected 0)\n",
                 (draw_pipe->packets - last_packets) / seconds,
                 (draw_pipe->drains - last_drains) / seconds,
                 (draw_pipe->sleeps - last_sleeps) / seconds,
                 100.0 * (draw_pipe->drain_cycles - last_drain_cycles) / cycles,
                 100.0 * (busy - last_busy) / cycles,
                 DrawPipe::BatchedHandover() ? "fenced every 8 packets" : "fenced every packet",
-                static_cast<unsigned long long>(draw_pipe->late_wakes.exchange(0)));
+                static_cast<unsigned long long>(draw_pipe->late_wakes.exchange(0)),
+                DrawPipe::PlainCount() ? "plain (a process-wide fence when stage A sleeps)"
+                                       : "fenced",
+                static_cast<unsigned long long>(draw_pipe->stage_a_missed_wakes.exchange(0)));
     last_sleeps = draw_pipe->sleeps;
     // 0.4.6 beta 19: what the pending tables were given and asked (item 3).
     if (NewPendingTables()) {

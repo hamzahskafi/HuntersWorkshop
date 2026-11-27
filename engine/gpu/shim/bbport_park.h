@@ -27,7 +27,10 @@ void WakeAll(std::atomic<std::uint32_t>& word);
 /// and reads with plain loads and stores (no fence of its own); the rare side writes, calls this,
 /// then reads. When this returns every thread's earlier stores are visible to the caller, and the
 /// caller's to every thread's later loads (FlushProcessWriteBuffers on Windows, a registered
-/// membarrier on Linux). Only where HeavyFenceAvailable(): elsewhere the busy side keeps its fence.
+/// membarrier on Linux). Only where HeavyFenceAvailable() (not under Wine, whose fence is a stub;
+/// not where Linux refuses the registration): elsewhere the busy side keeps its fence. Its users
+/// still wake to look again now and then, so a missed wake (a system that hides being Wine) costs
+/// a few milliseconds, never a hang.
 bool HeavyFenceAvailable();
 void HeavyFence();
 

@@ -145,6 +145,9 @@ public:
     /// when the sleep ended, is not one (the builder saw those under Wine), and Commit publishes
     /// with the fence at once when it sees the sleep announced.
     std::atomic<u64> late_wakes{0};
+    /// 0.4.6 beta 20: stage A's sleeps that found their packet run without a wake for it
+    /// (WaitUntil; expected 0).
+    std::atomic<u64> stage_a_missed_wakes{0};
     /// The sleep that ended at its timeout finds packets up to `seen` published: late when the
     /// last fenced publish is before them.
     void NoteTimeout(u64 seen_published) {
@@ -367,7 +370,18 @@ private:
             if (asleep) {
                 ++sleeps;
                 while (drained.load(std::memory_order_seq_cst) == seen) {
-                    BbPark::Wait(drained, seen);
+                    // 0.4.6 beta 20: a look every kSleepCheckMs. The packet run and no wake yet:
+                    // stage B is sending it, or never will (a process-wide fence that didn't
+                    // fence). Taken back here either way, so a miss costs this look, never a hang;
+                    // counted only when stage B never took the waiter (expected 0).
+                    if (!BbPark::Wait(drained, seen, kSleepCheckMs) &&
+                        drained.load(std::memory_order_seq_cst) == seen &&
+                        consumed_packets.load(std::memory_order_seq_cst) >= wait_for) {
+                        if (wake_at.exchange(NoWaiter, std::memory_order_seq_cst) == wait_for) {
+                            stage_a_missed_wakes.fetch_add(1, std::memory_order_relaxed);
+                        }
+                        break;
+                    }
                 }
             }
             wake_at.store(NoWaiter, std::memory_order_relaxed);
@@ -457,6 +471,9 @@ private:
                 // (WaitUntil). It was a locked add and a fenced load on every packet.
                 const u64 run = consumed_packets.load(std::memory_order_relaxed) + 1;
                 consumed_packets.store(run, std::memory_order_release);
+                // The compiler keeps the load after the store (the light half of the pattern; no
+                // instruction): a release store lets a later load move before it.
+                std::atomic_signal_fence(std::memory_order_seq_cst);
                 if (run >= wake_at.load(std::memory_order_relaxed)) [[unlikely]] {
                     WakeStageA();
                 }

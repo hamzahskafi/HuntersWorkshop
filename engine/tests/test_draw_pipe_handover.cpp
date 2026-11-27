@@ -192,6 +192,9 @@ int main() {
     std::printf("  behind slow packets: stage A slept %llu times, worst wait past its packets %lld us\n",
                 static_cast<unsigned long long>(slept), worst_extra_us);
     check(slept >= 100, "stage A slept behind slow packets");
+    std::printf("  stage A's missed wakes (a packet run, no wake): %llu\n",
+                static_cast<unsigned long long>(pipe.stage_a_missed_wakes.load()));
+    check(pipe.stage_a_missed_wakes.load() == 0, "stage B woke every sleeping stage A");
     check(worst_extra_us < 50000, "no wake was lost (a wait ends with its packets)");
     pipe.Drain();
     if (g_fail) {

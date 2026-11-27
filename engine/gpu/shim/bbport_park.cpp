@@ -70,7 +70,14 @@ void WakeAll(std::atomic<std::uint32_t>& word) {
     }
 }
 bool HeavyFenceAvailable() {
-    return true; // since Windows Vista
+    // Since Windows Vista. Not under Wine or Proton: their NtFlushProcessWriteBuffers is a stub
+    // (Wine 9.0 prints "fixme:virtual:NtFlushProcessWriteBuffers stub"; the builder's probe of
+    // engine id 136), so the fence would order nothing. Wine is known by its ntdll export.
+    static const bool real = [] {
+        const HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+        return !(ntdll && GetProcAddress(ntdll, "wine_get_version"));
+    }();
+    return real;
 }
 void HeavyFence() {
     FlushProcessWriteBuffers();

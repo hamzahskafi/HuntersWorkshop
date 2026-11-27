@@ -180,8 +180,23 @@ Changed from the design while building:
   segment's thread, asleep by design. Keeping it spinning would hold a core for each of the three
   recorders.
 
+**Engine id 137 (the builder's review of 136):** Wine's and Proton's `FlushProcessWriteBuffers` is a
+stub (Wine 9.0 prints `fixme:virtual:NtFlushProcessWriteBuffers stub`), so under them item 7's
+handshake could lose stage A's wake at a drain's last packet, and stage A's sleep had no timeout: a
+freeze. Now:
+- under Wine (its `ntdll` exports `wine_get_version`) stage B keeps the fenced count;
+- stage A's sleep looks again every 2 ms: a packet run with no wake is taken back by stage A itself
+  (a missed wake costs that look, never a hang, on any system), counted only when stage B never took
+  the waiter ("stage A's missed wakes", expected 0, in the draw pipe line, which also names the count's
+  mode);
+- a compiler fence between stage B's count and its look at the waiter, so their order is guaranteed,
+  not incidental.
+A first version counted a timeout landing while stage B was already sending the wake (between taking
+the waiter and the wake's system call) as missed: 1-2 in 3,600 sleeps, in either mode. Counting only an
+untaken waiter: 0 in 7,200, in either mode.
+
 The GPU cache's identity changes with this beta (`liverpool.{h,cpp}`, `submit_queue.h`,
-`vk_pipeline_cache.h`): `31aba0f240c65c6f`, from `cdca3ea71cd46d16`.
+`vk_pipeline_cache.h`): `31aba0f240c65c6f`, from `cdca3ea71cd46d16` (unchanged by 137).
 
 Tests: `role-lock-test` (real threads; counts everywhere, the raise on Windows or Wine), `submit-queue-test`,
 `pending-test` (the filter against a model, with and without), `draw-pipe-handover-test` (now also stage A
