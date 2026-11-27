@@ -776,9 +776,13 @@ when no waits overlap). The tester's run: `BB_TIMELINE` and
 **Beta 18's research, read: the tester's 131 session (2026-11-27, log `54dfbbd3`).** 9 s of play
 captured two minutes in: 1,839 frames, 400,000 events; 1920x1080, DLAA through OptiScaler and d4r,
 uncapped, the GPU profile off. A frame is 4.74 ms median (211 FPS; the window's statistics 193 FPS).
-**The GPU is the limit.** It had nothing to do 2.5% of the time (0.12 ms a frame in 1.7 gaps, a lower
-bound); 86% of the submissions went in behind work still on the GPU; its work per frame (one presenter
-submission to the next) is 4.63 ms median. So the 1.12 ms "between submissions" of the 129 profile
+**The GPU's queue is the slowest step.** It had nothing to do 2.5% of the time (0.12 ms a frame in 1.7
+gaps, a lower bound); 86% of the submissions went in behind work still on the GPU; its work per frame
+(one presenter submission to the next) is 4.63 ms median. Corrected after the tester's note
+(2026-11-27): their GPU overlay read about 85% in these runs. The timeline measures whether the GPU
+has work queued, not whether it is computing: about 15% of the time it waits inside its work
+(barriers that wait for all earlier work, the end of each submission, render passes cut and begun
+again, lower clocks at partial load). So "busy" here means never out of work, not flat out. So the 1.12 ms "between submissions" of the 129 profile
 was the profiler's (its marks end the passes and wait) and the presenter's submissions (outside the
 profile). The hypotheses:
 - H1, stage A or B late: no. Stage A is idle 27% of the frame and stage B waits 38%. Stage A finishes a
