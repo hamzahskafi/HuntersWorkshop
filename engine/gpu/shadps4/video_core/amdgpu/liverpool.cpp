@@ -264,6 +264,8 @@ void Liverpool::Process(std::stop_token stoken) {
         {
             const auto idle_start = std::chrono::steady_clock::now();
             BbTimeline::Note(BbTimeline::DecoderIdleBegin);
+            // 0.4.6 beta 21 research: a pause within the game's frame, not its wait between frames.
+            const bool mid_frame = !Libraries::GnmDriver::GuestWaitingForFrame();
             // bbport: the game submits a frame in ~20 parts: waking from the condition variable for
             // each took tens of microseconds on the way to the GPU. Spins first, with cores to spare
             // (200 us with 12+ hardware threads, else 0; BB_SPIN_US lowers it).
@@ -314,10 +316,13 @@ void Liverpool::Process(std::stop_token stoken) {
                 gpu_wants_work_now = gpu_wants_work.exchange(false, std::memory_order_relaxed);
             }
             decoder_idle.store(false, std::memory_order_release);
-            BbStats::gpu_idle_ns.fetch_add(
-                std::chrono::duration_cast<std::chrono::nanoseconds>(
-                    std::chrono::steady_clock::now() - idle_start).count(),
-                std::memory_order_relaxed);
+            const u64 idle_ns = static_cast<u64>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                                     std::chrono::steady_clock::now() - idle_start)
+                                                     .count());
+            BbStats::gpu_idle_ns.fetch_add(idle_ns, std::memory_order_relaxed);
+            if (rasterizer && BbStats::enabled) {
+                rasterizer->NoteDecoderPause(idle_ns, mid_frame && !Libraries::GnmDriver::GuestWaitingForFrame());
+            }
             BbTimeline::Note(BbTimeline::DecoderIdleEnd);
             if (gpu_wants_work_now && rasterizer) {
                 // The GPU has got to its last submission: the work waiting for it goes now, as
@@ -1907,6 +1912,11 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                     BbFreeCheck::NoteFenceDecoded(reinterpret_cast<u64>(event_eos->Address()),
                                                   event_eos->DataDWord(), header, dcb.data(), seq);
                 }
+                if (rasterizer && BbStats::enabled) {
+                    const bool value = event_eos->command.Value() == PM4CmdEventWriteEos::Command::SignalFence;
+                    rasterizer->NoteFenceDecoded(1, reinterpret_cast<VAddr>(event_eos->Address()),
+                                                 value ? 4u : 0u, false);
+                }
                 if (rasterizer &&
                     rasterizer->RunInOrder(&RunEventWriteEos, event_eos, sizeof(*event_eos),
                                            BbToggle::PipelinedTasks, false, "EventWriteEos")) {
@@ -1922,6 +1932,15 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                         event_eop->data_sel.Value() == DataSelect::Data32Low ? event_eop->DataDWord()
                                                                              : event_eop->DataQWord(),
                         header, dcb.data(), seq);
+                }
+                if (rasterizer && BbStats::enabled) {
+                    const auto sel = event_eop->data_sel.Value();
+                    rasterizer->NoteFenceDecoded(
+                        0, reinterpret_cast<VAddr>(event_eop->Address<u8>()),
+                        sel == DataSelect::None ? 0u : sel == DataSelect::Data32Low ? 4u
+                                                     : sel == DataSelect::Data64   ? 8u
+                                                                                   : 9u,
+                        event_eop->int_sel.Value() != InterruptSelect::None);
                 }
                 if (rasterizer) {
                     if (rasterizer->RunInOrder(&RunEventWriteEop, event_eop, sizeof(*event_eop),
@@ -2464,6 +2483,17 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
             // BB_HONEST_LABELS: written once the GPU has finished the work before it (not a GDS store,
             // which needs the GPU copy recorded here).
             if (const auto* rm = reinterpret_cast<const PM4CmdReleaseMem*>(header);
+                rasterizer && BbStats::enabled) {
+                const auto sel = rm->data_sel.Value();
+                rasterizer->NoteFenceDecoded(
+                    2, rm->Address<VAddr>(),
+                    sel == DataSelect::None || sel == DataSelect::GdsMemStore ? 0u
+                    : sel == DataSelect::Data32Low                           ? 4u
+                    : sel == DataSelect::Data64                              ? 8u
+                                                                             : 9u,
+                    rm->int_sel.Value() != InterruptSelect::None);
+            }
+            if (const auto* rm = reinterpret_cast<const PM4CmdReleaseMem*>(header);
                 rasterizer && Vulkan::Rasterizer::HonestLabels() &&
                 rm->data_sel.Value() != DataSelect::GdsMemStore) {
                 rasterizer->ProcessDownloadImages();
@@ -2628,6 +2658,9 @@ bool Liverpool::EndFrameAtBoundary() {
     rasterizer->RunInOrder(&FrameEndTask, &frame, sizeof(frame), BbToggle::PipelinedTasks, true,
                            "SubmitDone");
     VideoCore::StartCapture();
+    if (BbStats::enabled) {
+        rasterizer->NoteFenceFrameEnd();
+    }
     return true;
 }
 
@@ -2648,6 +2681,9 @@ void Liverpool::SignalDecodedFrames() {
             Libraries::GnmDriver::NoteFramesRetired(frame);
         }
         return;
+    }
+    if (BbStats::enabled) {
+        rasterizer->NoteFenceFrameEnd();
     }
     // Everything of the frame recorded (the draw pipe drained), then submitted: finished once the
     // GPU has executed it, whatever is decoded after it.

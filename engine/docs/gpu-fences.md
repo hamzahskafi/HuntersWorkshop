@@ -156,6 +156,26 @@ without, with the GPU profile on.
 These are counters only (no behavior change), with one line in the frame statistics. One run at the
 three spots answers them.
 
+## The counting build (engine id 139)
+
+Counted only; nothing in play changes but `BB_CUT_IN_PASS=0`, a measurement. With the frame statistics
+on, the draw pipe's block has two lines more:
+- `fences a frame (beta 21 research)`: by packet (end-of-pipe, end-of-shader, compute's RELEASE_MEM);
+  by what they write (no value, 32-bit, 64-bit, a clock or counter); with an interrupt; the share of
+  their values in the GX region in place (`BufferCache::GpuWritesInPlace`: its own buffer, nothing
+  noted), outside a frame, unaligned; after GPU writes into the game's memory (noted since the fence
+  before: `NotePendingGpuWrite`); right after another (nothing in the draw pipe between); distinct
+  addresses a frame.
+- `the game's pauses mid-frame a frame`: the GPU command thread's idle waits outside the game's wait
+  for its previous frame (`GnmDriver::GuestWaitingForFrame`), by length, and those of 50 us or more
+  that ended with the GPU out of work (everything submitted done: `Scheduler::IsFree`).
+`BB_CUT_IN_PASS=0`: the recording threads cut only where a pass ends (inside one only past 8 times the
+segment size); the `render passes ... begun again after a recording cut` figure, the GPU profile's pass
+counts and time, and the `Recording:` line show the effect.
+
+The run: the three spots with `BB_GPU_PROFILE=1`, then the same with `BB_GPU_PROFILE=1` and
+`BB_CUT_IN_PASS=0`. The GPU cache's identity changes (`liverpool.cpp`): `ce835392748d8a45`.
+
 ## Expected, if the counts are favorable
 
 - Switches: from 3.4-6.2 a frame to about 2 (the frame and the presenter's), on devices with the

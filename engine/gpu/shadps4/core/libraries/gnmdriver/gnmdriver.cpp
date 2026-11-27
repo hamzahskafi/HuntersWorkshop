@@ -188,6 +188,12 @@ static void WaitPreviousFrameAtSubmit() {
     WaitPreviousFrame();
 }
 
+static std::atomic<bool> g_waiting_for_frame{false};
+
+bool GuestWaitingForFrame() {
+    return g_waiting_for_frame.load(std::memory_order_relaxed);
+}
+
 static void WaitPreviousFrame() {
     std::unique_lock lock{m_wait_idle};
     if (frames_retired >= u64(frames_submitted)) {
@@ -195,7 +201,9 @@ static void WaitPreviousFrame() {
     }
     BbTimeline::Note(BbTimeline::GuestWaitBegin, u64(frames_submitted));
     const auto start = std::chrono::steady_clock::now();
+    g_waiting_for_frame.store(true, std::memory_order_relaxed);
     cv_lock.wait(lock, [] { return frames_retired >= u64(frames_submitted); });
+    g_waiting_for_frame.store(false, std::memory_order_relaxed);
     BbStats::gnm_frame_waits.fetch_add(1, std::memory_order_relaxed);
     BbStats::gnm_frame_wait_ns.fetch_add(
         std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start)

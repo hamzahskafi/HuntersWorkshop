@@ -235,6 +235,9 @@ bool SubmitLockOnDecode();
 void ReleaseSubmissionLock();
 /// The GPU has finished everything up to the `frames`th sceGnmSubmitDone (BB_SUBMIT_LOCK=decode).
 void NoteFramesRetired(u64 frames);
+/// 0.4.6 beta 21 research: the game is waiting for its previous frame (a pause between frames, not
+/// within one).
+bool GuestWaitingForFrame();
 int PS4_SYSV_ABI sceGnmUnmapComputeQueue(u32 vqid);
 int PS4_SYSV_ABI sceGnmUnregisterAllResourcesForOwner();
 int PS4_SYSV_ABI sceGnmUnregisterOwnerAndResources();

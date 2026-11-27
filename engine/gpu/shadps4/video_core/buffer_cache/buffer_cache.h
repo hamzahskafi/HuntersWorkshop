@@ -200,6 +200,11 @@ public:
     /// copy of it is taken before (IsRegionGpuModified).
     [[nodiscard]] std::optional<std::pair<const Buffer*, u64>> CommandWriteTarget(VAddr device_addr,
                                                                                 u32 size);
+    /// 0.4.6 beta 21 research: whether the GPU writes these bytes of the game's memory in place
+    /// (the GX region through its own buffer), with nothing noted or changed.
+    [[nodiscard]] bool GpuWritesInPlace(VAddr device_addr, u64 size) const noexcept {
+        return gx_own.load(std::memory_order_acquire) != nullptr && InGxRegion(device_addr, size);
+    }
 
     /// Return true when a region is modified from the CPU
     [[nodiscard]] bool IsRegionCpuModified(VAddr addr, size_t size);
