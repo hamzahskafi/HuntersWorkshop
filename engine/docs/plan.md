@@ -873,6 +873,13 @@ is a profile of stage A by packet kind and by part of a draw (the clock is alrea
 `bbport_native_calls.cpp`), so the build that cuts it aims at measured time. The gain is bounded by
 the GPU's headroom at this spot (the monitor's 14-15%).
 
+**The other area still to measure (the tester, 2026-11-27).** There (`98217950`, overlay 85-86%) the
+game's own frame set the pace (5.0 of 5.08 ms, almost no wait for the engine), so where its threads run
+matters there, unlike at the lamp spot. A 132 capture in that area (`BB_TIMELINE_START` at a time the
+tester stands there) shows whether its busiest threads sit on efficiency cores; if so, keeping them on
+the performance cores is a beta 18 part for spots where the game is the limit, beside stage A's cost
+for spots where the engine is.
+
 ### Performance, in 0.4.6 (moved in, 2026-11-27)
 
 The tester (2026-11-27): "I wanted the Performance part to mostly be completed in 0.4.6!" and, of the
