@@ -70,6 +70,7 @@ void Unlock(Slot& s) {
 BbStats::Counter written_records, written_fallback;
 u64 verified = 0, mismatches = 0, unrecorded = 0, trace_trailers = 0, decoded = 0;
 u64 window_draws = 0, packet_ticks = 0, draw_ticks = 0, timed_draws = 0;
+u64 sample_state = 0x9E3779B97F4A7C15ull;
 u64 window_tsc = 0;
 std::chrono::steady_clock::time_point window_start = std::chrono::steady_clock::now();
 u64 mismatch_logged = 0;
@@ -183,12 +184,29 @@ bool TimingEnabled() {
     return on;
 }
 
-void AddPacketTicks(u64 ticks, bool is_draw) {
-    packet_ticks += ticks;
-    if (is_draw) {
-        draw_ticks += ticks;
-        ++timed_draws;
+u32 sample_countdown = 1;
+u32 sample_weight = [] {
+    const char* env = std::getenv("BB_STATS_EVERY_PACKET");
+    return env && env[0] == '1' ? 1u : 16u;
+}();
+
+u32 NextSampleGap() {
+    if (sample_weight == 1) {
+        return 1;
     }
+    sample_state = sample_state * 6364136223846793005ull + 1442695040888963407ull;
+    return 8 + static_cast<u32>((sample_state >> 33) % 17); // 8 to 24, 16 on average
+}
+
+void AddPacketTicks(u64 ticks, bool is_draw) {
+    packet_ticks += ticks * sample_weight;
+    if (is_draw) {
+        draw_ticks += ticks * sample_weight;
+    }
+}
+
+void CountDraw() {
+    ++timed_draws;
 }
 
 void MaybeReport() {

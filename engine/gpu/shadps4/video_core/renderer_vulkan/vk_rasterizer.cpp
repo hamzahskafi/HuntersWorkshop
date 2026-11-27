@@ -950,18 +950,45 @@ bool Rasterizer::IsGpuSideThread() const {
     return OnStageA() || DrawPipe::OnStageB() || BbCopy::ForGpuSide();
 }
 
+bool Rasterizer::NewPendingTables() {
+    static const bool on = [] {
+        const char* env = std::getenv("BB_PENDING_TABLES");
+        return !(env && std::strcmp(env, "old") == 0);
+    }();
+    return on;
+}
+
 void Rasterizer::NotePendingGpuWrite(VAddr address, u64 size) {
     if (!draw_pipe || !size) {
         return;
     }
     // Numbered by packet (a position, the packet's start, counted as reached once the packet
-    // before it had run, while this one was not recorded yet), in hashed granules: a lookup per
-    // constant binding instead of a scan of the writes (a list scan was ~5% of this thread).
-    pending_write_table.Note(address, size, draw_pipe->NextPacket());
+    // before it had run, while this one was not recorded yet).
+    const u64 packet = draw_pipe->NextPacket();
+    if (!NewPendingTables()) {
+        // In hashed granules: a lookup per constant binding instead of a scan of every write.
+        pending_write_table.Note(address, size, packet);
+        return;
+    }
+    // 0.4.6 beta 19: the list of the writes stage B hasn't reached (the hashed table's notes were
+    // about 2.5% of this thread, its lookups 4%).
+    pending_writes.Prune([this](u64 p) { return draw_pipe->ReachedPacket(p); });
+    if (!pending_writes.Note(address, size, packet)) {
+        pending_write_table.Note(address, size, packet); // the list is full
+        pending_write_table_newest = packet;
+        ++pending_stats.writes_tabled;
+        return;
+    }
+    ++pending_stats.writes_listed;
 }
 
 void Rasterizer::NotePendingRead(VAddr address, u64 size) {
     if (draw_pipe && size && OnStageA()) {
+        if (NewPendingTables() && !dump_pages.Touches(address, size)) {
+            ++pending_stats.reads_skipped; // no dump writes there (WaitForPendingReads)
+            return;
+        }
+        ++pending_stats.reads_noted;
         pending_reads.Note(address, size, draw_pipe->NextPacket());
     }
 }
@@ -978,6 +1005,14 @@ void Rasterizer::WaitForPendingReads(VAddr address, u64 size) {
         DrainDrawPipe(DrawPipe::ReasonConstRam);
         return;
     }
+    if (NewPendingTables() && !dump_pages.Covers(address, size)) {
+        // 0.4.6 beta 19: bytes no dump wrote before: reads of them were not noted. Every queued
+        // packet is waited for once; from now on reads of these pages are noted.
+        ++pending_stats.dump_ranges_new;
+        dump_pages.Add(address, size);
+        DrainDrawPipe(DrawPipe::ReasonConstRam);
+        return;
+    }
     const u64 packet = std::max(untracked_reads_packet, pending_reads.Newest(address, size));
     if (draw_pipe->ReachedPacket(packet)) {
         ++constram_waits_skipped;
@@ -989,6 +1024,18 @@ void Rasterizer::WaitForPendingReads(VAddr address, u64 size) {
 bool Rasterizer::PendingWriteOverlaps(VAddr address, u64 size) {
     if (!draw_pipe || size == 0) {
         return false;
+    }
+    if (NewPendingTables()) {
+        ++pending_stats.write_lookups;
+        pending_writes.Prune([this](u64 p) { return draw_pipe->ReachedPacket(p); });
+        if (pending_writes.Overlaps(address, size)) {
+            return true;
+        }
+        if (pending_write_table_newest == 0 ||
+            draw_pipe->ReachedPacket(pending_write_table_newest)) {
+            pending_write_table_newest = 0; // every write the table holds has been reached
+            return false;
+        }
     }
     const u64 packet = pending_write_table.Newest(address, size);
     return packet != 0 && !draw_pipe->ReachedPacket(packet);
@@ -1313,6 +1360,7 @@ bool Rasterizer::RunInOrder(OrderedTask task, const void* data, u32 size, u64 to
     *reinterpret_cast<TaskPacket*>(out) = {PacketKind::Task, size, task};
     std::memcpy(out + sizeof(TaskPacket), data, size);
     draw_pipe->Commit(total);
+    draw_pipe->Publish(); // tasks are fences, signals and flips the game waits for: at once
     return true;
 }
 
@@ -1755,13 +1803,28 @@ void Rasterizer::PrintPipeStats() {
     const u64 busy = draw_pipe->busy_cycles.load(std::memory_order_relaxed);
     static u64 last_sleeps = 0;
     std::printf("Draw pipe: %.0f draws/s pipelined, %.0f drains/s that waited (%.1f/s slept), "
-                "stage A waited %.1f%%, stage B busy %.1f%%\n",
+                "stage A waited %.1f%%, stage B busy %.1f%%; hand-over %s, late wakes %llu "
+                "(expected 0)\n",
                 (draw_pipe->packets - last_packets) / seconds,
                 (draw_pipe->drains - last_drains) / seconds,
                 (draw_pipe->sleeps - last_sleeps) / seconds,
                 100.0 * (draw_pipe->drain_cycles - last_drain_cycles) / cycles,
-                100.0 * (busy - last_busy) / cycles);
+                100.0 * (busy - last_busy) / cycles,
+                DrawPipe::BatchedHandover() ? "fenced every 8 packets" : "fenced every packet",
+                static_cast<unsigned long long>(draw_pipe->late_wakes.exchange(0)));
     last_sleeps = draw_pipe->sleeps;
+    // 0.4.6 beta 19: what the pending tables were given and asked (item 3).
+    if (NewPendingTables()) {
+        auto& p = pending_stats;
+        std::printf("  pending tables/s: reads noted %.0f, skipped %.0f (no dump writes there; the "
+                    "dumps' pages: %zu ranges, %llu new%s); GPU writes listed %.0f, to the table "
+                    "%.0f (list full), lookups %.0f\n",
+                    p.reads_noted / seconds, p.reads_skipped / seconds, dump_pages.ranges.size(),
+                    static_cast<unsigned long long>(p.dump_ranges_new),
+                    dump_pages.overflow ? ", too many: every read noted" : "",
+                    p.writes_listed / seconds, p.writes_tabled / seconds, p.write_lookups / seconds);
+        p = {};
+    }
     std::printf("  drains by reason/s:");
     for (u32 r = 0; r < DrawPipe::NumReasons; ++r) {
         if (const u64 n = draw_pipe->drains_by_reason[r]) {

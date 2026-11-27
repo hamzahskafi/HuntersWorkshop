@@ -12,6 +12,7 @@
 #pragma once
 
 #include <cstdlib>
+#include "bbport_park.h"
 #include "bbport_platform.h"
 #include "bbport_threads.h"
 #include "bbport_sections.h"
@@ -45,8 +46,7 @@ public:
         Drain();
         thread.request_stop();
         published.fetch_add(0, std::memory_order_seq_cst);
-        wake.fetch_add(1, std::memory_order_seq_cst);
-        wake.notify_one();
+        BbPark::Bump(wake);
     }
 
     /// True on the draw recording thread.
@@ -80,21 +80,52 @@ public:
     }
 
     /// Stage A: hands the packet from Begin() to stage B.
+    /// 0.4.6 beta 19 (docs/stage-a-cost.md, item 2): a plain release store makes the packet
+    /// visible; the fence that pairs with stage B's announced sleep, and the sleep checks, come
+    /// every kPublishEvery packets and wherever stage A stops making packets (Publish). A
+    /// sequentially consistent store and two checks on every packet were about 4.6% of stage A.
+    /// BB_PIPE_HANDOVER=each: every packet, as before.
     void Commit(u32 payload_size) {
         reinterpret_cast<Header*>(ring.get() + head % Capacity)->payload = payload_size;
         head += pending_size;
-        published.store(head, std::memory_order_seq_cst);
         ++packets;
+        if (BatchedHandover() && ++unpublished < kPublishEvery) {
+            published.store(head, std::memory_order_release);
+            return;
+        }
+        Publish();
+    }
+
+    /// Stage A: every committed packet published with the fence, and stage B and the lookahead
+    /// thread woken if they sleep. Called before stage A waits for anything, after a task (its
+    /// fences and signals are waited for), and before it goes idle. Stage B's own sleep wakes by
+    /// itself after kSleepCheckMs, so a publish point missed costs that much, never a hang.
+    void Publish() {
+        unpublished = 0;
+        if (fenced_head == head) {
+            return;
+        }
+        fenced_head = head;
+        published.store(head, std::memory_order_seq_cst);
         if (sleeping.load(std::memory_order_seq_cst)) {
-            wake.fetch_add(1, std::memory_order_seq_cst);
-            wake.notify_one();
+            BbPark::Bump(wake);
         }
         // bbport: the lookahead thread (BB_DRAWREC_WORKERS) sleeps the same way (WaitForCommit).
         if (ahead_sleeping.load(std::memory_order_seq_cst)) {
-            ahead_wake.fetch_add(1, std::memory_order_seq_cst);
-            ahead_wake.notify_one();
+            BbPark::Bump(ahead_wake);
         }
     }
+
+    static bool BatchedHandover() {
+        static const bool on = [] {
+            const char* env = std::getenv("BB_PIPE_HANDOVER");
+            return !(env && std::strcmp(env, "each") == 0);
+        }();
+        return on;
+    }
+    /// Statistics: stage B's and the lookahead thread's sleeps that ended at kSleepCheckMs with a
+    /// packet there (a publish point stage A missed; expected 0).
+    std::atomic<u64> late_wakes{0};
 
     /// Why stage A drained (statistics): a PM4 opcode, or one of these.
     enum Reason : u32 {
@@ -230,11 +261,14 @@ public:
         const u32 seen = ahead_wake.load(std::memory_order_seq_cst);
         ahead_sleeping.store(true, std::memory_order_seq_cst);
         if (published.load(std::memory_order_seq_cst) <= position && !stop.stop_requested()) {
-            std::stop_callback on_stop{stop, [this] {
-                ahead_wake.fetch_add(1, std::memory_order_seq_cst);
-                ahead_wake.notify_all();
-            }};
-            ahead_wake.wait(seen, std::memory_order_seq_cst);
+            std::stop_callback on_stop{stop, [this] { BbPark::Bump(ahead_wake, true); }};
+            while (ahead_wake.load(std::memory_order_seq_cst) == seen && !stop.stop_requested()) {
+                if (!BbPark::Wait(ahead_wake, seen, kSleepCheckMs) &&
+                    published.load(std::memory_order_seq_cst) > position) {
+                    late_wakes.fetch_add(1, std::memory_order_relaxed);
+                    break;
+                }
+            }
         }
         ahead_sleeping.store(false, std::memory_order_relaxed);
     }
@@ -251,6 +285,8 @@ private:
     };
     static constexpr u64 Capacity = 16ull << 20;
     static constexpr u64 NoWaiter = ~u64{0};
+    static constexpr u32 kPublishEvery = 8;
+    static constexpr u32 kSleepCheckMs = 2;
 
     static constexpr u32 Align(u32 size) {
         return (size + 63) & ~63u;
@@ -274,6 +310,7 @@ private:
     /// ms of kernel time in a 330 ms stall, a core taken from the threads doing the work.
     template <typename Done, typename Target>
     void WaitUntil(Done&& done, Target&& target) {
+        Publish(); // stage B may need the packets not published with the fence yet
         for (u32 spins = 0; spins < 4096; ++spins) {
             if (done()) {
                 return;
@@ -297,7 +334,9 @@ private:
                 consumed_packets.load(std::memory_order_seq_cst) < wait_for && !done();
             if (asleep) {
                 ++sleeps;
-                drained.wait(seen, std::memory_order_seq_cst);
+                while (drained.load(std::memory_order_seq_cst) == seen) {
+                    BbPark::Wait(drained, seen);
+                }
             }
             wake_at.store(NoWaiter, std::memory_order_relaxed);
             if (!asleep) {
@@ -309,8 +348,7 @@ private:
     /// Stage B: stage A sleeps until the packet just run (WaitUntil).
     void WakeStageA() {
         if (wake_at.exchange(NoWaiter, std::memory_order_seq_cst) != NoWaiter) {
-            drained.fetch_add(1, std::memory_order_seq_cst);
-            drained.notify_all();
+            BbPark::Bump(drained, true);
         }
     }
 
@@ -340,9 +378,15 @@ private:
                     if (!(spins & 255) && std::chrono::steady_clock::now() >= spin_until) {
                         const u32 seen = wake.load(std::memory_order_seq_cst);
                         sleeping.store(true, std::memory_order_seq_cst);
-                        if (published.load(std::memory_order_seq_cst) == at &&
-                            !stop.stop_requested()) {
-                            wake.wait(seen, std::memory_order_seq_cst);
+                        // 0.4.6 beta 19: on the engine's parking word, and awake again after
+                        // kSleepCheckMs to look (Publish).
+                        while (published.load(std::memory_order_seq_cst) == at &&
+                               wake.load(std::memory_order_seq_cst) == seen &&
+                               !stop.stop_requested()) {
+                            if (!BbPark::Wait(wake, seen, kSleepCheckMs) &&
+                                published.load(std::memory_order_seq_cst) != at) {
+                                late_wakes.fetch_add(1, std::memory_order_relaxed);
+                            }
                         }
                         sleeping.store(false, std::memory_order_relaxed);
                     }
@@ -387,6 +431,8 @@ private:
     std::unique_ptr<u8[]> ring;
     u64 head = 0; ///< stage A's write position
     u32 pending_size = 0;
+    u32 unpublished = 0; ///< stage A: packets committed since the last Publish
+    u64 fenced_head = 0; ///< stage A: head at the last Publish
     alignas(64) std::atomic<u64> published{0};
     alignas(64) std::atomic<u64> consumed{0};
     std::atomic<u64> consumed_packets{0}; ///< packets stage B has run (NextPacket numbers)

@@ -228,6 +228,9 @@ void Liverpool::Process(std::stop_token stoken) {
                 }
             }
         }
+        if (rasterizer) {
+            rasterizer->PublishDrawPipe(); // 0.4.6 beta 19: nothing more comes for a while
+        }
         {
             const auto idle_start = std::chrono::steady_clock::now();
             BbTimeline::Note(BbTimeline::DecoderIdleBegin);
@@ -1397,8 +1400,10 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
             const u32 count = header->type3.NumWords();
             const PM4ItOpcode opcode = header->type3.opcode;
             // bbport BB_NATIVE_CALLS: a draw call's record NOP (mode 1), the checksum before the
-            // packet (verify), the packet's start (BB_FRAME_STATS).
-            const u64 packet_start = native_timing ? BbNativeCalls::Ticks() : 0;
+            // packet (verify), the packet's start (BB_FRAME_STATS; 0.4.6 beta 19: about one packet
+            // in 16 is timed, BbNativeCalls::TimePacket).
+            const bool timed = native_timing && BbNativeCalls::TimePacket();
+            const u64 packet_start = timed ? BbNativeCalls::Ticks() : 0;
             const u64 checksum_before = gfx_reg_checksum;
             BbNativeCalls::DrawRecord native_record;
             const bool native_draw =
@@ -2082,10 +2087,13 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                 // bbport BB_FRAME_STATS: this thread's time per packet (nested IBs count their
                 // own packets), per draw; the "Native calls" lines every 5 s.
                 const bool is_draw = native_draw || IsDrawOpcode(opcode);
-                if (native_timing && opcode != PM4ItOpcode::IndirectBuffer) {
+                if (timed && opcode != PM4ItOpcode::IndirectBuffer) {
                     BbNativeCalls::AddPacketTicks(BbNativeCalls::Ticks() - packet_start, is_draw);
                 }
                 if (is_draw) {
+                    if (native_timing) {
+                        BbNativeCalls::CountDraw();
+                    }
                     BbNativeCalls::MaybeReport();
                 }
             }

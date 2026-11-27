@@ -18,6 +18,7 @@
 #include "video_core/renderer_vulkan/vk_scene_resolution.h"
 #include "video_core/renderer_vulkan/vk_object_motion.h"
 #include "video_core/renderer_vulkan/vk_draw_pipe.h"
+#include "video_core/renderer_vulkan/vk_pending.h"
 #include "video_core/renderer_vulkan/vk_draw_prep.h"
 #include "video_core/renderer_vulkan/vk_temporal_upscaler.h"
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
@@ -210,6 +211,13 @@ public:
     [[nodiscard]] bool DrawPipeIdle() const {
         return !draw_pipe || draw_pipe->Idle();
     }
+    /// Stage A, before it stops making packets for a while (idle, or a wait stage B's work may
+    /// end): every packet handed over with the fence (DrawPipe::Publish; 0.4.6 beta 19).
+    void PublishDrawPipe() {
+        if (draw_pipe && OnStageA()) {
+            draw_pipe->Publish();
+        }
+    }
     /// Stage A, end of a submission: its prepared draws stay alive until the recording thread
     /// has recorded them (instead of a drain).
     void RetireSubmission();
@@ -220,12 +228,14 @@ public:
     void NotePendingRead(VAddr address, u64 size);
     /// Before a guest-visible write: fences deferred earlier are written first.
     void WaitDeferredSignals(u32 site = BbStats::WaitOther) {
+        PublishDrawPipe(); // the deferred fences come after packets stage B may not have yet
         scheduler.WaitDeferredSignals(site);
     }
     /// bbport: before a CPU write of the command processor (WriteData, DMA): only the deferred
     /// fences it must follow (Scheduler::WaitDeferredSignalsFor, BB_FENCE_ORDER).
     void WaitDeferredSignalsFor(u32 site, VAddr address, u64 size, VAddr src = 0,
                                 u64 src_size = 0) {
+        PublishDrawPipe();
         scheduler.WaitDeferredSignalsFor(site, address, size, src, src_size);
     }
     /// bbport (stage A): a WaitRegMem was met by a fence still deferred: the command processor
@@ -811,6 +821,22 @@ private:
     };
     PendingReads pending_reads;
     PendingReads pending_write_table; ///< the same per granule for GPU writes queued (NotePendingGpuWrite)
+    /// 0.4.6 beta 19 (docs/stage-a-cost.md, item 3; BB_PENDING_TABLES=old: as before). The read
+    /// table answers one question, for the constant engine's dumps (WaitForPendingReads): those
+    /// write a small, fixed set of pages (the constant ring), so a read is noted only where it
+    /// touches bytes a dump has written. A dump into bytes no dump wrote before waits once for every
+    /// queued packet, and its pages join the set. Stage A only: no race.
+    DumpPages dump_pages; ///< vk_pending.h
+    /// The GPU writes stage B hasn't reached yet (vk_pending.h): a constant binding checks these
+    /// (PendingWriteOverlaps); the hashed table above holds the ones that come while it is full.
+    PendingWriteList pending_writes;
+    u64 pending_write_table_newest = 0; ///< the newest packet noted in the table (0: none)
+    static bool NewPendingTables();
+    /// Statistics (stage A, BB_FRAME_STATS): what the tables were asked and given.
+    struct PendingStats {
+        u64 reads_noted = 0, reads_skipped = 0, dump_ranges_new = 0;
+        u64 writes_listed = 0, writes_tabled = 0, write_lookups = 0;
+    } pending_stats;
     u64 untracked_reads_packet = 0; ///< newest packet reading guest memory it does not list
     u64 constram_waits_skipped = 0; ///< statistics: CPU writes that did not have to wait
     u64 proxy_samples = 0; ///< texture bindings that read a scene proxy (statistics)

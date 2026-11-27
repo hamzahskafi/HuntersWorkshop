@@ -189,8 +189,26 @@ bool TimingEnabled();
 inline u64 Ticks() {
     return __builtin_ia32_rdtsc();
 }
-/// GPU thread: per type-3 packet (not IBs) its handling time; draws counted separately.
+/// 0.4.6 beta 19: the packets timed, about one in 16: a countdown reloaded at random from 8 to 24
+/// (no fixed stride a command buffer's pattern could line up with), each timed packet counting as
+/// 16. Two clock reads a packet were about 10% of the GPU command thread with the statistics on
+/// (the tester's stage A profile, 2026-11-27). BB_STATS_EVERY_PACKET=1: every packet, as before.
+extern u32 sample_countdown;
+extern u32 sample_weight;
+u32 NextSampleGap();
+/// GPU thread, at each type-3 packet: whether to time it.
+inline bool TimePacket() {
+    if (--sample_countdown != 0) [[likely]] {
+        return false;
+    }
+    sample_countdown = NextSampleGap();
+    return true;
+}
+/// GPU thread: a timed type-3 packet's (not an IB's) handling time, counted for the packets it
+/// stands for; draws among them separately.
 void AddPacketTicks(u64 ticks, bool is_draw);
+/// GPU thread: every draw, timed or not (the per-draw figures divide by these).
+void CountDraw();
 /// GPU thread, after each direct draw: prints every 5 s ("Native calls: ...").
 void MaybeReport();
 } // namespace BbNativeCalls
