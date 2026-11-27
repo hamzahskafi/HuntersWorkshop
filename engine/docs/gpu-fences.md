@@ -447,3 +447,9 @@ The tester's run of 140 (`20261128_013438`, frame statistics on; `_013656` witho
   game mid-frame there and takes the work as it comes), so only the round trip goes. The GPU cache's
   identity changes: `1c63203f101f3d79` (`liverpool.{h,cpp}`).
 
+**Engine id 142** (statistics only): the hand-overs at a game submission's end are counted by the GPU's
+state (140 and 141 counted a GPU done with everything as "on its last unit"), and every submission, the
+presenter's included, that found the GPU done with everything given before it is counted. That count
+less "ran out with work waiting" is how often the GPU waited for the game itself (its two-submission
+lead after its wait, its wake-up when the previous frame retires): the part the queue cannot give.
+

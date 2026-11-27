@@ -146,6 +146,8 @@ inline std::atomic<std::uint64_t> idle_flushes{0}, ahead_flushes{0}, announced_f
 inline std::atomic<std::uint64_t> queue_frame_flushes{0}, progress_marks{0};
 /// Engine id 141: submissions when the game waited for its previous frame (Liverpool::GuestWaits).
 inline std::atomic<std::uint64_t> queue_wait_flushes{0};
+/// Engine id 142: submissions (any cause) that found the GPU done with everything given to it.
+inline std::atomic<std::uint64_t> queue_found_idle{0};
 inline std::atomic<std::uint64_t> fences_by_mark_a{0}, fences_by_mark_signal{0}, fences_by_tick{0};
 inline std::atomic<std::uint64_t> fences_late_irq{0}, fences_late_clock{0}, fences_late_in_place{0};
 /// BB_PIPE_SIGNALS: frames retired in the frame end's own submission, and in one of their own.

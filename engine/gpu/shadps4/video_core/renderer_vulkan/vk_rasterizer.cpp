@@ -186,6 +186,16 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_, Runtime
             const u32 before = submitted_marks.exchange(recorded, std::memory_order_relaxed);
             handover_mark.store(GpuQueueLogic::HandOverMark(recorded, before),
                                 std::memory_order_relaxed);
+            // Engine id 142 (docs/gpu-fences.md): every submission (the presenter's included) that
+            // found the GPU done with everything given before it (the tick it knows, no query):
+            // each one the GPU waited for, for work held or for the game. The tick being submitted
+            // is CurrentTick() - 1 here (taken already).
+            if (BbStats::enabled) {
+                const u64 next = scheduler.CurrentTick();
+                if (next >= 3 && scheduler.GetWorkSemaphore()->IsFree(next - 2)) {
+                    BbStats::queue_found_idle.fetch_add(1, std::memory_order_relaxed);
+                }
+            }
         }
         // bbport BB_HONEST_LABELS: the signal thread waits on submitted work only (GpuSignalLoop),
         // so every submission wakes it, the scheduler's own (Finish) included.
@@ -467,15 +477,15 @@ void Rasterizer::QueueUnitEnd() {
     }
     const u64 tick = scheduler.CurrentTick();
     // The word may lag the GPU's last write by a moment: also the tick it knows, without a query.
+    const bool last_done = tick >= 2 && scheduler.GetWorkSemaphore()->IsFree(tick - 1);
+    // Engine id 142: counted by the GPU's state (finished everything, or on its last unit); the
+    // decision takes either. 140 and 141 counted a GPU out of work as on its last unit.
     switch (GpuQueueLogic::Decide(tick < 2, progress.Read(),
-                                  handover_mark.load(std::memory_order_relaxed),
-                                  tick >= 2 && scheduler.GetWorkSemaphore()->IsFree(tick - 1))) {
+                                  handover_mark.load(std::memory_order_relaxed), last_done)) {
     case GpuQueueLogic::HandOver::OnLastUnit:
-        BbStats::ahead_flushes.fetch_add(1, std::memory_order_relaxed);
-        Flush();
-        return;
     case GpuQueueLogic::HandOver::OutOfWork:
-        BbStats::idle_flushes.fetch_add(1, std::memory_order_relaxed);
+        (last_done ? BbStats::idle_flushes : BbStats::ahead_flushes)
+            .fetch_add(1, std::memory_order_relaxed);
         Flush();
         return;
     case GpuQueueLogic::HandOver::Hold:

@@ -1045,6 +1045,7 @@ void VideoOutDriver::Flip(const Request& req) {
                 // 0.4.6 beta 21 (docs/gpu-fences.md): the GPU queue's line in place of it.
                 const u64 frame_ends = BbStats::queue_frame_flushes.exchange(0);
                 const u64 game_waits = BbStats::queue_wait_flushes.exchange(0);
+                const u64 found_idle = BbStats::queue_found_idle.exchange(0);
                 const u64 marks = BbStats::progress_marks.exchange(0);
                 const u64 by_a = BbStats::fences_by_mark_a.exchange(0);
                 const u64 by_signal = BbStats::fences_by_mark_signal.exchange(0);
@@ -1063,7 +1064,10 @@ void VideoOutDriver::Flip(const Request& req) {
                                 "(the GPU on its last unit %.1f, out of work %.1f), %.1f/frame when "
                                 "it ran out with work waiting, %.1f/frame when the game waited for "
                                 "its previous frame, %.1f/frame at a frame's end, %.1f/frame by the "
-                                "safety net (expected 0); %.1f marks/frame; fences written as "
+                                "safety net (expected 0); submissions (the presenter's too) that "
+                                "found the GPU done with everything given to it %.1f/frame (it "
+                                "waited: for work held, or for the game); %.1f marks/frame; fences "
+                                "written as "
                                 "the GPU passed their game submission %.1f%% (by the GPU command "
                                 "thread %.1f%%, the signal thread %.1f%%), at their submission's end "
                                 "%.1f%%; kept to it: with an interrupt %.1f/frame, a clock or counter "
@@ -1074,7 +1078,7 @@ void VideoOutDriver::Flip(const Request& req) {
                                 (dry + ahead) / double(frames), ahead / double(frames),
                                 dry / double(frames), announced / double(frames),
                                 game_waits / double(frames), frame_ends / double(frames),
-                                net / double(frames),
+                                net / double(frames), found_idle / double(frames),
                                 marks / double(frames), share(by_a + by_signal), share(by_a),
                                 share(by_signal), share(by_tick), late_irq / double(frames),
                                 late_clock / double(frames), late_in_place / double(frames),
