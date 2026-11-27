@@ -6,9 +6,8 @@
 // Its hooks (vkCreateDevice, vkGetDeviceProcAddr, vkQueueSubmit, the NGX calls) are allowed; while it
 // is loaded a compatibility mode keeps the engine on the paths they handle: NGX calls and every queue
 // under the queue lock (its calls may wait for the device), the Vulkan instance and device made on a
-// thread of their own, and one submit thread while its frame generation is set. One switch for all
-// of it: optiscaler_compat in config.ini (the in-game menu, read at start), or BB_OPTISCALER_COMPAT=0
-// (the launcher's Engine switch) for a run.
+// thread of their own, and one submit thread while its frame generation is set. Always, with it loaded
+// (0.4.6 beta 17: the switch went, the tester's call: off took the protections away and bought nothing).
 #pragma once
 
 #include <optional>
@@ -36,7 +35,7 @@ const Info& Detect();
 /// The engine's DLSS calls go to OptiScaler's NGX entry points: it is loaded and its DLSS inputs are
 /// not turned off in OptiScaler.ini (EnableDlssInputs=false leaves DLSS to NVIDIA's driver).
 bool DlssThrough();
-/// OptiScaler is loaded and its compatibility mode is on.
+/// The compatibility mode: OptiScaler is loaded.
 bool Compat();
 /// One submit thread: Compat() with its frame generation on.
 bool SyncSubmit();

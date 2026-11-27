@@ -17,7 +17,7 @@ Vulkan.
   Radeon RX 6000 and newer, FSR 3.1 on other cards), TAA or the game's own anti-aliasing; HDR output,
   widescreen, and picture tuning.
 - **A PC version of the game:** keyboard and mouse controls, the game's System menu with PC pages, and
-  an in-game settings menu (Insert, or L3 + R3 on a controller).
+  an in-game settings menu (F1, or L3 + R3 on a controller).
 - **Online and co-op** through [The Hunter's Dream](https://thehuntersdream.com).
 - **The rest of the workshop:** mods and the community's game patches, cheats, trophies, save backups,
   and a launcher in 13 languages with a setup guide that checks your game files.

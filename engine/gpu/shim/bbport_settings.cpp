@@ -195,8 +195,6 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         }
     } else if (key == "dlss_preset") {
         v.dlss_preset = DlssPresetFromText(value.c_str());
-    } else if (key == "optiscaler_compat") {
-        v.optiscaler_compat = i != 0;
     } else if (key == "fsr_invert_jitter" || key == "fsr4_invert_jitter") { // 0.4.4 beta 28: was fsr4_
         v.fsr_invert_jitter = i != 0;
     } else if (key == "widescreen") {
@@ -515,7 +513,6 @@ void Load() {
     v.startup_output_res = v.output_res;
     v.startup_live_resolution = v.live_resolution;
     v.startup_hdr = v.hdr;
-    v.startup_optiscaler_compat = v.optiscaler_compat;
 }
 
 void ConfigureUpscalerSupport(bool fsr, bool dlss) {
@@ -636,7 +633,6 @@ void Save() {
     put("hide_cursor", flag(v.hide_cursor));
     put("fsr_invert_jitter", flag(v.fsr_invert_jitter));
     put("dlss_preset", DlssPresetText(v.dlss_preset));
-    put("optiscaler_compat", flag(v.optiscaler_compat));
     // Read by patches.py at start.
     for (int e = 0; e < EffectCount; ++e) {
         put(Effects[e].key, flag(v.effects[e]));
@@ -735,7 +731,7 @@ void Save() {
         std::fclose(file);
     }
     if (!had_lines) {
-        out = "# Hunter's Workshop settings (in-game menu: Insert / L3+R3)\n";
+        out = "# Hunter's Workshop settings (in-game menu: F1 / L3+R3)\n";
     }
     for (size_t k = 0; k < keys.size(); ++k) {
         if (!written[k]) {

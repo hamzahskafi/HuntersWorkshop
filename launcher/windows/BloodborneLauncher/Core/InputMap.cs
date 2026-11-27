@@ -56,7 +56,7 @@ namespace BloodborneLauncher.Core
         /// <summary>Keys the port itself uses while the game runs.</summary>
         public static readonly Dictionary<string, string> Reserved = new(StringComparer.OrdinalIgnoreCase)
         {
-            ["Insert"] = "Insert opens the port's settings menu",
+            ["F1"] = "F1 opens the port's settings menu",
         };
 
         public static readonly string[] MouseTokens = { "Mouse1", "Mouse2", "Mouse3", "Mouse4", "Mouse5", "WheelUp", "WheelDown" };

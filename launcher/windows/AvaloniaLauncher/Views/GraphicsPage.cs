@@ -15,7 +15,7 @@ namespace BloodborneLauncher.Views
         private bool _syncing;
 
         public GraphicsPage() : base(L.T("Graphics"),
-            L.T("Stored in config.ini; the upscaler can also be changed in game (Insert or L3 + R3)."))
+            L.T("Stored in config.ini; the upscaler can also be changed in game (F1 or L3 + R3)."))
         {
             Add(Card(SymbolRegular.Gauge24, L.T("Best settings for this PC"), Hardware.Detect().Summary,
                 SmallButton(L.T("Recommend…"), SymbolRegular.Sparkle24, (_, _) => MainWindow.Instance!.OfferBestSettings(firstRun: false)), out _));
@@ -54,15 +54,15 @@ namespace BloodborneLauncher.Views
             IniToggle(SymbolRegular.ArrowMove24, L.T("Object motion vectors"), L.T("Less ghosting on characters; costs about 10% FPS"), "object_motion");
             IniToggle(SymbolRegular.DataUsage24, L.T("Show FPS"), null, "show_fps");
             IniToggle(SymbolRegular.Wrench24, L.T("Note while shaders build"),
-                L.T("\"Building shaders\" in a corner while the game builds shaders for a place it shows for the first time. Also in game: Insert or L3 + R3"),
+                L.T("\"Building shaders\" in a corner while the game builds shaders for a place it shows for the first time. Also in game: F1 or L3 + R3"),
                 "compile_note");
-            // The FPS counter's look (live in game too: Insert or L3 + R3 › Other).
+            // The FPS counter's look (live in game too: F1 or L3 + R3 › Other).
             IniCombo(SymbolRegular.PositionToFront24, L.T("FPS counter position"), null, new Choice[]
             {
                 new(L.T("Top right"), "0"), new(L.T("Top left"), "1"), new(L.T("Bottom right"), "2"), new(L.T("Bottom left"), "3"), new(L.T("Top centre"), "4"),
             }, "fps_position");
             IniSlider(SymbolRegular.TextFontSize24, L.T("FPS counter size"), 0.75, 2.0, "fps_scale");
-            IniCombo(SymbolRegular.Color24, L.T("FPS counter text colour"), L.T("Any colour in game: Insert or L3 + R3 › Other"), new Choice[]
+            IniCombo(SymbolRegular.Color24, L.T("FPS counter text colour"), L.T("Any colour in game: F1 or L3 + R3 › Other"), new Choice[]
             {
                 new(L.T("White"), "#FFFFFF"), new(L.T("Yellow"), "#FFD54A"), new(L.T("Green"), "#7CFC8A"), new(L.T("Cyan"), "#6FE3FF"),
                 new(L.T("Red"), "#FF5A5A"), new(L.T("Orange"), "#FFA040"), new(L.T("Pink"), "#FF8AD8"), new(L.T("Black"), "#000000"),
@@ -96,7 +96,7 @@ namespace BloodborneLauncher.Views
             // The engine's picture and camera controls (bbport_settings.cpp clamps the same ranges).
             Group(L.T("Picture"));
             var picture = new StackPanel();
-            IniToggle(SymbolRegular.Color24, L.T("Picture tuning"), L.T("Turns the settings below on, live. Also in the game's System menu (PC Graphics, PC Effects, PC Colour) and the Insert menu"), "graphics_controls");
+            IniToggle(SymbolRegular.Color24, L.T("Picture tuning"), L.T("Turns the settings below on, live. Also in the game's System menu (PC Graphics, PC Effects, PC Colour) and the F1 menu"), "graphics_controls");
             IniToggle(SymbolRegular.CircleHalfFill24, L.T("Vignette"), null, "graphics_vignette", picture);
             IniSlider(SymbolRegular.DarkTheme24, L.T("Ambient occlusion strength"), 0, 3, "graphics_ao_strength", picture);
             IniSlider(SymbolRegular.WeatherSunny24, L.T("Shadow distance"), 0.5, 4, "graphics_shadow_scale", picture);

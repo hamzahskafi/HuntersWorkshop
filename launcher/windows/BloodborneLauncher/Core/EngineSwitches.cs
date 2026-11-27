@@ -124,9 +124,6 @@ namespace BloodborneLauncher.Core
             OnUnless0("BB_SOUND_HACK", Fixes, L.T("Weapon sound save fix"),
                 L.T("Sets the flag in the game's save that some weapon and player sounds need (without it they never play), before ") +
                 L.T("the game reads the save. Off leaves saves untouched")) with { Line = L.T("Fixes weapon sounds that never play") },
-            OnUnless0("BB_OPTISCALER_COMPAT", Fixes, L.T("OptiScaler compatibility"),
-                L.T("Only when OptiScaler is installed: DLSS calls wait for the GPU queue, and one thread sends the GPU work while its frame generation is on, ") +
-                L.T("so OptiScaler's hooks don't crash. Costs a little FPS with its frame generation. Off: the engine runs as without OptiScaler")) with { Line = L.T("Keeps OptiScaler's hooks from crashing the game") },
             OnUnless0("BB_EFFECT_FIXES", Fixes, L.T("Ebrietas effect fix"),
                 L.T("Replaces Ebrietas' trail effect with the one Nexus mod 41 uses, made from your own game files: her rock attacks no longer pile up thousands of rocks ") +
                 L.T("(FPS falling from 90 to 40). Off: the game's own effect. A mod that changes these effect files wins")) with { Line = L.T("Stops her rock attacks from piling up rocks") },

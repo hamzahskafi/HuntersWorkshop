@@ -119,7 +119,7 @@ namespace BloodborneLauncher.Views
             };
 
             // DLSS's model, with DLSS only (Auto, the default: NVIDIA's pairing for each quality).
-            IniCombo(SymbolRegular.BrainCircuit24, L.T("DLSS model"), L.T("Which NVIDIA model DLSS runs; also in game (Insert or L3 + R3)"),
+            IniCombo(SymbolRegular.BrainCircuit24, L.T("DLSS model"), L.T("Which NVIDIA model DLSS runs; also in game (F1 or L3 + R3)"),
                 Choices.DlssModels, "dlss_preset", changed: UpdateUpscaler);
             _dlssModel = Nest();
             _dlssModel.SetTip(L.T("Auto: K from DLAA to Balanced, M at Performance, L at Ultra Performance."));

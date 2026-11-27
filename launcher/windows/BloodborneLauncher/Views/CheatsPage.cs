@@ -28,7 +28,7 @@ namespace BloodborneLauncher.Views
 
         public CheatsPage()
         {
-            Body.Children.Add(Text(L.T("Set here for the next start. While playing, change them in the in-game menu (Insert or L3 + R3): they apply live. Turning a cheat off puts the game's values back; items you already have stay."), "Faint"));
+            Body.Children.Add(Text(L.T("Set here for the next start. While playing, change them in the in-game menu (F1 or L3 + R3): they apply live. Turning a cheat off puts the game's values back; items you already have stay."), "Faint"));
             _engine = new InfoBar
             {
                 IsClosable = false,
@@ -70,8 +70,8 @@ namespace BloodborneLauncher.Views
             ComboRow(SymbolRegular.ArrowTrendingLines24, L.T("Blood Echo multiplier"), L.T("Enemies already loaded give the new amount after you rest at a lamp or reload"),
                 new[] { new Choice(L.T("Normal"), "1"), new Choice("x2", "2"), new Choice("x5", "5"), new Choice("x10", "10") },
                 () => Ini.Get("cheat_echo_multiplier", "1"), v => Ini.Set("cheat_echo_multiplier", v), line: L.T("More Blood Echoes from each enemy"), defaultValue: "1");
-            Add(Card(SymbolRegular.Add24, L.T("Add echoes or insight"), L.T("In the in-game overlay menu (Insert or L3 + R3): +1,000, +10,000, +100,000 echoes and +1 insight"), null, out _,
-                line: L.T("From the in-game overlay menu (Insert or L3 + R3)")));
+            Add(Card(SymbolRegular.Add24, L.T("Add echoes or insight"), L.T("In the in-game overlay menu (F1 or L3 + R3): +1,000, +10,000, +100,000 echoes and +1 insight"), null, out _,
+                line: L.T("From the in-game overlay menu (F1 or L3 + R3)")));
         }
 
         /// <summary>A mode row and its amount slider for one cheat key.</summary>

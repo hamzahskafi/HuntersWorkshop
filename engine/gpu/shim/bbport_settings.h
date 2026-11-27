@@ -295,12 +295,6 @@ struct Values {
     std::atomic<float> render_scale{1.3f};
     /// mip_bias: texture LOD bias added while an upscaler runs (MipBiasMin..Max); live.
     std::atomic<float> mip_bias{0.0f};
-    /// OptiScaler's compatibility mode (vk_optiscaler.h), optiscaler_compat in config.ini: the menu
-    /// edits it; the engine reads startup_optiscaler_compat, and BB_OPTISCALER_COMPAT (the launcher's
-    /// switch) overrides that. (0.4.4 beta 28: optiscaler_ngx_lock, _clean_thread and _sync_submit,
-    /// its parts' own keys, went; they follow it.)
-    std::atomic<bool> optiscaler_compat{true};
-    bool startup_optiscaler_compat = true;
 
     /// Startup settings for the explicit BB_RENDER_RES compatibility patch only.
     int startup_preset = PresetAuto;
@@ -354,7 +348,7 @@ void Load();
 void ConfigureUpscalerSupport(bool fsr, bool dlss);
 /// Startup-patched scene dimensions cannot change until run.sh prepares a new image.
 bool FixedRenderSession();
-/// 0.4.4 beta 26b: whether an output resolution chosen in game (the Insert menu, the pause menu's
+/// 0.4.4 beta 26b: whether an output resolution chosen in game (the in-game menu, the pause menu's
 /// Graphics page) applies at once: only with Live resolution changes on when the game started.
 bool OutputChangesLive();
 /// The preset in effect: Auto resolved for the output it applies to, NativeAA under TAA, the startup's

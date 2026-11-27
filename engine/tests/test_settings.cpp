@@ -346,28 +346,24 @@ int main() {
                text.find("fsr_invert_jitter=1\n") == text.rfind("fsr_invert_jitter=1\n"));
     }
     s.fsr_invert_jitter = false;
-    // The DLSS model (live in the menu), OptiScaler's compatibility mode (read at start). dlss_mip_bias
-    // went in 0.4.4 beta 27d (NVIDIA's extra level always), the OptiScaler parts' own keys in beta 28
-    // (they follow the mode): read as nothing, left in the file as they were.
+    // The DLSS model (live in the menu). dlss_mip_bias went in 0.4.4 beta 27d (NVIDIA's extra level
+    // always), the OptiScaler parts' own keys in beta 28, and optiscaler_compat in 0.4.6 beta 17 (the
+    // compatibility mode always on with OptiScaler loaded): read as nothing, left in the file as they were.
     {
         std::ofstream file(path);
         file << "dlss_preset=j\ndlss_mip_bias=0\noptiscaler_compat=0\noptiscaler_sync_submit=1\n";
     }
     BbSettings::Load();
-    assert(s.dlss_preset == 10 && !s.optiscaler_compat && !s.startup_optiscaler_compat);
+    assert(s.dlss_preset == 10);
     s.dlss_preset = BbSettings::DlssPresetDefault;
-    s.optiscaler_compat = true;
     BbSettings::Save();
     {
         const std::string text = Read(path);
         assert(text.find("dlss_preset=default\n") != std::string::npos);
         assert(text.find("dlss_mip_bias=0\n") != std::string::npos);
-        assert(text.find("optiscaler_compat=1\n") != std::string::npos);
+        assert(text.find("optiscaler_compat=0\n") != std::string::npos);
         assert(text.find("optiscaler_sync_submit=1\n") != std::string::npos);
     }
-    assert(!s.startup_optiscaler_compat); // the menu's change waits for a restart
-    BbSettings::Load();
-    assert(s.optiscaler_compat && s.startup_optiscaler_compat);
     assert(BbSettings::DlssPresetFromText("m") == 13 && std::string(BbSettings::DlssPresetText(13)) == "m");
     // 0.4.4 beta 27c: Auto (NVIDIA's model for each quality mode) by default and for unknown text.
     {

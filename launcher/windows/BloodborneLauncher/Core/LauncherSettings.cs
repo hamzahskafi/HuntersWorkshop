@@ -125,6 +125,9 @@ namespace BloodborneLauncher.Core
                     _data.Remove("exp_vram_cleanup");
                     _data.Remove("exp_vram_budget");
                     _data.Remove("vram_budget_beta_on");
+                    // 0.4.6 beta 17: the in-game menu opens on F1 (Insert is OptiScaler's menu's):
+                    // "Insert only" saved before is "F1 only".
+                    if ((string?)_data["overlay_keys"] == "insert") _data["overlay_keys"] = "keyboard";
                     // 0.9.37 beta 8: beta builds write the frame statistics into the log, switched
                     // on once. Ebrietas' device losses were told apart only in the one log that had
                     // them (the game's GPU range allocator nearly empty); most reports came without.

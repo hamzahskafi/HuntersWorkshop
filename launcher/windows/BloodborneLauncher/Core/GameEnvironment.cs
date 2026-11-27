@@ -203,7 +203,7 @@ namespace BloodborneLauncher.Core
             if (s.Bool("exp_sfx_workaround")) env["BB_SFX_WORKAROUND"] = "1";
             if (s.Bool("borderless_fullscreen")) env["BB_EXCLUSIVE_FULLSCREEN"] = "0";
             if (!s.Bool("exp_compile_skip")) env["BB_COMPILE_SKIP"] = "0";
-            if (s.Str("overlay_keys") is "insert" or "off") env["BB_OVERLAY_KEYS"] = s.Str("overlay_keys");
+            if (s.Str("overlay_keys") is "keyboard" or "off") env["BB_OVERLAY_KEYS"] = s.Str("overlay_keys");
             if (s.Bool("legacy_shaders")) env["BB_NATIVE_SHADERS"] = "0";
             // Safe mode (after a crash, one run): every experimental engine option and the mods off, a crash
             // guard on (the engine's start programs set them, whatever the rows above say).

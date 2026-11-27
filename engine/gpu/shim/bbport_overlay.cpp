@@ -1276,10 +1276,9 @@ void MaskSection() {
     ImGui::EndDisabled(); // upscaler off
 }
 
-// bbport: OptiScaler (vk_optiscaler.h): what was found at start, and the engine's compatibility
-// mode for it (optiscaler_compat in config.ini, applied on restart).
+// bbport: OptiScaler (vk_optiscaler.h): what was found at start. With it loaded the engine always
+// works in its compatibility mode (0.4.6 beta 17: no longer a switch; the tester's call).
 void OptiScalerSection() {
-    auto& s = BbSettings::Get();
     const auto& opti = Vulkan::OptiScaler::Detect();
     Section("OptiScaler");
     if (WholeSection() && Shown("OptiScaler")) {
@@ -1287,18 +1286,13 @@ void OptiScalerSection() {
         if (!opti.loaded) {
             ImGui::TextDisabled("%s", BbSettings::MenuText(
                                           "Not loaded. OptiScaler is a DLL put next to the engine (often as winmm.dll "
-                                          "or dxgi.dll) with its OptiScaler.ini; it takes over DLSS. The switches below "
-                                          "apply when it is there.",
+                                          "or dxgi.dll) with its OptiScaler.ini; it takes over DLSS.",
                                           "Не загружен. OptiScaler — это DLL рядом с движком (обычно winmm.dll или "
-                                          "dxgi.dll) с файлом OptiScaler.ini; он перехватывает DLSS. Переключатели ниже "
-                                          "действуют, когда он есть."));
+                                          "dxgi.dll) с файлом OptiScaler.ini; он перехватывает DLSS."));
         } else {
             ImGui::Text(BbSettings::MenuText("Loaded: %s as %s", "Загружен: %s как %s"),
                         opti.version.empty() ? "OptiScaler" : ("v" + opti.version).c_str(), opti.module.c_str());
-            ImGui::Text("%s",
-                        Vulkan::OptiScaler::Compat()
-                            ? BbSettings::MenuText("Compatibility mode in this run: on", "Режим совместимости сейчас: вкл.")
-                            : BbSettings::MenuText("Compatibility mode in this run: off", "Режим совместимости сейчас: выкл."));
+            ImGui::Text("%s", BbSettings::MenuText("Compatibility mode in this run: on", "Режим совместимости сейчас: вкл."));
             if (!opti.frame_generation.empty()) {
                 ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f),
                                    BbSettings::MenuText(
@@ -1310,26 +1304,6 @@ void OptiScalerSection() {
             }
         }
         ImGui::PopTextWrapPos();
-    }
-    if (const char* label = Item("Compatibility mode (restart required)", "Режим совместимости (после перезапуска)")) {
-        Checkbox(label, s.optiscaler_compat);
-        Hint(BbSettings::MenuText(
-            "Keeps the engine on the paths OptiScaler's hooks handle: DLSS calls wait for the GPU queue, "
-            "the Vulkan device is created where OptiScaler can prepare it, and one thread sends the GPU "
-            "work while its frame generation is on (a little FPS). Off: the engine runs as without "
-            "OptiScaler. OptiScaler's own settings (its upscaler, its frame generation) are in its own "
-            "overlay and OptiScaler.ini. Applies after restarting the game.",
-            "Держит движок на путях, которые выдерживают хуки OptiScaler: вызовы DLSS ждут очередь GPU, "
-            "устройство Vulkan создаётся там, где OptiScaler может его подготовить, а работу GPU "
-            "отправляет один поток, пока включена его генерация кадров (немного FPS). Выкл.: движок "
-            "работает как без OptiScaler. Собственные настройки OptiScaler (его апскейлер, его генерация "
-            "кадров) — в его оверлее и OptiScaler.ini. Применяется после перезапуска игры."));
-        if (const char* env = std::getenv("BB_OPTISCALER_COMPAT"); env && env[0] == '0') {
-            ImGui::TextDisabled("%s", BbSettings::MenuText(
-                                          "Off for this run: the launcher's Engine > OptiScaler compatibility is off.",
-                                          "Выключен в этом запуске: в лаунчере выключено Engine > OptiScaler "
-                                          "compatibility."));
-        }
     }
 }
 
@@ -1681,8 +1655,8 @@ void Menu() {
                              ImGuiCond_Appearing);
     bool keep_open = true;
     if (!ImGui::Begin(
-            BbSettings::MenuText("Bloodborne - Graphics  (Insert / L3+R3)###bbport_settings",
-                                 "Bloodborne — настройки  (Insert / L3+R3)###bbport_settings"),
+            BbSettings::MenuText("Bloodborne - Graphics  (F1 / L3+R3)###bbport_settings",
+                                 "Bloodborne — настройки  (F1 / L3+R3)###bbport_settings"),
             &keep_open, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
         ImGui::End();
         return;
@@ -1781,8 +1755,6 @@ void Menu() {
     // 0.4.4 beta 27b: the game's own anti-aliasing, patched at start, applies only without an upscaler.
     restart |= BbSettings::GameAaApplies(s.effects[BbSettings::EffectGameAa], s.upscaler) !=
                BbSettings::GameAaApplies(s.startup_effects[BbSettings::EffectGameAa], s.startup_upscaler);
-    // OptiScaler's switches matter only with it loaded.
-    restart |= Vulkan::OptiScaler::Detect().loaded && s.optiscaler_compat != s.startup_optiscaler_compat;
     if (restart) {
         ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "%s",
                            BbSettings::MenuText("Changes apply after restarting the game",
@@ -2039,14 +2011,20 @@ void SetTextPrompt(bool active, const std::string& prompt, const std::string& te
 }
 
 /// bbport: what opens this menu (BB_OVERLAY_KEYS, the launcher's "In-game menu shortcut"): "both"
-/// (Insert and L3+R3, the default), "insert" (a controller can't open it by accident: L3 and R3
-/// pressed together in a fight did) or "off" (only the game's own PC menus).
-enum class OverlayKeys { Both, Insert, Off };
+/// (F1 and L3+R3, the default), "keyboard" (a controller can't open it by accident: L3 and R3
+/// pressed together in a fight did; "insert" before 0.4.6 beta 17) or "off" (only the game's own PC
+/// menus). 0.4.6 beta 17: F1, not Insert (the tester's call): OptiScaler's own keys are Insert (its
+/// menu), End (its frame generation), Page Up and Page Down (its FPS counter), ReShade's Home; F1 is
+/// none of theirs, not one of the game's default bindings, and no key a text field types with.
+enum class OverlayKeys { Both, Keyboard, Off };
+constexpr SDL_Keycode kMenuKey = SDLK_F1;
 static OverlayKeys MenuKeys() {
     static const OverlayKeys keys = [] {
         const char* env = std::getenv("BB_OVERLAY_KEYS");
         const std::string value = env ? env : "";
-        return value == "off" ? OverlayKeys::Off : value == "insert" ? OverlayKeys::Insert : OverlayKeys::Both;
+        return value == "off"                             ? OverlayKeys::Off
+               : value == "keyboard" || value == "insert" ? OverlayKeys::Keyboard
+                                                          : OverlayKeys::Both;
     }();
     return keys;
 }
@@ -2118,8 +2096,8 @@ void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count) 
         return;
     }
     initialized = true;
-    std::printf("Overlay: menu ready (%s)\n", MenuKeys() == OverlayKeys::Both     ? "Insert or L3+R3"
-                                             : MenuKeys() == OverlayKeys::Insert ? "Insert; L3+R3 off"
+    std::printf("Overlay: menu ready (%s)\n", MenuKeys() == OverlayKeys::Both       ? "F1 or L3+R3"
+                                             : MenuKeys() == OverlayKeys::Keyboard ? "F1; L3+R3 off"
                                                                                  : "shortcuts off");
 }
 
@@ -2150,10 +2128,10 @@ bool HandleEvent(const SDL_Event& event) {
     case SDL_EVENT_KEY_UP: {
         const bool down = event.type == SDL_EVENT_KEY_DOWN;
         if (down && !event.key.repeat &&
-            ((event.key.key == SDLK_INSERT && (is_open || MenuKeys() != OverlayKeys::Off)) ||
+            ((event.key.key == kMenuKey && (is_open || MenuKeys() != OverlayKeys::Off)) ||
              // Esc in a text field (the search, a typed value) is the field's: it clears, or leaves.
              (is_open && event.key.key == SDLK_ESCAPE && !io.WantTextInput))) {
-            SetOpen(event.key.key == SDLK_INSERT ? !is_open : false);
+            SetOpen(event.key.key == kMenuKey ? !is_open : false);
             return true;
         }
         if (!is_open) {

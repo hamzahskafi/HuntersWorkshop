@@ -161,7 +161,7 @@ namespace BloodborneLauncher.Core
             }
 
             if (_lines.Count == 0)
-                output.Add("# Hunter's Workshop settings (in-game menu: Insert / L3+R3)");
+                output.Add("# Hunter's Workshop settings (in-game menu: F1 / L3+R3)");
             foreach (var (key, value) in _values)
                 if (!written.Contains(key) && value != null)
                     output.Add($"{key}={value}");

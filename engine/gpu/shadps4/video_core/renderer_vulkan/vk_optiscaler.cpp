@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <cstdio>
-#include <cstdlib>
 #include <cwctype>
 #include <optional>
 #include <filesystem>
@@ -14,21 +13,11 @@
 #include <tlhelp32.h>
 #endif
 
-#include "bbport_settings.h"
 #include "video_core/renderer_vulkan/vk_optiscaler.h"
 
 namespace Vulkan::OptiScaler {
 
 namespace {
-
-/// The compatibility mode wanted: BB_OPTISCALER_COMPAT when set (0: off), else config.ini's
-/// optiscaler_compat at start (the in-game menu's).
-bool CompatWanted() {
-    if (const char* env = std::getenv("BB_OPTISCALER_COMPAT")) {
-        return env[0] != '0';
-    }
-    return BbSettings::Get().startup_optiscaler_compat;
-}
 
 #ifdef _WIN32
 std::string Narrow(const std::wstring& text) {
@@ -134,15 +123,12 @@ const Info& Detect() {
         Info found = Find();
         if (found.loaded) {
             const bool dlss = found.ini.dlss_inputs.value_or(true);
-            std::printf("OptiScaler: %s%s loaded as %s; the engine's DLSS goes %s; compatibility mode: %s\n",
+            std::printf("OptiScaler: %s%s loaded as %s; the engine's DLSS goes %s; compatibility mode: on - NGX "
+                        "calls and every queue under the queue lock, the Vulkan device made on a thread of its "
+                        "own, one submit thread while its frame generation is set\n",
                         found.version.empty() ? "" : "v",
                         found.version.empty() ? "(version unknown)" : found.version.c_str(), found.module.c_str(),
-                        dlss ? "through it" : "to NVIDIA's driver (EnableDlssInputs=false in OptiScaler.ini)",
-                        CompatWanted()
-                            ? "on - NGX calls and every queue under the queue lock, the Vulkan device made "
-                              "on a thread of its own, one submit thread while its frame generation is set; "
-                              "optiscaler_compat=0 or BB_OPTISCALER_COMPAT=0 turns it off"
-                            : "off (BB_OPTISCALER_COMPAT=0 or optiscaler_compat=0)");
+                        dlss ? "through it" : "to NVIDIA's driver (EnableDlssInputs=false in OptiScaler.ini)");
             if (dlss) {
                 std::printf("OptiScaler: its upscaler for Vulkan: %s (VulkanUpscaler in OptiScaler.ini, or "
                             "its menu)%s\n",
@@ -170,8 +156,7 @@ bool DlssThrough() {
 }
 
 bool Compat() {
-    static const bool on = Detect().loaded && CompatWanted();
-    return on;
+    return Detect().loaded;
 }
 
 bool SyncSubmit() {
