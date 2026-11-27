@@ -143,7 +143,11 @@ One cache line is written by every game thread, and the samples land on those in
 - The draw record counters become per-thread counts, summed when the statistics line is printed.
 - The statistics stay the same.
 
-**The barrier's spin gets a `pause`**, as a game fix beside the existing "job lock spins with pause".
+**The barrier's spin gets a `pause`, then a yield**, as a game fix beside the existing "job lock spins
+with pause". After about 50 us of spinning, each pass also gives the core up (`Sleep(0)`), so a worker
+the main thread waits for can run on it. Where cores are spare there is nobody to yield to, and it
+costs nothing. Where cores are scarce (fewer hardware threads), it keeps the spin from starving the very
+workers it waits for. Microsoft's guidance: avoid long spins.
 - The loop at `0x21b8890` keeps its logic; it gains a `pause` per pass.
 - A spin without one takes a hyperthreaded core's resources from the thread beside it. That thread can
   be one of the workers being waited for, or stage A.
@@ -254,6 +258,38 @@ confirms which threads the group uses, since their waits and the barrier line up
 | MMCSS ("Games" task class) | Near-realtime priorities for threads that spin and wait: risky |
 | The power plan's hybrid scheduling policies | System settings, outside the game |
 
+### By CPU
+
+Part 1 applies to every CPU unchanged. It removes engine overhead, and adds no spinning, so it helps most
+where cores are fewest. Part 2 differs, from the layout the engine already reads at start
+(`bbport_cpu_layout`: efficiency classes, cores, logical processors, the process's affinity):
+
+| CPU | Part 2 |
+|---|---|
+| Hybrid, 4+ performance cores (Intel 12th-14th gen desktops, Core Ultra desktops) | The frame-critical chain above normal, on the performance cores by CPU sets |
+| Hybrid, fewer than 4 performance cores (many laptops) | Priority only: too few performance cores to restrict to (Microsoft: 3-4 cores at least) |
+| One kind of core, one last-level cache (Ryzen with one core complex, Intel before 12th gen) | Priority only |
+| One kind of core, several last-level caches (Ryzen 9 with two core complexes, X3D among them) | Priority only in beta 18 (see below) |
+| Fewer than 16 hardware threads (8 cores or fewer with SMT, of any kind) | The engine's chain above normal as today, stage A with it; the game's main thread stays normal |
+
+**Why the main thread stays normal below 16 hardware threads.** There the game's threads often outnumber
+the free cores. The main thread spins at the barrier for workers of normal priority. Above them, it could
+keep them from the very cores they need, and the frame would get slower. GXRenderThread mostly waits and
+is raised everywhere. This is the engine's existing rule for its own bulk threads (raised only with 16 or
+more hardware threads, `BbPlatform::MakeCritical`).
+
+**Two core complexes.** Handoffs between threads on different complexes cross the slower link between
+their caches. On AMD's X3D parts, the cache CCD is chosen by AMD's driver only for programs Windows
+recognizes as games. Keeping the frame-critical chain and the barrier's workers within one last-level
+cache group (CPU sets, by the `LastLevelCacheIndex` the layout already returns) is the natural next
+step. It goes in the register until a tester with such a CPU can measure it.
+
+**Testing the small-CPU path on the tester's PC.** `BB_TEST_CPUS=<n>`, test only, removed with the other
+temporary switches: the engine limits its own process to n logical processors at start (the first n of
+the performance cores), so it lays itself out and schedules as a CPU with n hardware threads would.
+Caches and clocks stay the tester's, but scheduling is what part 2 changes. One run with
+`BB_TEST_CPUS=8` (a 4-core, 8-thread CPU), part 2 on and off, covers the small-CPU rule.
+
 **Linux:** raising priorities needs privileges there, and CPU affinity could follow later. Linux builds are
 paused.
 
@@ -271,7 +307,8 @@ candidate:
 3. both on;
 4. both on, with the barrier's workers on the performance cores (`BB_THREAD_PLACEMENT=workers`).
 
-And the lamp spot once with the best of these.
+And the lamp spot once with the best of these. And at the slower spot, with `BB_TEST_CPUS=8`: part 2 off
+and on, both with part 1.
 
 **Compared:**
 - FPS;
