@@ -998,6 +998,34 @@ then fast travel and an area with new shaders; runs 1 and 3 deferred).** Against
   not beta 18's.
 - **No engine thread without a role** was logged.
 
+**Beta 19's run, read (the tester, 2026-11-27, log `20261127_211019`, engine 134; frame statistics, no
+sampler; the tester's overlay: GPU 96% at the lamp spot, 91% in the slow area, CPU 54%, about 100 W).**
+Against 133's stage A profile run (`20261127_201857`, the same spot, the stage A sampler on) and 133's
+first run (`20261127_195807`, the main thread sampled):
+
+| | 133 | 134 |
+|---|---|---|
+| Lamp spot, 1,345 draws | 224-229 FPS; stage A 2.9-3.0 us a draw, idle 0.4-0.9% | 228-232 FPS; stage A 2.4-2.7 us a draw, idle 10-12%; the game waiting 1.5-1.9 ms |
+| Lamp spot past its jump, 1,296 draws | 228-233 FPS | 232-235 FPS |
+| The 1,780-1,795-draw view | 175-182 FPS (main thread sampled) | 190-194 FPS; stage A idle 5-6%, stage B 88% busy, the game waiting 2.3-2.6 ms |
+| The slow area (1,332 draws in 133, 1,286 here) | 200-205 FPS (main thread sampled) | 210-217 FPS; stage A idle 20%, stage B 80% busy, the game waiting 0.4-0.5 ms, 9.7 Vulkan submissions a frame |
+| Stage A's packets ("all packets", a draw) | 2.43 us | 2.03 us |
+
+- **The lamp spot is the GPU's now** (96% on the overlay, stage A idle 11%). Part of stage A's drop is the
+  statistics' own clock, which only runs with the statistics paid; the switch runs would separate it.
+- **The slow area has no single limit:** the GPU 91%, stage B 80%, stage A 80%, the main thread 0.87 cores
+  (0.43 ms a frame at its fork-join waits). It makes 9.7 Vulkan submissions a frame against 4.4 at the
+  lamp spot: the game syncs with the GPU mid-frame, so each sync waits for the whole chain (stage A,
+  stage B, the recorders, the GPU). The chain's latency is what is left there.
+- **The heavy view is the engine's:** stage A idle 5%, stage B 88% busy. Stage B's cost a draw is the next
+  CPU limit after stage A's.
+- **The pending tables:** no read was noted (the dumps write 3 ranges no read touches); GPU writes listed
+  145-160 thousand a second, 31-34 thousand to the table while the list is full (stage B more than 64
+  writes behind). A full list makes each constant lookup scan 64 entries: to check in the next profile.
+- **Late wakes:** 0 in play but one window (1), 2-4 in the menus and the load: the counting race the
+  builder found, counted exactly from engine id 135.
+- **Placement:** the main thread woke on the performance cores 69-80% of the time, `GXRenderThread` 38-79%.
+
 ### Performance, in 0.4.6 (moved in, 2026-11-27)
 
 The tester (2026-11-27): "I wanted the Performance part to mostly be completed in 0.4.6!" and, of the
@@ -1029,6 +1057,8 @@ was mostly the profiler's: without it the GPU is busy 97.5% of the time.
 | **Beta 19, revised: the GPU command thread's cost a draw (statistics without a per-packet clock, the hand-over without a fence a draw, the pending tables asked and filled less, the submission lock held only for the push, no heap per fence, small ones), with beta 19's engine waits and the per-thread `Roles:` entries** ([stage-a-cost.md](stage-a-cost.md)) | The stage A profile, 2026-11-27 | Built: engine id 134 (2026-11-27; the tester: "go ahead with beta 19") |
 | Beta 19's runs: the lamp spot and the 1,780-draw view with the frame statistics (no sampler): FPS, stage A's microseconds a draw and idle, the draw pipe's late wakes (expected 0), the pending tables' counts; the same with each switch off once (`BB_STATS_EVERY_PACKET=1`, `BB_PIPE_HANDOVER=each`, `BB_PENDING_TABLES=old`, `BB_FRAME_POOL=0`, `BB_ENGINE_PARK=0`); a stage A profile with `BB_SAMPLE_TOP=200` for beta 20; runs 1 and 3 of beta 18 when there is time | stage-a-cost.md, measurement | The tester, on 134 |
 | The Frame threads wake on the performance cores 40-43% of the time in play: per-thread shares for `main` and `GXRenderThread` in the `Roles:` line, then the measured option of Frame (or those two) preferring the fastest class | Beta 18's first run, read | With the next beta's line; the preference only if a run shows it helps |
+| **Beta 20 (proposed): the engine's chain a draw:** stage A's remaining 40% (the packet loop, the draw step), stage B's cost a draw (88% busy in heavy views), the pending write list's lookups when it is full; from a profile of both stages | Beta 19's run, read | To the tester with a profile run first |
+| A profile of stages A and B on 135: `BB_SAMPLE_THREADS=shadPS4:GpuCommandProcessor,bb:DrawRec`, `BB_SAMPLE_TOP=200`, the slow area and the heavy view (no new build) | Beta 19's run, read | Asked of the tester |
 | **Beta 19 (the original part, built in 134):** the engine's own waits (stage A's, the draw pipe's, the recorders', host copies') on the parking primitive with their spins set by role; pool sizes tuned from beta 18's `Roles:` lines; anything beta 18's runs ask for (Frame threads on the fastest class if measured better) | Beta 18's design, staging | Beta 19, after beta 18's runs |
 | **Beta 20, if betas 18 and 19 make stage A the limit:** stage A's cost a draw, starting with its constants step (0.63-0.73 us a draw, about 0.9 ms a frame at 1,300 draws), then its pipeline and inputs steps | The diagnostics runs, 2026-11-27 | After beta 19, decided from its runs |
 | The last-level-cache criterion in the roles' core rule (Ryzen with two core complexes) | Beta 18's design | When a tester with such a CPU can measure it |
