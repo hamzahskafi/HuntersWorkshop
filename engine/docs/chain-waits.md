@@ -1,6 +1,7 @@
 # Beta 20 design: the render chain never waits on a lower role, and its cost a draw
 
-Status: proposed to the tester (2026-11-27), not built.
+Status: approved by the tester ("go ahead with beta 20", 2026-11-27) and built (engine id 136); see
+"As built" at the end.
 
 ## Why
 
@@ -142,3 +143,47 @@ Each item has a switch this beta, as before (the role-aware lock's inheritance t
 
 On the beta, frame statistics on: the three spots as in the profile run, then the same profile run
 (both stages sampled) to check that no Chain wait lands on a lock any more.
+
+## As built (engine id 136)
+
+| Item | Where | Switch (this beta only) |
+|---|---|---|
+| 1. The draw preparation off stage A's locks: the game's submit hands the record over through a lock-free list (the scanner moves it into the queue) and to stage A with its decode task (`ProcessGraphics`'s parameter); stage A only marks a finished submission, the scanner collects it; the scanner sleeps on a parking word, woken by a system call only when it sleeps, and wakes one worker a buffer scanned; a rebase is tried without waiting | `vk_draw_prep.{h,cpp}`, `liverpool.{h,cpp}` | `BB_PREP_HANDOVER=old` |
+| 2. Each queue's submissions read and popped by stage A without the queue's lock (`AmdGpu::SubmitQueue`: blocks of 64, an emptied block recycled); the game's submitting threads keep the lock among themselves | `submit_queue.h`, `liverpool.{h,cpp}` | `BB_SUBMIT_QUEUE=locked` |
+| 3. The lock that carries priority (`BbRoles::Mutex`, `SharedMutex`): the holder noted at each take (a release store); a waiter behind a lower role counts the wait by the lock's name and raises the holder to its own priority until the holder lets go of its last role lock or the waiter gets the lock; a role without a priority of its own gets back the one it had. The `Roles:` line ends with "waited on lower roles". The runtime's memory map lock through C hooks, try-locks first | `bbport_role_lock.h`, `bbport_roles.cpp`, `src/runtime_memory.c`, `src/host_sync.h` | `BB_LOCK_INHERIT=0` (counts only) |
+| 3, applied: the submission counters (`submit_mutex`, its wakes now after it), the decode tasks' frame pool, the draw preparation's, the shader programs', the pipeline compile queue's, the copy pool's, the buffer cache's pre-upload, load-upload and unmap locks, the texture cache's and its prepared textures', the video out port's, flips' and flip requests' | each lock's header | (with item 3) |
+| 4. Raise on wait: a chain thread waiting on a pipeline raises the standing compile threads running a job too (slots beside the burst threads'), one waiting on host copies with nothing left to help with raises the copy threads running them; each goes back at its job's end (`BbRoles::EndRaise`) | `pipeline_compile_queue.h`, `vk_graphics_pipeline.cpp`, `bbport_copy.cpp` | `BB_RAISE_ON_WAIT=0` |
+| 5. The pending write list: 1,024 entries, a counting filter over 64 KB pages of the live ones; a range written again among the newest 8 moves to the end (the list stays in packet order); the pending tables line adds the lookups the filter answered | `vk_pending.h`, `vk_rasterizer.cpp` | `BB_PENDING_FILTER=0` |
+| 6. Stage A's thread times read ten times a second | `liverpool.cpp` | `BB_STATS_USAGE_EVERY=1` |
+| 7. Stage B counts packets with a plain store; a stage A about to sleep issues a process-wide fence (`FlushProcessWriteBuffers`, a registered `membarrier` on Linux) | `vk_draw_pipe.h`, `bbport_park.{h,cpp}` | `BB_PIPE_COUNT=fenced` |
+| 8. The signal thread's start a flag | `vk_rasterizer.{h,cpp}` | - |
+| 9. `GetDrawOffsets` takes the pipeline's own `optional<const FetchShaderData>` | `vk_rasterizer.cpp` | - |
+
+Changed from the design while building:
+- **Item 1:** the register-file copies stay under the draw preparation's lock: stage A only tries it now
+  (and the game's submit doesn't take it), so they hold up only the preparation's own threads. The
+  doc's audit missed the submission counters' lock (`submit_mutex`), which stage A takes once a
+  submission and the game's submit held while it woke threads: role-aware now, the wakes after it.
+- **Item 7:** the design's per-packet release store with a fence before stage B waits could make a
+  wake late by one long packet (a compile, an upload: milliseconds). The process-wide fence on the
+  sleeping side keeps every wake exact and costs only when stage A sleeps, which it does after 500 us
+  of waiting.
+- **Item 9:** the profile's two heap sites (the draw record's own allocation and the vertex
+  attributes' vector) were one: `GetDrawOffsets`, inlined into the draw record, took
+  `optional<FetchShaderData>` while the pipeline hands out `optional<const FetchShaderData>`, so
+  every call built a converted copy with its attribute vector on the heap.
+- **Item 10 not built:** the texture cache's LRU is already touched once a frame per image (its tick
+  advances once a frame); the profile's cost there is the first read of the image's state at its
+  draw, which binding the texture needs anyway. Keeping the barrier state elsewhere to skip that read
+  would let a wrong barrier through for about 2%; a finer profile first.
+- **Item 11 dropped:** the recorder is woken only when it sleeps; the wakes counted are for the next
+  segment's thread, asleep by design. Keeping it spinning would hold a core for each of the three
+  recorders.
+
+The GPU cache's identity changes with this beta (`liverpool.{h,cpp}`, `submit_queue.h`,
+`vk_pipeline_cache.h`): `31aba0f240c65c6f`, from `cdca3ea71cd46d16`.
+
+Tests: `role-lock-test` (real threads; counts everywhere, the raise on Windows or Wine), `submit-queue-test`,
+`pending-test` (the filter against a model, with and without), `draw-pipe-handover-test` (now also stage A
+sleeping behind slow packets: 300 sleeps, no lost wake), `pipeline-burst-test` (standing raises);
+ThreadSanitizer clean here for the threaded ones.

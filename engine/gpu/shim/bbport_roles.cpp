@@ -848,10 +848,18 @@ struct CWait {
     std::uint64_t generation = 0, start = 0;
 };
 thread_local CWait t_c_wait;
+// The last lock name looked up on this thread (the runtime passes string literals): no search under
+// the registry's lock at each contended wait.
+thread_local const char* t_c_name = nullptr;
+thread_local BbRoles::LockDetail::Stats* t_c_stats = nullptr;
 } // namespace
 extern "C" void bbgpu_role_contended(const char* lock, void* holder) {
     auto& w = t_c_wait;
-    w.stats = BbRoles::LockDetail::Register(lock);
+    if (lock != t_c_name) {
+        t_c_stats = BbRoles::LockDetail::Register(lock);
+        t_c_name = lock;
+    }
+    w.stats = t_c_stats;
     w.holder = holder;
     w.start = 0;
     w.generation = BbRoles::LockDetail::Contended(w.stats, holder, w.start);

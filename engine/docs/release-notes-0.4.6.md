@@ -431,6 +431,29 @@ at the tested spots. A profile of it showed where its time went, and beta 19 cut
 - For this beta's measurements only, `BB_STATS_EVERY_PACKET=1`, `BB_PIPE_HANDOVER=each`,
   `BB_PENDING_TABLES=old`, `BB_FRAME_POOL=0` and `BB_ENGINE_PARK=0` each turn one change off.
 
+## The render chain no longer waits on slower threads (beta 20)
+
+A profile of both render threads on beta 19 showed the GPU command thread spending about a sixth of
+its time waiting for locks held by threads Windows runs at a lower priority (the draw preparation's
+helpers, the game's own submit), which Windows had set aside. Windows' locks don't pass a waiter's
+priority on to the thread holding the lock.
+- **The GPU command thread takes none of those locks any more.** The draw preparation's data comes
+  with each submission, finished work is cleaned up by the helpers themselves, and the game's
+  submissions reach this thread without a lock.
+- **A lock that passes priority on.** Every lock the render threads share with slower ones now
+  notes who holds it. A render thread that finds it held by a slower thread raises that thread to its
+  own priority until it lets go. Each such wait is counted, so the `Roles:` log line shows any that are
+  left ("waited on lower roles"), on any PC.
+- **The threads the render chain waits for are raised while it waits**: the shader compile threads
+  and the copy threads, as the backlog compile threads already were.
+- **Less work on every draw:** a quicker check of the memory the queued draws write, no memory
+  fence on the drawing thread for every draw, no system call to check a thread exists, and no
+  memory allocation for each draw.
+- The shader cache is rebuilt once on the first start of this beta (its identity changed).
+- For this beta's measurements only, `BB_PREP_HANDOVER=old`, `BB_SUBMIT_QUEUE=locked`,
+  `BB_LOCK_INHERIT=0`, `BB_RAISE_ON_WAIT=0`, `BB_PENDING_FILTER=0`, `BB_STATS_USAGE_EVERY=1` and
+  `BB_PIPE_COUNT=fenced` each turn one change off.
+
 ## Sharpening: one meaning, off by default (beta 16)
 
 The sharpening slider meant different things depending on the upscaler, so the same value could be
