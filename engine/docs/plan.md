@@ -540,7 +540,12 @@ The design (the parts, in the order they would be built):
 - **G6, pacing:** AMD's swapchain paces the frames it shows; the engine paces the real ones at half the
   output rate (AMD: on Vulkan the game's own frame limiter keeps the CPU from running ahead). The FPS
   limit means the output rate (120: 60 real frames); V-Sync on caps real frames at half the refresh, as
-  AMD documents; the vblank lock is off with frame generation; the FPS counter shows both rates.
+  AMD documents; the vblank lock is off with frame generation; the FPS counter shows both rates. The game's
+  own timing never sees the generated frames: its frame pacer, the frame-rate fixes and the physics run
+  at the real rate, so a fixed rate chosen with frame generation (120) runs the game and its fixes at
+  half (60). Uncapped, the fixes that follow each frame's time are right at any real rate; the few set
+  once (frame counts and constants in code, `FRAME_VALUE`/`FRAME_COUNT`, the cloth scale) are set for
+  120, so an uncapped output of 240 with frame generation puts the real rate where those are exact.
 - **G7, HDR:** AMD takes PQ (HDR10) and scRGB swapchains with its HDR flag: the HUD-less copy encoded as
   the frame is. After SDR works.
 - **G8, settings and reports:** a launcher choice (Frame generation: Off, AMD FSR; read at start, the
