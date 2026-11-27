@@ -951,6 +951,20 @@ Kept: FIFO waiters, timeouts, cancel and delete waking every waiter, the freeze 
 (`tests/test_sema.c`, `runtime-test`). Measured with the same sampler run at the slower spot. A spin
 before blocking only if latency is still left afterwards.
 
+**Thread priorities, raised by the tester (2026-11-27).** Today: the flip thread highest; the engine's
+render chain above normal (stage A, stage B, the recording threads and, on 16 or more hardware threads,
+the 7 draw preparation workers: `BbPlatform::MakeCritical`, `BB_GPU_THREAD_PRIORITY`); all ~60 game
+threads normal, the main thread and GXRenderThread among them (the game gives every thread but FMOD's
+PS4 priority 700; the runtime applies only the audio range, `BB_AUDIO_THREAD_PRIORITY`); the compile and
+burst threads idle. On a hybrid CPU Windows gives the performance cores to higher priorities first: on
+the tester's 20-thread CPU about 12 engine threads sit above the game's main thread, as many as its
+performance-core slots, which fits the main thread waking on an efficiency core half the time.
+**Proposed as beta 18's second part (for the tester's go-ahead):** priorities along the frame's chain:
+the game's main thread and GXRenderThread above normal with the engine's render chain; the helpers
+(the game's job workers, the engine's draw preparation workers) normal; background work as now; audio
+as now. Behind an Extra variable for the measurement (on and off at the slower spot). The two game
+threads raised on every CPU, the engine's helpers kept to the 16-thread rule.
+
 ### Performance, in 0.4.6 (moved in, 2026-11-27)
 
 The tester (2026-11-27): "I wanted the Performance part to mostly be completed in 0.4.6!" and, of the
