@@ -932,9 +932,24 @@ waiting 0.15 ms a frame).**
 
 So at the slower spot no thread is saturated: the main thread hands out short jobs and waits for each,
 and every wait is a block and a wake on Windows. The runtime's semaphores and condition variables
-block at once (`runtime_sema.c`, `runtime_mutex.c`). **Proposed (for the tester's review):** a test
-switch, `BB_WAIT_SPIN_US` (off by default), that has those waits spin that long before blocking, run at
-the slower spot with 0, 20 and 50: it measures how much of the lost room is wake latency.
+block at once (`runtime_sema.c`, `runtime_mutex.c`). First proposed: a test switch, `BB_WAIT_SPIN_US`,
+spinning before blocking. The tester asked for the fix at the source instead (2026-11-27), and the source
+is the runtime itself:
+- **Semaphores** (`runtime_sema.c`): one process-wide lock for every semaphore operation of every
+  thread, the id found by walking a list under it, and `sem_signal` waking the waiter while still
+  holding it: the woken thread, inside `SleepConditionVariableSRW`, must take that lock back, so it
+  blocks again until the signaller lets go. Two wakes a handoff, and every other thread's semaphore
+  work queued behind the same lock (the job workers alone make tens of thousands of these a second).
+- **Read/write locks** (`runtime_rwlock.c`): every lock and unlock takes one process-wide lock, walks a
+  list and allocates or frees a holder record under it.
+- The mutexes and condition variables are per object over SRW locks and Windows condition variables:
+  not part of it.
+**Proposed as beta 18 (for the tester's go-ahead):** each semaphore and read/write lock with its own
+state, found without a shared lock; a semaphore's waiters woken after its lock is let go, each sleeping
+on its own word (wait on address), so a handoff is one wake; an atomic fast path when nobody waits.
+Kept: FIFO waiters, timeouts, cancel and delete waking every waiter, the freeze report's descriptions
+(`tests/test_sema.c`, `runtime-test`). Measured with the same sampler run at the slower spot. A spin
+before blocking only if latency is still left afterwards.
 
 ### Performance, in 0.4.6 (moved in, 2026-11-27)
 
