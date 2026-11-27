@@ -834,6 +834,41 @@ for a display buffer).
 the game's threads on efficiency cores, keeping them on the performance cores comes first: smaller,
 and it lifts the game's own frame. The GPU-profile part above waits until the GPU is the limit again.
 
+**Engine id 132's runs, read (the tester, 2026-11-27; logs `20261127_072134` and `_073834`, lamp spot,
+FSR 4.1.2 at 1920x1080, standing still; captures at 120 s and 360 s).** The jump came at about 3 minutes
+in the second run, so the first capture is before it and the second after.
+
+| | Before (2,309 frames) | After (2,436 frames) |
+|---|---|---|
+| Frame, median | 4.76 ms (210 FPS) | 4.41 ms (227 FPS) |
+| Draws a frame | 1,345 | 1,296 |
+| Vulkan submissions a frame (the game's fenced submission ends) | 12 (11) | 6 (5) |
+| The game waiting for its previous frame | 0.61 ms | 1.82 ms |
+| The frame-ending thread waiting on its own condition variables | 2.23 ms | 0.83 ms |
+| Stage A idle | 1% | 0% |
+| GPU idle (between submissions) | 2% | 0% |
+| A frame's way to retirement: stage A, the GPU | 2.37, 1.57 ms | 1.53, 1.96 ms |
+
+- **Not the efficiency cores.** The game's threads wake on all 20 logical processors. The busiest one
+  (about 2,900-3,150 waits a second, waiting 15-17% of the time) wakes on an efficiency core 50% of
+  the time in both captures, the job workers 67-69%, the frame-ending thread 21-30%, and 22-23% of
+  frames end on an efficiency core in both. Nothing moved at the jump; steering the game's threads
+  is not the lever here.
+- **The jump is the game's.** At it the game makes about half as many fenced submissions a frame,
+  draws 49 fewer things, and its frame-ending thread waits 1.4 ms less on its own threads. Something
+  in the scene stops: work the game syncs with the GPU several times a frame.
+- **The limit at the lamp spot is stage A.** It never runs out of work in either state (idle 0-1%),
+  while the game waits for it (0.6 and 1.8 ms a frame). The GPU's queue never runs dry either, but
+  the tester's GPU monitor reads 85-86%: the GPU follows stage A's rate with some headroom. Stage A
+  takes 3.0-3.2 us a draw (draw packets 1.4 us, all packets 2.5 us, the rest outside packets).
+- **The flip is not a factor.** PrepareFrame to the flip taken 0.02 ms, the game told 0.03 ms later,
+  the swap thread's present 0.32-0.33 ms on its own thread, and no stage A waits for a display buffer.
+
+**Proposal, from these (for the tester's review):** beta 18 is stage A's cost a draw. Its first step
+is a profile of stage A by packet kind and by part of a draw (the clock is already read per packet,
+`bbport_native_calls.cpp`), so the build that cuts it aims at measured time. The gain is bounded by
+the GPU's headroom at this spot (the monitor's 14-15%).
+
 ### Performance, in 0.4.6 (moved in, 2026-11-27)
 
 The tester (2026-11-27): "I wanted the Performance part to mostly be completed in 0.4.6!" and, of the
