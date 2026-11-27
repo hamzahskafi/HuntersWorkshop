@@ -951,19 +951,15 @@ Kept: FIFO waiters, timeouts, cancel and delete waking every waiter, the freeze 
 (`tests/test_sema.c`, `runtime-test`). Measured with the same sampler run at the slower spot. A spin
 before blocking only if latency is still left afterwards.
 
-**Thread priorities, raised by the tester (2026-11-27).** Today: the flip thread highest; the engine's
-render chain above normal (stage A, stage B, the recording threads and, on 16 or more hardware threads,
-the 7 draw preparation workers: `BbPlatform::MakeCritical`, `BB_GPU_THREAD_PRIORITY`); all ~60 game
-threads normal, the main thread and GXRenderThread among them (the game gives every thread but FMOD's
-PS4 priority 700; the runtime applies only the audio range, `BB_AUDIO_THREAD_PRIORITY`); the compile and
-burst threads idle. On a hybrid CPU Windows gives the performance cores to higher priorities first: on
-the tester's 20-thread CPU about 12 engine threads sit above the game's main thread, as many as its
-performance-core slots, which fits the main thread waking on an efficiency core half the time.
-**Proposed as beta 18's second part (for the tester's go-ahead):** priorities along the frame's chain:
-the game's main thread and GXRenderThread above normal with the engine's render chain; the helpers
-(the game's job workers, the engine's draw preparation workers) normal; background work as now; audio
-as now. Behind an Extra variable for the measurement (on and off at the slower spot). The two game
-threads raised on every CPU, the engine's helpers kept to the 16-thread rule.
+**Thread priorities, raised by the tester (2026-11-27).** Researched with the semaphores into one design,
+[handoffs-and-placement.md](handoffs-and-placement.md), for the tester's review before any code. A
+correction to the first reading: the engine's threads above normal are stage B, the 3 recording threads
+and the 4 copy threads (mostly asleep); the 7 draw preparation threads run idle and stage A runs normal,
+like the game's ~60 threads. So the raised threads do not crowd the main thread off the performance
+cores; Windows' wake placement (an idle core first, the efficiency cores most often) is the likelier
+reason. The design: the frame-critical chain (the game's main thread and GXRenderThread, stage A, stage B,
+the recording threads) above normal and, on hybrid CPUs with 4 or more performance cores, on those
+cores by CPU sets (soft); everything else as now; measured on and off.
 
 ### Performance, in 0.4.6 (moved in, 2026-11-27)
 
