@@ -37,6 +37,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -3103,9 +3104,20 @@ int RunCurves(const fs::path& self, const fs::path& dir, const fs::path& report)
 }
 #endif
 
-} // namespace
+int Usage() {
+    std::fprintf(stderr,
+                 "usage: bb-shader-lab <capture folder> [report.csv]\n"
+                 "       bb-shader-lab --check-cache <cache folder>\n"
+                 "       bb-shader-lab --fix-keys <cache folder>\n"
+                 "       bb-shader-lab --recompile-cache <cache folder>\n"
+                 "       bb-shader-lab --export-catalog <cache folder> <catalog folder>\n"
+                 "       bb-shader-lab --seed-cache <catalog folder> <cache folder> <game folder> <eboot.elf>\n"
+                 "       bb-shader-lab --bench <capture folder> [rounds] [report.csv]\n"
+                 "       (and the research commands in tests/shader_lab.cpp's main)\n");
+    return 2;
+}
 
-int main(int argc, char** argv) {
+int Run(int argc, char** argv) {
     // Options anywhere after the positional arguments.
     std::vector<char*> args;
     for (int i = 0; i < argc; ++i) {
@@ -3217,9 +3229,9 @@ int main(int argc, char** argv) {
         const fs::path file = argv[2];
         return RunOne(file, file.parent_path() / "profile.bin");
     }
-    if (argc < 2) {
-        std::fprintf(stderr, "usage: bb-shader-lab <capture folder> [report.csv]\n");
-        return 2;
+    // No command, an unknown one, or one without its arguments (--help): the usage, not a folder named so.
+    if (argc < 2 || argv[1][0] == '-') {
+        return Usage();
     }
     const fs::path dir = argv[1];
     const fs::path report = argc >= 3 ? fs::path(argv[2]) : dir / "lab-report.csv";
@@ -3230,4 +3242,18 @@ int main(int argc, char** argv) {
 #else
     return RunAll(argv[0], dir, report);
 #endif
+}
+
+} // namespace
+
+int main(int argc, char** argv) {
+    // A folder that is not there, or one the lab cannot read, is said plainly (exit 3), not an
+    // uncaught exception.
+    try {
+        return Run(argc, argv);
+    } catch (const std::exception& error) {
+        std::fflush(stdout);
+        std::fprintf(stderr, "bb-shader-lab: %s\n", error.what());
+        return 3;
+    }
 }
