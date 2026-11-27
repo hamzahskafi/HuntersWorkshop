@@ -2189,7 +2189,9 @@ every queue's submits go out under `Scheduler::submit_mutex` (its calls may wait
 the Vulkan instance and device are made on a thread of their own, and one submit thread runs while its
 frame generation is set (the compatibility mode). On Windows the helpers (`bb-splash`, `bb-shader-lab`,
 `bb-gpu-capabilities`) run from `engine\out\tools`, so a DLL put beside the game is loaded into the
-game alone. Its frame generation is not supported yet.
+game alone. Its frame generation is not supported yet. Engine id 127: the engine runs in its own folder
+(`engine\out`), as a game does: tools beside it give paths from there (d4r's `NvngxPath=d4r\nvngx.dll`,
+which OptiScaler resolves from the working folder).
 
 ### The 0.4.6 release
 

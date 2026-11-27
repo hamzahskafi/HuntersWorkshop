@@ -256,6 +256,8 @@ int Main(std::vector<std::wstring> arguments) {
     // which has no user folder): shared with the shadPS4 emulator, never reset with an
     // engine update nor by the launcher's Clear, so a damaged or outdated shader stayed.
     if (Env("BB_GPU_USER_DIR", "").empty()) SetEnv("BB_GPU_USER_DIR", Utf8(folders.package / "user"));
+    // The engine's crash dump: the launcher names its logs folder; started without it, the package's.
+    if (Env("BB_CRASH_DIR", "").empty()) SetEnv("BB_CRASH_DIR", Utf8(folders.package / "logs"));
     {
         std::error_code error;
         fs::create_directories(Path(Env("BB_GPU_USER_DIR", "")), error); // bb-probe falls back without it
@@ -548,7 +550,11 @@ int Main(std::vector<std::wstring> arguments) {
                                       Wide(Env("BB_TIMEOUT", "0"))};
     command.insert(command.end(), arguments.begin(), arguments.end());
     splash.Step(BbSplashStatus::Step::Engine);
-    return RunProbe(probe, command, folders.engine);
+    // 0.4.6 beta 17: in its own folder, as a game runs. Tools put beside it give their paths from
+    // there: d4r's OptiScaler.ini names d4r\nvngx.dll, which OptiScaler looks for from the working
+    // folder (the tester's 126 runs: not found from engine\, so its DLSS had no runtime and crashed).
+    // The engine itself is given every path whole.
+    return RunProbe(probe, command, out);
 }
 
 } // namespace

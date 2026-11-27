@@ -548,12 +548,16 @@ static unsigned __stdcall crash_helper_thread(void *unused) {
     return 0;
 }
 static void start_crash_helper(void) {
-    /* The session log's folder (BB_LOG_FILE, set by the launcher), else logs\ here. */
-    const char *log = getenv("BB_LOG_FILE");
+    /* The session log's folder: BB_LOG_FILE's when output goes to a file, else BB_CRASH_DIR (the
+     * launcher's logs folder, where it keeps last_session.log), else logs\ here. */
+    const char *log = getenv("BB_LOG_FILE"), *crash_dir = getenv("BB_CRASH_DIR");
     const char *slash = log ? strrchr(log, '\\') : NULL, *other = log ? strrchr(log, '/') : NULL;
     if (other > slash) slash = other;
     if (slash && (size_t)(slash - log) + sizeof("\\crash.dmp") < sizeof(crash_dump_path)) {
         snprintf(crash_dump_path, sizeof(crash_dump_path), "%.*s\\crash.dmp", (int)(slash - log), log);
+    } else if (crash_dir && crash_dir[0] && strlen(crash_dir) + sizeof("\\crash.dmp") < sizeof(crash_dump_path)) {
+        snprintf(crash_dump_dir, sizeof(crash_dump_dir), "%s", crash_dir);
+        snprintf(crash_dump_path, sizeof(crash_dump_path), "%s\\crash.dmp", crash_dir);
     } else {
         snprintf(crash_dump_dir, sizeof(crash_dump_dir), "logs");
         snprintf(crash_dump_path, sizeof(crash_dump_path), "logs\\crash.dmp");

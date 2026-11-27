@@ -162,6 +162,8 @@ namespace BloodborneLauncher.Core
                 env["BB_SHADER_CAPTURE_DIR"] = Path.Combine(Path.GetDirectoryName(GameRunner.SessionLog)!, "shaders");
             }
             if (diag.Count > 0) env["BB_DIAG"] = string.Join(",", diag);
+            // The engine's crash dump beside logs\last_session.log (the engine runs in engine\out).
+            env["BB_CRASH_DIR"] = Path.GetDirectoryName(GameRunner.SessionLog)!;
             // Experimental engine features: on by default, each can be turned off.
             // 0.4.4 beta 28: what is on by default in the engine is passed only when off.
             if (!s.Bool("exp_frame_pacing")) env["BB_PRECISE_PACING"] = "0";
