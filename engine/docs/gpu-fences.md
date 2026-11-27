@@ -98,10 +98,29 @@ queued; the tester asked whether that added waiting, counting and delay. It did,
 needs none.) Devices without the marker keep today's rule, since their fences still need a
 submission's end.
 
-**5. Kept from before:** suspending and resuming passes across the recording threads' cuts was
-measured in 0.4.4 (betas 14 and 20/21): a cut pass costs a few microseconds, halving the cuts changed
-neither GPU time nor FPS. Vulkan also needs the suspending flag when the pass begins, before a cut is
-known. Not proposed again.
+**5. Passes cut between the recording threads' command buffers: measured afresh, not taken from 0.4.4.**
+0.4.4 (betas 14, 20, 21) found a cut pass cost a few microseconds and halving the cuts changed
+nothing, on an RTX 3070 Ti at 60-120 FPS with the recording of then. The tester (2026-11-27): a lot has
+changed since, so a fresh approach. Today's GPU (RX 9070 XT), frame time (4.3-5.2 ms, where a fixed
+cost a frame weighs twice as much) and recording threads differ. The 138 log has about 17 cuts a frame
+of a pass ("begun again after a recording cut"), in the main geometry pass most of all (about 20 pieces
+a frame in the profile).
+- What a cut costs in principle: a store of the attachments at the end of one piece and a load at the
+  start of the next. The specification: "Store and resolve operations are only performed at the end of a
+  render pass instance that does not specify the VK_RENDERING_SUSPENDING_BIT_KHR flag", and loads only
+  at the start of one without VK_RENDERING_RESUMING_BIT_KHR.
+- The objection that the suspending flag must be set when a pass begins, before a cut is known, has a
+  way around it. Every pass begins suspendable. At a cut it is suspended and resumed as the first
+  command of the next command buffer. At a normal end it is closed by an empty resuming instance, which
+  does the store. The rules allow it: the suspended and resuming instances are in one submission's
+  command buffers, in order, with no action or synchronization commands and no other render pass
+  instance between them (VUID-VkSubmitInfo-pCommandBuffers-06014 to 06016). With whole-frame
+  submissions every cut is inside one.
+- First, a measurement in the counting build: a switch that never cuts inside a pass, only at the
+  next pass end (with a size cap). It shows what the cuts cost on this GPU, and what recording the
+  long pass on one thread costs the recording threads. Then: if it pays and recording keeps up, cut
+  only at pass ends; if it pays and recording suffers, the suspendable passes above; if it does not
+  pay, today's numbers recorded.
 
 ## Still unknown: a counting build first
 
@@ -116,7 +135,8 @@ Three facts decide how much of the idea applies. None can be read from the logs 
    and how long matters.
 
 Also counted: distinct fence addresses a frame and back-to-back fences (no work between them), for the
-marker count's cost.
+marker count's cost. And the switch of item 5 (no cuts inside a pass), for one run with it and one
+without, with the GPU profile on.
 
 These are counters only (no behavior change), with one line in the frame statistics. One run at the
 three spots answers them.
