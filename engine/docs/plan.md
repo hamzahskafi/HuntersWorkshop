@@ -767,7 +767,10 @@ engine's); (H4) the presenter's wait for the frame before (`BB_FRAMES_AHEAD=1`) 
 Vulkan submissions and the GPU's progress; engine id 131 adds stage B's waits (20 us or more) and
 `tools/timeline_report.py`, which says per frame how long the game waited, how long each stage and the
 GPU sat idle, and how a frame's way from the game's frame end to its retirement splits between stage A,
-stage B, the last submission and the GPU's tail. The tester's run: `BB_TIMELINE` and
+stage B, the last submission and the GPU's tail. The builder's review of 131: the report's lookups
+walked every interval for each frame, and overlapping waits would count twice; it now merges the
+intervals and looks them up by bisection (0.3 s for 900 synthetic frames, 7 s before; the same output
+when no waits overlap). The tester's run: `BB_TIMELINE` and
 `BB_TIMELINE_START=120` in Extra variables, the GPU profile diagnostic off, a minute at the usual spot.
 
 ### Performance, in 0.4.6 (moved in, 2026-11-27)

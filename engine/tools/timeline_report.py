@@ -15,6 +15,7 @@ retirement (the GPU's tail).
 
 Usage: python3 -I tools/timeline_report.py <timeline file> [--frames N]
 """
+import bisect
 import statistics
 import sys
 
@@ -51,8 +52,30 @@ def spans(entries, begin, end):
     return out
 
 
-def overlap(intervals, a, b):
-    return sum(max(0, min(stop, b) - max(start, a)) for start, stop in intervals)
+class Intervals:
+    """Sorted, merged intervals (overlapping ones joined, so no share can pass 100%), looked up by
+    bisection: the report stays linear in the file's length."""
+
+    def __init__(self, intervals):
+        merged = []
+        for start, stop in sorted(intervals):
+            if merged and start <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], stop)
+            else:
+                merged.append([start, stop])
+        self.starts = [start for start, _ in merged]
+        self.stops = [stop for _, stop in merged]
+
+    def overlap(self, a, b):
+        total, i = 0, bisect.bisect_right(self.stops, a)
+        while i < len(self.starts) and self.starts[i] < b:
+            total += min(self.stops[i], b) - max(self.starts[i], a)
+            i += 1
+        return total
+
+    def first_start(self, at_least):
+        i = bisect.bisect_left(self.starts, at_least)
+        return self.starts[i] if i < len(self.starts) else None
 
 
 def gpu_idle_intervals(entries):
@@ -85,29 +108,30 @@ def main(argv):
         return 1
     ends = [(ns, arg) for ns, event, arg, _ in entries if event == E["GuestSubmitDone"]]
     retired = {arg: ns for ns, event, arg, _ in entries if event == E["FrameRetired"]}
-    waits = spans(entries, E["GuestWaitBegin"], E["GuestWaitEnd"])
-    decoder_idle = spans(entries, E["DecoderIdleBegin"], E["DecoderIdleEnd"])
-    stage_b_waits = [(ns - arg * 1000, ns) for ns, event, arg, _ in entries if event == E["StageBWait"]]
-    gpu_idle = gpu_idle_intervals(entries)
-    submits = [ns for ns, event, _, _ in entries if event == E["VulkanSubmit"]]
+    waits = Intervals(spans(entries, E["GuestWaitBegin"], E["GuestWaitEnd"]))
+    decoder_idle = Intervals(spans(entries, E["DecoderIdleBegin"], E["DecoderIdleEnd"]))
+    stage_b_waits = Intervals((ns - arg * 1000, ns) for ns, event, arg, _ in entries if event == E["StageBWait"])
+    gpu_idle = Intervals(gpu_idle_intervals(entries))
+    submits = [ns for ns, event, _, _ in entries if event == E["VulkanSubmit"]]  # sorted, as entries are
 
     rows, ways = [], []
     for (a, frame), (b, _) in zip(ends, ends[1:]):
         rows.append({
             "frame": b - a,
-            "game wait": overlap(waits, a, b),
-            "stage A idle": overlap(decoder_idle, a, b),
-            "stage B waits": overlap(stage_b_waits, a, b),
-            "GPU idle": overlap(gpu_idle, a, b),
-            "submits": sum(1 for ns in submits if a <= ns < b),
+            "game wait": waits.overlap(a, b),
+            "stage A idle": decoder_idle.overlap(a, b),
+            "stage B waits": stage_b_waits.overlap(a, b),
+            "GPU idle": gpu_idle.overlap(a, b),
+            "submits": bisect.bisect_left(submits, b) - bisect.bisect_left(submits, a),
         })
         # The frame's way after its end was submitted.
         done = retired.get(frame)
         if done is None or done < a:
             continue
-        a_done = next((start for start, _ in decoder_idle if start >= a), None)
-        b_done = next((start for start, _ in stage_b_waits if a_done is not None and start >= a_done), None)
-        last_submit = max((ns for ns in submits if a <= ns <= done), default=None)
+        a_done = decoder_idle.first_start(a)
+        b_done = stage_b_waits.first_start(a_done) if a_done is not None else None
+        i = bisect.bisect_right(submits, done) - 1
+        last_submit = submits[i] if i >= 0 and submits[i] >= a else None
         if a_done is None or b_done is None or last_submit is None:
             continue
         a_done, b_done = min(a_done, done), min(max(b_done, a_done), done)
