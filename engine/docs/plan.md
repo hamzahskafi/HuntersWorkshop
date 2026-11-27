@@ -773,6 +773,41 @@ intervals and looks them up by bisection (0.3 s for 900 synthetic frames, 7 s be
 when no waits overlap). The tester's run: `BB_TIMELINE` and
 `BB_TIMELINE_START=120` in Extra variables, the GPU profile diagnostic off, a minute at the usual spot.
 
+**Beta 18's research, read: the tester's 131 session (2026-11-27, log `54dfbbd3`).** 9 s of play
+captured two minutes in: 1,839 frames, 400,000 events; 1920x1080, DLAA through OptiScaler and d4r,
+uncapped, the GPU profile off. A frame is 4.74 ms median (211 FPS; the window's statistics 193 FPS).
+**The GPU is the limit.** It had nothing to do 2.5% of the time (0.12 ms a frame in 1.7 gaps, a lower
+bound); 86% of the submissions went in behind work still on the GPU; its work per frame (one presenter
+submission to the next) is 4.63 ms median. So the 1.12 ms "between submissions" of the 129 profile
+was the profiler's (its marks end the passes and wait) and the presenter's submissions (outside the
+profile). The hypotheses:
+- H1, stage A or B late: no. Stage A is idle 27% of the frame and stage B waits 38%. Stage A finishes a
+  frame 1.36 ms after the game's frame end (about 32 of the frame's ~58 submissions come in its last 2 ms),
+  but the GPU still has work queued then.
+- H2, held work: no. The GPU runs dry at 1.7 points a frame, 0.07 ms median.
+- H3, the GPU's own work: yes, in its general form. The last three submissions of a frame carry 54% of
+  its GPU time (the upscaler, post-processing, the UI, the presenter's pass).
+- H4, the presenter's wait for the frame before: no. Never needed in 1,839 frames.
+
+The game waits for its previous frame 0.18 ms median (0.31 mean, in 68% of frames). Without that wait
+its own frame is about 4.2-4.3 ms (4.0-5.5 across the capture). So at this spot GPU savings lift the
+frame rate by about 10% (to about 235 FPS) before the game's own CPU frame becomes the limit; past that
+the next limits are the game's threads and stage A (77% busy). The upscaler alone is 0.5 ms of the
+difference: DLSS through d4r 1.29 ms a frame, FSR 4 0.73-0.82 ms (the 129 session).
+
+The report, fixed with this reading: its GPU idle left out the presenter's frame submissions (PipeTask
+5), so it counted the GPU idle while that work ran (0.18 ms median, now 0.07); its "frame's way" reached
+into the next frame's submissions. It now takes submissions from both, says what share went in behind
+earlier work, and follows a frame to the presenter's submission, then the GPU's queue and work: stage
+A 1.36 ms, to the presenter's submission 0.04 ms, the GPU 2.28 ms, in all 3.74 ms median.
+
+**Proposed for the tester's review (2026-11-27): beta 18 retargeted to the GPU's work.** Part 1, a
+measurement build: the GPU profile without its distortion (marks only where passes end anyway, no
+added waits, the presenter's submissions included), so per-pass costs add up to the GPU's 4.6 ms and
+rank what to cut. Part 2, from that ranking: the engine's own GPU work first (the copy shaders, which
+interrupt a render pass 37 times a frame, the barriers that wait for all commands, the presenter's passes),
+then the game's hottest shaders (step 2). The ceiling at this spot is the 10% above.
+
 ### Performance, in 0.4.6 (moved in, 2026-11-27)
 
 The tester (2026-11-27): "I wanted the Performance part to mostly be completed in 0.4.6!" and, of the
@@ -782,7 +817,8 @@ All of them are ours (HW's measurements and plans). The evidence for each is in
 [archive/plan-0.4.5.md](archive/plan-0.4.5.md). The newest figure (the tester's 129 session,
 `054a5566`, 1920x1080 with OptiScaler's FSR 4): 4.90 ms of GPU work a frame, of which 1.12 ms is the GPU
 idle between submissions (12 gaps a frame), the upscaler 0.83 ms, the copy shaders 0.22 ms (56 a frame);
-the GPU idle is now the largest item after the upscaler (0.12 ms in 3.3 gaps at the lamp spot in 0.4.5).
+the GPU idle is now the largest item after the upscaler (0.12 ms in 3.3 gaps at the lamp spot in 0.4.5). The 131 timeline (beta 18's research, above) shows that idle
+was mostly the profiler's: without it the GPU is busy 97.5% of the time.
 
 | Item | From | Scheduled |
 |---|---|---|
@@ -790,10 +826,10 @@ the GPU idle is now the largest item after the upscaler (0.12 ms in 3.3 gaps at 
 | Vertex shader contraction with an invariant position (`shader-5`, about 4% of vertex code) | Plan step 2 | With step 2 |
 | The native compiler's step 2 (control flow without goto variables), measured in the lab first | Plan step 2 | With step 2, if the hot shaders gain |
 | The barriers that remain (about 23 a frame at the lamp spot): a measurement beta with reads tracked exactly (`BbToggle::CoarseReadTracking`) and barrier counts by what they wait for | The rest of 0.4.5, item 2 | After 0.4.6 |
-| The GPU idle between submissions (about 0.12 ms a frame in 3.3 gaps): why the GPU runs dry there, and whether submissions can overlap | The rest of 0.4.5, item 3 | After 0.4.6 |
+| The GPU idle between submissions (about 0.12 ms a frame in 3.3 gaps): why the GPU runs dry there, and whether submissions can overlap | The rest of 0.4.5, item 3 | Closed by beta 18's research (the 131 timeline): without the profiler the GPU has nothing to do 2.5% of the time (0.12 ms a frame); 86% of submissions go in behind work still on it. Nothing to gain |
 | `mem-4`, `upscale-2`, `upscale-3` (0.1 ms at most; the second only at reduced upscaler presets) | The rest of 0.4.5, item 6 | When nearby work passes them |
 | The CPU (step 4): stage B on two threads (`parallel-stageb.md`, approach B), with `idle-1`, `pipe-1`, `asc-2` and `rt-1` | Plan step 4 | When a 6-core CPU or a frame rate above about 230 FPS makes it the limit |
-| A GPU timer at pass ends that doesn't wait at each label | Plan, "Later, if at all" | If an item's gain needs a finer measure than FPS |
+| A GPU timer at pass ends that doesn't wait at each label | Plan, "Later, if at all" | Proposed as beta 18's part 1 (2026-11-27): the GPU's work is now the frame, and the profile's totals do not add up |
 | The copy shader's ranges served from the engine's snapshots, so no copy runs | Plan, "Later, if at all" | Later, if at all |
 | `engine-map.md` section 6: the first test session, the small measurement code and what the agents could not determine | `engine-map.md` | Gone through with step 2 and step 4; what was answered since is marked there then |
 

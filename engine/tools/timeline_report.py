@@ -6,12 +6,14 @@ Per frame (from one of the game's frame-end submissions to the next):
   - the frame's time, and how long the game waited in it for its previous frame (GuestWait);
   - how long the GPU command thread had nothing to decode (stage A idle) and how long stage B waited
     for packets (its waits of 20 us or more);
-  - how long the GPU had nothing submitted to it: from its finishing everything submitted so far
-    (GpuDone at the newest submitted tick) to the next Vulkan submission.
+  - how long the GPU had nothing to do: from its finishing a submission (GpuDone) to the next one's
+    submission, when that came later. Submissions are the rasterizer's (VulkanSubmit) and the
+    presenter's frame (PipeTask 5); GpuDone is seen by a thread waiting for it, a little late, so this
+    is a lower bound;
+  - how many submissions were made, and the share of them queued behind earlier work on the GPU.
 And the way of each frame after the game submitted its end (GuestSubmitDone) to its retirement
-(FrameRetired): until the GPU command thread went idle (stage A done), until stage B's next wait
-after that (stage B done), until the last Vulkan submission before the retirement, and until the
-retirement (the GPU's tail).
+(FrameRetired): until the GPU command thread went idle (stage A done), until the presenter submitted
+the frame (PipeTask 5), and from there until the GPU had run it (the GPU's queue and work).
 
 Usage: python3 -I tools/timeline_report.py <timeline file> [--frames N]
 """
@@ -78,19 +80,43 @@ class Intervals:
         return self.starts[i] if i < len(self.starts) else None
 
 
-def gpu_idle_intervals(entries):
-    """The GPU had nothing submitted: from GpuDone reaching the newest submitted tick to the next
-    VulkanSubmit (ticks are 32-bit in the file: compared as they are, which holds within a run)."""
-    out, newest, idle_from = [], 0, None
-    for ns, event, arg, _ in entries:
+def submissions(entries):
+    """Each GPU tick's submission time: the rasterizer's (VulkanSubmit, arg) and the presenter's frame
+    (PipeTask 5, arg2). Ticks are 32-bit in the file: compared as they are, which holds within a run."""
+    out = {}
+    for ns, event, arg, arg2 in entries:
         if event == E["VulkanSubmit"]:
-            newest = max(newest, arg)
-            if idle_from is not None:
-                out.append((idle_from, ns))
-                idle_from = None
-        elif event == E["GpuDone"] and newest and arg >= newest and idle_from is None:
-            idle_from = ns
+            out[arg] = ns
+        elif event == E["PipeTask"] and arg == 5:
+            out[arg2] = ns
     return out
+
+
+def completions(entries, ticks):
+    """Each tick's completion: the first GpuDone that reached it (the GPU's progress only grows)."""
+    done, i = {}, 0
+    for ns, event, arg, _ in entries:
+        if event != E["GpuDone"]:
+            continue
+        while i < len(ticks) and ticks[i] <= arg:
+            done[ticks[i]] = ns
+            i += 1
+    return done
+
+
+def gpu_idle_intervals(submitted, done):
+    """The GPU had nothing to do: a tick submitted after the one before it was done. Also returns how
+    many ticks were submitted while earlier work was still on the GPU."""
+    out, queued = [], 0
+    for tick in sorted(submitted):
+        before = done.get(tick - 1)
+        if before is None:
+            continue
+        if submitted[tick] > before:
+            out.append((before, submitted[tick]))
+        else:
+            queued += 1
+    return out, queued
 
 
 def ms(ns):
@@ -111,8 +137,12 @@ def main(argv):
     waits = Intervals(spans(entries, E["GuestWaitBegin"], E["GuestWaitEnd"]))
     decoder_idle = Intervals(spans(entries, E["DecoderIdleBegin"], E["DecoderIdleEnd"]))
     stage_b_waits = Intervals((ns - arg * 1000, ns) for ns, event, arg, _ in entries if event == E["StageBWait"])
-    gpu_idle = Intervals(gpu_idle_intervals(entries))
-    submits = [ns for ns, event, _, _ in entries if event == E["VulkanSubmit"]]  # sorted, as entries are
+    submitted = submissions(entries)
+    ticks = sorted(submitted)
+    idle, queued = gpu_idle_intervals(submitted, completions(entries, ticks))
+    gpu_idle = Intervals(idle)
+    submits = sorted(submitted.values())
+    presents = [ns for ns, event, arg, _ in entries if event == E["PipeTask"] and arg == 5]  # sorted
 
     rows, ways = [], []
     for (a, frame), (b, _) in zip(ends, ends[1:]):
@@ -129,17 +159,15 @@ def main(argv):
         if done is None or done < a:
             continue
         a_done = decoder_idle.first_start(a)
-        b_done = stage_b_waits.first_start(a_done) if a_done is not None else None
-        i = bisect.bisect_right(submits, done) - 1
-        last_submit = submits[i] if i >= 0 and submits[i] >= a else None
-        if a_done is None or b_done is None or last_submit is None:
+        i = bisect.bisect_left(presents, a)
+        presented = presents[i] if i < len(presents) else None
+        if a_done is None or presented is None or presented > done:
             continue
-        a_done, b_done = min(a_done, done), min(max(b_done, a_done), done)
+        a_done = min(a_done, presented)
         ways.append({
             "stage A": a_done - a,
-            "stage B": b_done - a_done,
-            "to the last submission": max(0, last_submit - b_done),
-            "the GPU's tail": done - max(last_submit, b_done),
+            "to the presenter's submission": presented - a_done,
+            "the GPU's queue and work": done - presented,
             "in all": done - a,
         })
     if limit:
@@ -149,7 +177,8 @@ def main(argv):
         return 1
 
     span = ms(entries[-1][0] - entries[0][0])
-    print(f"{len(entries)} events over {span:.0f} ms, {len(rows)} frames")
+    print(f"{len(entries)} events over {span:.0f} ms, {len(rows)} frames; {len(ticks)} GPU submissions, "
+          f"{queued / max(1, len(ticks) - 1):.0%} of them queued behind earlier work on the GPU")
     print("Per frame, median (mean) in ms:")
     for key in rows[0]:
         values = [r[key] for r in rows]
@@ -165,9 +194,9 @@ def main(argv):
               f"{len(ways)} frames:")
         for key in ways[0]:
             values = [w[key] for w in ways]
-            print(f"  {key:24} {ms(statistics.median(values)):8.3f} ({ms(statistics.mean(values)):.3f})")
+            print(f"  {key:30} {ms(statistics.median(values)):8.3f} ({ms(statistics.mean(values)):.3f})")
     else:
-        print("No frame's way could be followed (no stage A idle or stage B wait after its end).")
+        print("No frame's way could be followed (no stage A idle or presenter submission after its end).")
     return 0
 
 
