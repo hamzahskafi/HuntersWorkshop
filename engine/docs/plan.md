@@ -478,7 +478,14 @@ sure OptiScaler will work and that we are optimal, then we'll talk frame generat
   (`vk_pipeline_serialization.cpp`): players' caches are translated again once (a few seconds).
 - **T1:** `optiscaler-ini-test` (the shipped ini, a player's, both frame-generation keys, keys of the
   same names in other sections). The tester's runs still to come.
-- Left for the tester's review before they are built: E7, L1, L2, D1.
+- The tester's review of the drafts (2026-11-27): "Fine for the crash report, everything else is mostly
+  unnecessary. Mark it, no need to do it right now". **L2 approved, to build later:** with OptiScaler's
+  frame generation set, "…its frame generation set ({fg}), which the engine does not support yet. Set
+  Frame Generation to none in OptiScaler's menu, then play again." (today's text points at a launcher
+  frame generation that does not exist); 0xC0000135, "The engine could not start: a DLL it needs is
+  missing from engine\out. Reinstall the package to put it back."; the OptiScaler device-lost text
+  without the switch (done in engine id 128). **E7, L1 and D1 dropped** (the menu's OptiScaler lines stay
+  as they are).
 
 **Phase D: the release candidate.**
 
