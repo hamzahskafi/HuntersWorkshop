@@ -732,10 +732,16 @@ found.
 | A first visit with the cache cleared: the GPU thread builds the pipelines' shaders itself (beta 15's cold run: a 220.8 ms frame after the load, 185 pipelines, 323.6 ms of shader and pipeline work on the GPU thread); burst threads compile only what is queued after that | Beta 15's first runs, 2026-11-24 (`b53c92dc`) | A one-time cost per new build or cleared cache; looked at if new ground still stalls with the cache warm (translation off the GPU thread is the lead) |
 | The tombstones in a graveyard do not look right to the tester | The tester, 2026-11-08 (beta 10's second run) | Not the memory work: the same in 0.4.5. Looked at only with a screenshot and the place, or a PS4 comparison |
 
-### Performance, after 0.4.6
+### Performance, in 0.4.6 (moved in, 2026-11-27)
 
-The evidence for each is in [performance.md](performance.md) and [engine-map.md](engine-map.md); the
-plan they come from is [archive/plan-0.4.5.md](archive/plan-0.4.5.md).
+The tester (2026-11-27): "I wanted the Performance part to mostly be completed in 0.4.6!" and, of the
+release candidate's list, "they don't close the 0.4.6". These come before phase D, as betas of their own.
+All of them are ours (HW's measurements and plans). The evidence for each is in
+[performance.md](performance.md) and [engine-map.md](engine-map.md); the plan they come from is
+[archive/plan-0.4.5.md](archive/plan-0.4.5.md). The newest figure (the tester's 129 session,
+`054a5566`, 1920x1080 with OptiScaler's FSR 4): 4.90 ms of GPU work a frame, of which 1.12 ms is the GPU
+idle between submissions (12 gaps a frame), the upscaler 0.83 ms, the copy shaders 0.22 ms (56 a frame);
+the GPU idle is now the largest item after the upscaler (0.12 ms in 3.3 gaps at the lamp spot in 0.4.5).
 
 | Item | From | Scheduled |
 |---|---|---|
@@ -755,6 +761,12 @@ Not reopened: `seg-1`, `renderer-3`, `renderer-4`, `renderer-6` and the refuted 
 the PC memory model), fixed, removed, or not the cause in 0.4.4's logs.
 
 ### Features and fixes, after 0.4.6
+
+Where each comes from: ours unless named. Lantern's (Lantern 0.9.39, reviewed in community-fixes.md):
+Anti-Lag 2, the optional lighting effects, lamp to lamp; Lantern's DLSS audit: the passes left
+unjittered. bbport 0.7's: SMAA and FXAA, FSR 1, GT-VBAO, the shader recipe pack, video skipping, invert
+mouse X. bbhost's (Kyoskii's findings): the SSR patch's tuning, the message boxes' confirm delay, the
+online probe's timing line.
 
 - **Last of all: frame generation on AMD and NVIDIA** (Decisions): AMD's through its SDK (the design
   above), NVIDIA's through Streamline with its DLSS moved to Streamline, Reflex with it.
