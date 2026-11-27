@@ -487,6 +487,16 @@ sure OptiScaler will work and that we are optimal, then we'll talk frame generat
   without the switch (done in engine id 128). **E7, L1 and D1 dropped** (the menu's OptiScaler lines stay
   as they are).
 
+**Frame generation, back on the table (2026-11-27).** The tester: "it's not for me honestly, people are
+requesting it", "it's the nVidia users that requested it. But we can start with AMD then take it from
+there." NVIDIA's own (DLSS Frame Generation) is offered only through Streamline, with Reflex required,
+and brings back what removed Streamline in 0.4.4 beta 28 (NVIDIA's Vulkan driver presenting through
+DXGI, V-Sync held to two frames a refresh); RTX 40 and 50 only, and neither of the tester's cards runs
+it. AMD's (FidelityFX SDK 2.4, `amd_fidelityfx_framegeneration_vk.dll` beside the upscaler's DLLs
+already shipped) runs on any vendor's GPU and can be tested on the RX 9070 XT. Order: AMD's first,
+designed for the tester's review (research under way: AMD's Vulkan frame generation API, the engine's
+present path); NVIDIA's after, as its own option.
+
 **Phase D: the release candidate.**
 
 - The switches settled with the tester: every 0.4.6 switch (`BB_EMPTY_SURFACES`, `BB_TARGET_POOL`,
