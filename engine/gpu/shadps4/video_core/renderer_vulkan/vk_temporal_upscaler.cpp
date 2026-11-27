@@ -33,6 +33,7 @@
 #include "video_core/renderer_vulkan/vk_shader_util.h"
 #include "video_core/renderer_vulkan/vk_camera_motion.h"
 #include "video_core/renderer_vulkan/vk_optiscaler.h"
+#include "engine/startup.h"
 #include "video_core/renderer_vulkan/vk_frame_capture.h"
 #include "video_core/renderer_vulkan/vk_hdr_native.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
@@ -178,8 +179,9 @@ struct DumpImage {
 void DumpImages(const Instance& instance, Scheduler& scheduler, vk::CommandBuffer cmdbuf,
                 int frame, std::initializer_list<DumpImage> images) {
     static const std::string dir = [] {
+        // Unnamed: engine/out/dump, beside the engine (not from the working folder).
         const char* env = std::getenv("BB_DUMP_DIR");
-        return std::string{env && env[0] ? env : "out/dump"};
+        return env && env[0] ? std::string{env} : BbStartup::Utf8(BbStartup::ProgramDir() / "dump");
     }();
     const vk::MemoryBarrier2 before{
         .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
