@@ -221,6 +221,19 @@ untaken waiter: 0 in 7,200, in either mode.
   then found again); the pending tables line counts the lookups that scanned for that reason and the
   entries a scan went through, so the next run shows whether the 64 KB pages themselves are too coarse.
 
+**The tester's run of 138** (log `20261127_230858`; the overlay's GPU use 98% at the lamp spot, 98% in the
+busy view, 94-95% in the slow area):
+- The page filter answers 97-99% of lookups (from 8-27%); the draw step is back to 1.11-1.14 us a draw
+  at the lamp spot (134: 1.10, 136: 1.20) and 1.10-1.18 in the busy view (134: 1.18, 136: 1.27). The
+  scans left come mostly from more than 16 wide writes live for a moment (the busy view: up to 17).
+- FPS: the lamp spot about 230, the busy view about 200, the slow area (a few metres from 136's, 1,263
+  draws) about 225. Stage A idle 30-41%, stage B 68-83% busy; stage A's missed wakes 0.
+- So on this PC the render chain is nowhere the limit: the lamp spot and the busy view are at the GPU's,
+  and the slow area leaves the GPU idle about 5% of the time. There the game waits for GPU results in
+  the middle of its frame (fences at its submission ends 3.8-4.0 a frame, against 1.1 at the lamp spot),
+  the engine sends the frame in 4.8-5.0 submissions (3.0-3.4 elsewhere), and the GPU had run out of work
+  when about one in two of those arrived. The 4 KB page table (proposed after 136) is not worth it now.
+
 The GPU cache's identity changes with this beta (`liverpool.{h,cpp}`, `submit_queue.h`,
 `vk_pipeline_cache.h`): `31aba0f240c65c6f`, from `cdca3ea71cd46d16` (unchanged by 137 and 138).
 
