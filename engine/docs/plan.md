@@ -861,24 +861,35 @@ in the second run, so the first capture is before it and the second after.
 - **The jump is the game's.** At it the game makes about half as many fenced submissions a frame,
   draws 49 fewer things, and its frame-ending thread waits 1.4 ms less on its own threads. Something
   in the scene stops: work the game syncs with the GPU several times a frame.
-- **The limit at the lamp spot is stage A.** It never runs out of work in either state (idle 0-1%),
-  while the game waits for it (0.6 and 1.8 ms a frame). The GPU's queue never runs dry either, but
-  the tester's GPU monitor reads 85-86%: the GPU follows stage A's rate with some headroom. Stage A
-  takes 3.0-3.2 us a draw (draw packets 1.4 us, all packets 2.5 us, the rest outside packets).
+- **The pace-setter at the lamp spot is the game's main thread** (corrected the same day, from the
+  frames themselves; it was first read as stage A). The busiest game thread (the main thread: it
+  makes most of the GX resources) runs 4.0 ms of a frame before the jump and 3.75 ms after, and
+  waits 0.81 and 0.68 ms; only 0.30 and 0.40 ms of its waiting falls while the frame-ending thread
+  waits for the engine. The frame-ending thread waits for the main thread's handover (2.2 ms, then
+  0.8 ms after the jump), sends the frame's 70-odd command buffers, and waits for the engine on the
+  way (0.6, then 1.8 ms), mostly while the main thread works on. Stage A never runs out of work
+  (idle 0-1%) because it runs at the same pace, not because it holds the main thread: a faster
+  stage A gains about 0.3 ms a frame at most here. Stage A takes 3.0-3.2 us a draw (draw packets
+  1.4 us, all packets 2.5 us). The GPU's queue never runs dry either; the tester's overlay reads
+  85-86%.
+- **Efficiency cores tested directly:** in frames where the main thread woke mostly on efficiency
+  cores the frames were no slower (correlation -0.14 before, 0.10 after). Not the lever.
 - **The flip is not a factor.** PrepareFrame to the flip taken 0.02 ms, the game told 0.03 ms later,
   the swap thread's present 0.32-0.33 ms on its own thread, and no stage A waits for a display buffer.
 
-**Proposal, from these (for the tester's review):** beta 18 is stage A's cost a draw. Its first step
-is a profile of stage A by packet kind and by part of a draw (the clock is already read per packet,
-`bbport_native_calls.cpp`), so the build that cuts it aims at measured time. The gain is bounded by
-the GPU's headroom at this spot (the monitor's 14-15%).
+**Proposal, from these (for the tester's review, revised the same day):** most of the frame at these
+spots is the game's own main thread. What the engine still owns there is small (stage A, about 0.3
+ms; the GPU's waits inside its work). One measurement can still find a lever: samples of where the
+main thread spends its 3.9 ms (the hitch reporter's stack sampling), split between the game's code
+and the engine's (HLE calls, the runtime's sync primitives, memory and file calls). If the engine's
+share is large, beta 18 cuts it; if small, the performance work closes for 0.4.6 and the release
+candidate follows. Stage A's cost a draw and the GPU profile without its distortion stay in the
+register for when they are the limit.
 
-**The other area still to measure (the tester, 2026-11-27).** There (`98217950`, overlay 85-86%) the
-game's own frame set the pace (5.0 of 5.08 ms, almost no wait for the engine), so where its threads run
-matters there, unlike at the lamp spot. A 132 capture in that area (`BB_TIMELINE_START` at a time the
-tester stands there) shows whether its busiest threads sit on efficiency cores; if so, keeping them on
-the performance cores is a beta 18 part for spots where the game is the limit, beside stage A's cost
-for spots where the engine is.
+**The other area (the tester, 2026-11-27).** There (`98217950`, overlay 85-86%) the game's own frame set
+the pace (5.0 of 5.08 ms, almost no wait for the engine): most likely the same main thread with more to
+do. The efficiency-core question for it is answered by the lamp spot's frames (no effect), so no 132
+capture there is needed for that.
 
 ### Performance, in 0.4.6 (moved in, 2026-11-27)
 
