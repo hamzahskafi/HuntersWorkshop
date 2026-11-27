@@ -497,6 +497,67 @@ already shipped) runs on any vendor's GPU and can be tested on the RX 9070 XT. O
 designed for the tester's review (research under way: AMD's Vulkan frame generation API, the engine's
 present path); NVIDIA's after, as its own option.
 
+**AMD's frame generation, designed for the tester's review (2026-11-27).** From AMD's FidelityFX SDK
+v2.4.0 (its docs `frame-interpolation-api.md`, `frame-interpolation-swap-chain.md`,
+`frame-interpolation-ml.md`, the headers `ffx_api_framegeneration_vk.h` and `ffx_framegeneration.h`,
+its FSR sample and Cauldron2's Vulkan device and swapchain) and the engine's present path.
+
+What AMD's Vulkan frame generation is: a replacement swapchain. The engine creates AMD's swapchain
+(`ffxCreateContextDescFrameGenerationSwapChainVK`) instead of its own and calls AMD's replacements for
+acquire, present, images and HDR metadata. Each real frame the engine records a "prepare" (depth,
+motion vectors, camera, jitter, frame time, a reset flag) and hands its finished frame to present; AMD's
+swapchain makes the in-between frame from the last two, composites the UI on both, and paces the
+presents itself on two threads of its own, on queues of its own (present, image acquire, async compute).
+A mode without the replacement exists but is undocumented and loses AMD's pacing: not used. Versions:
+FSR 3.1 frame generation (60 FPS input or more) on any GPU, FSR 4's (30 FPS input or more) on RX 9000 with
+Windows 11; AMD's loader picks the newest the GPU runs, as for the upscaler. Licence: the DLL is under
+the SDK's MIT-style terms (its notice shipped, as for the upscaler's). Windows only (no Linux build).
+GPU memory at 1080p about 170 MB. Not stated by AMD: support on NVIDIA and Intel (no restriction
+either; its sample "can GPU-crash on NVIDIA", a known issue).
+
+The design (the parts, in the order they would be built):
+- **G1, the files:** `amd_fidelityfx_framegeneration_vk.dll` fetched with the upscaler's two
+  (`tools/fetch_amd_fsr.sh`, AMD's hash), AMD's frame-generation headers vendored with its API headers.
+- **G2, the queues:** with frame generation chosen, the device is made with the three extra queues AMD's
+  swapchain needs (a presentable one besides ours, an image-acquire one, an async compute one), picked as
+  AMD's sample picks them; none to be had: frame generation unavailable, said in the log and the menu.
+  Every queue of ours stays under `Scheduler::submit_mutex`; AMD's are its own, so the engine's device
+  waits become AMD's "wait for presents" plus a wait on our queue (`vkDeviceWaitIdle` needs every queue
+  held).
+- **G3, the swapchain:** `Swapchain` makes AMD's when frame generation is on, and goes through AMD's
+  functions for everything after (acquire, present, images, HDR metadata, recreate in place on a resize,
+  destroy in AMD's order). Off: the engine's own swapchain, as today.
+- **G4, each frame:** the prepare from the temporal upscaler (it already holds depth, motion vectors in
+  render pixels without jitter, the camera, the jitter and the camera-cut reset), on both its paths
+  (1080p and scaled); frame IDs one a real frame, a reset at camera cuts, loads and the menus; the frame
+  time. It needs the temporal upscaler running (FSR, DLSS or TAA): with the game's own AA alone there are
+  no motion vectors, and frame generation is off.
+- **G5, the UI:** the game's HUD is in the frame, so AMD is given the frame without it (the HUD-less
+  colour: a copy at the game's first UI draw, which the scaled path already has and the 1080p path takes
+  as it does for native HDR): it tells AMD which pixels are HUD, so the HUD is not smeared. Our own menu
+  and FPS counter go into a UI image of their own, registered with AMD's swapchain and laid over every
+  frame, real and generated (they then update at the real rate).
+- **G6, pacing:** AMD's swapchain paces the frames it shows; the engine paces the real ones at half the
+  output rate (AMD: on Vulkan the game's own frame limiter keeps the CPU from running ahead). The FPS
+  limit means the output rate (120: 60 real frames); V-Sync on caps real frames at half the refresh, as
+  AMD documents; the vblank lock is off with frame generation; the FPS counter shows both rates.
+- **G7, HDR:** AMD takes PQ (HDR10) and scRGB swapchains with its HDR flag: the HUD-less copy encoded as
+  the frame is. After SDR works.
+- **G8, settings and reports:** a launcher choice (Frame generation: Off, AMD FSR; read at start, the
+  swapchain being made then) and a live on/off in the in-game menu when it started on; the log names the
+  version AMD's loader picked, the queues and the rates; off with OptiScaler loaded (it hooks the same
+  swapchain); the crash report names it.
+
+Conflicts and risks: the game's HUD may still show artifacts where the HUD-less copy cannot tell it
+apart (moving HUD elements); latency of about one real frame (Anti-Lag 2 through `VK_AMD_anti_lag`
+a later step); below 60 real FPS (FSR 3.1's) the in-between frames get worse, AMD says turn it off; on
+NVIDIA unproven until an NVIDIA player tests it, so the first NVIDIA run is the gate before it is
+offered there. NVIDIA's own (DLSS Frame Generation through Streamline) stays a design of its own, after.
+
+The tester's calls before it is built: the settings (G8: a start-time choice in the launcher with a live
+switch in game), the FPS limit meaning the output rate (G6), SDR first and HDR after (G7), off with
+OptiScaler (G8).
+
 **Phase D: the release candidate.**
 
 - The switches settled with the tester: every 0.4.6 switch (`BB_EMPTY_SURFACES`, `BB_TARGET_POOL`,
