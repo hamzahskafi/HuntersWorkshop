@@ -6,6 +6,7 @@
 #include <string>
 #include <atomic>
 #include <chrono>
+#include "bbport_role_lock.h"
 #include "bbport_toggles.h"
 
 #include <condition_variable>
@@ -698,7 +699,7 @@ private:
         BbEngine::GxResources::Ahead job;
         std::unique_ptr<Image> image;
     };
-    std::mutex prepared_mutex;
+    BbRoles::Mutex prepared_mutex{"prepared textures"}; ///< 0.4.6 beta 20: role-aware
     std::vector<Prepared> prepared_in;
     std::vector<Prepared> ahead_take;
     std::deque<Prepared> ahead_jobs;
@@ -742,7 +743,9 @@ private:
     Common::LeastRecentlyUsedCache<u64, u64> sampler_lru_cache;
     const bool readback_linear_images;
     PageTable page_table;
-    std::mutex mutex;
+    /// 0.4.6 beta 20: role-aware (bbport_role_lock.h): the draw recording thread and the game's
+    /// threads (writes into watched pages) share it.
+    BbRoles::Mutex mutex{"texture cache"};
     /// bbport: the pages tracked images protect, readable without `mutex` (WatchesPages);
     /// changed with `mutex` held, through WatchPages and UnwatchPages.
     WatchedPages watched_pages;

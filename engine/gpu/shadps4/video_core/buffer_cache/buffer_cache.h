@@ -4,6 +4,7 @@
 #pragma once
 
 #include "bbport_copy.h"
+#include "bbport_role_lock.h"
 
 #include <deque>
 #include <condition_variable>
@@ -432,11 +433,11 @@ private:
     std::array<const Buffer*, NUM_ARENA_PAGES> address_space{};
     std::deque<Buffer> arenas;
     std::vector<ArenaBinds> pending_binds;
-    std::mutex preupload_mutex;               ///< the map hooks come from guest threads
+    BbRoles::Mutex preupload_mutex{"buffer pre-upload"}; ///< the map hooks come from guest threads
     std::map<VAddr, VAddr> preupload_ranges; ///< start -> end of pre-uploaded guest memory
     VAddr preupload_cursor = 0;
     u64 preupload_first_bytes = 0, preupload_again_bytes = 0; ///< BB_FRAME_STATS report
-    std::mutex load_upload_mutex;            ///< 0.4.6 beta 15 part 2: queued on the game's threads
+    BbRoles::Mutex load_upload_mutex{"buffer load upload"}; ///< 0.4.6 beta 15 part 2: queued on the game's threads
     std::map<VAddr, u64> load_upload_ranges; ///< start -> size, uploaded by LoadUpload
     Vulkan::Semaphore memory_semaphore;
 
@@ -454,7 +455,7 @@ private:
     /// bbport BB_GX_IN_PLACE: blocks bound to the game's own memory (the GX region's import), and
     /// guest unmaps to apply.
     TrackedIntervalList<> in_place_blocks;
-    std::mutex pending_unmaps_mutex;
+    BbRoles::Mutex pending_unmaps_mutex{"buffer unmaps"}; ///< 0.4.6 beta 20: role-aware, as the two above
     std::vector<std::pair<VAddr, u64>> pending_unmaps;
     std::atomic<bool> unmaps_pending{false};
     /// VRAM slots of blocks that left VRAM, for the next blocks moved there (in their chunks).

@@ -69,7 +69,7 @@ constexpr Entry kEngine[] = {
 };
 /// The chain's busy threads (stage A and B, three recorders, signals, swap): the fastest class of
 /// cores is its preference only while it has at least this many logical processors.
-constexpr std::size_t kChainDemand = 6;
+[[maybe_unused]] constexpr std::size_t kChainDemand = 6;
 /// FMOD's threads: the game's PS4 priorities 256-300.
 constexpr int kAudioLast = 300;
 
@@ -120,7 +120,7 @@ bool AudioHigh() { // the launcher's "Sound threads first"
     }();
     return on;
 }
-bool ChainAbove() { // BB_GPU_THREAD_PRIORITY=0 (the launcher's experiment, safe mode): normal
+[[maybe_unused]] bool ChainAbove() { // BB_GPU_THREAD_PRIORITY=0 (the launcher's experiment, safe mode): normal
     static const bool on = [] {
         const char* env = std::getenv("BB_GPU_THREAD_PRIORITY");
         return !(env && env[0] == '0');

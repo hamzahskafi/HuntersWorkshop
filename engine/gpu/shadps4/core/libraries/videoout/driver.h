@@ -9,6 +9,7 @@
 #include "common/debug.h"
 #include "common/polyfill_thread.h"
 #include "core/libraries/videoout/video_out.h"
+#include "bbport_role_lock.h"
 #include "bbport_timeline.h"
 
 #include <condition_variable>
@@ -31,10 +32,12 @@ struct VideoOutPort {
     SceVideoOutVblankStatus vblank_status;
     std::vector<Kernel::OrbisKernelEqueue> flip_events;
     std::vector<Kernel::OrbisKernelEqueue> vblank_events;
-    std::mutex vo_mutex;
-    std::mutex port_mutex;
-    std::condition_variable vo_cv;
-    std::condition_variable vblank_cv;
+    /// 0.4.6 beta 20: role-aware (bbport_role_lock.h): the flip and vblank threads (Pacing) and the
+    /// game's flip calls and vblank waits (Frame) share them.
+    BbRoles::Mutex vo_mutex{"video out port"};
+    BbRoles::Mutex port_mutex{"video out flips"};
+    std::condition_variable_any vo_cv;
+    std::condition_variable_any vblank_cv;
     int flip_rate = 0;
     int prev_index = -1;
     bool is_open = false;
@@ -135,8 +138,8 @@ private:
     bool separate_swap = true;
     std::jthread swap_thread; ///< before present_thread: destroyed after it
 
-    std::mutex mutex;
-    std::condition_variable request_cv; ///< bbport: a flip was queued (immediate flips)
+    BbRoles::Mutex mutex{"flip requests"}; ///< 0.4.6 beta 20: role-aware
+    std::condition_variable_any request_cv; ///< bbport: a flip was queued (immediate flips)
     VideoOutPort main_port{};
     std::jthread present_thread;
     std::queue<Request> requests;

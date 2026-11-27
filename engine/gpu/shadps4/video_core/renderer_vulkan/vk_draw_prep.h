@@ -25,6 +25,7 @@
 #include <thread>
 #include <vector>
 
+#include "bbport_role_lock.h"
 #include "common/types.h"
 #include "video_core/amdgpu/regs.h"
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
@@ -174,7 +175,7 @@ private:
     bool baseline_ready{}; ///< guarded by `mutex`
     /// Taken by the scanner and the workers (the Assist role); the GPU thread only tries it, for a
     /// rebase (and takes it once, for the baseline).
-    std::mutex mutex;
+    BbRoles::Mutex mutex{"draw preparation"}; ///< role-aware: the GPU thread's rare takes counted
     std::condition_variable_any cv; ///< the workers' wait: the scanner wakes one a buffer scanned
     std::deque<std::shared_ptr<Submission>> submissions; ///< ordered by seq; the scanner adds
     std::atomic<Submission*> incoming{nullptr}; ///< newest first; the game's submit pushes

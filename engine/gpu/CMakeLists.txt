@@ -529,9 +529,14 @@ target_compile_options(thd-addr-text-test PRIVATE -UNDEBUG -Wall -Wextra -Werror
 target_include_directories(thd-addr-text-test PRIVATE ..)
 # 0.4.6 beta 15 part 1: compile bursts (the burst threads' count from the CPU's layout; the queue's
 # backlog rule, raise-on-wait and burst accounting with real threads).
-add_executable(pipeline-burst-test EXCLUDE_FROM_ALL ../tests/test_pipeline_burst.cpp)
+add_executable(pipeline-burst-test EXCLUDE_FROM_ALL ../tests/test_pipeline_burst.cpp
+    shim/bbport_roles.cpp shim/bbport_cpu_layout.cpp) # 0.4.6 beta 20: the queue's role-aware lock
 target_compile_options(pipeline-burst-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(pipeline-burst-test PRIVATE shim shadps4)
+if (WIN32)
+    target_sources(pipeline-burst-test PRIVATE shim/bbport_platform.cpp)
+    target_link_libraries(pipeline-burst-test PRIVATE psapi)
+endif()
 target_link_libraries(pipeline-burst-test PRIVATE Threads::Threads)
 # 0.4.6 beta 16: the engine's FFmpeg plays what the movie player accepts (tests/data/movies: the MP4
 # family, H.264, HEVC 8- and 10-bit, AAC stereo and 5.1; by path and through custom I/O, the streams on

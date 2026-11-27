@@ -4,6 +4,7 @@
 // and burst accounting (pipeline_compile_queue.h), with real threads. No Vulkan, no system calls.
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <optional>
@@ -15,6 +16,12 @@
 
 using namespace std::chrono_literals;
 using Vulkan::PipelineJobQueue;
+
+// 0.4.6 beta 20: the queue's lock is role-aware (bbport_role_lock.h); the roles' clock, as the test
+// has no runtime.
+extern "C" std::uint64_t runtime_tsc_frequency() {
+    return 3'000'000'000ull;
+}
 
 namespace {
 

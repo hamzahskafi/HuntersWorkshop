@@ -19,6 +19,8 @@
 #include <optional>
 #include <utility>
 
+
+#include "bbport_role_lock.h"
 namespace Vulkan {
 
 /// Compile jobs, first in, first out (the order the draws need them in), each with the object
@@ -251,8 +253,10 @@ private:
     /// More jobs wait than the standing threads asleep in Pop will take.
     [[nodiscard]] bool Backlog() const { return jobs.size() > idle_standing; }
 
-    std::mutex mutex;
-    std::condition_variable cv, burst_cv;
+    /// 0.4.6 beta 20: role-aware (bbport_role_lock.h): the render chain pushes and takes jobs, the
+    /// compile threads (Frame) and the burst threads (Background) pop them.
+    BbRoles::Mutex mutex{"pipeline compile queue"};
+    std::condition_variable_any cv, burst_cv;
     std::deque<Entry> jobs;
     std::size_t idle_standing = 0, idle_burst = 0, running_burst = 0;
     Slot slots[kMaxBurstThreads];

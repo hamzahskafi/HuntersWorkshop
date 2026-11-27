@@ -7,6 +7,7 @@
 #include <unordered_set>
 #include <mutex>
 #include <shared_mutex>
+#include "bbport_role_lock.h"
 #include <variant>
 #include <boost/container/static_vector.hpp>
 #include <tsl/robin_map.h>
@@ -312,7 +313,9 @@ private:
     Shader::Pools pools;
     tsl::robin_map<size_t, std::unique_ptr<Program>> program_cache;
     /// bbport: exclusive for program/permutation insertions, shared for worker lookups.
-    std::shared_mutex programs_mutex;
+    /// 0.4.6 beta 20: role-aware (bbport_role_lock.h): the GPU command thread and the draw
+    /// preparation threads (Assist) share it.
+    BbRoles::SharedMutex programs_mutex{"shader programs"};
     /// 0.4.6 beta 17 part 2: the translations queued ahead (workers add, the GPU thread takes; an
     /// entry no draw took goes after 10 s).
     Ahead::Registry<TranslationJob> ahead_registry{10'000'000'000ull, 4096};
