@@ -59,6 +59,9 @@ static inline uint64_t runtime_wait_clock(void) { return host_monotonic_ns(); }
  * from detailed on. */
 int runtime_log_level(void);
 const char *runtime_import_name(const char *name);
+/* 0.4.6 beta 18: BB_RUNTIME_SYNC=0, the semaphores and read/write locks from before beta 18 (this beta
+ * only, to measure against). */
+int runtime_sync_legacy(void);
 uintptr_t runtime_rwlock_resolve(const char *name);
 void runtime_rwlock_report(void);
 /* bbport: rwlocks alive, lookups and list entries walked so far (the 60 s "Load:" line). */
