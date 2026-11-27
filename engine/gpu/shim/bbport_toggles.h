@@ -105,6 +105,14 @@ inline bool Experiment(std::uint64_t bit) {
 }
 } // namespace BbToggle
 
+/// 0.4.6 beta 21 (docs/gpu-fences.md): the GPU queue in use (the frame statistics' line), and GPU
+/// writes into the game's memory in place recorded so far (a count that only grows: the fence
+/// after one keeps to its submission's end, as the GPU's writes are visible only then).
+namespace BbGpuQueue {
+inline std::atomic<bool> active{false};
+inline std::atomic<std::uint64_t> in_place_writes{0};
+} // namespace BbGpuQueue
+
 namespace BbStats {
 /// Guest writes caught by page protection, and pages currently left unprotected as hot.
 inline std::atomic<std::uint64_t> tracker_faults{0};
@@ -128,6 +136,16 @@ inline std::atomic<std::uint64_t> backing_stores{0}, backing_stores_marked{0}, b
 /// the GPU command thread's safety net (fence work nothing would submit: expected 0).
 inline std::atomic<std::uint64_t> idle_flushes{0}, ahead_flushes{0}, announced_flushes{0},
     net_flushes{0};
+/// 0.4.6 beta 21 (docs/gpu-fences.md): with the GPU queue, `idle_flushes` and `ahead_flushes` count
+/// the submissions at the end of a game submission with the GPU out of work and on the last unit
+/// it was given, `announced_flushes` those when it ran out with work waiting. Also: submissions at
+/// a frame's end; progress marks recorded; fences written once the GPU had passed their game
+/// submission, by the GPU command thread and by the signal thread, and at their engine
+/// submission's end; fences kept to that end: with an interrupt, writing a clock or counter, and
+/// after a GPU write into the game's memory in place.
+inline std::atomic<std::uint64_t> queue_frame_flushes{0}, progress_marks{0};
+inline std::atomic<std::uint64_t> fences_by_mark_a{0}, fences_by_mark_signal{0}, fences_by_tick{0};
+inline std::atomic<std::uint64_t> fences_late_irq{0}, fences_late_clock{0}, fences_late_in_place{0};
 /// BB_PIPE_SIGNALS: frames retired in the frame end's own submission, and in one of their own.
 inline std::atomic<std::uint64_t> retired_with_end{0}, retired_alone{0};
 /// BB_HONEST_LABELS: flushes with nothing recorded since the last submission (none made).

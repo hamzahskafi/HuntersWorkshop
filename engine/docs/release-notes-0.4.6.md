@@ -457,6 +457,27 @@ priority on to the thread holding the lock.
   `BB_LOCK_INHERIT=0`, `BB_RAISE_ON_WAIT=0`, `BB_PENDING_FILTER=0`, `BB_STATS_USAGE_EVERY=1` and
   `BB_PIPE_COUNT=fenced` each turn one change off.
 
+## The GPU gets each frame in one piece (beta 21)
+
+The GPU was idle between its submissions for 4-15% of each frame in a profile (55-90 microseconds at
+each switch, 3-8 switches a frame), though the game was always a frame ahead. The engine had to send
+work in many small pieces because the game only saw its fences (the "this work is done" notes it
+reuses memory by) when a whole piece had finished on the GPU.
+- **The GPU now reports how far it has got.** At the end of each of the game's submissions it writes
+  that submission's number into one word of memory (a buffer marker; AMD and NVIDIA drivers both have
+  it). The game's fences are written as soon as the GPU has passed them, sooner than before and never
+  too early, so the work no longer has to be cut up for them.
+- **The work is handed to the GPU as a queue:** it waits while the GPU has more than one piece ahead of
+  it, and goes when the GPU starts its last piece, when it runs out, or when the game finishes a frame.
+  With the GPU as the limit, each frame goes as one submission queued behind the one it is drawing.
+- **Render passes are cut between the recording threads only where they end** (+0.6-0.8% measured on
+  beta 20). `BB_CUT_IN_PASS=1` cuts inside them too, as before.
+- The quick check of the memory the queued draws write keeps working with up to 64 large writes live
+  (16 before).
+- Devices without buffer markers, and `BB_GPU_FENCES=cpu` on any device, keep beta 20's way; the log
+  says which runs.
+- The shader cache is rebuilt once on the first start of this beta (its identity changed).
+
 ## Sharpening: one meaning, off by default (beta 16)
 
 The sharpening slider meant different things depending on the upscaler, so the same value could be

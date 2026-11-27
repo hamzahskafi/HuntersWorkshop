@@ -101,10 +101,11 @@ int main() {
     // Against a model (every noted write and its packet), with the filter and without: no missed
     // overlap ever; an overlap reported for reached writes only while pruning hasn't passed them.
     // Engine id 138: also with wide writes common, so more than kMaxWide are live at times (every
-    // lookup scans then) and their places are rebuilt once they are fewer.
+    // lookup scans then) and their places are rebuilt once they are fewer. Beta 21 (kMaxWide 64):
+    // the third run notes only wide writes, to pass it.
     for (int run = 0; run < 3; ++run) {
         const int with_filter = run != 0;
-        const std::uint64_t wide_every = run == 2 ? 3 : 50;
+        const std::uint64_t wide_every = run == 2 ? 1 : 50;
         PendingWriteList list2;
         list2.use_filter = with_filter != 0;
         std::vector<std::tuple<std::uint64_t, std::uint64_t, std::uint64_t>> model;

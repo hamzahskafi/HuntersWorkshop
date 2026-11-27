@@ -20,6 +20,7 @@
 #include "video_core/renderer_vulkan/vk_draw_pipe.h"
 #include "video_core/renderer_vulkan/vk_pending.h"
 #include "video_core/renderer_vulkan/vk_draw_prep.h"
+#include "video_core/renderer_vulkan/vk_gpu_progress.h"
 #include "video_core/renderer_vulkan/vk_temporal_upscaler.h"
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
@@ -261,8 +262,32 @@ public:
     /// 0.4.4 beta 20: `size`, the bytes it writes (4 or 8): a wait on label+4 is answered from
     /// an 8-byte fence only (the engine map's fence-1). `known` false: it writes a value not
     /// known here (a clock or counter), so waits on its bytes read memory (PendingSignalWord).
+    /// 0.4.6 beta 21 (docs/gpu-fences.md): `kind`. A plain fence (a value written, nothing else)
+    /// may be written as soon as the GPU has passed the game's submission it is in (GpuQueue);
+    /// the others, and a fence after a GPU write into the game's memory in place, when its whole
+    /// submission is done, as before. `Idle`: the GPU idle signal (Liverpool::SignalGpuIdle, at
+    /// each point the GPU command thread runs dry), not a fence but as early: else every fence
+    /// after it would wait for its whole submission's end.
+    enum class SignalKind : u8 { Other, Plain, Interrupt, Clock, Idle };
     void SignalAfterGpu(std::function<void()> signal, VAddr label = 0, u64 value = 0,
-                        u32 size = 8, bool known = true);
+                        u32 size = 8, bool known = true, SignalKind kind = SignalKind::Other);
+    /// 0.4.6 beta 21 (docs/gpu-fences.md): the GPU's progress word in use. The fences are written
+    /// as the GPU passes the game's submissions, and the work goes to the GPU when it starts the
+    /// last unit it was given (or runs out, or a frame ends). False: today's path (no marker,
+    /// BB_GPU_FENCES=cpu, or fences written when recorded).
+    [[nodiscard]] bool GpuQueue() const {
+        return gpu_queue;
+    }
+    [[nodiscard]] bool RecordedSinceSubmit() const {
+        return scheduler.RecordedSinceSubmit();
+    }
+    /// In order with the recording (stage B): the end of one of the game's submissions, numbered
+    /// and written by the GPU when it gets there (nothing when nothing was recorded since the
+    /// last submission).
+    void RecordUnitMark();
+    /// Stage A, at the end of each of the game's submissions: writes the queued fences of the
+    /// game's submissions the GPU has finished (one read of the word when it has not moved).
+    void ForwardPassedSignals();
     /// Whether signals wait for work not submitted yet (the GPU command thread submits it when
     /// it runs out of work, or the guest could wait for them forever).
     bool HasUnsubmittedSignals();
@@ -914,6 +939,21 @@ private:
     u32 PrefetchDraw(const u8* data, u32 size);
     std::jthread lookahead_thread;
 
+    /// 0.4.6 beta 21 (docs/gpu-fences.md): the progress word, and whether it is used. Before the
+    /// signal thread below, which uses them until it stops.
+    GpuProgress progress;
+    bool gpu_queue = false;
+    /// Marks recorded (in order with the recording), and at the last submission the mark that has
+    /// the GPU on the last unit given to it once passed (the submit callback).
+    std::atomic<u32> recorded_marks{0};
+    std::atomic<u32> submitted_marks{0};
+    std::atomic<u32> handover_mark{0};
+    /// Stage A: the word at its last look (ForwardPassedSignals).
+    u32 forwarded_word = 0;
+    /// BbGpuQueue::in_place_writes when the last signal was registered.
+    std::atomic<u64> in_place_writes_seen{0};
+    /// One thread at a time writes the queued signals (the signal thread, or stage A when it is not).
+    BbRoles::Mutex signal_run_mutex{"GPU signals"};
     /// BB_HONEST_LABELS (SignalAfterGpu). Last: its thread stops before the scheduler goes.
     struct GpuSignal {
         u64 tick;
@@ -922,6 +962,9 @@ private:
         u64 value;
         u32 size = 8; ///< 0.4.4 beta 20: the bytes the fence writes at `label`
         bool known = true; ///< 0.4.4 beta 20: `value` is what it writes
+        u32 mark = 0;      ///< 0.4.6 beta 21: the game submission's mark that ends the work before it
+        bool early = false; ///< 0.4.6 beta 21: may be written once the word has passed `mark`
+        SignalKind kind = SignalKind::Other;
     };
     void GpuSignalLoop(std::stop_token token);
     /// bbport: GpuSignalLoop has waited 10 s for `tick`: prints whether the GPU or the port is stuck.
@@ -951,6 +994,12 @@ private:
     std::atomic<bool> gpu_submit_requested{false};
     void ArmWatch(u64 tick);
     void Announce(u64 tick);
+
+    /// The end of a game submission with the GPU queue: the mark, then the hand-over.
+    void QueueUnitEnd();
+    /// Writes the queued signals that are ready (their submission done, or plain and passed); `wait`
+    /// false: not if another thread is at it (-1).
+    int RunReadySignals(bool wait);
 };
 
 } // namespace Vulkan

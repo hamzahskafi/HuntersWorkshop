@@ -1000,6 +1000,7 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
         if (is_written) {
             WriteTicks().Note(device_addr, size, scheduler.CurrentTick());
             BbStats::bound_in_place_written_bytes.fetch_add(size, std::memory_order_relaxed);
+            BbGpuQueue::in_place_writes.fetch_add(1, std::memory_order_relaxed); // 0.4.6 beta 21
         }
         CountGxUse(is_written ? GxWritten : is_texel_buffer ? GxTexel : GxInPlace, size);
         BbStats::bound_in_place_bytes.fetch_add(size, std::memory_order_relaxed);
@@ -1028,6 +1029,7 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
             BbStats::bound_in_place_bytes.fetch_add(size, std::memory_order_relaxed);
             if (is_written) {
                 BbStats::bound_in_place_written_bytes.fetch_add(size, std::memory_order_relaxed);
+                BbGpuQueue::in_place_writes.fetch_add(1, std::memory_order_relaxed);
             }
             TraceBinding(device_addr, size, is_written, is_written ? 0 : 2);
             note_hle(0);

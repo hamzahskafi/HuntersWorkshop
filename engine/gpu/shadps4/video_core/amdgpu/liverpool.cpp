@@ -201,6 +201,12 @@ void FrameEndTask(Vulkan::Rasterizer& r, const u8* data) {
     u64 frame;
     std::memcpy(&frame, data, sizeof(frame));
     r.OnSubmit();
+    // 0.4.6 beta 21 (docs/gpu-fences.md): the frame's last game submission ends here; its units
+    // go to the GPU as one submission, queued behind what it runs.
+    r.RecordUnitMark();
+    if (r.GpuQueue() && BbStats::enabled && r.RecordedSinceSubmit()) {
+        BbStats::queue_frame_flushes.fetch_add(1, std::memory_order_relaxed);
+    }
     if (frame != 0) {
         BbStats::retired_with_end.fetch_add(1, std::memory_order_relaxed);
         BbTimeline::Note(BbTimeline::PipeTask, 7, r.CurrentTick());
@@ -216,6 +222,10 @@ void FramesRetiredTask(Vulkan::Rasterizer& self, const u8* data) {
     std::memcpy(&retired, data, sizeof(retired));
     BbStats::retired_alone.fetch_add(1, std::memory_order_relaxed);
     BbTimeline::Note(BbTimeline::PipeTask, 7, self.CurrentTick());
+    self.RecordUnitMark(); // 0.4.6 beta 21: as a game submission's end
+    if (self.GpuQueue() && BbStats::enabled && self.RecordedSinceSubmit()) {
+        BbStats::queue_frame_flushes.fetch_add(1, std::memory_order_relaxed);
+    }
     self.SignalAfterGpu([retired] { Libraries::GnmDriver::NoteFramesRetired(retired); });
     self.Flush();
 }
@@ -499,13 +509,15 @@ void Liverpool::Process(std::stop_token stoken) {
                         IdleSignal idle;
                         std::memcpy(&idle, data, sizeof(idle));
                         r.WaitDeferredSignals();
-                        r.SignalAfterGpu([idle] { idle.self->SignalGpuIdle(idle.generation); });
+                        r.SignalAfterGpu([idle] { idle.self->SignalGpuIdle(idle.generation); }, 0,
+                                         0, 8, true, Vulkan::Rasterizer::SignalKind::Idle);
                         r.SubmitForSignals(); // now, or when the GPU gets to its last
                     },
                     &signal, sizeof(signal), BbToggle::PipelinedTasks, false, "GpuIdleHonest");
                 continue;
             }
-            rasterizer->SignalAfterGpu([this, generation] { SignalGpuIdle(generation); });
+            rasterizer->SignalAfterGpu([this, generation] { SignalGpuIdle(generation); }, 0, 0, 8,
+                                       true, Vulkan::Rasterizer::SignalKind::Idle);
             continue;
         }
         bool idle;
@@ -652,9 +664,16 @@ void RunEventWriteEop(Vulkan::Rasterizer& rasterizer, const u8* data) {
         const bool writes = sel != DataSelect::None;
         const bool known = sel == DataSelect::Data32Low || sel == DataSelect::Data64;
         const u64 value = sel == DataSelect::Data32Low ? eop.DataDWord() : eop.DataQWord();
+        // 0.4.6 beta 21 (docs/gpu-fences.md): a plain value may be written as soon as the GPU
+        // has passed this game submission; an interrupt or a clock waits for the submission's end.
+        using Kind = Vulkan::Rasterizer::SignalKind;
+        const Kind kind = eop.int_sel.Value() != InterruptSelect::None ? Kind::Interrupt
+                          : !writes                                   ? Kind::Other
+                          : known                                     ? Kind::Plain
+                                                                      : Kind::Clock;
         rasterizer.SignalAfterGpu([eop, seq] { SignalEop(eop, seq); },
                                   writes ? reinterpret_cast<VAddr>(eop.Address<u8>()) : 0, value,
-                                  sel == DataSelect::Data32Low ? 4u : 8u, known);
+                                  sel == DataSelect::Data32Low ? 4u : 8u, known, kind);
         return;
     }
     // Guest memory copies on the copy threads precede the fence the guest sees.
@@ -863,7 +882,8 @@ void RunEventWriteEos(Vulkan::Rasterizer& rasterizer, const u8* data) {
         rasterizer.ProcessDownloadImages();
         const PM4CmdEventWriteEos eos = event_eos;
         rasterizer.SignalAfterGpu([eos] { eos.SignalFence(&WriteEosLabel); },
-                                  reinterpret_cast<VAddr>(eos.Address()), eos.DataDWord(), 4);
+                                  reinterpret_cast<VAddr>(eos.Address()), eos.DataDWord(), 4, true,
+                                  Vulkan::Rasterizer::SignalKind::Plain);
         return;
     }
     // Copies deferred to the recording thread precede writes the guest sees.
@@ -2189,6 +2209,11 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
     if (draw_prep) {
         draw_prep->EndSubmission();
     }
+    // 0.4.6 beta 21 (docs/gpu-fences.md): the fences of the game's submissions the GPU has finished
+    // are written here, at the end of each of the game's submissions (one read when nothing moved).
+    if (rasterizer && seq != NoSeq) {
+        rasterizer->ForwardPassedSignals();
+    }
     if (rasterizer && seq != NoSeq && !EndsSignalledFrame()) {
         rasterizer->SubmitForSignals();
     }
@@ -2564,6 +2589,9 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
     // (Before 0.4.4 beta 10 it waited for the next graphics submission, a fence wait on the GPU,
     // or this thread to be idle for 0.2 ms.)
     if constexpr (!is_indirect) {
+        if (rasterizer) {
+            rasterizer->ForwardPassedSignals(); // 0.4.6 beta 21, as at a graphics submission's end
+        }
         if (rasterizer && !EndsSignalledFrame()) {
             rasterizer->SubmitForSignals();
         }

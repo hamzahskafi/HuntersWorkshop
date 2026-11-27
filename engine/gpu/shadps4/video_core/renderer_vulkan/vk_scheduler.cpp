@@ -641,17 +641,15 @@ void Scheduler::MaybeSplit() {
     if (bytes < (is_rendering ? 2 * split_bytes : split_bytes)) {
         return;
     }
-    // 0.4.6 beta 21 research (docs/gpu-fences.md, item 5): BB_CUT_IN_PASS=0 cuts only where a pass
-    // ends (and inside one only past 8 times the segment size), to measure what the cuts inside
-    // passes cost the GPU on today's hardware, and what one long pass recorded on one thread costs
-    // the recording.
+    // 0.4.6 beta 21 (docs/gpu-fences.md, plan part 4): the recording threads cut only where a pass
+    // ends (and inside one only past 8 times the segment size). Measured in engine id 139 without
+    // the profiler: +0.6-0.8% FPS at the tester's three spots, a sixth of the cuts, the recording
+    // keeping up. BB_CUT_IN_PASS=1: cut inside passes too, as before.
     static const bool cut_in_pass = [] {
         const char* env = std::getenv("BB_CUT_IN_PASS");
-        const bool on = !(env && env[0] == '0');
-        if (!on) {
-            std::printf("GPU: passes cut between recording threads only where they end "
-                        "(BB_CUT_IN_PASS=0, a measurement)\n");
-        }
+        const bool on = env && env[0] == '1';
+        std::printf("GPU: passes cut between recording threads %s (BB_CUT_IN_PASS)\n",
+                    on ? "inside them too (=1)" : "only where they end");
         return on;
     }();
     if (is_rendering && !cut_in_pass && bytes < 8 * split_bytes) {

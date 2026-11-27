@@ -90,7 +90,9 @@ public:
     /// a DMA or copy into a large range); up to this many, the filter still answers for the rest.
     /// In 136 one live wide write sent every lookup to the scan (the tester's run: the filter
     /// answered 8-27% of lookups, and the draw step took about 0.1 us a draw more than in 134).
-    static constexpr std::uint32_t kMaxWide = 16;
+    /// 0.4.6 beta 21: 64 (16 before; 138's busy view had up to 17 live). A lookup checks the ones
+    /// live, not the limit, so the limit costs nothing until they are that many.
+    static constexpr std::uint32_t kMaxWide = 64;
 
     /// BB_PENDING_FILTER=0 (this beta only): every lookup scans the list.
     bool use_filter = true;

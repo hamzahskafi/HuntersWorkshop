@@ -1,7 +1,7 @@
 # Beta 21 research: the GPU writes the game's fences
 
-Status: research (2026-11-27), counted in engine id 139, and a plan for beta 21 proposed to the tester
-(2026-11-28, the last section); not built.
+Status: research (2026-11-27), counted in engine id 139, the plan approved by the tester (2026-11-28),
+built in engine id 140 ("As built", the last section).
 
 ## Why
 
@@ -345,3 +345,40 @@ barrier's stall or a layout change's hidden work (a decompression), and itself e
 it without changing it is AMD's Radeon GPU Profiler (one frame captured at each spot: each barrier's
 time, the passes' gaps, layout changes, the waves per draw). Then a design for what costs most.
 
+## As built (engine id 140)
+
+- **The word** (`vk_gpu_progress.{h,cpp}`): 64 bytes of host-visible, coherent host memory, kept for the
+  process's life as the breadcrumbs' buffer. `BB_GPU_FENCES=cpu`, or a device without the marker: the
+  old path, said in the log at start.
+- **Marks** (`Rasterizer::RecordUnitMark`): at the end of each graphics and compute submission of the
+  game (`QueueUnitEnd`), at the GPU-idle point and at the frame's end (`FrameEndTask`,
+  `FramesRetiredTask`), only with work recorded since the last submission (a mark alone would make a
+  submission of nothing). A signal registered takes the next mark's number.
+- **Which signals go early** (`SignalAfterGpu`'s `SignalKind`): plain EOP and EOS fences and the GPU
+  idle signal. Not: interrupts, clock and counter values, the WRITE_DATA the GPU writes in place, the
+  frame retirements, and any signal after a GPU write into the game's memory in place
+  (`BbGpuQueue::in_place_writes`: bindings written in place, GPU WRITE_DATA, DMA the GPU does). The
+  queue stays in order, so a signal that must wait holds back those after it. The GPU idle signal goes
+  early because the GPU command thread runs dry about 20 times a frame: tick-bound, it would have held
+  back every fence after it until its whole submission ended.
+- **Who writes them** (`GpuQueueLogic::RunReady`, `Rasterizer::RunReadySignals`): one thread at a time
+  under `signal_run_mutex`; the GPU command thread at the end of each of the game's submissions
+  (`ForwardPassedSignals`, only when the word moved, giving way to the signal thread), the signal thread
+  at each submission's end (as before, now also by marks).
+- **The hand-over** (`QueueUnitEnd`, `GpuQueueLogic::Decide`): at each submission the callback sets the
+  hand-over mark (`HandOverMark`: the mark before the last unit given, or the last mark when the
+  submission has none of its own). At a unit's end: past it, or the GPU's last submission done (its
+  known tick, no query): submit; else hold and watch the last submission; its end announces it
+  (`Announce`, `SubmitForGpu`), and the recording thread submits at its next packet. The frame's end
+  submits as before.
+- **Counted** (`GPU queue:` line): submissions at the game's submission ends (the GPU on its last
+  unit, out of work), when it ran out with work waiting, at a frame's end, by the safety net; marks a
+  frame; fences written early (by which thread) and at their submission's end; those kept to the end by
+  reason; the GPU's writes into the game's memory in place a frame.
+- **Tested** (`tests/test_gpu_queue.cpp`, `gpu-queue-test`): the comparison across the wrap, the
+  hand-over decision, two threads at the runner (in order, each once; ThreadSanitizer clean), and a
+  model GPU and game in four cases using the same functions. With the GPU as the limit: 1.02
+  submissions a frame; with the game the limit: one per game submission (the GPU taking each as it
+  comes, as before); in every case no fence before its unit was done, all in order, and the GPU never
+  idle while work waited for it.
+- **The GPU cache's identity** changes (`liverpool.cpp`): `f5f2f67fe80d3585`.

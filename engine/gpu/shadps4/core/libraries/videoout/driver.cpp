@@ -1042,7 +1042,42 @@ void VideoOutDriver::Flip(const Request& req) {
                 // "high half" (0 before: the engine map's fence-1).
                 const u64 half = AmdGpu::Liverpool::fence_high_half_refused.exchange(0);
                 const u64 compute_writes = AmdGpu::Liverpool::compute_write_data.exchange(0);
-                if (dry || ahead || announced || net || empty || half || compute_writes) {
+                // 0.4.6 beta 21 (docs/gpu-fences.md): the GPU queue's line in place of it.
+                const u64 frame_ends = BbStats::queue_frame_flushes.exchange(0);
+                const u64 marks = BbStats::progress_marks.exchange(0);
+                const u64 by_a = BbStats::fences_by_mark_a.exchange(0);
+                const u64 by_signal = BbStats::fences_by_mark_signal.exchange(0);
+                const u64 by_tick = BbStats::fences_by_tick.exchange(0);
+                const u64 late_irq = BbStats::fences_late_irq.exchange(0);
+                const u64 late_clock = BbStats::fences_late_clock.exchange(0);
+                const u64 late_in_place = BbStats::fences_late_in_place.exchange(0);
+                static u64 in_place_before = 0;
+                const u64 in_place_now = BbGpuQueue::in_place_writes.load(std::memory_order_relaxed);
+                const u64 in_place = in_place_now - in_place_before;
+                in_place_before = in_place_now;
+                if (BbGpuQueue::active.load(std::memory_order_relaxed)) {
+                    const double fences = double(by_a + by_signal + by_tick);
+                    const auto share = [&](u64 n) { return fences ? 100.0 * n / fences : 0.0; };
+                    std::printf("GPU queue: %.1f submissions/frame at the game's submission ends "
+                                "(the GPU on its last unit %.1f, out of work %.1f), %.1f/frame when "
+                                "it ran out with work waiting, %.1f/frame at a frame's end, %.1f/frame "
+                                "by the safety net (expected 0); %.1f marks/frame; fences written as "
+                                "the GPU passed their game submission %.1f%% (by the GPU command "
+                                "thread %.1f%%, the signal thread %.1f%%), at their submission's end "
+                                "%.1f%%; kept to it: with an interrupt %.1f/frame, a clock or counter "
+                                "%.1f/frame, after a GPU write in place %.1f/frame (GPU writes into "
+                                "the game's memory in place %.1f/frame); empty ones not made "
+                                "%.1f/frame; waits on a 4-byte fence's next word read from memory "
+                                "%llu\n",
+                                (dry + ahead) / double(frames), ahead / double(frames),
+                                dry / double(frames), announced / double(frames),
+                                frame_ends / double(frames), net / double(frames),
+                                marks / double(frames), share(by_a + by_signal), share(by_a),
+                                share(by_signal), share(by_tick), late_irq / double(frames),
+                                late_clock / double(frames), late_in_place / double(frames),
+                                in_place / double(frames), empty / double(frames),
+                                static_cast<unsigned long long>(half));
+                } else if (dry || ahead || announced || net || empty || half || compute_writes) {
                     std::printf("Fence submissions: %.1f/frame at the game's submission ends (GPU "
                                 "out of work %.1f, on its last %.1f), %.1f/frame when the GPU got "
                                 "to its last, %.1f/frame by the safety net (expected 0); frames "

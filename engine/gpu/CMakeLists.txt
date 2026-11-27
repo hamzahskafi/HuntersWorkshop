@@ -626,6 +626,11 @@ add_executable(submit-queue-test EXCLUDE_FROM_ALL ../tests/test_submit_queue.cpp
 target_compile_options(submit-queue-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(submit-queue-test PRIVATE shadps4)
 target_link_libraries(submit-queue-test PRIVATE Threads::Threads)
+# 0.4.6 beta 21: the GPU queue's logic against a model GPU (vk_gpu_queue_logic.h).
+add_executable(gpu-queue-test EXCLUDE_FROM_ALL ../tests/test_gpu_queue.cpp)
+target_compile_options(gpu-queue-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(gpu-queue-test PRIVATE shadps4)
+target_link_libraries(gpu-queue-test PRIVATE Threads::Threads)
 # 0.4.6 beta 19: stage A's record of pending reads and writes (vk_pending.h).
 add_executable(pending-test EXCLUDE_FROM_ALL ../tests/test_pending.cpp)
 target_compile_options(pending-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
