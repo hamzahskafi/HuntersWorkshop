@@ -382,3 +382,24 @@ time, the passes' gaps, layout changes, the waves per draw). Then a design for w
   comes, as before); in every case no fence before its unit was done, all in order, and the GPU never
   idle while work waited for it.
 - **The GPU cache's identity** changes (`liverpool.cpp`): `f5f2f67fe80d3585`.
+- **What an early fence relies on** (from the builder's review of 140, checked 2026-11-28). The marker is
+  an execution dependency only: it says the work before it has run, not that its writes are visible to
+  the CPU. So every way the GPU's results reach the game's memory must be safe without the
+  submission's end. They are:
+  - image downloads are done before the fence is even queued: `RunEventWriteEop` and the EOS and
+    RELEASE_MEM paths call `ProcessDownloadImages` first, which waits for the GPU (`Finish`) and copies
+    the data in (`DownloadImageMemory` is only called synchronously);
+  - GPU writes into the game's memory in place (bindings written in place, the GPU's WRITE_DATA, DMA
+    the GPU does) make the next signal keep to its submission's end (`BbGpuQueue::in_place_writes`),
+    and the queue's order holds back those after it;
+  - occlusion results are written once the GPU has finished their submission and carry their own
+    valid bit, which the game polls ("not ready" meanwhile, `vk_occlusion.h`): no fence orders them;
+  - an image stored to the game's memory when VRAM is full lands after its submission (a deferred
+    store), as before; the game does not read render targets back (`readbacks 0/s`), and the old
+    path's fence (the signal thread at the submission's end) did not order it either.
+  A new path that copies GPU results into the game's memory after a submission ends, relying on the
+  fences after it, would have to mark the next signal late in the same way.
+- **Signal bodies never wait.** The GPU command thread runs queued signals (giving way with a
+  try-lock), while the signal thread waits for that lock. A signal that waited on the signal thread,
+  or on something done after it, would deadlock the two. Today's early ones write memory, note it,
+  and raise the GPU idle interrupt.
