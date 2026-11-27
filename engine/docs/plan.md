@@ -966,6 +966,38 @@ reason. The design: the frame-critical chain (the game's main thread and GXRende
 the recording threads) above normal and, on hybrid CPUs with 4 or more performance cores, on those
 cores by CPU sets (soft); everything else as now; measured on and off.
 
+**Beta 18's first run, read (the tester, 2026-11-27, log `20261127_195807`, engine 133; FSR 4.1.2 at
+1920x1080, uncapped, frame statistics and `BB_SAMPLE_THREADS=main`; runs 2 and 4 of the measurement,
+then fast travel and an area with new shaders; runs 1 and 3 deferred).** Against 132's sampler run
+(`20261127_173510`, same PC, same spots):
+
+| | 132 | 133 |
+|---|---|---|
+| Lamp spot, 1,345 draws | 201-207 FPS, stage A idle 4%, the game waiting 0.8 ms a frame | 215-221 FPS, stage A idle 0.3%, the game waiting 2.6 ms |
+| Lamp spot past its jump, about 1,300 draws | 218-222 FPS, stage A idle 1.5%, waiting 1.7 ms | 225-228 FPS, stage A idle 0.6%, waiting 2.55 ms |
+| Slower spot (1,400 draws in 132, 1,332 here: the same main-thread profile, `+0x4935c4a` its top wait) | 177-181 FPS, stage A idle 11-13%, waiting 0.15 ms | 200-205 FPS, stage A idle 3%, waiting 1.3 ms |
+| The main thread's spin at `+0x21b8890`/`+0x21b8899` | 9-13% of its samples | gone; the fork-join wait shows as the engine's pause loop and yields, 5-7% |
+| Stage A a draw at the lamp spot | 3.05-3.26 us | 2.85-3.09 us |
+
+- **The limit moved from the game to the engine at both spots.** The game now waits for the engine
+  1.3-2.6 ms a frame, and stage A is idle 0.3-3% of the time: its cost a draw (about 3.0 us, about 4 ms a
+  frame at 1,345 draws) sets the frame rate now. The slower spot's part of the gain may also include its
+  5% fewer draws.
+- **The fork-join waits:** 17-19 a frame, 0.47-0.61 ms a frame, 11% of them past 50 us at the lamp spot
+  (3% to 8% elsewhere); 1,250-1,700 yields a frame that find nobody, so on this CPU the workers never wait
+  for a core and the wait is their own work. The main thread no longer spins without `pause`.
+- **Placement:** the chain's 7 threads use 2.8 cores; the game's 62 Frame threads use 3.7-4.0 cores and
+  wake on the performance cores only 40-43% of the time in play (84-88% in menus); audio 44-48%. Whether
+  the main thread and `GXRenderThread` are among those that wake on the efficiency cores isn't in the
+  line (it sums per role).
+- **Loading and streaming:** the first load 3.57 s (132: 3.53 s); two fast travels 1.84 s and 3.32 s,
+  no frame over 25 ms in the 2 s after either. Background threads used no CPU in play (no backlog).
+- **The new-shader area:** two hitches (64 ms and 40 ms) where draws waited for pipelines being
+  compiled (8 waits, 79 ms, the longest 16 ms; 13 compiles, 82 ms). The compile threads ran as before
+  (normal priority, now Frame) and the burst threads had no backlog, so this is the known first-sight cost,
+  not beta 18's.
+- **No engine thread without a role** was logged.
+
 ### Performance, in 0.4.6 (moved in, 2026-11-27)
 
 The tester (2026-11-27): "I wanted the Performance part to mostly be completed in 0.4.6!" and, of the
@@ -990,6 +1022,8 @@ was mostly the profiler's: without it the GPU is busy 97.5% of the time.
 | A GPU timer at pass ends that doesn't wait at each label | Plan, "Later, if at all" | When the GPU is the limit again (the 131 runs showed it isn't at the tester's spots without DLAA through d4r); was proposed as beta 18's part 1 before the threads' reading |
 | **Beta 18: thread roles and handoffs** ([handoffs-and-placement.md](handoffs-and-placement.md)): the roles module with every engine and game thread on it, the runtime's semaphores and read/write locks rebuilt on a parking primitive, the game's fork-join barrier with `pause` then a yield, per-thread hot-path counters (`memory_calls` dropped), the `Roles:` line; temporary switches `BB_THREAD_ROLES`, `BB_RUNTIME_SYNC`, `BB_TEST_CPUS` | Beta 18's research, 2026-11-27 | Beta 18 (design agreed 2026-11-27; built on the tester's go: part 1 4fe1d91, part 2 with the barrier fix and the counters after it; engine id 133) |
 | Beta 18's runs: the slower spot with `BB_THREAD_ROLES=0`, as built, then `BB_TEST_CPUS=8` roles off and on; the lamp spot as built; each with the frame statistics and `BB_SAMPLE_THREADS=main` (and `BB_GAME_FIXES_SKIP=job_barrier` once, for the barrier fix alone). Watch: hitches against the burst threads' raises (the `Pipelines:` burst lines), since Background and Assist run idle in play; the file read-ahead (`bb:Prefetch`) runs idle and eco in play now (below normal before), so streaming hitches without a loading screen would point at it | Beta 18's design, measurement; the builder's review of 133 | The tester, on 133 (built 2026-11-27: every test passes under Wine and natively, the cache id unchanged, the dispatcher's sites and hash checked against the 1.09 eboot) |
+| Stage A is the limit at both of the tester's spots on 133 (idle 0.3-3%, the game waiting 1.3-2.6 ms a frame): its cost a draw, about 3.0 us, is what the next beta should cut (beta 20's item, its condition now met) | Beta 18's first run, read | Proposed to the tester as the next beta (2026-11-27) |
+| The Frame threads wake on the performance cores 40-43% of the time in play: per-thread shares for `main` and `GXRenderThread` in the `Roles:` line, then the measured option of Frame (or those two) preferring the fastest class | Beta 18's first run, read | With the next beta's line; the preference only if a run shows it helps |
 | **Beta 19:** the engine's own waits (stage A's, the draw pipe's, the recorders', host copies') on the parking primitive with their spins set by role; pool sizes tuned from beta 18's `Roles:` lines; anything beta 18's runs ask for (Frame threads on the fastest class if measured better) | Beta 18's design, staging | Beta 19, after beta 18's runs |
 | **Beta 20, if betas 18 and 19 make stage A the limit:** stage A's cost a draw, starting with its constants step (0.63-0.73 us a draw, about 0.9 ms a frame at 1,300 draws), then its pipeline and inputs steps | The diagnostics runs, 2026-11-27 | After beta 19, decided from its runs |
 | The last-level-cache criterion in the roles' core rule (Ryzen with two core complexes) | Beta 18's design | When a tester with such a CPU can measure it |
