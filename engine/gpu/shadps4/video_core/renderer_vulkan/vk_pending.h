@@ -84,13 +84,20 @@ public:
     static constexpr std::uint32_t Capacity = 1024;
     static constexpr std::uint32_t kPageShift = 16;  ///< 64 KB
     static constexpr std::uint32_t kFilterBits = 12; ///< 4,096 counters
-    static constexpr std::uint64_t kMaxPages = 32;   ///< wider writes: every lookup scans
+    static constexpr std::uint64_t kMaxPages = 32;   ///< wider writes are "wide": checked one by one
     static constexpr std::uint32_t kRecent = 8;      ///< how far back a repeated range is found
+    /// Engine id 138: the wide writes live are checked one by one (a storage buffer bound whole,
+    /// a DMA or copy into a large range); up to this many, the filter still answers for the rest.
+    /// In 136 one live wide write sent every lookup to the scan (the tester's run: the filter
+    /// answered 8-27% of lookups, and the draw step took about 0.1 us a draw more than in 134).
+    static constexpr std::uint32_t kMaxWide = 16;
 
     /// BB_PENDING_FILTER=0 (this beta only): every lookup scans the list.
     bool use_filter = true;
-    /// Lookups answered by the filter alone, and those that scanned (statistics).
-    std::uint64_t filtered = 0, scanned = 0;
+    /// Statistics: lookups answered without the scan (by the filter, after the wide ones), those
+    /// that scanned because a page held a write or because more than kMaxWide wide writes were
+    /// live, and the entries those scans went through.
+    std::uint64_t filtered = 0, scanned = 0, scanned_wide = 0, scanned_entries = 0;
 
     /// Drops the writes stage B has reached (`reached(packet)`), and the moved ones' old places.
     template <typename Reached>
@@ -129,7 +136,7 @@ public:
             return false;
         }
         Entry& e = entries[(first + count) & (Capacity - 1)];
-        e = {address, end, packet, true};
+        e = {address, end, packet, true, false};
         Remember(e);
         ++count;
         return true;
@@ -140,7 +147,17 @@ public:
             return false;
         }
         const Addr end = address + size;
-        if (use_filter && wide == 0) {
+        if (use_filter && !wide_lost) {
+            for (std::uint32_t i = 0; i < wide; ++i) {
+                const Entry& e = entries[wide_at[i]];
+                if (address < e.hi && end > e.lo) {
+                    return true;
+                }
+            }
+            if (live == wide) {
+                ++filtered;
+                return false;
+            }
             bool hit = false;
             for (Addr page = address >> kPageShift; page <= (end - 1) >> kPageShift; ++page) {
                 if (filter[Slot(page)]) {
@@ -152,8 +169,11 @@ public:
                 ++filtered;
                 return false;
             }
+        } else if (use_filter) {
+            ++scanned_wide;
         }
         ++scanned;
+        scanned_entries += count;
         for (std::uint32_t i = 0; i < count; ++i) {
             const Entry& e = entries[(first + i) & (Capacity - 1)];
             if (e.live && address < e.hi && end > e.lo) {
@@ -172,34 +192,80 @@ private:
         Addr lo, hi;
         std::uint64_t packet;
         bool live;
+        bool wide;
     };
     static std::uint32_t Slot(Addr page) {
         return static_cast<std::uint32_t>((page * 0x9E3779B97F4A7C15ull) >> (64 - kFilterBits));
     }
     template <int Delta>
     void Count(const Entry& e) {
-        const Addr first_page = e.lo >> kPageShift, last_page = (e.hi - 1) >> kPageShift;
-        if (last_page - first_page + 1 > kMaxPages) {
-            wide += Delta;
-            return;
-        }
-        for (Addr page = first_page; page <= last_page; ++page) {
+        for (Addr page = e.lo >> kPageShift; page <= (e.hi - 1) >> kPageShift; ++page) {
             filter[Slot(page)] += Delta;
         }
     }
-    void Remember(const Entry& e) {
+    void Remember(Entry& e) {
         ++live;
-        Count<1>(e);
+        e.wide = ((e.hi - 1) >> kPageShift) - (e.lo >> kPageShift) + 1 > kMaxPages;
+        if (!e.wide) {
+            Count<1>(e);
+            return;
+        }
+        if (wide < kMaxWide && !wide_lost) {
+            wide_at[wide] = Index(e);
+        } else {
+            wide_lost = true; // more than kMaxWide: every lookup scans until they are fewer
+        }
+        ++wide;
     }
     void Forget(Entry& e) {
         e.live = false;
         --live;
-        Count<-1>(e);
+        if (!e.wide) {
+            Count<-1>(e);
+            return;
+        }
+        --wide;
+        if (wide_lost) {
+            if (wide <= kMaxWide) {
+                RebuildWide();
+            }
+            return;
+        }
+        const std::uint32_t at = Index(e);
+        for (std::uint32_t i = 0; i <= wide; ++i) {
+            if (wide_at[i] == at) {
+                wide_at[i] = wide_at[wide];
+                break;
+            }
+        }
+    }
+    std::uint32_t Index(const Entry& e) const {
+        return static_cast<std::uint32_t>(&e - entries.data());
+    }
+    /// The wide entries' places again, once few enough are live.
+    void RebuildWide() {
+        std::uint32_t n = 0;
+        for (std::uint32_t i = 0; i < count; ++i) {
+            const std::uint32_t at = (first + i) & (Capacity - 1);
+            if (entries[at].live && entries[at].wide) {
+                wide_at[n++] = at;
+            }
+        }
+        wide = n;
+        wide_lost = false;
     }
 
     std::array<Entry, Capacity> entries{};
     std::array<std::uint16_t, std::size_t{1} << kFilterBits> filter{};
+    std::array<std::uint32_t, kMaxWide> wide_at{}; ///< the live wide entries' places (unless lost)
     std::uint32_t first = 0, count = 0, live = 0, wide = 0;
+    bool wide_lost = false;
+
+public:
+    /// Live wide writes now (statistics).
+    [[nodiscard]] std::uint32_t Wide() const {
+        return wide;
+    }
 };
 
 } // namespace Vulkan

@@ -1834,16 +1834,22 @@ void Rasterizer::PrintPipeStats() {
         auto& p = pending_stats;
         std::printf("  pending tables/s: reads noted %.0f, skipped %.0f (no dump writes there; the "
                     "dumps' pages: %zu ranges, %llu new%s); GPU writes listed %.0f, to the table "
-                    "%.0f (list full), lookups %.0f (%.0f answered by the page filter, %.0f "
-                    "scanned the list; %u writes listed now)\n",
+                    "%.0f (list full), lookups %.0f (%.0f answered without the list, %.0f "
+                    "scanned it: %.0f of them as more than %u wide writes were live, %.0f entries "
+                    "a scan; %u writes listed now, %u of them wide)\n",
                     p.reads_noted / seconds, p.reads_skipped / seconds, dump_pages.ranges.size(),
                     static_cast<unsigned long long>(p.dump_ranges_new),
                     dump_pages.overflow ? ", too many: every read noted" : "",
                     p.writes_listed / seconds, p.writes_tabled / seconds, p.write_lookups / seconds,
                     pending_writes.filtered / seconds, pending_writes.scanned / seconds,
-                    pending_writes.Size());
+                    pending_writes.scanned_wide / seconds, PendingWriteList::kMaxWide,
+                    pending_writes.scanned
+                        ? double(pending_writes.scanned_entries) / pending_writes.scanned
+                        : 0.0,
+                    pending_writes.Size(), pending_writes.Wide());
         p = {};
         pending_writes.filtered = pending_writes.scanned = 0;
+        pending_writes.scanned_wide = pending_writes.scanned_entries = 0;
     }
     std::printf("  drains by reason/s:");
     for (u32 r = 0; r < DrawPipe::NumReasons; ++r) {

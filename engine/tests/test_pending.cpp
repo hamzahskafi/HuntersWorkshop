@@ -100,24 +100,31 @@ int main() {
     }
     // Against a model (every noted write and its packet), with the filter and without: no missed
     // overlap ever; an overlap reported for reached writes only while pruning hasn't passed them.
-    for (int with_filter = 0; with_filter < 2; ++with_filter) {
+    // Engine id 138: also with wide writes common, so more than kMaxWide are live at times (every
+    // lookup scans then) and their places are rebuilt once they are fewer.
+    for (int run = 0; run < 3; ++run) {
+        const int with_filter = run != 0;
+        const std::uint64_t wide_every = run == 2 ? 3 : 50;
         PendingWriteList list2;
         list2.use_filter = with_filter != 0;
         std::vector<std::tuple<std::uint64_t, std::uint64_t, std::uint64_t>> model;
         std::uint64_t at = 0, packet = 0, missed = 0, extra = 0, full = 0;
         const auto reached_at = [&](std::uint64_t p) { return p <= at; };
-        std::mt19937_64 r{11u + with_filter};
+        std::mt19937_64 r{11u + static_cast<unsigned>(run)};
+        std::uint32_t most_wide = 0;
         for (int i = 0; i < 200000; ++i) {
             const std::uint64_t base = 0x40000000ull + (r() % 64) * 0x10000;
             if (r() % 3 == 0) {
                 const std::uint64_t address = base + (r() % 64) * 0x400;
-                const std::uint64_t size = r() % 50 == 0 ? (1 + r() % 4) * 0x400000 : 0x100 + r() % 0x4000;
+                const std::uint64_t size =
+                    r() % wide_every == 0 ? (1 + r() % 4) * 0x400000 : 0x100 + r() % 0x4000;
                 ++packet;
                 if (list2.Note(address, size, packet)) {
                     model.emplace_back(address, address + size, packet);
                 } else {
                     ++full;
                 }
+                most_wide = std::max(most_wide, list2.Wide());
             } else if (r() % 4 == 0) {
                 at = std::min(packet, at + r() % 6);
                 list2.Prune(reached_at);
@@ -139,11 +146,18 @@ int main() {
         list2.Prune(reached_at);
         check(list2.Size() == 0 && !list2.Overlaps(0x40000000ull, 0x400000),
               "everything reached: nothing overlaps");
-        std::printf("  filter %s: overlaps reported for reached writes %llu, answered by the filter "
-                    "%llu, scanned %llu\n",
-                    with_filter ? "on" : "off", static_cast<unsigned long long>(extra),
+        std::printf("  filter %s, a wide write in %llu: overlaps reported for reached writes %llu, "
+                    "answered without the list %llu, scanned %llu (%llu with too many wide; at most "
+                    "%u wide live)\n",
+                    with_filter ? "on" : "off", static_cast<unsigned long long>(wide_every),
+                    static_cast<unsigned long long>(extra),
                     static_cast<unsigned long long>(list2.filtered),
-                    static_cast<unsigned long long>(list2.scanned));
+                    static_cast<unsigned long long>(list2.scanned),
+                    static_cast<unsigned long long>(list2.scanned_wide), most_wide);
+        if (run == 2) {
+            check(most_wide > PendingWriteList::kMaxWide && list2.scanned_wide > 0,
+                  "more wide writes than kept one by one: the lookups scan");
+        }
     }
     if (g_fail) {
         std::printf("pending-test: %d failed\n", g_fail);

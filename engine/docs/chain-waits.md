@@ -195,8 +195,34 @@ A first version counted a timeout landing while stage B was already sending the 
 the waiter and the wake's system call) as missed: 1-2 in 3,600 sleeps, in either mode. Counting only an
 untaken waiter: 0 in 7,200, in either mode.
 
+**The tester's run of 136** (log `20261127_224829`, frame statistics on, no sampler; against 134's run
+`20261127_211019`, also without a sampler, at the same spots):
+
+| | Lamp spot (1,345 draws) | Busy view (about 1,780) | Slow area (1,286-1,317) |
+|---|---|---|---|
+| FPS, 134 then 136 | 230 then 228 (the GPU's limit) | 192 then 199 (+4%) | 216 then 221 (+2-3%) |
+| Stage A idle | 11.5% then 34.8% | 5.7% then 24.9% | 20.3% then 37.2% |
+| Stage B busy | about 74% then 68% | about 88% then 84% | about 80% then 78% |
+| The game waiting for the engine, ms a frame | 1.5-1.9 then 2.8-3.4 | 2.3-2.6 then 3.9-4.0 | 0.3-0.6 then 0.8-1.2 |
+| The engine's threads, cores | 8.95 then 7.75 | 9.33 then 8.35 | 9.17 then 8.42 |
+
+- The render chain's waits on lower roles: about 17% of stage A in 135's profile, now under 0.2 ms a
+  second in all (the submission counters about 20 a second, the flip requests, host copies and the decode
+  tasks' frames a few each).
+- Neither stage is the limit now; the game waits longer for the engine, so the GPU is (expected at the
+  lamp spot, likely in the other two; the overlay's GPU use confirms).
+- About 1 to 1.2 cores less CPU at every spot, most of it the draw preparation's threads (one woken a
+  buffer instead of all) and the game's threads.
+- **Item 5 fell short:** the page filter answered 8-27% of lookups, and stage A's draw step took about
+  0.1 us a draw more than in 134 (1.10 to 1.20 us at the lamp spot) while its other packets took less.
+  One live write over 2 MB (a storage buffer bound whole, a copy into a large range) sent every lookup
+  to the scan of the whole list. **Engine id 138:** up to 16 live wide writes are checked one by one and
+  the filter answers for the rest (more than 16: every lookup scans until they are fewer, their places
+  then found again); the pending tables line counts the lookups that scanned for that reason and the
+  entries a scan went through, so the next run shows whether the 64 KB pages themselves are too coarse.
+
 The GPU cache's identity changes with this beta (`liverpool.{h,cpp}`, `submit_queue.h`,
-`vk_pipeline_cache.h`): `31aba0f240c65c6f`, from `cdca3ea71cd46d16` (unchanged by 137).
+`vk_pipeline_cache.h`): `31aba0f240c65c6f`, from `cdca3ea71cd46d16` (unchanged by 137 and 138).
 
 Tests: `role-lock-test` (real threads; counts everywhere, the raise on Windows or Wine), `submit-queue-test`,
 `pending-test` (the filter against a model, with and without), `draw-pipe-handover-test` (now also stage A
