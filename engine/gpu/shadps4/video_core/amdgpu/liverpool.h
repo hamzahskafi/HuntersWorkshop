@@ -41,6 +41,10 @@ namespace AmdGpu {
 
 union PM4Header;
 
+// bbport 0.4.6 beta 19 (liverpool.cpp, bbport_frame_pool.h): the decode tasks' frames.
+void* TakeTaskFrame(std::size_t size);
+void GiveTaskFrame(void* frame, std::size_t size);
+
 struct Liverpool {
     static constexpr u32 GfxQueueId = 0u;
     static constexpr u32 NumGfxRings = 1u;     // actually 2, but HP is reserved by system software
@@ -121,6 +125,7 @@ public:
         }
         submit_done = true;
         submit_cv.notify_one();
+        WakeDecoder();
     }
 
     void WaitGpuIdle() noexcept {
@@ -136,6 +141,7 @@ public:
             gpu_wants_work.store(true, std::memory_order_relaxed);
         }
         submit_cv.notify_all();
+        WakeDecoder();
     }
 
     /// bbport: this thread is waiting for the game's next submission, everything before decoded.
@@ -175,6 +181,7 @@ public:
                 });
                 ++num_commands;
                 submit_cv.notify_one();
+                WakeDecoder();
             }
             sem.acquire();
         } else {
@@ -182,6 +189,7 @@ public:
             command_queue.emplace(std::move(func));
             ++num_commands;
             submit_cv.notify_one();
+            WakeDecoder();
         }
     }
 
@@ -236,6 +244,13 @@ private:
             struct empty {};
             std::suspend_always yield_value(empty&&) {
                 return {};
+            }
+            // bbport 0.4.6 beta 19 (bbport_frame_pool.h): frames kept for the next task.
+            static void* operator new(std::size_t size) {
+                return TakeTaskFrame(size);
+            }
+            static void operator delete(void* frame, std::size_t size) {
+                GiveTaskFrame(frame, size);
             }
         };
 
@@ -338,6 +353,11 @@ private:
     std::atomic<bool> submit_done{};
     std::mutex submit_mutex;
     std::condition_variable_any submit_cv;
+    /// bbport 0.4.6 beta 19: the word the GPU command thread's idle wait sleeps on (BbPark,
+    /// liverpool.cpp), bumped wherever submit_cv is notified for it; submit_cv stays for
+    /// WaitGpuIdle. BB_ENGINE_PARK=0: the condition variable, as before.
+    std::atomic<u32> decoder_word{0};
+    void WakeDecoder();
     /// bbport BB_HONEST_LABELS: set by WakeForGpu (under submit_mutex), taken by the idle wait.
     std::atomic<bool> gpu_wants_work{false};
     std::atomic<bool> decoder_idle{false};

@@ -412,6 +412,25 @@ without thread support although the movie player uses it from three threads.
   `BB_GAME_FIXES_SKIP=job_barrier` turn each part off, and `BB_TEST_CPUS=8` runs the game as on a CPU
   with 8 hardware threads.
 
+## The GPU command thread, lighter on every draw (beta 19)
+
+The thread that turns the game's commands into graphics card work became the limit after beta 18
+at the tested spots. A profile of it showed where its time went, and beta 19 cuts the largest parts:
+- **The frame statistics cost less.** They read the clock for about one command in 16 instead of
+  every one, so runs with statistics on behave like normal play.
+- **Handing a draw to the next thread costs less.** The expensive memory fence that guarantees the
+  next thread is woken now comes every 8 draws and whenever this thread stops, not on every draw.
+- **Less bookkeeping per draw.** The engine kept a record of every piece of memory a queued draw
+  would read or write. It now records only what can actually be overwritten while a draw waits.
+- **The game's submissions no longer hold up this thread.** The work the game's submit did while
+  holding a lock this thread needs moved outside it.
+- **The engine's own threads sleep and wake more cheaply**, on a word of their own, as the game's
+  threads do since beta 18.
+- The `Roles:` log line now also shows the game's main thread and render thread on their own.
+- The shader cache is rebuilt once on the first start of this beta (its identity changed).
+- For this beta's measurements only, `BB_STATS_EVERY_PACKET=1`, `BB_PIPE_HANDOVER=each`,
+  `BB_PENDING_TABLES=old`, `BB_FRAME_POOL=0` and `BB_ENGINE_PARK=0` each turn one change off.
+
 ## Sharpening: one meaning, off by default (beta 16)
 
 The sharpening slider meant different things depending on the upscaler, so the same value could be

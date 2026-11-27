@@ -110,7 +110,10 @@ public:
     /// command buffer. Null when disabled.
     std::shared_ptr<Submission> Build(std::span<const u32> commands);
     /// Game submit thread, under the queue lock: hands it to the workers in submission order.
-    void Enqueue(u64 seq, std::shared_ptr<Submission> submission);
+    void Enqueue(u64 seq, std::shared_ptr<Submission> submission, bool notify = true);
+    /// The scanner and workers told of buffers enqueued with `notify` false (0.4.6 beta 19: the
+    /// game's submit wakes them after letting the submission queue's lock go).
+    void NotifyWorkers();
 
     /// GPU thread: brackets the processing of submission `seq`. The first call hands the
     /// workers the exact register state and checksum they start replaying from.

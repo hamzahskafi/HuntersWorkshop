@@ -1,6 +1,7 @@
 # Beta 19 design: the GPU command thread's cost a draw, and the engine's own waits
 
-Status: proposed to the tester (2026-11-27), not built.
+Status: approved by the tester ("go ahead with beta 19", 2026-11-27) and built (engine id 134); see
+"As built" at the end.
 
 The tester (2026-11-27), after beta 18: keep beta 19's work ("it's still optimization work that should
 be completed either way") and do the GPU command thread's optimizations as well. The GPU cache's
@@ -124,3 +125,32 @@ On the beta, frame statistics on, no sampler:
 | Stage A's register application moved to the draw preparation workers (they already decode the same buffers) | Stage A still has to walk every packet in order for its side effects (fences, DMA, the constant engine); a large change for what Part 1 gets from smaller ones. Kept for after beta 20's profile |
 | Publishing to stage B in batches of draws | Saves the same fence as item 2 but delays stage B's start on every batch; item 2 keeps per-draw publication |
 | Turning the statistics' clocks off instead of item 1 | The tester's runs need the per-draw numbers |
+
+## As built (engine id 134)
+
+| Item | Where | Switch (this beta only) |
+|---|---|---|
+| 1. Statistics: about one packet in 16 timed (a countdown reloaded at random from 8 to 24), each counted as 16 | `bbport_native_calls.{h,cpp}`, `liverpool.cpp` | `BB_STATS_EVERY_PACKET=1` |
+| 2. The hand-over: a release store a packet, the fence and the sleep checks every 8 packets, after every task, before stage A goes idle and before each of its waits (the draw pipe's, the deferred signals'); stage B's and the lookahead thread's sleeps on the engine's parking word (`bbport_park.h`), looking again every 2 ms (a "late wake" in the draw pipe line, expected 0) | `vk_draw_pipe.h`, `vk_rasterizer.{h,cpp}`, `liverpool.cpp` | `BB_PIPE_HANDOVER=each` |
+| 3. The pending tables: reads noted only where the dumps write (`DumpPages`), GPU writes as a list of the unreached ones (`PendingWriteList`) with the hashed table when it fills; counts in a "pending tables/s" line | `vk_pending.h`, `vk_rasterizer.{h,cpp}` | `BB_PENDING_TABLES=old` |
+| 4. The submission lock: the draw preparation threads woken and the free check told after it | `liverpool.cpp`, `vk_draw_prep.{h,cpp}` | (with item 5) |
+| 5. The decode tasks' frames from a pool (`bbport_frame_pool.h`): no heap under the lock or at each submission's end | `liverpool.{h,cpp}` | `BB_FRAME_POOL=0` |
+| Part 2: the recording threads' and stage A's idle waits on their own parking words, no condition variable | `vk_scheduler.{h,cpp}`, `liverpool.{h,cpp}` | `BB_ENGINE_PARK=0` |
+| Part 2: the `Roles:` line ends with the game's `main` and `GXRenderThread` on their own (cores, where they woke) | `bbport_roles.cpp` | - |
+| The sampler walks a sample inside system code back to its engine caller with the unwind data, instead of the first engine-looking value on the stack (the profile's 4.8% of unplaced waits) | `bbport_sampler.cpp` | - |
+
+Changed from the design while building:
+- **Item 5:** the pending-fence queue already reuses its blocks (libc++'s deque in first-in, first-out
+  use), so only the decode tasks' frames changed.
+- **Item 6 dropped**, each for a reason found in the code:
+  - the constant copies are the copying itself;
+  - CLEAR_STATE comes a few times a frame (a 208 KB reset each), and resetting only the changed blocks
+    would cost a mark on every register packet;
+  - the prepared pipeline's compare is the check that keeps a stale pipeline out.
+- **Part 2's spins** stay as they are (`CapSpinUs`, `SpinLimitUs`): no run has shown a reason to
+  change them yet.
+
+The GPU cache's identity changes with this beta (`liverpool.{h,cpp}`): `cdca3ea71cd46d16`, from
+`fed6a8570e2a2710`.
+
+Tests: `draw-pipe-handover-test` (real threads; ThreadSanitizer clean here), `pending-test`.

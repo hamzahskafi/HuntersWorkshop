@@ -240,7 +240,7 @@ std::shared_ptr<DrawPreparation::Submission> DrawPreparation::Build(
     return submission;
 }
 
-void DrawPreparation::Enqueue(u64 seq, std::shared_ptr<Submission> submission) {
+void DrawPreparation::Enqueue(u64 seq, std::shared_ptr<Submission> submission, bool notify) {
     if (!submission) {
         return;
     }
@@ -249,6 +249,12 @@ void DrawPreparation::Enqueue(u64 seq, std::shared_ptr<Submission> submission) {
         std::scoped_lock lk{mutex};
         submissions.push_back(std::move(submission));
     }
+    if (notify) {
+        cv.notify_all();
+    }
+}
+
+void DrawPreparation::NotifyWorkers() {
     cv.notify_all();
 }
 

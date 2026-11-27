@@ -20,6 +20,7 @@
 #include <queue>
 
 #include "bbport_copy.h"
+#include "bbport_park.h"
 #include "bbport_toggles.h"
 #include "common/assert.h"
 #include "common/interval_set.h"
@@ -1137,6 +1138,8 @@ private:
         bool busy = false;     ///< running a chunk (guarded by recorder_mutex)
         bool sleeping = false; ///< waiting on cv (guarded by recorder_mutex)
         std::condition_variable_any cv;
+        /// 0.4.6 beta 19: the word it sleeps on (BbPark), bumped by HandOver when it sleeps.
+        std::atomic<u32> wake_word{0};
         std::jthread thread;
     };
 

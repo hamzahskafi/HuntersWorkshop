@@ -89,6 +89,9 @@ struct Thread {
     int qos = kQosKeep;       // applied
     int cores = kCoresKeep;   // applied
     std::uint64_t cycles = 0; // at the last report
+    /// 0.4.6 beta 19: the game's main and render threads, shown on their own in the line.
+    bool tracked = false;
+    std::atomic<std::uint64_t> wakes[3]{}; // by core class; written by the thread itself
 };
 
 std::mutex g_mutex;
@@ -283,6 +286,7 @@ void Assign(const char* name, Role role, bool game) {
     t->name = name;
     t->role = role;
     t->game = game;
+    t->tracked = game && (t->name == "main" || t->name.rfind("GXRenderThread", 0) == 0);
     if (t->handle) {
         Apply(*t);
     }
@@ -408,9 +412,13 @@ void NoteWake() {
     if (!BbStats::enabled) {
         return;
     }
-    const Thread* t = t_self;
+    Thread* t = t_self;
     const unsigned role = t ? static_cast<unsigned>(t->role) : 0;
-    g_wakes[role][ClassOfCurrent()].Add();
+    const unsigned where = ClassOfCurrent();
+    g_wakes[role][where].Add();
+    if (t && t->tracked) {
+        t->wakes[where].fetch_add(1, std::memory_order_relaxed);
+    }
 }
 
 void Report(double seconds) {
@@ -423,6 +431,7 @@ void Report(double seconds) {
     } rows[kRoles];
     static bool listed = false;
     std::string game_names;
+    std::string tracked; // " main 0.95 cores (woke on the fastest cores 41%);" ...
 #ifdef _WIN32
     const double hz = static_cast<double>(runtime_tsc_frequency());
 #endif
@@ -437,8 +446,25 @@ void Report(double seconds) {
             if (t.handle) {
                 ULONG64 cycles = 0;
                 if (QueryThreadCycleTime(static_cast<HANDLE>(t.handle), &cycles) && hz > 0) {
-                    rows[role].cores += static_cast<double>(cycles - std::min<ULONG64>(cycles, t.cycles)) / (hz * seconds);
+                    const double cores =
+                        static_cast<double>(cycles - std::min<ULONG64>(cycles, t.cycles)) / (hz * seconds);
+                    rows[role].cores += cores;
                     t.cycles = cycles;
+                    if (t.tracked) {
+                        std::uint64_t w[3], all = 0;
+                        for (unsigned c = 0; c < 3; ++c) {
+                            all += w[c] = t.wakes[c].exchange(0, std::memory_order_relaxed);
+                        }
+                        char part[160];
+                        std::snprintf(part, sizeof(part), " %s %.2f cores", t.name.c_str(), cores);
+                        tracked += part;
+                        if (all && (w[kFastest] || w[kEfficient])) {
+                            std::snprintf(part, sizeof(part), " (woke on the fastest cores %.0f%%)",
+                                          100.0 * w[kFastest] / all);
+                            tracked += part;
+                        }
+                        tracked += ";";
+                    }
                 }
                 DWORD code = 0;
                 alive = !GetExitCodeThread(static_cast<HANDLE>(t.handle), &code) || code == STILL_ACTIVE;
@@ -482,6 +508,9 @@ void Report(double seconds) {
             line += part;
         }
         line += ";";
+    }
+    if (!tracked.empty()) {
+        line += " of them" + tracked;
     }
     if (line.back() != ';') {
         return;

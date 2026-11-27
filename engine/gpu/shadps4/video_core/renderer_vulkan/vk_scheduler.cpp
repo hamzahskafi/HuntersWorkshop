@@ -742,7 +742,11 @@ void Scheduler::HandOver() {
     ordered_full.clear();
     // A busy thread picks the new chunks up by itself: waking it is a syscall per draw.
     if (wake) {
-        worker.cv.notify_one();
+        if (BbPark::EngineWaits()) {
+            BbPark::Bump(worker.wake_word);
+        } else {
+            worker.cv.notify_one();
+        }
     }
     if (!record_chunk) {
         record_chunk = AcquireChunk();
@@ -856,6 +860,9 @@ void Scheduler::RecorderThread(std::stop_token stoken, u32 index) {
     }
     BbThreads::MakeCritical();
     Worker& worker = *workers[index];
+    // 0.4.6 beta 19: its sleep is on its own word (BbPark): no lock of the condition variable's,
+    // no stop callback registered per wait. Stopping wakes it once.
+    std::stop_callback on_stop{stoken, [&worker] { BbPark::Bump(worker.wake_word, true); }};
     std::vector<std::unique_ptr<RecordChunk>> ordered;
     const auto has_work = [&] {
         return !worker.queue.empty() || OrderedReady();
@@ -886,7 +893,18 @@ void Scheduler::RecorderThread(std::stop_token stoken, u32 index) {
             std::unique_lock lk{recorder_mutex};
             if (!has_work()) {
                 worker.sleeping = true;
-                worker.cv.wait(lk, stoken, has_work);
+                if (BbPark::EngineWaits()) {
+                    // The word read under the lock: a hand-over after it bumps the word, so the
+                    // wait below returns at once.
+                    while (!has_work() && !stoken.stop_requested()) {
+                        const u32 seen = worker.wake_word.load(std::memory_order_seq_cst);
+                        lk.unlock();
+                        BbPark::Wait(worker.wake_word, seen);
+                        lk.lock();
+                    }
+                } else {
+                    worker.cv.wait(lk, stoken, has_work);
+                }
                 worker.sleeping = false;
                 if (!has_work()) {
                     return; // stop requested

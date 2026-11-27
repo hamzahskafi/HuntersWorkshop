@@ -11,6 +11,8 @@
 #include <unistd.h>
 #endif
 #include <time.h>
+#include "bbport_frame_pool.h"
+#include "bbport_park.h"
 #include "bbport_threads.h"
 #include "bbport_ce_stats.h"
 #include "bbport_timeline.h"
@@ -41,6 +43,24 @@
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
 
 extern "C" int runtime_memory_vma_info(uintptr_t address, int* prot, int* type, uintptr_t* end);
+
+namespace AmdGpu {
+
+void* TakeTaskFrame(std::size_t size) {
+    return BbFramePool::Take(size);
+}
+
+void GiveTaskFrame(void* frame, std::size_t size) {
+    BbFramePool::Give(frame, size);
+}
+
+void Liverpool::WakeDecoder() {
+    if (BbPark::EngineWaits()) {
+        BbPark::Bump(decoder_word);
+    }
+}
+
+}
 
 namespace AmdGpu {
 
@@ -257,7 +277,25 @@ void Liverpool::Process(std::stop_token stoken) {
                     std::memory_order_relaxed);
             }
             bool gpu_wants_work_now = false;
-            {
+            if (BbPark::EngineWaits()) {
+                // 0.4.6 beta 19: on its own word (BbPark). The word is read before the state is
+                // looked at: a submission after that bumps it, so the wait returns at once.
+                std::stop_callback on_stop{stoken, [this] { BbPark::Bump(decoder_word); }};
+                for (;;) {
+                    const u32 seen = decoder_word.load(std::memory_order_seq_cst);
+                    {
+                        std::scoped_lock lk{submit_mutex};
+                        if (num_commands || num_submits || submit_done ||
+                            gpu_wants_work.load(std::memory_order_relaxed) ||
+                            stoken.stop_requested()) {
+                            gpu_wants_work_now =
+                                gpu_wants_work.exchange(false, std::memory_order_relaxed);
+                            break;
+                        }
+                    }
+                    BbPark::Wait(decoder_word, seen);
+                }
+            } else {
                 std::unique_lock lk{submit_mutex};
                 Common::CondvarWait(submit_cv, lk, stoken, [this] {
                     return num_commands || num_submits || submit_done ||
@@ -2500,18 +2538,26 @@ void Liverpool::SubmitGfx(std::span<const u32> dcb, std::span<const u32> ccb) {
     // the GPU thread needs to pick up work.
     auto* draw_prep = rasterizer ? &rasterizer->GetDrawPreparation() : nullptr;
     auto prep_submission = draw_prep ? draw_prep->Build(dcb) : nullptr;
+    const void* noted_dcb = copy ? copy->guest_dcb : dcb.data();
+    u64 seq = NoSeq;
     {
         // Numbering, enqueueing and queueing under one lock keep the three orders identical.
+        // 0.4.6 beta 19 (docs/stage-a-cost.md, item 4): only that under it. The decode task's
+        // frame comes from a pool (bbport_frame_pool.h), the draw preparation threads are woken
+        // and the free check told after the lock is let go: the GPU command thread waited for
+        // this lock about 4% of its time.
         std::scoped_lock lock{queue.m_access};
-        u64 seq = NoSeq;
         if (draw_prep) {
             seq = gfx_submit_seq++;
-            draw_prep->Enqueue(seq, std::move(prep_submission));
+            draw_prep->Enqueue(seq, std::move(prep_submission), /*notify=*/false);
         }
-        BbFreeCheck::NoteSubmit(seq, copy ? copy->guest_dcb : dcb.data(), dcb.size_bytes());
         auto task = ProcessGraphics(dcb, ccb, seq, std::move(copy));
         queue.submits.emplace(task.handle);
     }
+    if (draw_prep) {
+        draw_prep->NotifyWorkers();
+    }
+    BbFreeCheck::NoteSubmit(seq, noted_dcb, dcb.size_bytes());
 
     std::scoped_lock lk{submit_mutex};
     ++num_submits;
@@ -2520,6 +2566,7 @@ void Liverpool::SubmitGfx(std::span<const u32> dcb, std::span<const u32> ccb) {
     BbTimeline::Note(BbTimeline::GuestSubmit, 0, submissions_total);
     work_retired = false;
     submit_cv.notify_one();
+    WakeDecoder();
 }
 
 bool Liverpool::EndsSignalledFrame() {
@@ -2614,6 +2661,7 @@ void Liverpool::SubmitAsc(u32 gnm_vqid, std::span<const u32> acb) {
     ++submissions_total;
     work_retired = false;
     submit_cv.notify_one();
+    WakeDecoder();
 }
 
 
