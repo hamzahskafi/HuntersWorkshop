@@ -245,22 +245,24 @@ The tester's two runs: `20261128_000941` (`BB_GPU_PROFILE=1`) and `20261128_0014
 
 **1. The GPU reports how far it has got, in one word.** At start, where the device has
 `VK_AMD_buffer_marker` (both of the tester's GPUs), the engine makes one 4-byte word of its own in host
-memory (host-visible and coherent, as the breadcrumbs' buffer). The recording numbers the fences it meets
-and the end of each of the game's submissions with one count, and at each one's place in the command
-stream writes that number into the word (`writeBufferMarkerAMD`, bottom of the pipe: after all earlier
-work, inside or outside a pass, holding up nothing after it). The word then always reads "everything
-before mark N is done". About 450-700 marks a frame (the fences and 20-70 submission ends); the
-breadcrumbs already write about 1,800 (one per command), and 3,600 cost 0.10 ms a frame on the 3070 Ti,
-so about 0.02 ms is expected. A profiled run measures it.
+memory (host-visible and coherent, as the breadcrumbs' buffer). The recording numbers the end of each of
+the game's submissions, and there writes that number into the word (`writeBufferMarkerAMD`, bottom of
+the pipe: after all earlier work, inside or outside a pass, holding up nothing after it). The word then
+always reads "the game's submissions up to N are done". One mark a submission, not one a fence
+(revised 2026-11-28): the fences are read at the game's submissions (part 2), so a finer mark would
+change nothing the game sees, and 20-70 marks a frame instead of about 600 cost about a tenth (the
+breadcrumbs already write about 1,800 a frame, one per command; 3,600 cost 0.10 ms a frame on the 3070
+Ti, so about 0.002 ms is expected).
 
 **2. Fences written as the GPU passes them.** Each plain fence (a value to write, no interrupt: all of
-them in the 139 counts) goes into a ring with its mark, address, value and size, in place of a function
-on the signal thread's list. The ring is written on the CPU, in order and exactly once per fence, at two
+them in the 139 counts) goes into a ring with its submission's number, address, value and size, in
+place of a function on the signal thread's list. The ring is written on the CPU, in order and exactly once per fence, at two
 points the engine passes anyway: the end of each of the game's submissions (the GPU command thread reads
-the word, one memory read, and writes what it has passed) and the end of each of the GPU's submissions
-(the signal thread, which waits for it as now). No timer, no thread of its own, no extra wake. A fence is
-then seen once the GPU has passed it and the game next submits, or its submission ends: earlier than
-today (its whole submission's end plus the signal thread's wake), never before the GPU has passed it.
+the word, one memory read, and writes the fences of the submissions done) and the end of each of the
+GPU's submissions (the signal thread, which waits for it as now). No timer, no thread of its own, no
+extra wake. A fence is then seen once the GPU has finished the game's submission holding it and the game
+next submits: earlier than today (the end of the engine's whole submission, 3-7 a frame, plus the signal
+thread's wake), never before the GPU has passed it.
 Kept on today's path (written when the submission ends): fences with an interrupt or another action, the
 clock and counter values, and a fence after GPU writes into the game's memory in place (those need the
 writes visible, which only the submission's end gives). 139 found none of these in play; counted. The
@@ -308,3 +310,38 @@ marker cannot be written before the work, so the risk is in the numbering, which
 Expected: the profile put the switches at 0.19-0.49 ms of a 4.3-5.2 ms frame; with two thirds of them
 gone, a few percent, the slow area most. The game sees its fences sooner, and the signal thread wakes
 about twice a frame.
+
+**What stays after it** (read from the 139 profile, `20261128_001438`, cuts only at pass ends):
+- The GPU between submissions: lamp 0.18-0.22 ms of 4.33-4.37 (3.2-3.4 submissions a frame), busy view
+  0.40-0.54 of 5.19-5.31 (5.5-7.9), slow area 0.48-0.69 of 4.36-4.63 (5.2-7.9): 55-90 us a switch. The
+  game waited for its previous frame 3.3-3.5 ms a frame at the lamp spot, 4.1-4.3 in the busy view and
+  1.3-2.0 in the slow area: the GPU was the limit at all three, so a whole frame would have been queued
+  in time, and the idle is the switches themselves. With the queue about 2 are left a frame: the
+  frame's, and the presenter's, which must wait for the swapchain image (taking that image a frame
+  earlier could fold it in; a later item). The profiler adds to these: unprofiled the vendor's counter
+  read 98/98/94-95% busy.
+
+## The GPU's time that is not the game's work (2026-11-28; to measure)
+
+The usage counter counts all of this as busy. Per frame, from the same profile (lamp / busy view / slow
+area):
+- **Render passes begun again with the same targets:** about 32 / 40 / 38. By cause: a depth view
+  change (depth writes switched, `renderer-3`) 12 / 17 / 17; the copy shader 7 / 9 / 11 (and its image
+  copies 1 / 1 / 1); image barriers 7 / 7 / 4 (most moving images to shader read); other layouts or
+  clears 3 / 3 / 3; buffer barriers 1 / 2 / 2.
+- **Barriers that wait for earlier work:** about 9.5 / 8.4 / 5.2 (attachments 4.0 / 4.1 / 2.0, compute
+  1.9 / 1.1 / 0.2, all commands 3.6 / 3.2 / 3.0). Each empties the GPU's pipeline before the next work
+  starts.
+- **The copy shader** (the game's copies, run as compute): 57-65 dispatches, 0.14-0.17 ms with their
+  barriers.
+- **Breadcrumbs:** one marker per command, about 1,800; 0.05 ms on the 3070 Ti (0.4.4); not measured on
+  the RX 9070 XT. `BB_BREADCRUMBS=0` measures it.
+- **The game's shaders as translated:** the bulk (about 3.5-4 ms). Whether they run as fast as they
+  could (occupancy, registers) is not visible to the engine.
+
+What each costs is not known: the engine's profiler times only between its labels, cannot see a
+barrier's stall or a layout change's hidden work (a decompression), and itself ends passes. 0.4.4's
+"a few microseconds a restart" was on the RTX 3070 Ti and is not carried over. The tool that sees all of
+it without changing it is AMD's Radeon GPU Profiler (one frame captured at each spot: each barrier's
+time, the passes' gaps, layout changes, the waves per draw). Then a design for what costs most.
+
