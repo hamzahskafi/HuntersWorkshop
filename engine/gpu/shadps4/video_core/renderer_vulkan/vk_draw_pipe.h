@@ -15,6 +15,7 @@
 #include "bbport_platform.h"
 #include "bbport_threads.h"
 #include "bbport_sections.h"
+#include "bbport_timeline.h"
 
 #include <array>
 #include <atomic>
@@ -329,7 +330,8 @@ private:
                 // game's own threads. BB_SPIN_US lowers it.
                 static const auto spin_time = std::chrono::microseconds(
                     BbThreads::CapSpinUs(BbThreads::Available() >= 12 ? 200 : 50));
-                const auto spin_until = std::chrono::steady_clock::now() + spin_time;
+                const auto wait_start = std::chrono::steady_clock::now();
+                const auto spin_until = wait_start + spin_time;
                 for (u32 spins = 1; available == at; ++spins) {
                     if (stop.stop_requested()) {
                         return;
@@ -345,6 +347,16 @@ private:
                         sleeping.store(false, std::memory_order_relaxed);
                     }
                     available = published.load(std::memory_order_acquire);
+                }
+                // 0.4.6 beta 18 (BB_TIMELINE): stage B's waits of 20 us or more.
+                static const bool timeline = BbTimeline::On();
+                if (timeline) {
+                    const auto waited = std::chrono::duration_cast<std::chrono::microseconds>(
+                                            std::chrono::steady_clock::now() - wait_start)
+                                            .count();
+                    if (waited >= 20) {
+                        BbTimeline::Note(BbTimeline::StageBWait, u64(waited));
+                    }
                 }
             }
             const auto* header = reinterpret_cast<const Header*>(ring.get() + at % Capacity);

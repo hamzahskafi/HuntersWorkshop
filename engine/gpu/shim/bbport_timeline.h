@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // bbport BB_TIMELINE=<file>: a timeline of the frame's way to the GPU (guest submissions and
-// waits, decoding, Vulkan submissions, GPU completion), to see where the GPU waits for work.
+// waits, decoding, stage B's waits for packets, Vulkan submissions, GPU completion), to see where
+// the GPU waits for work. tools/timeline_report.py reads it.
 // Recording starts BB_TIMELINE_START seconds (default 30) after the first event and stops when
 // the buffer is full (~15 s of play); the file is then written once: "ns event arg arg2" per line.
 #pragma once
@@ -27,7 +28,12 @@ enum Event : std::uint32_t {
     FrameRetired,      ///< arg: frame
     DecoderIdleBegin,  ///< the GPU command thread has nothing to decode
     DecoderIdleEnd,
+    StageBWait,        ///< 0.4.6 beta 18: stage B waited for a packet, at its end; arg: microseconds
+                       ///< (20 or more: the gaps between packets of one frame are left out)
 };
+
+/// Whether a timeline is being recorded (BB_TIMELINE set).
+inline bool On();
 
 struct Entry {
     std::uint64_t ns;
@@ -72,6 +78,10 @@ inline void Write(State& s) {
         std::fclose(f);
         std::printf("Timeline: %llu events written to %s\n", (unsigned long long)Capacity, s.path);
     }
+}
+
+inline bool On() {
+    return Get().path != nullptr;
 }
 
 inline void Note(Event event, std::uint64_t arg = 0, std::uint64_t arg2 = 0) {

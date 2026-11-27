@@ -745,6 +745,30 @@ found.
 | A first visit with the cache cleared: the GPU thread builds the pipelines' shaders itself (beta 15's cold run: a 220.8 ms frame after the load, 185 pipelines, 323.6 ms of shader and pipeline work on the GPU thread); burst threads compile only what is queued after that | Beta 15's first runs, 2026-11-24 (`b53c92dc`) | A one-time cost per new build or cleared cache; looked at if new ground still stalls with the cache warm (translation off the GPU thread is the lead) |
 | The tombstones in a graveyard do not look right to the tester | The tester, 2026-11-08 (beta 10's second run) | Not the memory work: the same in 0.4.5. Looked at only with a screenshot and the place, or a PS4 comparison |
 
+**Beta 18, the GPU's idle time: research (2026-11-27).** The tester's 129 session (`054a5566`, a
+statistics window at 180 FPS, 1920x1080, OptiScaler's FSR 4): a frame is 5.56 ms; the GPU is busy 3.8 ms
+of it (68%); the GPU command thread (stage A) works 3.28 us a draw over 1,010 draws and is idle 30.7%;
+stage B is busy 70.8%; the game waits for its previous frame 1.46 ms in 80% of frames
+(`WaitPreviousFrame`: it allows one frame in flight); at 1.5 of the 8.8 submissions a frame made at the
+game's submission ends the GPU had already run out of work. So no stage is the limit: each is about 70%
+busy, and they wait on each other around the game's one-frame loop (the game waits for its frame to
+retire, the retirement waits for stage A, stage B and the GPU). Two cautions: the GPU profiler's marks
+drain the GPU (`engine-map.md` 1.4), and the tester's runs have it on (Diagnostics "gpu"), so part of the
+1.12 ms "between submissions" is the profiler's; and the GPU profile does not cover the presenter's own
+submissions (its post pass, the swapchain copy), counted there as idle.
+
+Where the loop's slack is decides the fix: (H1) stage A or B finishes the frame late (their cost a draw:
+faster per draw, or stage B on two threads, `parallel-stageb.md` approach B); (H2) the GPU waits while
+recorded work is held for the game's next submission point (submit earlier); (H3) the GPU's tail after
+the frame's last submission (the upscaler, post-processing, UI) is the long part (GPU work, not the
+engine's); (H4) the presenter's wait for the frame before (`BB_FRAMES_AHEAD=1`) adds to it. The timeline
+(`BB_TIMELINE`, `bbport_timeline.h`) already has the game's submissions and waits, stage A's idle, the
+Vulkan submissions and the GPU's progress; engine id 131 adds stage B's waits (20 us or more) and
+`tools/timeline_report.py`, which says per frame how long the game waited, how long each stage and the
+GPU sat idle, and how a frame's way from the game's frame end to its retirement splits between stage A,
+stage B, the last submission and the GPU's tail. The tester's run: `BB_TIMELINE` and
+`BB_TIMELINE_START=120` in Extra variables, the GPU profile diagnostic off, a minute at the usual spot.
+
 ### Performance, in 0.4.6 (moved in, 2026-11-27)
 
 The tester (2026-11-27): "I wanted the Performance part to mostly be completed in 0.4.6!" and, of the
