@@ -521,6 +521,9 @@ static volatile DWORD crash_dump_thread_id;
 static volatile LONG crash_dump_written;
 /* Wide: a logs folder outside the system's code page (a user name in another script) still gets it. */
 static wchar_t crash_dump_dir[MAX_PATH], crash_dump_path[MAX_PATH];
+/* Its UTF-8 form for the log line, made once at start: the faulting thread's stack may be nearly
+ * gone (a stack overflow), so the handler keeps its own use small. */
+static char crash_dump_path_utf8[MAX_PATH * 3];
 typedef BOOL (WINAPI *MiniDumpWriteDumpFn)(HANDLE, DWORD, HANDLE, MINIDUMP_TYPE, PMINIDUMP_EXCEPTION_INFORMATION,
                                           PMINIDUMP_USER_STREAM_INFORMATION, PMINIDUMP_CALLBACK_INFORMATION);
 static unsigned __stdcall crash_helper_thread(void *unused) {
@@ -564,6 +567,9 @@ static void start_crash_helper(void) {
         swprintf(crash_dump_dir, MAX_PATH, L"logs");
         swprintf(crash_dump_path, MAX_PATH, L"logs\\crash.dmp");
     }
+    if (!WideCharToMultiByte(CP_UTF8, 0, crash_dump_path, -1, crash_dump_path_utf8, (int)sizeof(crash_dump_path_utf8),
+                             NULL, NULL))
+        crash_dump_path_utf8[0] = 0;
     crash_dump_request = CreateEventW(NULL, FALSE, FALSE, NULL);
     crash_dump_done = CreateEventW(NULL, TRUE, FALSE, NULL);
     HANDLE thread = crash_dump_request && crash_dump_done ? (HANDLE)_beginthreadex(NULL, 0, crash_helper_thread, NULL, 0, NULL) : NULL;
@@ -577,11 +583,9 @@ static void write_crash_dump(EXCEPTION_POINTERS *e) {
     crash_dump_thread_id = GetCurrentThreadId();
     SetEvent(crash_dump_request);
     const DWORD waited = WaitForSingleObject(crash_dump_done, 30000);
-    char path[MAX_PATH * 3];
-    if (!WideCharToMultiByte(CP_UTF8, 0, crash_dump_path, -1, path, (int)sizeof(path), NULL, NULL)) path[0] = 0;
-    char line[MAX_PATH * 3 + 64];
+    static char line[sizeof(crash_dump_path_utf8) + 64]; /* one thread gets here (report_exception) */
     snprintf(line, sizeof(line), waited == WAIT_OBJECT_0 && crash_dump_written ? "Crash dump: %s\n" : "Crash dump: not written (%s)\n",
-             path);
+             crash_dump_path_utf8);
     DWORD written;
     WriteFile(GetStdHandle(STD_ERROR_HANDLE), line, (DWORD)strlen(line), &written, NULL);
 }
