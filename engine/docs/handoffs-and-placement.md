@@ -1,337 +1,335 @@
-# Beta 18 design: the game's thread handoffs and where its threads run
+# Beta 18 design: thread roles and handoffs
 
 For the tester's review (2026-11-27). Nothing here is built yet.
 
-## What the measurements say
+This replaces the first draft, which handled each kind of CPU as a special case. The tester's direction:
+the way the engine starts its threads and hands out work should be designed once, so that each thread is
+flagged for what it is and the system places it; where scaling matters, the design scales by itself.
+That fixes the problem at its source, keeps it from coming back, and covers machines nobody has tested.
 
-Four kinds of run went into this: the tester's timelines (engine ids 131 and 132), the GPU profile with
-render stage timings, and the thread sampler (`BB_SAMPLE_THREADS`). Logs `20261127_072134`, `_073834`,
-`_170032`, `_170807`, `_173510`. All on the RX 9070 XT and i5-14600KF (6 performance cores with 2
-threads each, 8 efficiency cores, 20 logical processors), at 1920x1080.
+## Why: what the measurements say
 
-- **The slower spot** (about 1,400 draws, 177-181 FPS, 5.6 ms a frame). Nothing is saturated:
-  - the GPU does about 4.1-4.3 ms of work a frame (82-86%, as the tester's overlay shows);
-  - stage A is idle 11-13% of the time;
-  - the game waits for the engine only 0.15 ms a frame.
-  The pace is set by the game's main thread. Its time, from the sampler:
+The evidence comes from:
+- the tester's timelines (engine ids 131 and 132), the GPU profile with render stage timings, and the
+  thread sampler (`BB_SAMPLE_THREADS`), logs `20261127_072134`, `_073834`, `_170032`, `_170807` and
+  `_173510`;
+- the builder's symbolization of 132 and disassembly of 1.09.
 
-  | Main thread | Share |
-  |---|---|
-  | The game's own code | 55% |
-  | One spin in the game's code (`+0x21b8890`) | 10% |
-  | Waiting, in the system | 24-30% |
-  | Engine code (much of it the game's own memcpy through the runtime) | 6-8% |
+All on an RX 9070 XT and an i5-14600KF (6 performance cores with 2 threads each, 8 efficiency cores),
+at 1920x1080.
 
-- **The threads the main thread waits on are mostly idle.** GXWorker 1-5 wait 82-83% of the time, and
-  GXRenderThread 83-84%. In 132's timeline the other job workers wait 77-96%.
-- **The main thread's waits are short and many.** 132's timeline records waits of 10 us or more:
+**The slower spot** (5.6 ms frames). Nothing is saturated:
+- the GPU does 82-86% of a frame's time;
+- stage A is idle 11-13% of the time;
+- the game waits for the engine 0.15 ms a frame.
 
-  | Kind | Per frame | Median |
+The game's main thread sets the pace. Its time:
+
+| Main thread | Share |
+|---|---|
+| The game's own work | 55% |
+| Spinning at the game's fork-join barrier (`+0x21b8890`) | 10% |
+| Waiting | 24-30% |
+| Engine code | 6-8% |
+
+What these come from:
+- **The barrier.** The main thread wakes its job workers with one semaphore signal of count N-1, then
+  busy-waits, without `pause`, until they finish. The workers it waits on are idle 77-96% of the time.
+- **The waits.** About 14 a frame of 10 us or more: semaphores (median 28 us), condition variables
+  (55 us), mutexes (14 us).
+- **The engine code.** Mostly locked increments of counters that every game thread shares, in every
+  guest memcpy, memset, memmove and memcmp and in every draw record.
+
+**The cause is in the engine's own code.** The runtime gives the game:
+- **semaphores** behind one process-wide lock. A signal wakes its waiters while still holding it, so
+  each woken thread blocks again until the lock is free. The barrier's workers therefore start one
+  after another.
+- **read/write locks** that take a process-wide lock twice and allocate on each of 214,000 operations
+  a second.
+
+**And thread placement is decided ad hoc.** It's spread over about ten call sites:
+- `MakeCritical`, `MakeBackground` and raw `SetThreadPriority`, an above-normal rule for 16 or more
+  hardware threads, a spin cap for fewer, CPU sets for the burst threads only;
+- stage A, the busiest engine thread, at normal priority with the game's 60 threads.
+
+Nothing states what each thread is for, so each new thread or new machine needs a new rule.
+
+## Principles
+
+1. **Every thread has one role, declared once,** where the engine starts it, or from a table of the
+   game's thread names. Nothing else sets priorities, QoS or cores.
+2. **A role states the thread's relation to the frame. One module translates it into the system's own
+   flags**: priority, quality of service, preferred cores. The system places the thread; no model of
+   CPU is named anywhere.
+3. **Preferred cores come from one rule over the topology,** not per-CPU branches. A role may prefer
+   the fastest or the most efficient class of core, only while that class can hold the role's threads.
+   On a CPU of one kind every class is all of it, so the rule does nothing there by itself.
+4. **Priority follows who waits on whom.** A thread never sits above a thread it busy-waits on. Threads
+   above others never busy-wait on them; they park.
+5. **Every wait parks on a word of its own, and is woken after the lock is let go.** Spinning, when
+   there is any, is bounded and decided by the waiter's role.
+6. **Counters in hot paths are per thread,** summed when they are printed.
+7. **Each role shows in the log:** its threads, its CPU time, and the cores it ran on. Any machine's
+   log then says whether placement works there.
+
+## 1. Roles
+
+One module, `bbport_roles.{h,cpp}`. The rest of the engine calls `BbRoles::Assign(Role)` once, at a
+thread's start, and `BbRoles::Promote` while a frame waits on a background thread. That replaces
+`MakeCritical`, `MakeBackground`, `MakeNormal`, `SetPriority`, `CapSpinUs`, the burst threads' CPU-set
+steering and the runtime's audio priority.
+
+| Role | What it is | Engine threads | Game threads |
+|---|---|---|---|
+| **Pacing** | Tiny, deadline-driven, must never be late | flip thread (`shadPS4:PresentThread`), vblank watch | - |
+| **Chain** | The engine's frame chain: work nothing else can do, every frame | stage A (`shadPS4:GpuCommandProcessor`), stage B (`bb:DrawRec`), `bb:VkRecorder` x3, `bb:Copy` x4, `bb:GpuSignals` (fences the game waits on), `bb:Present` (swap) | - |
+| **Frame** | The game's frame work, its fork-join workers included, and work-ahead that only helps if it runs now | `bb:DrawAhead`, `bb:GxPrepare`, `bb:ReadySurfaces` | `main`, `GXRenderThread`, `GXWorker:*`, `HavokWorkerThread`, `CSChrThread`, `CSClothThread`, `EzWorkPool_Type`, every game thread not listed |
+| **Background** | Work ahead that nobody waits for this frame; a frame that needs it does it itself or promotes it | `bb:Pipeline*` (compiles), `bb:PipelineBurst*`, `bb:DrawPrep*`, `bb:DrawScan`, `shadPS4:PipelineCacheIO`, the runtime's file read thread | - |
+| **Audio** | Periodic, short, deadline-driven | - | FMOD's threads (the game's PS4 priorities 256-300) |
+| **Service** | Everything with its own pace | `bb:window`, `bb:kernel_service`, network, the watch threads, the sampler, video playback threads | - |
+
+The game's threads are recognized by name, through one data table, when the runtime names them
+(`thread_rename`, `pthread_setname`). A name not in the table is Frame, which is today's treatment.
+
+### What a role means to the system
+
+| Role | Windows priority | Windows QoS (`ThreadPowerThrottling`) | Preferred cores | Linux |
+|---|---|---|---|---|
+| Pacing | highest | high | any | normal |
+| Chain | above normal | high | the fastest class, if it holds the role | normal |
+| Frame | normal | high | any | normal |
+| Audio | normal; highest with the launcher's "Sound threads first" | high | any | normal |
+| Service | normal | system's choice | any | normal |
+| Background | idle | eco | the most efficient class, if it holds the role | `SCHED_IDLE` |
+
+Notes on these choices:
+- **QoS** is Windows' documented way to say how important a thread is (Microsoft's GDK guide).
+  - Eco threads go to efficiency cores and slower clocks on a hybrid CPU, and to slower clocks on any
+    other CPU.
+  - "High" is stated explicitly, so Windows never decides a game or chain thread is unimportant.
+  - With QoS doing the main job, priority only orders threads that compete for the same core.
+- **Chain above Frame, Frame equal among themselves.** This follows principle 4:
+  - The game's main thread busy-waits for its own workers, so they share a level.
+  - The chain never busy-waits on game threads: its idle spins are bounded, then it parks.
+  - The chain is above the game today already, except stage A, which now joins it.
+  - So no machine can get a raised thread spinning on a lower one, the risk the first draft solved with
+    a special case.
+- **Background promotion.** A frame that waits on a background thread promotes it to Chain until its
+  job is done (`Promote`: today's `RaiseRunning` for compiles), with QoS and priority together.
+- **Linux.** Raising needs privileges there, but lowering doesn't. So the same order comes from
+  Background at `SCHED_IDLE` with the rest at normal, and preferred cores by `sched_setaffinity`
+  through the same rule. Linux builds are paused; the module keeps the shape.
+
+### The core preference rule
+
+The topology is the one the engine already reads at start (`bbport_cpu_layout`): each logical
+processor's efficiency class, core and last-level cache.
+- **A role's preferred set** is all logical processors of the fastest class (Chain) or the most
+  efficient class (Background).
+- **It only applies while the set holds at least as many logical processors as the role has busy
+  threads.** Chain has about 6 busy (stage A, stage B, recorders, signals, swap). Otherwise the role
+  takes all cores.
+- **Results:**
+
+  | CPU | Chain | Background |
   |---|---|---|
-  | Semaphore | 8.5 | 28 us |
-  | Condition variable | 3.7 | 55 us |
-  | Mutex | 1.7 | 14 us |
+  | Hybrid desktop (6 performance cores) | performance cores | efficiency cores |
+  | Hybrid laptop with 2 performance cores | all cores (4 logical are too few for 6 threads) | efficiency cores |
+  | Ryzen, or Intel before 12th gen | all cores | all cores |
 
-  Shorter ones aren't counted.
-- **The lamp spot** has the same pattern. The main thread runs 3.75-4.0 ms of a frame, and stage A
-  keeps pace with it.
+  No CPU is named; the numbers decide.
+- **CPU sets are soft:** Windows works with them (Microsoft, Intel). They are set once per thread
+  (Intel: never per frame), and the process's affinity, if anyone restricts it, is respected.
+- **The same rule can later prefer one last-level cache group for the chain** (Ryzen with two core
+  complexes). It is a second criterion in the same rule, not a branch. It waits for a tester with such
+  a CPU, as it would change behaviour nobody here can measure.
 
-So at the slower spot the frame is a chain of short handoffs: the main thread hands out work, and each
-handoff ends in a block and a wake. That is where the spare CPU and GPU time goes.
+### Pool sizes
 
-**The main thread's spin is the game's fork-join barrier.** The builder disassembled 1.09 at `+0x21b8890`:
-- The function at `0x21b8710` dispatches a job group.
-- The main thread runs its own share, then wakes the group's other N-1 workers with one signal of count
-  N-1 (`0x263b0d0`, most likely `sceKernelSignalSema`: the runtime's semaphore).
-- It then busy-waits, with no `pause` instruction, until a counter reaches N-1 (every worker done),
-  then on each worker's state word.
+The engine sizes its pools in five places today:
+- recording threads: `RecordingThreadCount`;
+- copy threads: hardware threads / 4, 1 to 4;
+- compile threads: 4;
+- burst threads: up to 8, on the efficiency cores;
+- draw preparation threads: 7.
 
-So the 10% is the main thread waiting for its own workers to wake and finish. With today's semaphore
-(below), those workers start one after another.
+They move into the roles module as one function of the topology, with today's values reproduced. The
+rule behind them:
+- Chain pools scale with what the chain's work needs: it is serial, so a few threads.
+- Background pools take the cores the rest leaves idle. Their idle priority means oversizing them
+  costs nothing, and undersizing wastes idle cores.
 
-**The engine's share of the main thread is mostly a shared counter.** The builder symbolized the
-sampler's engine sites against 132's executable. `guest_memcpy` and `guest_memset` (`src/runtime.c`)
-are sampled right after a locked increment of one global counter (`memory_calls`). Every guest memcpy,
-memset, memmove and memcmp of every thread does that increment, and the counter is printed only at
-exit. The draw records' counter (`BbNativeCalls::NoteWritten`) is the same pattern, on every draw a
-thread writes. That cache line moves between all the game's threads.
+Changing the values comes later, with data. Beta 18 only puts them in one place.
 
-## Part 1: the handoffs (the runtime's semaphores and read/write locks)
+## 2. Handoffs
 
-### What is wrong now
+### One parking primitive
 
-The game's semaphores and read/write locks are the engine's runtime. Its mutexes and condition variables
-are per object, over Windows SRW locks and condition variables, and are not part of this.
+`host_park(word, expected, deadline)` and `host_unpark_one/all(word)`, in `src/host_sync.h`:
+- `WaitOnAddress` and `WakeByAddressSingle/All` on Windows (they spin briefly before sleeping:
+  Microsoft);
+- `futex` on Linux.
 
-**Semaphores** (`src/runtime_sema.c`):
-1. **One lock for every semaphore of every thread.** Each wait, signal and poll takes the same
-   process-wide lock (`lock`), then finds the semaphore by walking a list under it.
-2. **The signaller wakes its waiter while still holding that lock.** The waiter sleeps in
-   `SleepConditionVariableSRW` on that same lock. Woken, it must take the lock back before it can
-   return, so it blocks again until the signaller lets go: two wakes per handoff.
-3. **Every other thread's semaphore work queues behind that lock meanwhile.**
-4. **Every blocking wait calls `getenv("BB_TRACE_SEMA")`,** which takes the C runtime's environment
-   lock: another lock shared by all threads.
-5. **Contended game locks end up here too.** The engine replaces the game's `DLAdaptiveMutex::Lock`
-   (every heap, GX and queue lock: `gpu/shim/engine/job_pool.cpp`). A contended one spins for its budget,
-   then sleeps on its semaphore through this same wait.
-6. **The fork-join barrier pays twice.** A signal of count N-1 wakes N-1 waiters, each under the shared
-   lock. Each woken worker must then take that lock back in turn, so the workers start one after
-   another while the main thread spins (above).
+A thread parks on a word of its own and returns only when that word says so. A spurious wake or a
+wake meant for a thread that has gone is harmless.
 
-**Read/write locks** (`src/runtime_rwlock.c`): 214,000 operations a second on 8 live locks (the log's
-Load line: the game's busiest locks).
-- **Each lock** takes the process-wide `registry_lock` twice, walks the registry and allocates a
-  holder record.
-- **Each unlock** takes it again and frees that record.
+### Semaphores (`src/runtime_sema.c`)
 
-That's about 640,000 acquisitions of one lock a second, across every thread that touches a game heap.
+- **Lookup.** Ids name slots in a fixed table, with a generation in the high bits. Lookups take no
+  lock.
+- **Records are reused, never freed.** A stale id still finds a valid record, takes its lock, sees
+  the id changed, and answers `ESRCH`, as today.
+- **One lock per semaphore,** held only to change its count and its queue.
+- **Waiters park on their own word.** A signal unlinks the waiters its count satisfies, marks them,
+  lets the lock go, then wakes them. A signal of N-1 (the barrier) wakes N-1 threads at once, each with
+  nothing to take back.
+- **Kept as today:**
+  - FIFO order, with the first waiters the count satisfies served;
+  - timeouts: the waiter takes the lock at its deadline and leaves the queue if still in it;
+  - cancel and delete marking every waiter with today's PS4 error codes;
+  - the freeze and hitch reports' block slots and descriptions, and the timeline's wait notes.
+- `BB_TRACE_SEMA` is read once, not by `getenv` on every blocking wait.
 
-**Shared counters in the game's hottest calls:**
-- `memory_calls` takes a locked increment in every guest memcpy, memset, memmove and memcmp
-  (`src/runtime.c`).
-- `written_records` and `written_fallback` take one per draw record (`bbport_native_calls.cpp`).
+### Read/write locks (`src/runtime_rwlock.c`)
 
-One cache line is written by every game thread, and the samples land on those increments.
+- **The guest's handle points straight at its record.** Records are reused and carry a state word,
+  so an unknown or destroyed handle answers `EINVAL`.
+- **A statically initialized lock is installed on first use** by one compare-and-swap.
+- **What each thread holds lives in a small per-thread table:** no lock, no allocation. It gives
+  today's `EDEADLK` and `EPERM`, and tells unlock which mode to release.
+- **`EBUSY` on destroy** comes from two atomic counters.
+- **The same SRW lock underneath.**
 
-### Design
+### The game's own waiting code
 
-**Semaphores:**
-- **Lookup.** The id names a slot in a fixed table: a generation in the high bits, the slot in the low
-  bits. Lookups take no lock.
-- **Records are reused, never freed** (type-stable memory). A late call with a deleted id still finds a
-  valid record, takes its lock, sees the id changed, and returns the PS4's "no such semaphore"
-  (`ESRCH`), as today.
-- **One SRW lock per semaphore,** held only to change its count and its waiter queue.
-- **Waiters.** Each waiter sleeps on a word of its own with `WaitOnAddress` (a futex on Linux), not on
-  a condition variable.
-  - The signaller, under the semaphore's lock, unlinks the waiters it satisfies and marks each served.
-    It lets the lock go, then wakes them.
-  - A woken waiter has nothing to take back: one wake per handoff.
-  - Waking a word whose waiter has already returned is harmless: waiters loop until their word says
-    served.
-- **Order as today.** The queue is FIFO, and a signal serves the first waiters its count satisfies.
-- **Timeouts.** The waiter wakes at its deadline, takes the lock, and removes itself if still queued. A
-  signal that got there first keeps its result. The timeout precision is as today on Windows
-  (milliseconds).
-- **Cancel and delete** mark every waiter with today's PS4 error codes and wake them after the lock is
-  let go.
-- **Diagnostics kept.**
-  - `BB_TRACE_SEMA` is read once.
-  - The freeze and hitch reports' block slots, `runtime_wait_note` (the timeline) and the freeze
-    report's descriptions all stay.
-  - The counters become atomic.
-- **No spin of our own.** `WaitOnAddress` already spins briefly before it sleeps (Microsoft's
-  guidance), and long spins are what the guidance warns against. A spin is added only if the
-  after-measurement shows latency left.
+- **The adaptive lock.** The engine replaces the game's `DLAdaptiveMutex::Lock`
+  (`gpu/shim/engine/job_pool.cpp`). It already spins with `pause`, then sleeps on the mutex's
+  semaphore, which the game's own unlock signals. It stays semaphore-based, and gains through the
+  semaphore fix.
+- **The fork-join barrier** (`0x21b8710`, the loop at `0x21b8890`) becomes a checked game fix, like
+  "job lock spins with pause":
+  - `pause` on each pass;
+  - after about 50 us, a yield on each pass (`SwitchToThread`), so a worker can take the core when
+    cores are scarce;
+  - where cores are spare, the yield finds nobody and costs nothing.
+  With Frame threads at one level (principle 4), the yield always reaches the workers.
 
-**Read/write locks:**
-- **The guest's handle points straight at its record:** no registry walk. Records are reused, never
-  freed, and carry a state word, so an unknown or destroyed handle answers `EINVAL` as today.
-- **First use of a statically initialized lock** installs a record with one compare-and-swap. Two
-  threads racing: the loser's record goes back to the pool.
-- **Which thread holds what** lives in a small per-thread table: no lock, no allocation. It gives
-  today's answers (`EDEADLK` on a write after its own read or write, `EPERM` on an unlock it doesn't
-  hold). It also tells unlock which mode to release.
-- **`EBUSY` on destroy** comes from two atomic counters per lock (holders, and threads on their way
-  in).
-- **The same Windows SRW lock underneath.** Timed acquires keep today's try, yield and sleep loop.
+### The engine's own waits
 
-**The shared counters:**
-- `memory_calls` is dropped. It is an exit-time total nobody reads in play; the sampler measures the
-  same thing better.
-- The draw record counters become per-thread counts, summed when the statistics line is printed.
-- The statistics stay the same.
+These are stage A's wait for submissions, the draw pipe's stage waits, the recorders' waits and the
+host-copy waits. They have their own bounded spins and sleeps today.
+- They move onto the parking primitive, with their spin decided by role through one function
+  (today's `SpinLimitUs` and `CapSpinUs`).
+- That is a refactor of measured code, so it is staged after the guest primitives (below).
 
-**The barrier's spin gets a `pause`, then a yield**, as a game fix beside the existing "job lock spins
-with pause". After about 50 us of spinning, each pass also gives the core up (`Sleep(0)`), so a worker
-the main thread waits for can run on it. Where cores are spare there is nobody to yield to, and it
-costs nothing. Where cores are scarce (fewer hardware threads), it keeps the spin from starving the very
-workers it waits for. Microsoft's guidance: avoid long spins.
-- The loop at `0x21b8890` keeps its logic; it gains a `pause` per pass.
-- A spin without one takes a hyperthreaded core's resources from the thread beside it. That thread can
-  be one of the workers being waited for, or stage A.
-- `pause` costs about 140 cycles a pass on these cores (Intel's figure, about 30-50 ns), nothing next
-  to a worker's wake-up.
-- Checked against 1.09's code like the other fixes, and left out when the code differs.
+## 3. Counters
 
-**Alternatives considered:**
+`BbStats::Counter`, one type: a per-thread slot (cache-line sized, indexed by a thread number given at
+first use), summed when the statistics are printed.
+- **Into it go:**
+  - the draw record counters (`BbNativeCalls::NoteWritten`);
+  - every statistics counter a hot path touches while the statistics are on (stage A and B's
+    `BbStats` atomics).
+- **Dropped:** `memory_calls` in `src/runtime.c`, an exit-time total in every guest memcpy, memset,
+  memmove and memcmp, never read in play. The sampler measures the same better.
 
-| Alternative | Why not |
+## 4. Seeing it work
+
+A `Roles:` line with the frame statistics, every window, per role:
+- threads;
+- CPU time in cores (`QueryThreadCycleTime` deltas, one call per thread per window);
+- the share of the role's wake-ups on each core class (from the parking primitive, while the
+  statistics are on).
+
+For example, `Chain 9 threads, 2.8 cores, 96% on the fastest class; Frame 44, 3.1 cores, 61%;
+Background 24, 0.3 cores, 93% on the most efficient class`. Any tester's log then shows whether the
+placement holds on their machine.
+
+## What changes in the code
+
+| Where | Change |
 |---|---|
-| Spin before blocking (`BB_WAIT_SPIN_US`) | Hides the latency and burns a core while doing it; leaves the shared lock and the double wake |
-| Windows kernel semaphores | A system call on every operation, even uncontended |
-| Signal after unlock, everything else kept | Removes the double wake but keeps every thread queued on one lock |
+| `gpu/shim/bbport_roles.{h,cpp}` (new) | Roles, the mapping to the system, the core rule, pool sizes, promotion, the `Roles:` line |
+| `gpu/shim/bbport_threads.h`, `bbport_platform.cpp` | `MakeCritical`, `MakeBackground`, `MakeNormal` and the priority helpers removed; `SpinLimitUs` stays |
+| about 25 thread start sites (`vk_scheduler`, `vk_draw_pipe`, `liverpool`, `vk_rasterizer`, `vk_draw_prep`, `vk_graphics_pipeline`, `bbport_copy`, `driver.cpp`, `precise_pacing`, `gx_resources`, `cache_storage`, `ready_surfaces`, `bbgpu`, `freeze`, `avplayer`) | One `Assign(Role)` call each |
+| `pipeline_compile_queue.h` | `RaiseRunning` through `Promote` |
+| `src/runtime_thread.c` | The game's name table at rename; FMOD's range as Audio |
+| `src/host_sync.h` | `host_park` / `host_unpark` |
+| `src/runtime_sema.c`, `src/runtime_rwlock.c` | Rebuilt (section 2) |
+| `src/runtime.c` | `memory_calls` dropped |
+| `gpu/shim/engine/game_fixes.cpp`, `job_pool.*` | The barrier fix |
+| `gpu/shim/bbport_toggles.h` and users | Hot-path counters as `BbStats::Counter` |
 
-### What it should change
+## Staging
 
-- **Per job batch:** the workers start together instead of one after another, and the barrier's spin
-  shortens accordingly.
-- **Per semaphore handoff:** one wake instead of two, no list walk, no environment lock.
-- **Across the whole game:** no thread queued behind another thread's unrelated semaphore or
-  read/write lock. About 640,000 shared-lock acquisitions and 214,000 allocations a second go away. So do the locked increments in every memcpy and every draw record.
+**Beta 18 (this design):**
+- the roles module and every thread on it;
+- the guest primitives (semaphores, read/write locks);
+- the barrier fix;
+- the counters;
+- the `Roles:` line.
 
-How much frame time that is can't be computed beforehand. At the slower spot the main thread waits
-1.3-1.7 ms a frame and spins 0.55 ms; the run decides.
+**Beta 19 (after 18's data):**
+- the engine's own waits onto the parking primitive;
+- pool sizes tuned from the `Roles:` lines;
+- if a tester with such a CPU turns up, the last-level-cache criterion.
 
-### Tests
+Temporary switches, this beta only, removed before the release candidate:
+- `BB_THREAD_ROLES=0`: today's priorities and cores;
+- `BB_RUNTIME_SYNC=0`: today's semaphores and read/write locks;
+- `BB_TEST_CPUS=<n>`: the engine limits its own process to n logical processors at start. A
+  measurement tool, not a case in the design: it checks that the rules scale, on the tester's PC.
 
-- `tests/test_sema.c` (the PS4 contracts) and `runtime-test`, under Wine and natively.
-- New stress tests, many threads at once:
-  - semaphores: waits with needs above 1, timeouts, cancel and delete during waits, stale ids;
-  - read/write locks: readers and writers, static initialization racing, destroy while busy, the
-    error answers.
+## Measurement
 
-## Part 2: where the threads run (priorities and cores)
+The slower spot, a few minutes each, frame statistics and `BB_SAMPLE_THREADS=main` on. The baseline is
+132's runs, already in hand.
+1. Beta 18 with `BB_THREAD_ROLES=0`: the handoffs alone.
+2. Beta 18 as built: handoffs and roles.
+3. and 4. Both again with `BB_TEST_CPUS=8` (a 4-core, 8-thread CPU): roles off, then on.
+5. The lamp spot, as built.
 
-### Now
-
-| Threads | Windows priority | Cores |
-|---|---|---|
-| The flip thread (vblank watch, pacing) | highest | any |
-| Stage B (`bb:DrawRec`), 3 Vulkan recording threads | above normal | any |
-| 4 copy threads (on 16+ hardware threads; mostly asleep) | above normal | any |
-| **Stage A** (`shadPS4:GpuCommandProcessor`), lookahead, GPU signals, swap thread | **normal** | any |
-| **All ~60 game threads, the main thread and GXRenderThread included** | **normal** | any |
-| FMOD's threads | normal (above with the launcher's "Sound threads first") | any |
-| 7 draw preparation threads, the scanner, 4 compile threads | idle | any |
-| 8 burst compile threads | idle | efficiency cores |
-
-The game asks for core affinities for its threads (the PS4's 7 cores). They are recorded and not applied,
-which is right: they mean nothing on a PC.
-
-### What Windows does with them
-
-- **Priority is a secondary placement signal.** Intel's hybrid guide: "Threads marked as high priority
-  will naturally be assigned to higher performance cores, but this is a secondary consideration." And:
-  priority alone can misfire.
-- **CPU sets are the documented way** (Microsoft's GDK guide on hybrid CPUs):
-  - use CPU sets, not affinity masks;
-  - "On machines with three or more performance cores, you could restrict the frame critical threads to
-    only those higher performance cores", letting them float across all of them;
-  - job threads should float across all cores.
-  CPU sets are soft (a preference the scheduler works with); affinity masks are hard and advised
-  against.
-- **Measured caveats.** Microsoft notes that floating critical threads can sometimes run faster, and
-  that locking them improves the 1% lows. Another project found its gain within noise. So the change is
-  measured on and off.
-- **Wake-up placement.** A woken thread goes to an idle core first, and the efficiency cores are idle
-  most. That is the likely reason the main thread wakes on one about half the time (132's timeline).
-  It isn't the engine's raised threads: those few are mostly asleep.
-
-### Design
-
-**The frame-critical chain:** the game's main thread, GXRenderThread, stage A, stage B, the 3 recording
-threads.
-- **Priority above normal.** Stage A rises from normal. Not higher: both guides warn against extreme
-  priorities, and the main thread spins.
-- **CPU sets on hybrid CPUs with 4 or more performance cores:** all of their logical processors, so
-  these threads float across the performance cores and nowhere else.
-  - 4 cores is Microsoft's three-or-more rule, plus room for the chain's 2.5-3 cores of load.
-  - Fewer performance cores, or one kind of core: priority only.
-- **Set once, when each thread starts or gets its name.** Intel warns against changing affinity often.
-- **The game's two threads are found by their names** (`main`, `GXRenderThread`). Their names are logged
-  once.
-
-**The barrier's workers.** The game's fork-join workers are on the critical path while the main thread waits
-for them (Microsoft: a job thread becomes frame-critical while it holds the frame up). Keeping them on
-the performance cores as well is measured as a variant, not made the default:
-- it would put about 10 threads on 12 performance-core slots;
-- Microsoft's guidance is that job threads float.
-They are found by name: the GXWorker threads, the likely members of this group. The variant also
-confirms which threads the group uses, since their waits and the barrier line up in the timeline.
-
-**Everything else stays as it is.**
-- Workers stay normal and float everywhere: the game's job threads (GXWorker, Havok, EzWorkPool,
-  character and cloth threads), lookahead, GPU signals, the swap thread, GX prepare. Per Microsoft's
-  guidance, job threads float.
-- Background work stays idle, the burst threads on the efficiency cores.
-- Audio, the copy threads and the flip thread stay as they are.
-
-**Alternatives considered:**
-
-| Alternative | Why not |
-|---|---|
-| Priority only | A secondary signal; doesn't keep the main thread off the efficiency cores |
-| Hard affinity masks | Advised against by both guides; can't adapt |
-| Pinning the game's workers to the efficiency cores | Their handoffs are on the critical path; job threads should float |
-| MMCSS ("Games" task class) | Near-realtime priorities for threads that spin and wait: risky |
-| The power plan's hybrid scheduling policies | System settings, outside the game |
-
-### By CPU
-
-Part 1 applies to every CPU unchanged. It removes engine overhead, and adds no spinning, so it helps most
-where cores are fewest. Part 2 differs, from the layout the engine already reads at start
-(`bbport_cpu_layout`: efficiency classes, cores, logical processors, the process's affinity):
-
-| CPU | Part 2 |
-|---|---|
-| Hybrid, 4+ performance cores (Intel 12th-14th gen desktops, Core Ultra desktops) | The frame-critical chain above normal, on the performance cores by CPU sets |
-| Hybrid, fewer than 4 performance cores (many laptops) | Priority only: too few performance cores to restrict to (Microsoft: 3-4 cores at least) |
-| One kind of core, one last-level cache (Ryzen with one core complex, Intel before 12th gen) | Priority only |
-| One kind of core, several last-level caches (Ryzen 9 with two core complexes, X3D among them) | Priority only in beta 18 (see below) |
-| Fewer than 16 hardware threads (8 cores or fewer with SMT, of any kind) | The engine's chain above normal as today, stage A with it; the game's main thread stays normal |
-
-**Why the main thread stays normal below 16 hardware threads.** There the game's threads often outnumber
-the free cores. The main thread spins at the barrier for workers of normal priority. Above them, it could
-keep them from the very cores they need, and the frame would get slower. GXRenderThread mostly waits and
-is raised everywhere. This is the engine's existing rule for its own bulk threads (raised only with 16 or
-more hardware threads, `BbPlatform::MakeCritical`).
-
-**Two core complexes.** Handoffs between threads on different complexes cross the slower link between
-their caches. On AMD's X3D parts, the cache CCD is chosen by AMD's driver only for programs Windows
-recognizes as games. Keeping the frame-critical chain and the barrier's workers within one last-level
-cache group (CPU sets, by the `LastLevelCacheIndex` the layout already returns) is the natural next
-step. It goes in the register until a tester with such a CPU can measure it.
-
-**Testing the small-CPU path on the tester's PC.** `BB_TEST_CPUS=<n>`, test only, removed with the other
-temporary switches: the engine limits its own process to n logical processors at start (the first n of
-the performance cores), so it lays itself out and schedules as a CPU with n hardware threads would.
-Caches and clocks stay the tester's, but scheduling is what part 2 changes. One run with
-`BB_TEST_CPUS=8` (a 4-core, 8-thread CPU), part 2 on and off, covers the small-CPU rule.
-
-**Linux:** raising priorities needs privileges there, and CPU affinity could follow later. Linux builds are
-paused.
-
-## One build, measured three ways
-
-Both parts go behind temporary Extra variables for this beta only, removed again before the release
-candidate:
-- `BB_RUNTIME_SYNC=0` (the old semaphores and read/write locks);
-- `BB_THREAD_PLACEMENT=0` (the old priorities and cores).
-
-**The tester's runs.** The slower spot, a few minutes each, frame statistics and
-`BB_SAMPLE_THREADS=main` on:
-1. both off;
-2. part 1 only (`BB_THREAD_PLACEMENT=0`);
-3. both on;
-4. both on, with the barrier's workers on the performance cores (`BB_THREAD_PLACEMENT=workers`).
-
-And the lamp spot once with the best of these. And at the slower spot, with `BB_TEST_CPUS=8`: part 2 off
-and on, both with part 1.
-
-**Compared:**
-- FPS;
+Compared:
+- FPS and the 1% lows;
 - the main thread's waiting and spinning shares;
 - the frame-ending thread's wait for the engine;
-- with `BB_TIMELINE`, optionally: how often the main thread wakes on an efficiency core.
+- the `Roles:` lines.
 
-Part 2 is kept only if it helps on its own, or at least helps the 1% lows.
+A role setting stays only if it helps on its own, or at least helps the lows.
 
-## Resolved: the main thread's spin at `+0x21b8890`
+## Risks
 
-The game's fork-join barrier (above, from the builder's disassembly of 1.09). Part 1 shortens it, with
-the workers woken together and the spin given a `pause`.
+- **Correctness of the primitives every game thread depends on.**
+  - `tests/test_sema.c` (the PS4 contracts) and `runtime-test` run under Wine and natively.
+  - New stress tests: many threads; needs above 1; timeouts, cancel and delete during waits; stale
+    ids; readers and writers; static initialization racing; destroy while busy; every error answer.
+- **Eco QoS on compiles.** A compile a frame is waiting on must not run at eco clocks, which is why
+  promotion changes QoS with priority. The compile-wait counters show it.
+- **Placement can regress for one workload** (Microsoft: floating sometimes wins). That is why roles
+  have their own switch and line, and why Frame threads are not restricted. Restricting them to the
+  fastest class is a one-line change of their role's preference, kept as a measured option.
+- **The barrier fix** touches the game's code. It is checked against 1.09 byte for byte and left out
+  when the code differs, like the other game fixes.
 
 ## Sources
 
 - Microsoft, [Game Performance in Hybrid CPU Environments](https://learn.microsoft.com/en-us/gaming/gdk/docs/gdk-dev/pc-dev/overviews/game-performance-hybrid-cpu-environments?view=gdk-2610)
-  (GDK, 2026).
+  (GDK, 2026):
+  - CPU sets over affinity masks;
+  - frame-critical threads on the performance cores when there are three or more;
+  - job threads floating;
+  - QoS through `ThreadPowerThrottling`;
+  - avoid long spins;
+  - C-state wake costs.
 - Intel, [Game Dev Guide for 12th Gen Intel Core Processor Hybrid Architecture](https://www.intel.com/content/www/us/en/developer/articles/guide/12th-gen-intel-core-processor-gamedev-guide.html)
-  (2022).
+  (2022):
+  - priority as a secondary placement signal;
+  - the order of strength of placement controls;
+  - no per-frame affinity changes;
+  - `pause`'s cost.
 - Microsoft, [WaitOnAddress](https://learn.microsoft.com/en-us/windows/win32/api/synchapi/nf-synchapi-waitonaddress)
   and [SleepConditionVariableSRW](https://learn.microsoft.com/en-us/windows/win32/api/synchapi/nf-synchapi-sleepconditionvariablesrw).
-- Preshing, [Semaphores are surprisingly versatile](https://preshing.com/20150316/semaphores-are-surprisingly-versatile)
-  (lightweight semaphores over atomics).
+- Microsoft, [Static configuration options for heterogeneous power scheduling](https://learn.microsoft.com/en-us/windows-hardware/customize/power-settings/static-configuration-options-for-heterogeneous-power-scheduling).
+- Preshing, [Semaphores are surprisingly versatile](https://preshing.com/20150316/semaphores-are-surprisingly-versatile).
 - The [Lichii pull request](https://github.com/zortos293/Lichii/pull/232) on performance cores for
   time-critical threads (gain within noise).

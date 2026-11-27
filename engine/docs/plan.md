@@ -951,7 +951,12 @@ Kept: FIFO waiters, timeouts, cancel and delete waking every waiter, the freeze 
 (`tests/test_sema.c`, `runtime-test`). Measured with the same sampler run at the slower spot. A spin
 before blocking only if latency is still left afterwards.
 
-**Thread priorities, raised by the tester (2026-11-27).** Researched with the semaphores into one design,
+**Thread priorities, raised by the tester (2026-11-27).** Redesigned the same day at the tester's direction
+as one system instead of per-CPU cases: every thread gets a role (Pacing, Chain, Frame, Background,
+Audio, Service) declared once, one module maps roles to the system's own flags (priority, QoS, CPU sets
+by one topology rule), every wait parks on its own word, hot-path counters per thread, and a `Roles:`
+line in the log; see the design. Earlier reading, kept for the record: researched with the semaphores
+into one design,
 [handoffs-and-placement.md](handoffs-and-placement.md), for the tester's review before any code. A
 correction to the first reading: the engine's threads above normal are stage B, the 3 recording threads
 and the 4 copy threads (mostly asleep); the 7 draw preparation threads run idle and stage A runs normal,
