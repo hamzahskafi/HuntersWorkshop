@@ -116,6 +116,15 @@ Notes on these choices:
     a special case.
 - **Background promotion.** A frame that waits on a background thread promotes it to Chain until its
   job is done (`Promote`: today's `RaiseRunning` for compiles), with QoS and priority together.
+- **Phases** (found on review). Background is background only while the game plays.
+  - During a loading screen and while the GPU cache settles at start, the player waits on exactly that
+    work: compiles, draw preparation, the file thread.
+  - So the mapping takes the phase as well as the role: while loading or settling, Background maps to
+    normal priority and high QoS, and to any core.
+  - The engine already knows the phases (`engine/loading.h`, the cache settle at start). The roles
+    module is told when one begins and ends, and re-applies the mapping to Background's threads then.
+    That's a few calls per load, as Intel advises against changing affinity often.
+  - Without this, eco clocks on the efficiency cores would make loads and the first start slower.
 - **Linux.** Raising needs privileges there, but lowering doesn't. So the same order comes from
   Background at `SCHED_IDLE` with the rest at normal, and preferred cores by `sched_setaffinity`
   through the same rule. Linux builds are paused; the module keeps the shape.
@@ -213,6 +222,16 @@ wake meant for a thread that has gone is harmless.
     cores are scarce;
   - where cores are spare, the yield finds nobody and costs nothing.
   With Frame threads at one level (principle 4), the yield always reaches the workers.
+- **A compromise, named as one.** The main thread stays at Frame's level because it busy-waits on its
+  workers.
+  - On a small CPU, an unraised main thread can also wait its turn behind other game threads. That's
+    the same cost that made the engine raise its own chain.
+  - The better fix is a barrier that parks instead of spinning: the workers' completion (the game's
+    increment of the group's counter) also wakes the main thread. That patches the game's workers as
+    well as its dispatcher.
+  - Once the barrier parks, the main thread can be raised safely, since it no longer busy-waits.
+  - Beta 18 keeps the safe choice and measures it with `BB_TEST_CPUS=8`. If the main thread waits for
+    cores there, the parking barrier is a beta 19 item.
 
 ### The engine's own waits
 
@@ -245,6 +264,10 @@ For example, `Chain 9 threads, 2.8 cores, 96% on the fastest class; Frame 44, 3.
 Background 24, 0.3 cores, 93% on the most efficient class`. Any tester's log then shows whether the
 placement holds on their machine.
 
+Coverage in beta 18: the core shares come from wake-ups through the parking primitive. Only the
+game's threads park there in beta 18, through the runtime's semaphores. The engine's threads park there
+from beta 19, so in beta 18 their roles show CPU time but no core share. The line says so.
+
 ## What changes in the code
 
 | Where | Change |
@@ -271,6 +294,8 @@ placement holds on their machine.
 
 **Beta 19 (after 18's data):**
 - the engine's own waits onto the parking primitive;
+- if the small-CPU runs show the main thread waiting for cores: the parking barrier, and the main
+  thread raised with the chain;
 - pool sizes tuned from the `Roles:` lines;
 - if a tester with such a CPU turns up, the last-level-cache criterion.
 
@@ -296,6 +321,15 @@ Compared:
 - the `Roles:` lines.
 
 A role setting stays only if it helps on its own, or at least helps the lows.
+
+## Considered and not chosen
+
+| Alternative | Why not |
+|---|---|
+| Rewriting the game's job dispatch, so small batches run on the main thread with no handoff | Removes the handoffs at their very root, but changes the game's behaviour; patching its scheduler is riskier than everything above put together |
+| Workers spinning between batches, to stay awake for the next one | Handoffs come about 350 us apart: far longer than a spin should last (Microsoft: avoid long spins) |
+| Roles inferred from each thread's behaviour (how much it runs, how often it waits) | Windows already does this (Thread Director, its scheduler's heuristics); names are exact for 1.09 |
+| Per-CPU rules (the first draft) | Each new machine needs a new branch; the roles and one topology rule cover them all |
 
 ## Risks
 
