@@ -917,6 +917,25 @@ The tester's run (2026-11-27): `BB_SAMPLE_THREADS=main,GXRenderThread,GXWorker`,
 GPU profile and render stage timings off, the slower spot then the lamp spot past its jump. The
 engine's sites are named afterwards from 132's executable (the builder).
 
+**The sampler run, read (the tester, 2026-11-27, log `20261127_173510`; the lamp spot at 205 FPS, then
+221 after its jump; the slower spot at 177-181 FPS, about 1,400 draws, stage A idle 11-13%, the game
+waiting 0.15 ms a frame).**
+- The main thread: game code 62-67% (of which about 10% at one place, `+0x21b8890`..`+0x21b8899`: a
+  spin in the game's code), waiting in the system 24-30% (many sites: the game's job waits), the engine
+  6-8% (much of it the game's memcpy into the upload area through the runtime, `+0x26adc05`), ucrtbase
+  1-2%. The engine's own overhead on the main thread is small.
+- GXWorker:1-5 wait 82-83% of the time; GXRenderThread waits 83-84%, mostly for the main thread's
+  handover (`+0x21685d1`: 42% at the lamp spot, 64% at the slower spot) and at the lamp spot for the
+  engine (`+0x1073914`, 19%, against 3% at the slower spot).
+- The main thread's waits (132's timeline, 10 us or more): about 14 a frame, semaphores median 28 us
+  (8.5 a frame), condition variables median 55 us (3.7), mutexes 14 us (1.7).
+
+So at the slower spot no thread is saturated: the main thread hands out short jobs and waits for each,
+and every wait is a block and a wake on Windows. The runtime's semaphores and condition variables
+block at once (`runtime_sema.c`, `runtime_mutex.c`). **Proposed (for the tester's review):** a test
+switch, `BB_WAIT_SPIN_US` (off by default), that has those waits spin that long before blocking, run at
+the slower spot with 0, 20 and 50: it measures how much of the lost room is wake latency.
+
 ### Performance, in 0.4.6 (moved in, 2026-11-27)
 
 The tester (2026-11-27): "I wanted the Performance part to mostly be completed in 0.4.6!" and, of the
