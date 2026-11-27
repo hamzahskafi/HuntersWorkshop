@@ -15,6 +15,7 @@
 #include <climits>
 #include <ctime>
 #include <linux/futex.h>
+#include <linux/membarrier.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 #endif
@@ -68,6 +69,12 @@ void WakeAll(std::atomic<std::uint32_t>& word) {
         wake(reinterpret_cast<PVOID>(&word));
     }
 }
+bool HeavyFenceAvailable() {
+    return true; // since Windows Vista
+}
+void HeavyFence() {
+    FlushProcessWriteBuffers();
+}
 #else
 bool Wait(std::atomic<std::uint32_t>& word, std::uint32_t expected, std::uint32_t timeout_ms) {
     if (word.load(std::memory_order_seq_cst) != expected) {
@@ -90,6 +97,16 @@ void WakeOne(std::atomic<std::uint32_t>& word) {
 void WakeAll(std::atomic<std::uint32_t>& word) {
     syscall(SYS_futex, reinterpret_cast<std::uint32_t*>(&word), FUTEX_WAKE_PRIVATE, INT_MAX,
             nullptr, nullptr, 0);
+}
+bool HeavyFenceAvailable() {
+    static const bool registered =
+        syscall(SYS_membarrier, MEMBARRIER_CMD_REGISTER_PRIVATE_EXPEDITED, 0, 0) == 0;
+    return registered;
+}
+void HeavyFence() {
+    if (!HeavyFenceAvailable() || syscall(SYS_membarrier, MEMBARRIER_CMD_PRIVATE_EXPEDITED, 0, 0) != 0) {
+        std::abort(); // registered: it cannot fail; the busy side relies on it
+    }
 }
 #endif
 

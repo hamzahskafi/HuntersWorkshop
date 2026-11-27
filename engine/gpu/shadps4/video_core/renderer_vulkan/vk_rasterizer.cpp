@@ -111,6 +111,10 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_, Runtime
       guest_markers_enabled{EmulatorSettings.IsVkGuestMarkersEnabled()} {
     // Before the rasterizer is bound: Liverpool enqueues buffers only once it sees it.
     draw_prep = std::make_unique<DrawPreparation>(pipeline_cache);
+    // 0.4.6 beta 20 (docs/chain-waits.md, item 5): BB_PENDING_FILTER=0, every write lookup scans.
+    if (const char* env = std::getenv("BB_PENDING_FILTER"); env && env[0] == '0') {
+        pending_writes.use_filter = false;
+    }
     scene_targets = std::make_unique<SceneTargets>(instance, scheduler, runtime, texture_cache);
     // Allocation is independent of shader compilation, including constructor-time precache.
     object_motion = std::make_unique<ObjectMotion>(instance, scheduler);
@@ -205,7 +209,10 @@ void Rasterizer::PublishSignals() {
     bool was_empty;
     {
         std::scoped_lock lk{gpu_signals_mutex};
-        if (!gpu_signal_thread.joinable()) {
+        // 0.4.6 beta 20 (docs/chain-waits.md, item 8): a flag, not joinable() (on Windows it asks
+        // the system for the thread's id: a system call on every publish, about 1% of stage B).
+        if (!gpu_signal_started) {
+            gpu_signal_started = true;
             gpu_signal_thread =
                 std::jthread([this](std::stop_token token) { GpuSignalLoop(token); });
         }
@@ -244,7 +251,10 @@ void Rasterizer::SignalAfterGpu(std::function<void()> signal, VAddr label, u64 v
     bool was_empty;
     {
         std::scoped_lock lk{gpu_signals_mutex};
-        if (!gpu_signal_thread.joinable()) {
+        // 0.4.6 beta 20 (docs/chain-waits.md, item 8): a flag, not joinable() (on Windows it asks
+        // the system for the thread's id: a system call on every publish, about 1% of stage B).
+        if (!gpu_signal_started) {
+            gpu_signal_started = true;
             gpu_signal_thread =
                 std::jthread([this](std::stop_token token) { GpuSignalLoop(token); });
         }
@@ -821,9 +831,12 @@ void Rasterizer::NotifyUiDraw(const GraphicsPipeline* pipeline) {
                      UiComposition::WidenedUiViewport(viewport.xscale * 2, viewport.yscale * 2));
 }
 
+// 0.4.6 beta 20 (docs/chain-waits.md, item 9): the pipeline's own type (optional<const ...>). Taken
+// as optional<FetchShaderData>, every call made a converted copy, its attribute list on the heap:
+// an allocation and a free a draw on the draw recording thread.
 static std::pair<u32, u32> GetDrawOffsets(
     const AmdGpu::Regs& regs, const Shader::Info& info,
-    const std::optional<Shader::Gcn::FetchShaderData>& fetch_shader) {
+    const std::optional<const Shader::Gcn::FetchShaderData>& fetch_shader) {
     u32 vertex_offset = regs.index_offset;
     u32 instance_offset = 0;
     if (fetch_shader) {
@@ -1818,12 +1831,16 @@ void Rasterizer::PrintPipeStats() {
         auto& p = pending_stats;
         std::printf("  pending tables/s: reads noted %.0f, skipped %.0f (no dump writes there; the "
                     "dumps' pages: %zu ranges, %llu new%s); GPU writes listed %.0f, to the table "
-                    "%.0f (list full), lookups %.0f\n",
+                    "%.0f (list full), lookups %.0f (%.0f answered by the page filter, %.0f "
+                    "scanned the list; %u writes listed now)\n",
                     p.reads_noted / seconds, p.reads_skipped / seconds, dump_pages.ranges.size(),
                     static_cast<unsigned long long>(p.dump_ranges_new),
                     dump_pages.overflow ? ", too many: every read noted" : "",
-                    p.writes_listed / seconds, p.writes_tabled / seconds, p.write_lookups / seconds);
+                    p.writes_listed / seconds, p.writes_tabled / seconds, p.write_lookups / seconds,
+                    pending_writes.filtered / seconds, pending_writes.scanned / seconds,
+                    pending_writes.Size());
         p = {};
+        pending_writes.filtered = pending_writes.scanned = 0;
     }
     std::printf("  drains by reason/s:");
     for (u32 r = 0; r < DrawPipe::NumReasons; ++r) {

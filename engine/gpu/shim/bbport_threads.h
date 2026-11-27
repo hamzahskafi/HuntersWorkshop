@@ -50,6 +50,9 @@ int CurrentPriority();
 bool SetPriority(void* thread, int priority);
 /// The calling thread back at normal priority.
 void MakeNormal();
+/// 0.4.6 beta 20: the calling thread, raised through SetPriority for a waiter, back where it was
+/// (its role; normal without roles).
+void EndRaise();
 #else
 /// Linux: unchanged (normal priority; raising it needs privileges).
 inline void MakeCritical(bool = false) {}
@@ -70,6 +73,7 @@ inline void* SelfHandle() { return nullptr; }
 inline int CurrentPriority() { return 0; }
 inline bool SetPriority(void*, int) { return false; }
 inline void MakeNormal() {}
+inline void EndRaise() {}
 
 /// The calling thread only runs on otherwise idle cores (falls back to the lowest nice level).
 inline void MakeBackground() {

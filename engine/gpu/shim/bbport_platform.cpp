@@ -212,6 +212,12 @@ void MakeNormal() {
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_NORMAL);
 }
 
+void EndRaise() {
+    if (!BbRoles::EndRaise()) {
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_NORMAL);
+    }
+}
+
 unsigned CapSpinUs(unsigned wanted) {
     return SpinLimitUs(Raising() && Available() < 16 ? std::min(wanted, 50u) : wanted);
 }

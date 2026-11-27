@@ -71,59 +71,135 @@ struct DumpPages {
     }
 };
 
-/// The GPU writes the draw pipe's stage B hasn't reached, oldest first (packet numbers rise): few
-/// at any time, as stage B keeps up. Full, a write goes to the caller's fallback.
+/// The GPU writes the draw pipe's stage B hasn't reached, oldest first (packet numbers rise). Full,
+/// a write goes to the caller's fallback. 0.4.6 beta 20 (docs/chain-waits.md, item 5): 1,024 entries
+/// (the 64 of beta 19 filled 31-34 thousand times a second in the tester's profile), and a counting
+/// filter over 64 KB pages of the live entries, so most lookups (every constant binding) read one or
+/// two counters and only a hit scans the list. A write of a range among the newest few entries
+/// moves that entry to the end (draws writing the same buffers in turn keep one entry each), which
+/// keeps the list in packet order, so pruning from the front always moves.
 class PendingWriteList {
 public:
     using Addr = std::uint64_t;
-    static constexpr std::uint32_t Capacity = 64;
+    static constexpr std::uint32_t Capacity = 1024;
+    static constexpr std::uint32_t kPageShift = 16;  ///< 64 KB
+    static constexpr std::uint32_t kFilterBits = 12; ///< 4,096 counters
+    static constexpr std::uint64_t kMaxPages = 32;   ///< wider writes: every lookup scans
+    static constexpr std::uint32_t kRecent = 8;      ///< how far back a repeated range is found
 
-    /// Drops the writes stage B has reached (`reached(packet)`).
+    /// BB_PENDING_FILTER=0 (this beta only): every lookup scans the list.
+    bool use_filter = true;
+    /// Lookups answered by the filter alone, and those that scanned (statistics).
+    std::uint64_t filtered = 0, scanned = 0;
+
+    /// Drops the writes stage B has reached (`reached(packet)`), and the moved ones' old places.
     template <typename Reached>
     void Prune(Reached&& reached) {
-        while (count && reached(entries[first].packet)) {
-            first = (first + 1) % Capacity;
+        while (count) {
+            Entry& e = entries[first];
+            if (e.live) {
+                if (!reached(e.packet)) {
+                    break;
+                }
+                Forget(e);
+            }
+            first = (first + 1) & (Capacity - 1);
             --count;
         }
     }
-    /// False when full (the caller keeps the write elsewhere). The same range as the newest entry
-    /// only moves that entry's packet up.
+    /// False when full (the caller keeps the write elsewhere).
     bool Note(Addr address, std::uint64_t size, std::uint64_t packet) {
-        if (count) {
-            Entry& last = entries[(first + count - 1) % Capacity];
-            if (last.lo == address && last.hi == address + size) {
-                last.packet = std::max(last.packet, packet);
-                return true;
+        const Addr end = address + size;
+        const std::uint32_t recent = count < kRecent ? count : kRecent;
+        for (std::uint32_t i = 0; i < recent; ++i) {
+            Entry& e = entries[(first + count - 1 - i) & (Capacity - 1)];
+            if (e.live && e.lo == address && e.hi == end) {
+                if (i == 0) {
+                    e.packet = std::max(e.packet, packet); // already the newest
+                    return true;
+                }
+                if (count == Capacity) {
+                    return false;
+                }
+                Forget(e); // its place stays, dead, until pruning passes it
+                break;
             }
         }
         if (count == Capacity) {
             return false;
         }
-        entries[(first + count) % Capacity] = {address, address + size, packet};
+        Entry& e = entries[(first + count) & (Capacity - 1)];
+        e = {address, end, packet, true};
+        Remember(e);
         ++count;
         return true;
     }
-    [[nodiscard]] bool Overlaps(Addr address, std::uint64_t size) const {
+    [[nodiscard]] bool Overlaps(Addr address, std::uint64_t size) {
+        if (live == 0) {
+            ++filtered;
+            return false;
+        }
         const Addr end = address + size;
+        if (use_filter && wide == 0) {
+            bool hit = false;
+            for (Addr page = address >> kPageShift; page <= (end - 1) >> kPageShift; ++page) {
+                if (filter[Slot(page)]) {
+                    hit = true;
+                    break;
+                }
+            }
+            if (!hit) {
+                ++filtered;
+                return false;
+            }
+        }
+        ++scanned;
         for (std::uint32_t i = 0; i < count; ++i) {
-            const Entry& e = entries[(first + i) % Capacity];
-            if (address < e.hi && end > e.lo) {
+            const Entry& e = entries[(first + i) & (Capacity - 1)];
+            if (e.live && address < e.hi && end > e.lo) {
                 return true;
             }
         }
         return false;
     }
+    /// Live entries.
     [[nodiscard]] std::uint32_t Size() const {
-        return count;
+        return live;
     }
 
 private:
     struct Entry {
         Addr lo, hi;
         std::uint64_t packet;
+        bool live;
     };
+    static std::uint32_t Slot(Addr page) {
+        return static_cast<std::uint32_t>((page * 0x9E3779B97F4A7C15ull) >> (64 - kFilterBits));
+    }
+    template <int Delta>
+    void Count(const Entry& e) {
+        const Addr first_page = e.lo >> kPageShift, last_page = (e.hi - 1) >> kPageShift;
+        if (last_page - first_page + 1 > kMaxPages) {
+            wide += Delta;
+            return;
+        }
+        for (Addr page = first_page; page <= last_page; ++page) {
+            filter[Slot(page)] += Delta;
+        }
+    }
+    void Remember(const Entry& e) {
+        ++live;
+        Count<1>(e);
+    }
+    void Forget(Entry& e) {
+        e.live = false;
+        --live;
+        Count<-1>(e);
+    }
+
     std::array<Entry, Capacity> entries{};
-    std::uint32_t first = 0, count = 0;
+    std::array<std::uint16_t, std::size_t{1} << kFilterBits> filter{};
+    std::uint32_t first = 0, count = 0, live = 0, wide = 0;
 };
 
 } // namespace Vulkan

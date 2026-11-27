@@ -10,6 +10,7 @@
 
 #include <chrono>
 #include <cstdio>
+#include <algorithm>
 #include <random>
 #include <thread>
 
@@ -45,6 +46,7 @@ using Clock = std::chrono::steady_clock;
 struct Payload {
     u64 number;
     Clock::rep committed;
+    u32 slow_us; ///< the handler takes this long (stage A's waits sleep behind it)
 };
 std::atomic<u64> g_run{0};
 std::atomic<u64> g_out_of_order{0};
@@ -59,6 +61,9 @@ void Handler(void*, const u8* packet, u32 size) {
     if (p.number != g_run.load(std::memory_order_relaxed) + 1) {
         g_out_of_order.fetch_add(1, std::memory_order_relaxed);
     }
+    if (p.slow_us) {
+        std::this_thread::sleep_for(std::chrono::microseconds(p.slow_us));
+    }
     g_run.store(p.number, std::memory_order_release);
     const long long us = std::chrono::duration_cast<std::chrono::microseconds>(
                              Clock::now() - Clock::time_point(Clock::duration(p.committed)))
@@ -69,9 +74,9 @@ void Handler(void*, const u8* packet, u32 size) {
 }
 
 u64 g_next = 0;
-void Send(Vulkan::DrawPipe& pipe) {
+void Send(Vulkan::DrawPipe& pipe, u32 slow_us = 0) {
     u8* out = pipe.Begin(sizeof(Payload));
-    const Payload p{++g_next, Clock::now().time_since_epoch().count()};
+    const Payload p{++g_next, Clock::now().time_since_epoch().count(), slow_us};
     std::memcpy(out, &p, sizeof p);
     pipe.Commit(sizeof p);
 }
@@ -150,6 +155,44 @@ int main() {
         }
     }
     check(g_out_of_order.load() == 0, "packets run in order under drains");
+
+    // 0.4.6 beta 20 (item 7): stage A sleeping behind slow packets, woken by stage B's count
+    // without a fence a packet (the process-wide fence on stage A's side). A lost wake would leave
+    // a wait to its end: none may take much longer than the packets it waits for.
+    std::printf("  stage B's count %s\n", Vulkan::DrawPipe::PlainCount()
+                                               ? "without a fence (a process-wide fence when stage A sleeps)"
+                                               : "fenced (BB_PIPE_COUNT=fenced, or no process-wide fence here)");
+    const u64 sleeps_before = pipe.sleeps;
+    long long worst_extra_us = 0;
+    for (int round = 0; round < 300; ++round) {
+        const u32 slow = 700 + static_cast<u32>(rng() % 1500);
+        const int n = 1 + static_cast<int>(rng() % 3);
+        for (int i = 0; i < n; ++i) {
+            Send(pipe, slow);
+        }
+        if (rng() % 3 == 0) {
+            Send(pipe); // a quick one after: stage B sees the waiter at its next packet too
+        }
+        const auto start = Clock::now();
+        if (round & 1) {
+            pipe.Drain();
+        } else {
+            const u64 number = pipe.NextPacket() - 1;
+            pipe.WaitForPacket(number, Vulkan::DrawPipe::ReasonConstRam);
+        }
+        const long long took =
+            std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - start).count();
+        worst_extra_us = std::max(worst_extra_us, took - static_cast<long long>(n) * slow);
+        if (g_run.load(std::memory_order_acquire) != g_next) {
+            check(false, "a wait behind slow packets returns with them run");
+            break;
+        }
+    }
+    const u64 slept = pipe.sleeps - sleeps_before;
+    std::printf("  behind slow packets: stage A slept %llu times, worst wait past its packets %lld us\n",
+                static_cast<unsigned long long>(slept), worst_extra_us);
+    check(slept >= 100, "stage A slept behind slow packets");
+    check(worst_extra_us < 50000, "no wake was lost (a wait ends with its packets)");
     pipe.Drain();
     if (g_fail) {
         std::printf("draw-pipe-handover-test: %d failed\n", g_fail);

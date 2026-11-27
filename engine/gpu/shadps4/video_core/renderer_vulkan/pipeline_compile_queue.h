@@ -37,6 +37,11 @@ class PipelineJobQueue {
 public:
     using Job = std::function<void()>;
     static constexpr unsigned kMaxBurstThreads = 16;
+    /// 0.4.6 beta 20 (docs/chain-waits.md, item 4): standing threads with a slot (Pop's index),
+    /// raised too while a thread of a higher priority waits; RaiseRunning numbers them after the
+    /// burst threads (kMaxBurstThreads + index).
+    static constexpr unsigned kMaxStandingThreads = 16;
+    static constexpr unsigned kNoSlot = ~0u;
 
     /// One burst, as BurstLine prints it.
     struct Burst {
@@ -68,12 +73,17 @@ public:
         }
     }
 
-    /// A standing compile thread: the oldest job (waits for one).
-    Job Pop() {
+    /// A standing compile thread: the oldest job (waits for one). With `index` (below
+    /// kMaxStandingThreads) it may be raised while it runs it; StandingDone after.
+    Job Pop(unsigned index = kNoSlot) {
         std::unique_lock lk{mutex};
         ++idle_standing;
         cv.wait(lk, [this] { return !jobs.empty(); });
         --idle_standing;
+        if (index < kMaxStandingThreads) {
+            standing[index].owner = jobs.front().owner;
+            standing[index].raised.store(false, std::memory_order_relaxed);
+        }
         Job job = std::move(jobs.front().job);
         jobs.pop_front();
         if (burst_on) {
@@ -152,11 +162,23 @@ public:
         return burst;
     }
 
+    /// Standing thread `index` finished the job Pop gave it: whether it was raised meanwhile (it
+    /// goes back where it was). Under the lock: no raise comes after it.
+    bool StandingDone(unsigned index) {
+        if (index >= kMaxStandingThreads) {
+            return false;
+        }
+        std::scoped_lock lk{mutex};
+        standing[index].owner = nullptr;
+        return standing[index].raised.exchange(false, std::memory_order_relaxed);
+    }
+
     /// A thread about to wait for a pipeline or compile one itself: each burst thread running a job
     /// and not raised yet is raised to `priority` by `raise(index, priority)` (under the queue's
-    /// lock, so it cannot be between jobs). Returns how many were raised now.
+    /// lock, so it cannot be between jobs); with `standing_too`, so is each standing thread with a
+    /// slot (index kMaxBurstThreads + its own). Returns how many were raised now.
     template <typename Raise>
-    unsigned RaiseRunning(int priority, Raise&& raise) {
+    unsigned RaiseRunning(int priority, Raise&& raise, bool standing_too = false) {
         std::scoped_lock lk{mutex};
         unsigned count = 0;
         for (unsigned i = 0; i < kMaxBurstThreads; ++i) {
@@ -167,6 +189,15 @@ public:
             slot.priority.store(priority, std::memory_order_relaxed);
             slot.raised.store(true, std::memory_order_seq_cst);
             raise(i, priority);
+            ++count;
+        }
+        for (unsigned i = 0; standing_too && i < kMaxStandingThreads; ++i) {
+            Slot& slot = standing[i];
+            if (slot.owner == nullptr || slot.raised.load(std::memory_order_relaxed)) {
+                continue;
+            }
+            slot.raised.store(true, std::memory_order_relaxed);
+            raise(kMaxBurstThreads + i, priority);
             ++count;
         }
         if (burst_on) {
@@ -225,6 +256,7 @@ private:
     std::deque<Entry> jobs;
     std::size_t idle_standing = 0, idle_burst = 0, running_burst = 0;
     Slot slots[kMaxBurstThreads];
+    Slot standing[kMaxStandingThreads];
     bool burst_on = false;
     Burst burst{};
     std::uint64_t burst_start_ns = 0;

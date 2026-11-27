@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "bbport_copy.h"
+#include "bbport_role_lock.h"
 #include "bbport_roles.h"
 #include "bbport_threads.h"
 
@@ -31,6 +32,7 @@ public:
         // of the hardware threads available to the process (Steam Deck 2).
         const unsigned count = BbRoles::PoolSize(BbRoles::Pool::Copy); // BB_COPY_THREADS
         epochs.emplace_back();
+        workers.resize(count);
         for (unsigned i = 0; i < count; ++i) {
             threads.emplace_back([this, i] { Loop(i); });
         }
@@ -76,6 +78,7 @@ public:
 
     void WaitAll() {
         // The waiting thread helps instead of only spinning.
+        bool raised = false;
         while (true) {
             Task task;
             {
@@ -86,6 +89,12 @@ public:
                 if (!async_tasks.empty()) {
                     task = std::move(async_tasks.front());
                     async_tasks.pop_front();
+                } else if (!raised) {
+                    // 0.4.6 beta 20 (docs/chain-waits.md, item 4): nothing left to help with; the
+                    // copy threads running what this waits for run at the waiter's priority until
+                    // their task is done (the render chain above them; once a wait).
+                    raised = true;
+                    RaiseBusy();
                 }
             }
             if (task.run) {
@@ -209,6 +218,17 @@ private:
         BbThreads::MakeCritical(/*bulk=*/true);
         u64 seen = 0;
         std::unique_lock lk{mutex};
+        Worker& self = workers[index];
+        self.handle = BbThreads::SelfHandle();
+        // Its task done: back where it was if a waiter raised it meanwhile (RaiseBusy, under the
+        // lock as this is: no raise comes after it).
+        const auto finished = [&] {
+            self.busy = false;
+            if (self.raised) {
+                self.raised = false;
+                BbThreads::EndRaise();
+            }
+        };
         while (true) {
             cv.wait(lk, [&] {
                 return stop || !async_tasks.empty() || (generation != seen && current);
@@ -219,22 +239,51 @@ private:
             if (!async_tasks.empty()) {
                 Task task = std::move(async_tasks.front());
                 async_tasks.pop_front();
+                self.busy = true;
                 lk.unlock();
                 RunAsync(task);
                 lk.lock();
+                finished();
                 continue;
             }
             seen = generation;
             const auto job = current;
+            self.busy = true;
             lk.unlock();
             Work(*job);
             lk.lock();
+            finished();
         }
     }
 
+    /// Under `mutex`: each copy thread running a task, raised to the calling thread's priority
+    /// when that is above normal (BB_RAISE_ON_WAIT=0: none).
+    void RaiseBusy() {
+        if (!BbRoles::RaiseOnWait()) {
+            return;
+        }
+        const int priority = BbThreads::CurrentPriority();
+        if (priority <= 0) {
+            return;
+        }
+        for (Worker& w : workers) {
+            if (w.busy && !w.raised && w.handle && BbThreads::SetPriority(w.handle, priority)) {
+                w.raised = true;
+            }
+        }
+    }
+
+    struct Worker {
+        void* handle = nullptr;
+        bool busy = false;   ///< running a task (under `mutex`)
+        bool raised = false; ///< by a waiter, for that task
+    };
     std::vector<std::thread> threads;
-    std::mutex mutex;
-    std::condition_variable cv;
+    std::vector<Worker> workers; ///< sized before the threads start
+    /// 0.4.6 beta 20: role-aware (bbport_role_lock.h): the GPU command thread (Chain) and the copy
+    /// threads (Frame) share it.
+    BbRoles::Mutex mutex{"host copies"};
+    std::condition_variable_any cv;
     std::shared_ptr<Job> current;
     u64 generation = 0;
     bool stop = false;

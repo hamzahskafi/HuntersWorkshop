@@ -421,6 +421,28 @@ bool Raise(void* handle, int priority) {
     return false;
 }
 
+bool EndRaise() {
+    Thread* t = t_self;
+    if (!On() || !t || !t->handle) {
+        return false;
+    }
+    std::scoped_lock lock{t->mutex};
+    if (t->raised) {
+        t->raised = false;
+        t->priority = kKeep; // applied anew
+        Apply(*t);
+    }
+    return true;
+}
+
+bool RaiseOnWait() {
+    static const bool on = [] {
+        const char* env = std::getenv("BB_RAISE_ON_WAIT");
+        return On() && !(env && env[0] == '0'); // without roles nothing puts a thread back
+    }();
+    return on;
+}
+
 // ---- 0.4.6 beta 20: the lock that carries priority (bbport_role_lock.h) ----------------------------
 
 namespace LockDetail {

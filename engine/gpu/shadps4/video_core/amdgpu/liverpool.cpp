@@ -2173,14 +2173,25 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
     if (rasterizer && seq != NoSeq && !EndsSignalledFrame()) {
         rasterizer->SubmitForSignals();
     }
+    // 0.4.6 beta 20 (docs/chain-waits.md, item 6): the thread's times (a system call) read 10 times
+    // a second, not at every submission (1.5-1.7% of this thread with the statistics on).
+    static const bool usage_every_submission = [] {
+        const char* env = std::getenv("BB_STATS_USAGE_EVERY");
+        return env && env[0] == '1';
+    }();
+    static std::chrono::steady_clock::time_point next_usage{};
     if (seq != NoSeq && BbStats::enabled) {
         BbStats::submissions.fetch_add(1, std::memory_order_relaxed);
-        if (BbPlatform::Usage usage; BbPlatform::GetUsage(true, usage)) {
-            BbStats::gpu_user_us.store(usage.user_us, std::memory_order_relaxed);
-            BbStats::gpu_sys_us.store(usage.sys_us, std::memory_order_relaxed);
-            BbStats::gpu_invol_switches.store(usage.invol_switches, std::memory_order_relaxed);
-            BbStats::gpu_vol_switches.store(usage.vol_switches, std::memory_order_relaxed);
-            BbStats::gpu_minor_faults.store(usage.minor_faults, std::memory_order_relaxed);
+        const auto now = std::chrono::steady_clock::now();
+        if (usage_every_submission || now >= next_usage) {
+            next_usage = now + std::chrono::milliseconds(100);
+            if (BbPlatform::Usage usage; BbPlatform::GetUsage(true, usage)) {
+                BbStats::gpu_user_us.store(usage.user_us, std::memory_order_relaxed);
+                BbStats::gpu_sys_us.store(usage.sys_us, std::memory_order_relaxed);
+                BbStats::gpu_invol_switches.store(usage.invol_switches, std::memory_order_relaxed);
+                BbStats::gpu_vol_switches.store(usage.vol_switches, std::memory_order_relaxed);
+                BbStats::gpu_minor_faults.store(usage.minor_faults, std::memory_order_relaxed);
+            }
         }
     }
 

@@ -399,12 +399,50 @@ void Stress() {
 
 } // namespace
 
+// 0.4.6 beta 20 (docs/chain-waits.md, item 4): a standing thread with a slot running a job is
+// raised for a waiter when asked (standing_too), once, and told so when its job is done; a standing
+// thread between jobs, or without a slot, is not.
+void StandingRaise() {
+    Vulkan::PipelineJobQueue q;
+    std::atomic<int> release{0};
+    std::atomic<bool> running{false}, done_raised{false}, second_done{false};
+    int owner = 0;
+    q.Push(&owner, [&] {
+        running = true;
+        while (!release) std::this_thread::sleep_for(1ms);
+    });
+    std::thread standing([&] {
+        auto job = q.Pop(3);
+        job();
+        done_raised = q.StandingDone(3);
+        auto next = q.Pop(3); // a quick one: done before anyone asks
+        next();
+        second_done = !q.StandingDone(3);
+    });
+    while (!running) std::this_thread::sleep_for(1ms);
+    unsigned seen = ~0u;
+    check(q.RaiseRunning(1, [&](unsigned i, int) { seen = i; }) == 0,
+          "standing threads are raised only when asked");
+    check(q.RaiseRunning(1, [&](unsigned i, int) { seen = i; }, true) == 1 &&
+              seen == Vulkan::PipelineJobQueue::kMaxBurstThreads + 3,
+          "a standing thread running a job is raised, numbered after the burst threads");
+    check(q.RaiseRunning(1, [&](unsigned, int) {}, true) == 0, "once");
+    release = 1;
+    q.Push(nullptr, [] {});
+    standing.join();
+    check(done_raised, "its job done, it is told it was raised");
+    check(second_done, "the next job, not raised, is not");
+    check(q.RaiseRunning(1, [&](unsigned, int) {}, true) == 0, "between jobs: none raised");
+    check(!q.StandingDone(Vulkan::PipelineJobQueue::kNoSlot), "a thread without a slot is never raised");
+}
+
 int main() {
     Layouts();
     Backlog();
     OneBurst();
     IdleBeforeBurst();
     Stress();
+    StandingRaise();
     if (g_fail) {
         std::printf("pipeline-burst-test: %d failed\n", g_fail);
         return 1;

@@ -22,6 +22,15 @@ bool Wait(std::atomic<std::uint32_t>& word, std::uint32_t expected, std::uint32_
 void WakeOne(std::atomic<std::uint32_t>& word);
 void WakeAll(std::atomic<std::uint32_t>& word);
 
+/// 0.4.6 beta 20 (docs/chain-waits.md, item 7): a fence across the process, for a handshake whose
+/// one side runs millions of times a second and whose other side waits rarely. The busy side writes
+/// and reads with plain loads and stores (no fence of its own); the rare side writes, calls this,
+/// then reads. When this returns every thread's earlier stores are visible to the caller, and the
+/// caller's to every thread's later loads (FlushProcessWriteBuffers on Windows, a registered
+/// membarrier on Linux). Only where HeavyFenceAvailable(): elsewhere the busy side keeps its fence.
+bool HeavyFenceAvailable();
+void HeavyFence();
+
 /// BB_ENGINE_PARK=0 (0.4.6 beta 19 only): the recording threads and the GPU command thread wait on
 /// condition variables as before.
 inline bool EngineWaits() {

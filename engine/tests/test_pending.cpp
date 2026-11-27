@@ -5,6 +5,7 @@
 
 #include <cstdio>
 #include <random>
+#include <tuple>
 #include <vector>
 
 namespace {
@@ -80,6 +81,70 @@ int main() {
           "pruning makes room, oldest first");
     check(!list.Overlaps(0x10000, 0x10) && list.Overlaps(0x10000 + 10 * 0x100, 1),
           "the reached ones are gone, the rest stay");
+    // 0.4.6 beta 20: a range written again among the newest entries moves to the end; the list
+    // stays in packet order, so an old range written over and over never holds up pruning.
+    {
+        PendingWriteList moved;
+        std::uint64_t at = 0;
+        const auto reached_at = [&](std::uint64_t p) { return p <= at; };
+        for (std::uint64_t packet = 1; packet <= 10000; ++packet) {
+            moved.Note(0xA000, 0x100, packet);                    // every packet
+            moved.Note(0xB000 + (packet % 3) * 0x100, 0x40, packet); // three in turn
+            at = packet - 4;                                      // stage B 4 behind
+            moved.Prune(reached_at);
+        }
+        check(moved.Size() <= 4, "ranges written in turn keep one entry each");
+        at = 10000;
+        moved.Prune(reached_at);
+        check(moved.Size() == 0 && !moved.Overlaps(0xA000, 1), "all reached: none left");
+    }
+    // Against a model (every noted write and its packet), with the filter and without: no missed
+    // overlap ever; an overlap reported for reached writes only while pruning hasn't passed them.
+    for (int with_filter = 0; with_filter < 2; ++with_filter) {
+        PendingWriteList list2;
+        list2.use_filter = with_filter != 0;
+        std::vector<std::tuple<std::uint64_t, std::uint64_t, std::uint64_t>> model;
+        std::uint64_t at = 0, packet = 0, missed = 0, extra = 0, full = 0;
+        const auto reached_at = [&](std::uint64_t p) { return p <= at; };
+        std::mt19937_64 r{11u + with_filter};
+        for (int i = 0; i < 200000; ++i) {
+            const std::uint64_t base = 0x40000000ull + (r() % 64) * 0x10000;
+            if (r() % 3 == 0) {
+                const std::uint64_t address = base + (r() % 64) * 0x400;
+                const std::uint64_t size = r() % 50 == 0 ? (1 + r() % 4) * 0x400000 : 0x100 + r() % 0x4000;
+                ++packet;
+                if (list2.Note(address, size, packet)) {
+                    model.emplace_back(address, address + size, packet);
+                } else {
+                    ++full;
+                }
+            } else if (r() % 4 == 0) {
+                at = std::min(packet, at + r() % 6);
+                list2.Prune(reached_at);
+            } else {
+                const std::uint64_t address = base + r() % 0x10000;
+                const std::uint64_t size = 4 + r() % 0x4000;
+                bool expect = false;
+                for (const auto& [lo, hi, p] : model) {
+                    expect = expect || (p > at && address < hi && address + size > lo);
+                }
+                const bool got = list2.Overlaps(address, size);
+                missed += expect && !got;
+                extra += got && !expect;
+            }
+        }
+        check(missed == 0, "no overlap with an unreached write is missed");
+        check(full == 0, "1,024 entries hold the writes not yet reached");
+        at = packet;
+        list2.Prune(reached_at);
+        check(list2.Size() == 0 && !list2.Overlaps(0x40000000ull, 0x400000),
+              "everything reached: nothing overlaps");
+        std::printf("  filter %s: overlaps reported for reached writes %llu, answered by the filter "
+                    "%llu, scanned %llu\n",
+                    with_filter ? "on" : "off", static_cast<unsigned long long>(extra),
+                    static_cast<unsigned long long>(list2.filtered),
+                    static_cast<unsigned long long>(list2.scanned));
+    }
     if (g_fail) {
         std::printf("pending-test: %d failed\n", g_fail);
         return 1;

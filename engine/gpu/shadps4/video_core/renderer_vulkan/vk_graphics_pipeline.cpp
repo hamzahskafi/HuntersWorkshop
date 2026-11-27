@@ -100,6 +100,8 @@ public:
     u32 burst_threads = 0;
     /// Burst thread i's handle (written by it before its first job, read under the queue's lock).
     void* burst_handles[PipelineJobQueue::kMaxBurstThreads]{};
+    /// 0.4.6 beta 20: standing thread i's, the same way.
+    void* standing_handles[PipelineJobQueue::kMaxStandingThreads]{};
     /// Since start, for the line on each load's first frames (part 5).
     std::atomic<u64> jobs_total{0}, compile_ns_total{0}, bursts_total{0}, burst_wall_ns_total{0};
     std::atomic<u32> burst_threads_most{0};
@@ -123,10 +125,18 @@ private:
         for (u32 i = 0; i < threads; ++i) {
             std::thread([this, i] {
                 Common::SetCurrentThreadName(("bb:Pipeline" + std::to_string(i)).c_str());
+                const unsigned slot = i < PipelineJobQueue::kMaxStandingThreads ? i : PipelineJobQueue::kNoSlot;
+                if (slot != PipelineJobQueue::kNoSlot) {
+                    standing_handles[slot] = BbThreads::SelfHandle();
+                }
                 for (;;) {
-                    auto job = queue.Pop();
+                    auto job = queue.Pop(slot);
                     const u64 start = NowNs();
                     job();
+                    // 0.4.6 beta 20: raised for a render chain thread that waited on its job.
+                    if (queue.StandingDone(slot)) {
+                        BbThreads::EndRaise();
+                    }
                     Finish(-1, NowNs() - start);
                 }
             }).detach();
@@ -250,14 +260,23 @@ std::function<void()> TakePipelineJob(const void* owner) {
 
 unsigned RaisePipelineBursts() {
     auto& compiler = PipelineCompiler::Get();
-    if (compiler.burst_threads == 0) {
-        return 0;
-    }
     // The waiting thread's priority, at least normal (the render chain runs above normal).
     const int priority = std::max(BbThreads::CurrentPriority(), 0);
-    return compiler.queue.RaiseRunning(priority, [&](unsigned i, int to) {
-        BbThreads::SetPriority(compiler.burst_handles[i], to);
-    });
+    // 0.4.6 beta 20 (docs/chain-waits.md, item 4): the standing threads (normal) too, for a waiter
+    // above them: the render chain waiting on a compile it cannot take itself.
+    const bool standing = priority > 0 && compiler.threads != 0 && BbRoles::RaiseOnWait();
+    if (compiler.burst_threads == 0 && !standing) {
+        return 0;
+    }
+    return compiler.queue.RaiseRunning(
+        priority,
+        [&](unsigned i, int to) {
+            void* handle = i < PipelineJobQueue::kMaxBurstThreads
+                               ? compiler.burst_handles[i]
+                               : compiler.standing_handles[i - PipelineJobQueue::kMaxBurstThreads];
+            BbThreads::SetPriority(handle, to);
+        },
+        standing);
 }
 
 PipelineBurstTotals PipelineBurstTotalsNow(bool reset_most) {

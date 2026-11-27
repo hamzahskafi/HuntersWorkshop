@@ -122,6 +122,16 @@ public:
         }
     }
 
+    /// Stage B's packet count without a fence (BB_PIPE_COUNT=fenced, this beta only: as before;
+    /// also where the system has no process-wide fence).
+    static bool PlainCount() {
+        static const bool plain = [] {
+            const char* env = std::getenv("BB_PIPE_COUNT");
+            return !(env && std::strcmp(env, "fenced") == 0) && BbPark::HeavyFenceAvailable();
+        }();
+        return plain;
+    }
+
     static bool BatchedHandover() {
         static const bool on = [] {
             const char* env = std::getenv("BB_PIPE_HANDOVER");
@@ -347,6 +357,11 @@ private:
             const u64 wait_for = target();
             const u32 seen = drained.load(std::memory_order_seq_cst);
             wake_at.store(wait_for, std::memory_order_seq_cst);
+            // 0.4.6 beta 20 (docs/chain-waits.md, item 7): stage B counts with a plain store and
+            // reads wake_at with a plain load; this process-wide fence stands for its side.
+            if (PlainCount()) {
+                BbPark::HeavyFence();
+            }
             const bool asleep =
                 consumed_packets.load(std::memory_order_seq_cst) < wait_for && !done();
             if (asleep) {
@@ -437,9 +452,19 @@ private:
             // finds the position past the packet once the count says so), then whether one of
             // them waits for this packet: a load and a branch per packet.
             consumed.store(at, std::memory_order_release);
-            const u64 run = consumed_packets.fetch_add(1, std::memory_order_seq_cst) + 1;
-            if (run >= wake_at.load(std::memory_order_seq_cst)) [[unlikely]] {
-                WakeStageA();
+            if (PlainCount()) {
+                // 0.4.6 beta 20 (item 7): no fence a packet; a sleeping stage A fences for both
+                // (WaitUntil). It was a locked add and a fenced load on every packet.
+                const u64 run = consumed_packets.load(std::memory_order_relaxed) + 1;
+                consumed_packets.store(run, std::memory_order_release);
+                if (run >= wake_at.load(std::memory_order_relaxed)) [[unlikely]] {
+                    WakeStageA();
+                }
+            } else {
+                const u64 run = consumed_packets.fetch_add(1, std::memory_order_seq_cst) + 1;
+                if (run >= wake_at.load(std::memory_order_seq_cst)) [[unlikely]] {
+                    WakeStageA();
+                }
             }
         }
     }

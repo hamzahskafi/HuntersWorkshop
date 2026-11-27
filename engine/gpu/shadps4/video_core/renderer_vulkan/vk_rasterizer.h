@@ -914,6 +914,7 @@ private:
     std::atomic<u64> signals_published_upto{0};
     std::atomic<bool> signal_flush_requested{false};
     std::jthread gpu_signal_thread;
+    bool gpu_signal_started = false; ///< under gpu_signals_mutex
     void SubmitForSignalsNow();
     /// The submission whose end puts the GPU on its last one while work is held for it (0: none):
     /// set by a submission queued behind unfinished work (Flush) and by a decision to hold
