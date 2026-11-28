@@ -961,6 +961,9 @@ public:
 
     /// Waits until every recorded command is in the command buffer.
     void SyncRecording();
+    /// Engine id 144: the breadcrumb marker after the last command before a submission (with a
+    /// marker after every 32nd command only, the work's end would otherwise go unmarked).
+    void MarkLastCrumb();
 
     /// bbport: guest memory copies on the recording thread (small ones, RecordHostCopy) or the
     /// copy threads (BbCopy::Async) must be done before the guest learns the GPU is past them

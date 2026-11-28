@@ -1097,6 +1097,7 @@ void Scheduler::SubmitExecution(SubmitInfo& info) {
     }
 
     EndRendering(GpuSavings::PassBreak::Submission);
+    MarkLastCrumb();
     if (auto* profiler = GpuProfiler::Get(); profiler && profiler->Records(this)) {
         // Until the next submission's first timestamp: mostly the GPU waiting for it.
         profiler->Mark(0x5B317ull, [] { return std::string{"(between submissions: GPU idle)"}; });
@@ -1170,6 +1171,19 @@ void Scheduler::SubmitExecution(SubmitInfo& info) {
     PopPendingOperations();
 }
 
+void Scheduler::MarkLastCrumb() {
+    // Engine id 144 (vk_breadcrumbs.h): one marker a submission, against the ~1,800 a frame saved,
+    // so a hang report reads a stream that finished as finished and a stream of fewer than 32
+    // commands as anything but "finished none" (the builder's review of 144).
+    const u32 id = Breadcrumbs::LastNoted(crumb_stream);
+    if (id == 0) {
+        return;
+    }
+    Record([stream = crumb_stream, id](vk::CommandBuffer cmdbuf) {
+        Breadcrumbs::MarkLast(cmdbuf, stream, id);
+    });
+}
+
 void Scheduler::CheckRecordedFlag() {
     if (recorded_since_submit.load(std::memory_order_relaxed)) {
         return;
@@ -1193,6 +1207,7 @@ void Scheduler::SubmitAsync(SubmitInfo& info) {
         on_submit(info);
     }
     EndRendering(GpuSavings::PassBreak::Submission);
+    MarkLastCrumb();
     if (auto* profiler = GpuProfiler::Get(); profiler && profiler->Records(this)) {
         profiler->Mark(0x5B317ull, [] { return std::string{"(between submissions: GPU idle)"}; });
     }

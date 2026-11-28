@@ -446,6 +446,22 @@ void Mark(vk::CommandBuffer cmdbuf, u32 stream, u32 id, bool after) {
                                 stream * StreamStride, id * 2 + (after ? 1 : 0));
 }
 
+u32 LastNoted(u32 stream) {
+    if (!enabled || stream >= MaxStreams) {
+        return 0;
+    }
+    return u32(streams[stream].next.load(std::memory_order_relaxed) - 1);
+}
+
+void MarkLast(vk::CommandBuffer cmdbuf, u32 stream, u32 id) {
+    // With a marker after each command (mark_every 1) the last one has written its own.
+    if (!enabled || stream >= MaxStreams || id == 0 || mark_every == 1) {
+        return;
+    }
+    cmdbuf.writeBufferMarkerAMD(vk::PipelineStageFlagBits::eBottomOfPipe, marker_buffer,
+                                stream * StreamStride, id * 2 + 1);
+}
+
 u32 ArgsSlot() {
     return enabled ? next_args_slot.fetch_add(1, std::memory_order_relaxed) % ArgSlots : ~0u;
 }

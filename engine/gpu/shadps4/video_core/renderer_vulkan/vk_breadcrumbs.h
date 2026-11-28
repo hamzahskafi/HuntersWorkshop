@@ -41,6 +41,11 @@ u32 Note(u32 stream, const Crumb& crumb);
 /// Recorded right before (`after` false; only with BB_BREADCRUMBS=both) and right after the
 /// command numbered `id`.
 void Mark(vk::CommandBuffer cmdbuf, u32 stream, u32 id, bool after);
+/// Engine id 144: the number of the last command noted on `stream` (0: none), and its marker after
+/// it written whatever the stride: recorded at each submission's end, so a stream that finished its
+/// work reads as finished in a report, short ones included.
+u32 LastNoted(u32 stream);
+void MarkLast(vk::CommandBuffer cmdbuf, u32 stream, u32 id);
 /// Indirect dispatches: a slot of a host-visible buffer for the arguments the GPU reads (the
 /// report and the statistics show them), ~0u when off. CopyArgs is recorded before the dispatch.
 u32 ArgsSlot();
