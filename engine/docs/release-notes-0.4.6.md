@@ -5,6 +5,21 @@ to 19 (the VRAM and texture work); 0.4.5 itself shipped from beta 13. The engine
 is in `docs/changelog.md` (under those 0.4.5 beta names), the findings in `docs/performance.md` and
 `docs/gpu-memory.md`, and what comes next in `docs/plan.md`.
 
+## Measured: 0.4.5 against 0.4.6
+
+The tester's runs on the same three spots, the same settings (RX 9070 XT, i5-14600KF, FSR 4.1.2 at
+1920x1080, uncapped, frame statistics on), 2026-11-28: 0.4.5 (`20261128_030439`) and 0.4.6 beta 21,
+engine id 145 (`_030936`).
+
+| | 0.4.5 | 0.4.6 | |
+|---|---|---|---|
+| Lamp spot (1,345 draws) | 206.6 FPS | 235.2 FPS | +13.8% |
+| Busy view (about 1,785 draws) | 187.6 FPS | 204.0 FPS | +8.7% |
+| Slow area (about 1,230-1,270 draws) | 191.7 FPS | 227.0 FPS | +18.4% |
+
+In 0.4.5 the slow area was held by the engine's threads (the game waited for its previous frame
+0.05-0.1 ms a frame, 20 submissions a frame); in 0.4.6 all three are held by the GPU.
+
 ## VRAM: one manager, nothing freed while there is room
 
 Textures and the game's data each had their own rules for leaving VRAM, and both freed things while
