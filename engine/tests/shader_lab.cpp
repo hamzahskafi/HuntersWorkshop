@@ -1795,6 +1795,20 @@ struct StateLayout {
     }
 };
 
+/// A state as a catalog holds it: without the program's code, the fetch shader's code and a
+/// geometry shader's copy shader (the seed puts them back from this PC's game files). A player's
+/// cache keeps them inline.
+std::vector<u8> CatalogForm(const std::vector<u8>& bytes, const StateLayout& layout) {
+    std::vector<u8> stripped(bytes.begin(), bytes.begin() + layout.code_at);
+    const size_t end = std::max(layout.rest_at, CopyTrailerAt(bytes));
+    stripped.insert(stripped.end(), bytes.begin() + layout.rest_at, bytes.begin() + end);
+    auto header = layout.header;
+    header.code_dwords = 0;
+    header.fetch_dwords = 0;
+    std::memcpy(stripped.data(), &header, sizeof(header));
+    return stripped;
+}
+
 int ExportCatalog(const fs::path& cache, const fs::path& out) {
     std::error_code error;
     fs::create_directories(out, error);
@@ -1851,13 +1865,7 @@ int ExportCatalog(const fs::path& cache, const fs::path& out) {
             StateLayout layout;
             if (!layout.Parse(bytes)) continue;
             // Without the code and the fetch shader's code: what is left is the draw's state.
-            std::vector<u8> stripped(bytes.begin(), bytes.begin() + layout.code_at);
-            stripped.insert(stripped.end(), bytes.begin() + layout.rest_at, bytes.begin() + CopyTrailerAt(bytes));
-            auto header = layout.header;
-            header.code_dwords = 0;
-            header.fetch_dwords = 0;
-            std::memcpy(stripped.data(), &header, sizeof(header));
-            if (WriteBytes(out / path.filename(), stripped)) {
+            if (WriteBytes(out / path.filename(), CatalogForm(bytes, layout))) {
                 ++states;
                 listed += path.filename().string() + "\n";
             }
@@ -1920,12 +1928,16 @@ struct CodeIndex {
             u64 hash;
             std::memcpy(&hash, blob.data() + at + 16, 8);
             // The program starts with s_mov_b32 vcc_hi, #imm whose immediate puts the footer at
-            // code + (imm + 1) * 8 bytes (AmdGpu::SearchBinaryInfo).
-            for (size_t p = at & ~size_t(3); p >= 8 && at - p < 0x40000; p -= 4) {
+            // code + (imm + 1) * 8 bytes (AmdGpu::SearchBinaryInfo). 0.4.6: so only the places a
+            // multiple of 8 bytes before the footer are looked at, at any alignment. 4-byte steps
+            // from a 4-byte boundary missed 5,139 of the eboot's 5,493 programs, which start 2
+            // bytes past one (the builder, 2026-11-28): no catalog state of theirs ever seeded.
+            for (size_t back = 8; back <= at && back < 0x40000; back += 8) {
+                const size_t p = at - back;
                 u32 token, imm;
                 std::memcpy(&token, blob.data() + p, 4);
                 std::memcpy(&imm, blob.data() + p + 4, 4);
-                if (token == 0xBEEB03FFu && p + (size_t(imm) + 1) * 8 == at) {
+                if (token == 0xBEEB03FFu && (size_t(imm) + 1) * 8 == back) {
                     u32 bits;
                     std::memcpy(&bits, blob.data() + at + 8, 4);
                     ((bits >> 2 & 15) == 6 ? copies : programs).try_emplace(hash, index, p);
@@ -2025,6 +2037,15 @@ int SeedCache(const fs::path& self, const fs::path& catalog, const fs::path& cac
         if (!layout.Parse(bytes) || meta.size() < 24) {
             ++unreadable;
             continue;
+        }
+        // 0.4.6: a player's cache (its states carry their code inline: every state of the
+        // tester's cache written by engine id 146) seeds as its catalog form would; the game
+        // files' code is put in below. Seeded as it was, the old code stayed behind the new under
+        // a header counting one, and a later read took a wrong count (std::bad_alloc; the
+        // builder, 2026-11-28).
+        if (layout.header.code_dwords != 0 || layout.header.fetch_dwords != 0) {
+            bytes = CatalogForm(bytes, layout);
+            layout.Parse(bytes);
         }
         // bbport: a version 7 record (before 0.9.34 beta 9.9) differs from version 8 only by
         // HwFragmentRuntimeInfo::depth_first, then padding, which the state's RuntimeInfo carries
