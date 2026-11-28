@@ -18,7 +18,8 @@ engine id 145 (`_030936`).
 | Slow area (about 1,230-1,270 draws) | 191.7 FPS | 227.0 FPS | +18.4% |
 
 In 0.4.5 the slow area was held by the engine's threads (the game waited for its previous frame
-0.05-0.1 ms a frame, 20 submissions a frame); in 0.4.6 all three are held by the GPU.
+0.05-0.1 ms a frame, 20 submissions a frame); in 0.4.6 all three are held by the GPU. The tester's CPU
+usage is 5-10% lower in 0.4.6 (Task Manager), at the higher frame rates.
 
 ## VRAM: one manager, nothing freed while there is room
 
