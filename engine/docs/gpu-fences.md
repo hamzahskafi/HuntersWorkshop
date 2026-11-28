@@ -514,8 +514,6 @@ The tester's runs on 142, frame statistics on, the process held to 8 logical pro
   0.02-0.03 ms, no frame over 1.5 times the median), 6-11 submissions a frame (the GPU idle under the cap,
   taking the work as it comes), a clean exit.
 
-
-
 ## Taken out (engine id 143, 2026-11-28)
 
 The tester's choice after the runs above: back to the old path. Removed: the progress word
