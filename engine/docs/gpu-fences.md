@@ -453,3 +453,32 @@ presenter's included, that found the GPU done with everything given before it is
 less "ran out with work waiting" is how often the GPU waited for the game itself (its two-submission
 lead after its wait, its wake-up when the previous frame retires): the part the queue cannot give.
 
+## Engine id 142's runs: the queue against the old path (2026-11-28)
+
+The tester's runs, both with frame statistics on: `20261128_020635` (the queue) and `20261128_021032`
+(`BB_GPU_FENCES=cpu`, the old path, same build); `_020239` without statistics was at other places (1,453
+and 1,544 draws a frame), so not compared.
+
+| | The queue | The old path | 139 default (beta 20) |
+|---|---|---|---|
+| Lamp spot | 230.2 FPS, 2.1-2.5 submissions a frame | 229.9, 3.1-3.6 | 229.3 |
+| Busy view | 200.7, 2.2-2.7 | 202.0, 3.2-3.5 | 199.8 |
+| Slow area | 228.0, 5.6-7.0 | 228.5, 5.7-8.2 | 226.1 |
+
+- **The queue works as built:** at the lamp spot and in the busy view the work goes when the game waits
+  for its previous frame (0.9-1.0 a frame), the GPU ran out with work waiting 0.0-0.1 a frame, and
+  submissions found it done with everything 0.1 a frame. A submission fewer a frame than the old path.
+  Fences written as the GPU passed them: 83-85% (75% in the slow area). The CPU is the same in both
+  (the render chain 2.35-2.45 cores, stage B 68/82/76% busy).
+- **The frame rate is the same in both,** within a run's spread (lamp +0.1%, busy view -0.6%, slow area
+  -0.2%). Both are above beta 20 by the cuts at pass ends (+0.3 to +1.1%). **So a queued switch costs
+  nothing that shows on this GPU:** the 55-90 us a switch in the GPU profile was the profiler's own work
+  at each submission (its mark and pass end there). The switch hypothesis of this research is not borne
+  out; with work queued, the GPU at these spots is busy all the time, and what remains to gain is in the
+  work itself (the busy time: "The GPU's time that is not the game's work" above).
+- **The slow area:** the GPU found itself out of work about once a frame (0.7 with work held, reaching it
+  through the announcement; 0.3 waiting for the game). The hand-over at the game's wait does not fire
+  there (0.0 a frame): the game stops waiting before the GPU command thread has decoded its third
+  submission. Handing over what is recorded at the moment the game waits would close it, but with the
+  old path level with the queue there and switches costing nothing measurable, the gain would be small.
+
