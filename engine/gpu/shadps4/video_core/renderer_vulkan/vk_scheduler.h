@@ -20,6 +20,7 @@
 #include <queue>
 
 #include "bbport_copy.h"
+#include "bbport_park.h"
 #include "bbport_toggles.h"
 #include "common/assert.h"
 #include "common/interval_set.h"
@@ -960,6 +961,9 @@ public:
 
     /// Waits until every recorded command is in the command buffer.
     void SyncRecording();
+    /// Engine id 144: the breadcrumb marker after the last command before a submission (with a
+    /// marker after every 32nd command only, the work's end would otherwise go unmarked).
+    void MarkLastCrumb();
 
     /// bbport: guest memory copies on the recording thread (small ones, RecordHostCopy) or the
     /// copy threads (BbCopy::Async) must be done before the guest learns the GPU is past them
@@ -1135,8 +1139,9 @@ private:
         std::deque<std::unique_ptr<RecordChunk>> queue; ///< guarded by recorder_mutex
         std::atomic<size_t> queued{0};                  ///< queue.size() for lock-free polling
         bool busy = false;     ///< running a chunk (guarded by recorder_mutex)
-        bool sleeping = false; ///< waiting on cv (guarded by recorder_mutex)
-        std::condition_variable_any cv;
+        bool sleeping = false; ///< waiting on wake_word (guarded by recorder_mutex)
+        /// 0.4.6 beta 19: the word it sleeps on (BbPark), bumped by HandOver when it sleeps.
+        std::atomic<u32> wake_word{0};
         std::jthread thread;
     };
 

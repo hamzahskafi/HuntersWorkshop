@@ -4,6 +4,7 @@
 #pragma once
 
 #include "bbport_copy.h"
+#include "bbport_role_lock.h"
 
 #include <deque>
 #include <condition_variable>
@@ -21,6 +22,7 @@
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/buffer_cache/fault_manager.h"
 #include "video_core/buffer_cache/range_set.h"
+#include "engine/gx_resources.h"
 #include "video_core/renderer_vulkan/vk_semaphore.h"
 
 namespace AmdGpu {
@@ -108,6 +110,29 @@ public:
 
     /// Invalidates any buffer in the logical page range.
     void InvalidateMemory(VAddr device_addr, u64 size, bool assume_locks = false);
+
+    /// 0.4.6 beta 12 (BB_WATCH_GAME_BUFFERS): the game's calls about memory (GxResources::MemoryEvent), on
+    /// the game's thread: the range is marked to upload now (but for pages the GPU wrote), and a
+    /// buffer's pages enter or leave the calls' watch on the uploading thread (ProcessCallsEvents).
+    void NoteGameMemory(VAddr addr, u64 size, u8 event);
+    /// 0.4.6 beta 15 part 4: a create call copies over [addr, addr + size) next, whole pages (the
+    /// game's thread): see MemoryTracker::CopyComing. {pages dropped without a readback, made writable}.
+    std::pair<u32, u32> CopyComing(VAddr addr, u64 size);
+    /// 0.4.6 beta 15 part 2: a buffer made with data during a loading screen is queued for
+    /// LoadUpload; one released takes the queued ones inside it out.
+    void NoteLoadUpload(VAddr addr, u64 size, BbEngine::GxResources::MemoryEvent e);
+    /// 0.4.6 beta 12: memory the game unmapped leaves the calls' watch.
+    void NoteGameMemoryUnmapped(VAddr addr, u64 size);
+    /// 0.4.6 beta 12: the engine wrote guest memory on the CPU for a GPU command (WRITE_DATA, a DMA
+    /// fill or copy, occlusion counts): marked to upload, as a fault on a watched page would have.
+    void NoteEngineStore(VAddr addr, u64 size);
+    /// 0.4.6 beta 13 (BB_LABEL_CHECK=0 turned it off until the release): the engine stored through the backing view (a label, an
+    /// occlusion result), which never faults: a page holding an uploaded copy is marked to upload,
+    /// pages the GPU wrote are left. Counted (BbStats::backing_stores*).
+    void NoteBackingStore(VAddr addr, u64 size);
+    /// 0.4.6 beta 13 (the write fault breakdown): this cache's watch on the page at `addr`: 2 the GPU's
+    /// data, 1 an uploaded copy, 0 none (MemoryTracker::PageWatch).
+    [[nodiscard]] u8 PageWatch(VAddr addr) const noexcept;
 
     /// bbport: a guest write fault at `device_addr` was handled; unprotect its neighbourhood.
     void ExtendWriteFault(VAddr device_addr);
@@ -198,6 +223,11 @@ public:
     /// bbport (BB_PREUPLOAD): uploads up to `budget` bytes of that memory which the CPU changed and
     /// then left alone for a few frames into the arena, ahead of its use (draw recording thread).
     void Preupload(u64 budget);
+    /// 0.4.6 beta 15 part 2 (BB_LOAD_UPLOAD=0: off): the game's buffers made with data while a
+    /// loading screen is up (NoteGameMemory queues them) get their VRAM and their upload during it,
+    /// once a frame on the draw recording thread: up to BB_LOAD_UPLOAD_MB (64) a frame while the
+    /// screen is up, 16 a frame for 2 s after it, then the rest is left to their first draw.
+    void LoadUpload();
     /// bbport (BB_GPU_WRITE_TWINS): forgets the twins of unmapped guest memory.
     void DropTwins(VAddr addr, u64 size);
 
@@ -242,6 +272,35 @@ private:
     };
     /// bbport: the housekeeping EnsureResident did before every binding (Process*), once a packet.
     void Maintain();
+    /// 0.4.6 beta 12: the game's buffer events, in order, applied where the tracker's regions are made
+    /// (op 0: made, 1: released, its inside pages; 2: unmapped or made over, every page).
+    struct CallsEvent {
+        VAddr addr;
+        u64 size;
+        u8 op;
+        bool with_data;
+    };
+    std::mutex calls_mutex;
+    std::vector<CallsEvent> calls_events, calls_taken;
+    std::atomic<bool> calls_waiting{false};
+    void ProcessCallsEvents();
+    /// 0.4.6 beta 12 (the net): each second up to 1 MiB of the live GX buffers hashed, in turn (the first
+    /// MiB of a larger one); a buffer whose memory changed since its last turn with nothing told is a CPU
+    /// write no call told (counted, described, marked to upload).
+    struct NetEntry {
+        u64 key;
+        u32 told;
+        u64 gpu_version;
+        u64 hash;
+        u64 size;
+    };
+    std::unordered_map<VAddr, NetEntry> net_entries;
+    std::vector<u8> net_scratch;
+    u64 net_next_ns = 0;
+    void CheckGameBuffers();
+    /// 0.4.6 beta 4: the buffers the game released, taken at every Maintain (not once a second);
+    /// with the VRAM manager off their data leaves VRAM as soon as the GPU is done with it.
+    void FollowGxReleases();
     u64 packet_epoch = 1, maintained_epoch = 0;
     /// bbport: answers of EnsureResident ("all resident") and IsInPlace for block ranges, valid
     /// while resident_ranges and in_place_blocks keep their generation.
@@ -290,20 +349,30 @@ private:
     /// bbport: idle VRAM blocks (see group_use).
     void NoteUse(VAddr address, u64 size);
     void ProcessIdleBlocks();
-    /// bbport: vram_level from the driver's usage and budget (BB_VRAM_PRESSURE_PERCENT, 85).
-    void UpdateVramLevel(u32 now);
+    /// vram_level from the VRAM manager (vram_policy.h; 0.4.5 beta 14), once a second.
+    void UpdateVramLevel();
     /// A VRAM slot of a block that left it: reused by the next move to VRAM.
     void ReleaseResidencySlot(vk::DeviceMemory memory, u64 offset);
+    /// 0.4.6 beta 5: one sparse unbind of [address, address + bytes) in each arena it lies in.
+    void UnbindRange(VAddr address, u64 bytes);
     /// Unbinds a VRAM block of memory the game unmapped (uploaded again if mapped and used).
-    void EvictVramBlock(u64 block);
-    /// bbport: while VRAM is tight (vram_level): VRAM copies of the game's data unused for 30 s
-    /// (10 s when full) leave VRAM; their slots take the next blocks instead of new VRAM, and they
-    /// are uploaded again from the game's memory when bound.
+    /// `watch`: its pages handed back to the game unwatched now; `unbind`: its sparse unbind queued
+    /// now (false for both: EvictVramBlocks does them per run of blocks). Whether it left VRAM.
+    bool EvictVramBlock(u64 block, bool watch = true, bool unbind = true);
+    /// 0.4.6 beta 3: blocks leaving VRAM together (sorted, deduplicated; on return only those that
+    /// left): their pages unwatched and page table entries cleared once per run of adjacent blocks
+    /// (beta 17-18 made a protection call per 64 KiB block). 0.4.6 beta 5: and one sparse unbind
+    /// per run (beta 4: one per block, ~12,000 in a loading screen's bind call).
+    void EvictVramBlocks(std::vector<u64>& blocks);
+    /// While VRAM is tight or full (the VRAM manager): VRAM copies of the game's data unused for
+    /// the manager's time leave VRAM, the longest unused first; their slots take the next blocks
+    /// instead of new VRAM, and they are uploaded again from the game's memory when bound.
     void EvictIdleCopies(u32 now);
-    u32 last_cleanup_scan = 0; ///< bbport: EvictIdleCopies with room in VRAM, every 10 s
-    /// Residency chunks without blocks for 5 s, the rebinds away from them done: back to the driver.
+    /// 0.4.5 beta 17: the game's data of the buffers the game released (gx_released) leaves VRAM.
+    void ReleaseGxBuffers();
+    /// Residency chunks without blocks for 30 s (5 s while VRAM is tight), the rebinds away from
+    /// them done: back to the driver.
     void FreeEmptyChunks(u32 now);
-    [[nodiscard]] static u32 VramIdleSeconds();
     void DownloadMemory(const Buffer* arena, VAddr device_addr, u64 size);
 
     bool SynchronizeMemory(const Buffer* arena, VAddr device_addr, u32 size, bool is_written,
@@ -364,10 +433,12 @@ private:
     std::array<const Buffer*, NUM_ARENA_PAGES> address_space{};
     std::deque<Buffer> arenas;
     std::vector<ArenaBinds> pending_binds;
-    std::mutex preupload_mutex;               ///< the map hooks come from guest threads
+    BbRoles::Mutex preupload_mutex{"buffer pre-upload"}; ///< the map hooks come from guest threads
     std::map<VAddr, VAddr> preupload_ranges; ///< start -> end of pre-uploaded guest memory
     VAddr preupload_cursor = 0;
     u64 preupload_first_bytes = 0, preupload_again_bytes = 0; ///< BB_FRAME_STATS report
+    BbRoles::Mutex load_upload_mutex{"buffer load upload"}; ///< 0.4.6 beta 15 part 2: queued on the game's threads
+    std::map<VAddr, u64> load_upload_ranges; ///< start -> size, uploaded by LoadUpload
     Vulkan::Semaphore memory_semaphore;
 
     struct Backing : public Interval {
@@ -384,7 +455,7 @@ private:
     /// bbport BB_GX_IN_PLACE: blocks bound to the game's own memory (the GX region's import), and
     /// guest unmaps to apply.
     TrackedIntervalList<> in_place_blocks;
-    std::mutex pending_unmaps_mutex;
+    BbRoles::Mutex pending_unmaps_mutex{"buffer unmaps"}; ///< 0.4.6 beta 20: role-aware, as the two above
     std::vector<std::pair<VAddr, u64>> pending_unmaps;
     std::atomic<bool> unmaps_pending{false};
     /// VRAM slots of blocks that left VRAM, for the next blocks moved there (in their chunks).
@@ -412,10 +483,17 @@ private:
     vk::DeviceMemory TakeSpareResidency();
     /// bbport: VRAM blocks no longer needed. Per 2 MiB of guest addresses, the second
     /// (BbStats::coarse_second) it was last bound: blocks in VRAM unused for a while leave it
-    /// (EvictIdleCopies; BB_VRAM_IDLE_SECONDS 0: never), and residency chunks left without blocks
+    /// (EvictIdleCopies, while VRAM is tight), and residency chunks left without blocks
     /// go back to the driver (ProcessIdleBlocks). Blocks of unmapped memory leave VRAM too.
     static constexpr u64 USE_GROUP_BITS = 21;
     std::vector<u32> group_use;
+    /// Beta 15: groups EvictIdleCopies took out of VRAM, and when (refaults: back within 5 minutes).
+    std::unordered_map<u64, u32> evicted_group_second;
+    u32 minute_second = 0;
+    /// Beta 16 (research): the buffers the game released (engine/gx_resources.h).
+    std::vector<BbEngine::GxResources::Gone> gx_released;
+    /// Beta 18: released buffers waiting for VRAM to be tight (ReleaseGxBuffers), oldest first.
+    std::deque<BbEngine::GxResources::Gone> released_pending;
     struct ResidencyChunk {
         u64 size;
         u64 used;         ///< bytes handed out and not returned
@@ -426,11 +504,9 @@ private:
     std::unordered_map<VkDeviceMemory, ResidencyChunk> residency_chunks;
     u32 idle_scan_second = 0;
     u32 gx_ring_looks = 0; ///< ProcessIdleBlocks: seconds without the GX range allocator's region
-    /// bbport: how full VRAM is against the driver's budget, once a second (UpdateVramLevel):
-    /// 0 room, 1 tight (idle VRAM copies leave sooner, new blocks go to system memory), 2 full.
+    /// The VRAM manager's level, once a second (UpdateVramLevel): 0 room, 1 tight (unused VRAM
+    /// copies leave, new blocks go to system memory where it can hold them), 2 full.
     std::atomic<int> vram_level{0};
-    u32 vram_full_until = 0; ///< a failed VRAM allocation counts as full until then
-    u32 vram_level_reports = 0;
     /// bbport: the second a shader last read the game's memory through the page table
     /// (SynchronizeDmaBuffers). Those reads do not mark blocks as used, so nothing leaves VRAM
     /// while such shaders run (EvictIdleCopies).

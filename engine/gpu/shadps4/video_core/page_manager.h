@@ -5,6 +5,8 @@
 
 #include <cstddef>
 #include <memory>
+#include <span>
+#include <utility>
 #include "common/alignment.h"
 #include "common/types.h"
 #include "video_core/buffer_cache//region_definitions.h"
@@ -38,6 +40,9 @@ public:
     /// code writes textures).
     static void NoteImageFault(VAddr image_address, u64 image_size, u32 width, u32 height,
                                u32 format, u32 tiling);
+    /// 0.4.6 beta 13: what watched the page of the write fault this thread handles (bits: 1 the GPU's
+    /// data, 2 the buffer cache's uploaded copy, 4 an image, 8 none), for its fault site's line.
+    static void NoteFaultWatch(u32 watched);
 
     /// Register a range of mapped gpu memory.
     void OnGpuMap(VAddr address, size_t size);
@@ -48,6 +53,10 @@ public:
     /// Updates watches in the pages touching the specified region.
     template <bool track>
     void UpdatePageWatchers(VAddr addr, u64 size) const;
+
+    /// 0.4.6 beta 4: a write watcher more on the pages of each range (sorted by address), one
+    /// protection change per run of pages that become watched.
+    void WatchRanges(std::span<const std::pair<VAddr, u64>> ranges) const;
 
     /// Updates watches in the pages touching the specified region using a mask.
     template <bool track, bool is_read = false>

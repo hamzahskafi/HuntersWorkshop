@@ -30,7 +30,10 @@ struct WindowSystemInfo {
 
 class WindowSDL {
 public:
-    WindowSDL(s32 width, s32 height, const char* title);
+    /// `hidden`: not shown until Show (0.4.6 beta 17: behind the start's splash).
+    WindowSDL(s32 width, s32 height, const char* title, bool hidden = false);
+    /// Window thread: shows a window made hidden, in front, its size read again.
+    void Show();
     ~WindowSDL();
     s32 GetWidth() const { return width.load(std::memory_order_relaxed); }
     s32 GetHeight() const { return height.load(std::memory_order_relaxed); }

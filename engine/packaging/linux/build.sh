@@ -20,6 +20,8 @@ cd "$engine"
 export CC=${CC:-clang} CXX=${CXX:-clang++}
 export PKG_CONFIG_PATH=${PKG_CONFIG_PATH:-/opt/deps/lib/pkgconfig:/opt/deps/share/pkgconfig}
 export CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH:-/opt/deps}
+# The engine's own FFmpeg (setup-ubuntu.sh, packaging/build-ffmpeg.sh): linked into the GPU library.
+export BB_FFMPEG_PREFIX=${BB_FFMPEG_PREFIX:-/opt/deps/ffmpeg}
 export LDFLAGS=${LDFLAGS:--fuse-ld=lld}
 # The profiles in pgo/ come from Windows runs: built without one.
 BB_PGO=${BB_PGO:-off} bash build.sh
@@ -29,7 +31,7 @@ bin=$root/engine/out
 rm -rf out/package
 mkdir -p "$bin/gpu"
 install -m755 out/bb-probe out/bb-gpu-capabilities packaging/linux/bb-start "$bin/"
-for tool in bb-engine-assets bb-shader-lab; do
+for tool in bb-engine-assets bb-shader-lab bb-splash; do
     [[ ! -f out/$tool ]] || install -m755 "out/$tool" "$bin/"
 done
 install -m755 out/gpu/libbbgpu.so "$bin/gpu/"
@@ -40,6 +42,12 @@ sdl=$(pkg-config --variable=libdir sdl3)/libSDL3.so.0
 install -m755 "$(readlink -f "$sdl")" "$bin/gpu/libSDL3.so.0"
 patchelf --set-rpath '$ORIGIN' "$bin/gpu/libbbgpu.so"
 patchelf --set-rpath '$ORIGIN/gpu' "$bin/bb-gpu-capabilities"
+# The start's splash (run.sh starts it first) and the shader lab (the engine runs it at its start to
+# settle the GPU cache) find SDL3 and the GPU library there too: the lab's own RUNPATH named the build
+# tree and /opt/deps only, so on a player's PC it did not start (the builder session, engine id 122).
+for tool in bb-splash bb-shader-lab; do
+    [[ ! -f $bin/$tool ]] || patchelf --set-rpath '$ORIGIN/gpu' "$bin/$tool"
+done
 strip --strip-debug "$bin/gpu/libbbgpu.so" "$bin/gpu/libSDL3.so.0"
 cp out/gpu-cache.id "$bin/" 2>/dev/null || true
 # NVIDIA's DLSS runtime (DLSS SDK license, tools/fetch_dlss.sh) beside bb-probe, where the engine
@@ -49,9 +57,14 @@ install -m644 out/libnvidia-ngx-dlss.so.* out/LICENSE-DLSS-SDK.txt "$bin/"
 
 cp run.sh "$root/engine/"
 cp -r scripts patches data licenses "$root/engine/"
-for item in shader-catalog gamecontrollerdb.txt; do
-    [[ ! -e $template/engine/$item ]] || cp -r "$template/engine/$item" "$root/engine/"
-done
+# The shipped shader catalog is the repository's (engine/shader-catalog, 0.4.6 beta 17).
+[[ ! -d shader-catalog ]] || cp -r shader-catalog "$root/engine/"
+# SDL's controller mappings from the template, with their licence.
+if [[ -e $template/engine/gamecontrollerdb.txt ]]; then
+    cp "$template/engine/gamecontrollerdb.txt" "$root/engine/"
+    [[ ! -f $template/engine/licenses/SDL_GAMECONTROLLERDB.txt ]] ||
+        cp "$template/engine/licenses/SDL_GAMECONTROLLERDB.txt" "$root/engine/licenses/"
+fi
 cp "$template/config.ini" "$root/engine/config.default.ini"
 cp "$template/config.ini" "$template/LICENSE" "$root/"
 install -m755 packaging/linux/play.sh "$root/play.sh"

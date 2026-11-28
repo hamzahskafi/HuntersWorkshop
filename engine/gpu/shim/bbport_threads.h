@@ -42,6 +42,17 @@ void MakeCritical(bool bulk = false);
 /// with fewer than 16 hardware threads (a raised thread spinning keeps a game thread waiting),
 /// and at most BB_SPIN_US (SpinLimitUs).
 unsigned CapSpinUs(unsigned wanted);
+/// 0.4.6 beta 15 part 1: a handle another thread may raise the calling thread through (never
+/// closed: the compile threads live as long as the process), the calling thread's priority
+/// (THREAD_PRIORITY_*), and setting a thread's.
+void* SelfHandle();
+int CurrentPriority();
+bool SetPriority(void* thread, int priority);
+/// The calling thread back at normal priority.
+void MakeNormal();
+/// 0.4.6 beta 20: the calling thread, raised through SetPriority for a waiter, back where it was
+/// (its role; normal without roles).
+void EndRaise();
 #else
 /// Linux: unchanged (normal priority; raising it needs privileges).
 inline void MakeCritical(bool = false) {}
@@ -56,6 +67,13 @@ inline unsigned Available() {
     }
     return std::max(1u, std::thread::hardware_concurrency());
 }
+
+/// 0.4.6 beta 15 part 1: an idle thread cannot be raised again here without privileges.
+inline void* SelfHandle() { return nullptr; }
+inline int CurrentPriority() { return 0; }
+inline bool SetPriority(void*, int) { return false; }
+inline void MakeNormal() {}
+inline void EndRaise() {}
 
 /// The calling thread only runs on otherwise idle cores (falls back to the lowest nice level).
 inline void MakeBackground() {

@@ -142,6 +142,8 @@ private:
     void LogHdrState(bool scrgb, int mode, bool native_frame);
 
 private:
+    /// bbport (0.4.6 beta 17): the first frame was presented (the game window shown for it).
+    bool first_frame_shown = false;
     float expected_ratio{1920.0 / 1080.0f};
     u32 expected_frame_width{1920};
     u32 expected_frame_height{1080};

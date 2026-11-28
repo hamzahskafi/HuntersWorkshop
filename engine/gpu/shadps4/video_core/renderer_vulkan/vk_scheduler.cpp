@@ -17,6 +17,7 @@
 
 #include "bbport_copy.h"
 #include "bbport_platform.h"
+#include "bbport_roles.h"
 #include "bbport_sections.h"
 #include "video_core/renderer_vulkan/vk_gpu_profiler.h"
 #include "bbport_toggles.h"
@@ -111,11 +112,7 @@ namespace {
 /// from 12. One thread records ~75% of a core at 200 FPS (4 cores / 8 threads); the segments
 /// let the stream use more than one.
 u32 RecordingThreadCount() {
-    if (const char* env = std::getenv("BB_VK_RECORD_THREADS")) {
-        return std::clamp(std::atoi(env), 1, 8);
-    }
-    const unsigned available = BbThreads::Available();
-    return available >= 12 ? 3 : available >= 8 ? 2 : 1;
+    return BbRoles::PoolSize(BbRoles::Pool::Recording); // BB_VK_RECORD_THREADS
 }
 
 vk::CommandBuffer BeginCommandBuffer(CommandPool& pool) {
@@ -182,7 +179,7 @@ Scheduler::~Scheduler() {
     if (!workers.empty()) {
         SyncRecording();
         for (auto& worker : workers) {
-            worker->thread.request_stop(); // wakes its wait on worker->cv
+            worker->thread.request_stop(); // its stop callback bumps wake_word, ending its wait
         }
         for (auto& worker : workers) {
             worker->thread.join();
@@ -639,9 +636,12 @@ void Scheduler::MaybeSplit() {
         BbToggle::Disabled(BbToggle::ParallelRecording)) {
         return;
     }
-    // Cutting inside a render pass closes and reopens it: only after a longer stretch.
+    // Cutting inside a render pass closes and reopens it. 0.4.6 beta 21 (docs/gpu-fences.md): the
+    // recording threads cut only where a pass ends, and inside one only past 8 times the segment
+    // size (2 times before). Measured in engine id 139 without the profiler: +0.6-0.8% FPS at the
+    // tester's three spots, a sixth of the cuts, the recording keeping up.
     const size_t bytes = segment_bytes + CurrentChunk().Size();
-    if (bytes < (is_rendering ? 2 * split_bytes : split_bytes)) {
+    if (bytes < (is_rendering ? 8 * split_bytes : split_bytes)) {
         return;
     }
     if (is_rendering) {
@@ -745,7 +745,7 @@ void Scheduler::HandOver() {
     ordered_full.clear();
     // A busy thread picks the new chunks up by itself: waking it is a syscall per draw.
     if (wake) {
-        worker.cv.notify_one();
+        BbPark::Bump(worker.wake_word);
     }
     if (!record_chunk) {
         record_chunk = AcquireChunk();
@@ -859,6 +859,9 @@ void Scheduler::RecorderThread(std::stop_token stoken, u32 index) {
     }
     BbThreads::MakeCritical();
     Worker& worker = *workers[index];
+    // 0.4.6 beta 19: its sleep is on its own word (BbPark): no lock of the condition variable's,
+    // no stop callback registered per wait. Stopping wakes it once.
+    std::stop_callback on_stop{stoken, [&worker] { BbPark::Bump(worker.wake_word, true); }};
     std::vector<std::unique_ptr<RecordChunk>> ordered;
     const auto has_work = [&] {
         return !worker.queue.empty() || OrderedReady();
@@ -889,7 +892,14 @@ void Scheduler::RecorderThread(std::stop_token stoken, u32 index) {
             std::unique_lock lk{recorder_mutex};
             if (!has_work()) {
                 worker.sleeping = true;
-                worker.cv.wait(lk, stoken, has_work);
+                // The word read under the lock: a hand-over after it bumps the word, so the wait
+                // below returns at once.
+                while (!has_work() && !stoken.stop_requested()) {
+                    const u32 seen = worker.wake_word.load(std::memory_order_seq_cst);
+                    lk.unlock();
+                    BbPark::Wait(worker.wake_word, seen);
+                    lk.lock();
+                }
                 worker.sleeping = false;
                 if (!has_work()) {
                     return; // stop requested
@@ -1068,6 +1078,7 @@ void Scheduler::SubmitExecution(SubmitInfo& info) {
     }
 
     EndRendering(GpuSavings::PassBreak::Submission);
+    MarkLastCrumb();
     if (auto* profiler = GpuProfiler::Get(); profiler && profiler->Records(this)) {
         // Until the next submission's first timestamp: mostly the GPU waiting for it.
         profiler->Mark(0x5B317ull, [] { return std::string{"(between submissions: GPU idle)"}; });
@@ -1141,6 +1152,19 @@ void Scheduler::SubmitExecution(SubmitInfo& info) {
     PopPendingOperations();
 }
 
+void Scheduler::MarkLastCrumb() {
+    // Engine id 144 (vk_breadcrumbs.h): one marker a submission, against the ~1,800 a frame saved,
+    // so a hang report reads a stream that finished as finished and a stream of fewer than 32
+    // commands as anything but "finished none" (the builder's review of 144).
+    const u32 id = Breadcrumbs::LastNoted(crumb_stream);
+    if (id == 0) {
+        return;
+    }
+    Record([stream = crumb_stream, id](vk::CommandBuffer cmdbuf) {
+        Breadcrumbs::MarkLast(cmdbuf, stream, id);
+    });
+}
+
 void Scheduler::CheckRecordedFlag() {
     if (recorded_since_submit.load(std::memory_order_relaxed)) {
         return;
@@ -1164,6 +1188,7 @@ void Scheduler::SubmitAsync(SubmitInfo& info) {
         on_submit(info);
     }
     EndRendering(GpuSavings::PassBreak::Submission);
+    MarkLastCrumb();
     if (auto* profiler = GpuProfiler::Get(); profiler && profiler->Records(this)) {
         profiler->Mark(0x5B317ull, [] { return std::string{"(between submissions: GPU idle)"}; });
     }

@@ -25,10 +25,9 @@ export BB_CONFIG=${BB_CONFIG:-$data/config.ini}
 # was set; the others turn off their parts, except a part set on its own.
 # switch-groups-begin
 switch_groups=(
-    "BB_SAFE_MODE=1 force BB_FAST_LOADING=0 BB_FRAME_FIXES=0 BB_HOT_PAGES=0 BB_GX_IN_PLACE=0 BB_NATIVE_CALLS=0 BB_PRECISE_PACING=0 BB_VBLANK_PACING=0 BB_INDIRECT_CLAMP=1 BB_IMAGE_WRITEBACK_GC=0 BB_GPU_THREAD_PRIORITY=0 BB_AUDIO_THREAD_PRIORITY=0 BB_NATIVE_SHADERS=0 BB_SLEEP_SPIN_US=600 BB_ASYNC_PIPELINES=0 BB_OCCLUSION=0 BB_MODS_ENABLED=0 BB_FAST_DRAWS=0 BB_COMPILE_SKIP=0 BB_VRAM_BUDGET=0"
+    "BB_SAFE_MODE=1 force BB_FAST_LOADING=0 BB_FRAME_FIXES=0 BB_HOT_PAGES=0 BB_GX_IN_PLACE=0 BB_NATIVE_CALLS=0 BB_PRECISE_PACING=0 BB_VBLANK_PACING=0 BB_INDIRECT_CLAMP=1 BB_GPU_THREAD_PRIORITY=0 BB_THREAD_ROLES=0 BB_RUNTIME_SYNC=0 BB_AUDIO_THREAD_PRIORITY=0 BB_NATIVE_SHADERS=0 BB_SLEEP_SPIN_US=600 BB_ASYNC_PIPELINES=0 BB_OCCLUSION=0 BB_MODS_ENABLED=0 BB_FAST_DRAWS=0 BB_COMPILE_SKIP=0 BB_VRAM_MANAGER=1 BB_EMPTY_SURFACES=0 BB_WATCH_GAME_TEXTURES=1 BB_IMAGE_OWNERS=0 BB_WATCH_GAME_BUFFERS=1 BB_PIPELINE_BURST=0 BB_LOAD_UPLOAD=0 BB_READY_SURFACES=0 BB_COPY_NOTICE=0 BB_TRANSLATE_AHEAD=0"
     "BB_FAST_DRAWS=0 keep BB_SUBMIT_END_TASKS=0 BB_MEMO_REVALIDATE=0 BB_SAMPLER_MEMO=0 BB_DRAIN_SLEEP=0 BB_FAULT_SKIP_TEXTURES=0"
     "BB_COMPILE_SKIP=0 keep BB_SKIP_UNCOMPILED=0 BB_LATE_PIPELINE_BIND=0 BB_PIPELINE_TAKE=0"
-    "BB_VRAM_BUDGET=0 keep BB_GC_PRESSURE_PERCENT=0 BB_GC_PRESSURE_SECONDS=0"
     "BB_SYNC=legacy keep BB_HONEST_LABELS=0 BB_GX_IN_PLACE=0 BB_PIPE_SIGNALS=0 BB_SUBMIT_LOCK=gpu BB_WORK_RETIRED=0 BB_ZPASS_IN_ORDER=0 BB_FENCE_ORDER=all BB_DMA_WAITS=all BB_HOST_COPY_WAITS=all BB_PRODUCER_CHECK=1"
 )
 # switch-groups-end
@@ -114,6 +113,19 @@ if [[ -z ${PYTHON:-} ]]; then echo 'Install Python 3 or set PYTHON.' >&2; exit 1
 # BB_GAME_DIR: the game's folder (eboot.bin, sce_module, ...); default next to this directory.
 game=${BB_GAME_DIR:-../CUSA03173}
 if [[ ! -f $game/eboot.bin ]]; then echo "No eboot.bin in $game (set BB_GAME_DIR)." >&2; exit 1; fi
+# 0.4.6 beta 17: the start's splash (bb-splash beside bb-probe: gpu/splash/main.cpp), from here until
+# the game's first frame. This script and the engine write the step they are on into its status file
+# (gpu/splash/status.h); it closes by itself when this process (bb-probe after the exec) ends.
+# BB_SPLASH=0: none. A restart (probe.c runtime_restart runs this script again) starts its own.
+unset BB_SPLASH_STATUS
+splash=$(dirname -- "${BB_PROBE:-out/bb-probe}")/bb-splash
+if [[ ${BB_SPLASH:-1} != 0 && -x $splash ]]; then
+    splash_status=${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/hunters-workshop-splash-$$.txt
+    if printf '%-63s\n' '1 prepare 0 0 1' 2>/dev/null > "$splash_status"; then
+        export BB_SPLASH_STATUS=$splash_status
+        "$splash" --status "$splash_status" --parent $$ --game-dir "$game" &
+    fi
+fi
 # Configure the selected online backend on Linux, as bb-start does on Windows.
 # The launcher already supplies the signed-in account in the environment. Capture changes
 # privately: credentials must never be printed into the game log or evaluated as shell code.
@@ -156,7 +168,7 @@ fi
 # (frame_rate.cpp; BB_FRAME_FIXES=0: the older FPS++ patches above 60). BB_PATCHES adds patch names ("a;b").
 # Fixes for the game's own bugs (gpu/shim/engine/game_fixes.cpp; the recording's compression level in
 # scripts/patches.py): BB_GAME_FIXES=0 leaves them out, BB_GAME_FIXES_SKIP the ones it names (job_lock,
-# job_nodes, job_slots, blur_samples, fmod_ring, hit_cap, gx_query, deflate).
+# job_nodes, job_slots, blur_samples, fmod_ring, hit_cap, gx_query, deflate, job_barrier).
 # The log (the launcher's Settings > Log, capture and extra variables): BB_LOG_LEVEL=detailed brings
 # back every save mount, thread, semaphore and memory map, the draw counts every 5 s, the job pools'
 # caches and the GPU side's info messages (the driver's missing extensions and formats among them);
@@ -207,13 +219,10 @@ elif [[ -n ${scaled_output:-} ]]; then
 fi
 "$PYTHON" scripts/patches.py --out "$out" --fps "$fps" --extra "${BB_PATCHES:-}" --settings "$BB_CONFIG" --game-dir "$game" --render-res "${BB_RENDER_RES:-}" --output-res "${BB_OUTPUT_RES:-}" \
     --patches-dir "${BB_PATCHES_DIR:-$data/patches}" --patches-config "${BB_PATCHES_CONFIG:-$data/patches.json}"
-# The GPU cache as bb-start.exe keeps it on Windows: recompiled by bb-shader-lab when the shader
-# compiler changed, then the shipped shader catalog seeded, so pipelines are built at the start
-# instead of in play. Packages only (packaging/linux/bb-start sets BB_GPU_USER_DIR).
-if [[ -n ${BB_PREBUILT:-} && -n ${BB_GPU_USER_DIR:-} ]]; then
-    "$PYTHON" scripts/gpu_cache.py --cache "$BB_GPU_USER_DIR/cache" --engine . --out "$out" \
-        --package "$data/package.json" --game "$game" || echo 'GPU cache: not prepared (scripts/gpu_cache.py failed)' >&2
-fi
+# The GPU cache (translated again after an engine or GPU change, the shipped shader catalog seeded) is
+# settled by the engine at its start since 0.4.6 beta 17 (PipelineCache::WarmUp); it finds the game
+# folder for the catalog's shaders, and the start's splash its art, here.
+export BB_GAME_MERGED=$game
 # Background upload of the game's GPU memory into VRAM ahead of use (BufferCache::Preupload):
 # 1 = only memory already in VRAM that the game rewrote (no new VRAM), 2 = all of it (~3 GB more
 # VRAM), 0 = off.
@@ -242,6 +251,10 @@ if [[ -n ${BB_PREBUILT:-} ]]; then
 else
     bash build.sh
     probe=${BB_PROBE:-out/bb-probe}  # BB_PROBE: a wrapper (gdb) around it
+fi
+# Written over the last step, never made again: a splash that closed removed it.
+if [[ -n ${BB_SPLASH_STATUS:-} && -f $BB_SPLASH_STATUS ]]; then
+    printf '%-63s\n' '2 engine 0 0 2' 1<> "$BB_SPLASH_STATUS" 2>/dev/null || true
 fi
 probe_args=("$out/boot-linked.bin" --content-profile "$out/content.bin" --patches "$out/patches.bin" --app0 "$game" --user "${BB_USER_DIR:-$data/user}" --timeout "${BB_TIMEOUT:-0}" "$@")
 if [[ -n ${mod_game:-} ]]; then

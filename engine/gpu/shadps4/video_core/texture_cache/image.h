@@ -50,7 +50,8 @@ struct UniqueImage {
         : device{other.device}, allocator{std::exchange(other.allocator, VK_NULL_HANDLE)},
           allocation{std::exchange(other.allocation, VK_NULL_HANDLE)},
           image{std::exchange(other.image, VK_NULL_HANDLE)}, image_ci{std::move(other.image_ci)},
-          size_bytes{std::exchange(other.size_bytes, 0)} {}
+          size_bytes{std::exchange(other.size_bytes, 0)},
+          in_system_memory{std::exchange(other.in_system_memory, false)} {}
     UniqueImage& operator=(UniqueImage&& other) {
         if (this == &other) return *this;
         Destroy();
@@ -60,10 +61,13 @@ struct UniqueImage {
         allocation = std::exchange(other.allocation, VK_NULL_HANDLE);
         image_ci = std::move(other.image_ci);
         size_bytes = std::exchange(other.size_bytes, 0);
+        in_system_memory = std::exchange(other.in_system_memory, false);
         return *this;
     }
 
-    void Create(const vk::ImageCreateInfo& image_ci);
+    /// `may_fail` (0.4.6 beta 4, an image prepared on a game thread): VRAM refusing it leaves no image
+    /// (false) instead of stopping.
+    bool Create(const vk::ImageCreateInfo& image_ci, bool may_fail = false);
 
     void Destroy();
 
@@ -82,11 +86,19 @@ public:
     vk::Image image{};
     vk::ImageCreateInfo image_ci{};
     vk::DeviceSize size_bytes{};
+    /// 0.4.6 beta 5: its memory is system memory, not VRAM (BbStats::system_images).
+    bool in_system_memory = false;
 };
+
+/// 0.4.6 beta 8 (part 3): a dead target's Vulkan image that the next Image constructed on this thread
+/// takes instead of allocating one, when their creation info is the same (TextureCache::FindImage);
+/// left as it is otherwise.
+inline thread_local UniqueImage* t_adopt_image = nullptr;
 
 struct Image {
     explicit Image(const Vulkan::Instance& instance, Vulkan::Runtime& runtime,
-                   Common::SlotVector<ImageView>& slot_image_views, const ImageInfo& info);
+                   Common::SlotVector<ImageView>& slot_image_views, const ImageInfo& info,
+                   bool may_fail = false);
     ~Image();
 
     Image(const Image&) = delete;
@@ -113,6 +125,22 @@ struct Image {
     bool IsTracked() {
         return track_addr != 0 && track_addr_end != 0;
     }
+
+    /// 0.4.6 beta 4: whether it got its Vulkan image (one made with `may_fail` may not have).
+    bool HasMemory() const {
+        return backing && backing->image;
+    }
+
+    /// 0.4.6 beta 4: an image built when the game created its texture was uploaded without hashing
+    /// its memory (RefreshImage): the hashes are only compared once the GPU has drawn into it. Taken
+    /// before anything marks it GpuModified (and by RefreshImage): of the memory as uploaded if it
+    /// is unchanged since (tracked, not written), else none (the next refresh uploads it).
+    void ResolveDeferredHashes() {
+        if (hashes_deferred) [[unlikely]] {
+            ResolveDeferredHashesNow();
+        }
+    }
+    void ResolveDeferredHashesNow();
 
     bool SafeToDownload() const {
         return True(flags & ImageFlagBits::GpuModified) && False(flags & (ImageFlagBits::Dirty));
@@ -165,10 +193,59 @@ public:
     /// bbport: counts accesses that may write the image (Runtime::Transit with a write access,
     /// backing swaps): unchanged, the image holds what it held (BufferCache::tile_memos).
     u64 write_seq = 0;
-    /// Hunter's Workshop (StoreTiledImage): the collector does not try storing this image again
+    /// Hunter's Workshop (BeginStore): the collector does not try storing this image again
     /// before this tick; each failure doubles the wait (store_failures).
     u64 store_retry_tick = 0;
     u8 store_failures = 0;
+    /// Beta 14: a store into the game's memory is under way (TextureCache::BeginStore).
+    bool store_pending = false;
+    /// Beta 16: built ahead of its first draw (TextureCache::BuildAhead): 1 not drawn yet, 2 drawn.
+    u8 ahead = 0;
+    /// 0.4.6 beta 4: its next refresh uploads without hashing (skip_hashes_once), and the hashes of
+    /// that upload are still to be taken (hashes_deferred, ResolveDeferredHashes).
+    bool skip_hashes_once = false;
+    bool hashes_deferred = false;
+    /// Beta 15 (research): the collector pass at which the game destroyed the texture at its address
+    /// (engine/gx_resources.h); 0: none.
+    u64 gx_dead_tick = 0;
+    /// 0.4.6 beta 5: when it was registered (steady clock, ns); whether the game has made a resource
+    /// in its memory since (TextureCache::ProcessGxCreated: its contents are no one's now), and the
+    /// scheduler's tick at the collector pass before that resource was made (an image the GPU drew
+    /// and used from then on may hold the new resource's contents).
+    u64 registered_ns = 0;
+    u64 reuse_tick = 0;
+    bool dead_by_reuse = false;
+    /// 0.4.6 beta 7: the image of a YEBIS texture YEBIS destroyed waits until then (steady clock, ns)
+    /// for the target it re-creates over the same memory (ProcessGxCreated hands it over).
+    u64 dead_grace_ns = 0;
+    /// 0.4.6 beta 8: the game resource at its memory when it was registered (GxResources::Owner), and
+    /// when that resource is a surface the game made without its data for the GPU to write
+    /// (GxResources::SurfaceAt), its creation time (0: none). Such an image never takes the game's
+    /// memory: its first use starts it empty (TextureCache::StartSurface), and a CPU write to its pages
+    /// while that resource lives is counted, not uploaded (InvalidateMemory).
+    u64 surface_ns = 0;
+    u8 gx_owner = 0;
+    bool gx_whole = false; ///< that resource starts where the image does
+    /// 0.4.6 beta 10: the gx_dead_tick at which a draw's taking it back was counted (NoteOwnerTake), and
+    /// at which its being kept by a guess was (FreeDeadImages: it is on the dead list once for its
+    /// texture's destroy and again for the resource made over it).
+    u64 owner_noted_tick = 0;
+    u64 guess_noted_tick = 0;
+    /// 0.4.6 beta 11: the scheduler's tick when it was found dead (its texture destroyed, or something
+    /// newer made over it): a use at or after it is a use since (DeadImageState, the owner rule).
+    u64 dead_sched_tick = 0;
+
+    /// 0.4.6 beta 8 (part 4; the targets' default since beta 9, textures made with their data's since
+    /// beta 10): its pages were left unwatched (the game's calls tell its writes); its track range is
+    /// bookkeeping only.
+    bool calls_watch = false;
+    /// 0.4.6 beta 16: the resource at its memory was made with its data (registration), and how many
+    /// times the cache marked it (possibly) written: the texture net counts a change of its memory with no
+    /// mark since its last look as a write no call told.
+    bool gx_with_data = false;
+    u32 cpu_marks = 0;
+    /// 0.4.6 beta 16, YEBIS by its calls: it lies in YEBIS's pool (registration; watch_rules.h).
+    bool gx_yebis_pool = false;
     ImageId depth_id{};
     u64 depth_uid{};
     u64 image_uid{};

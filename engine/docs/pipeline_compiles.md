@@ -219,7 +219,28 @@ had under their right stages too. The catalog was exported again after it:
 The 8 left are keys whose fragment shader reads the motion vectors their vertex shader does not
 write.
 
+**0.4.6 beta 17: a stage with no bindings at all.** The tester's cache left 6 of 560 keys out at
+every start (`--check-cache`: "a stage compiled after another fragment shader (binding start)") and
+built them again in play every session. They were made by the current engine: play reuses a stage
+with no bindings at all (no buffer, image, FMASK or sampler, the engine's own included) beside any
+fragment shader, since where its bindings start changes nothing in its module or the layout
+(`StageSpecialization::operator==`), and saves the key with the permutation it found first; the
+warm-up compared the start of every stage. `--fix-keys` at a rebuild gave those stages a permutation
+with the matching start, but play went on finding the first one and saving the same keys again. Now
+one rule, `StageSpecialization::HasNoBindings`, serves play, the warm-up (`LoadGraphicsPipeline`),
+`--check-cache` and `--fix-keys` (which leaves such stages as they are): the warm-up builds what play
+builds, and `--check-cache`'s layout check covers those pipelines too. The tester's run of engine id
+120 (`0cd9fa7c`): 560 of 560 keys built at the start after the rebuild, no pipeline compiled in play
+in the places of earlier sessions, 27 in an area new to the session; `--check-cache` afterwards: 587 of
+587, no layout mismatched.
+
 ## A catalog per GPU vendor (0.9.37 beta 9)
+
+**Replaced in Hunter's Workshop 0.4.6 beta 17 (engine id 121):** one catalog for every vendor,
+`engine/shader-catalog/CUSA03173` (Lantern 0.9.43's NVIDIA and AMD catalogs merged: each lost nothing
+under the other's profile), seeded by the engine at its start with this PC's profile
+(`SettleGpuCache`, `memory-model.md`, "First sight"); a profile change translates the cache again
+instead of emptying it. What follows is the earlier design.
 
 The catalogs: `engine\shader-catalog\<game>` (NVIDIA, as before) and
 `engine\shader-catalog\amd\<game>`, made from a player's RX 7800 XT catalog (vendor 1002, device

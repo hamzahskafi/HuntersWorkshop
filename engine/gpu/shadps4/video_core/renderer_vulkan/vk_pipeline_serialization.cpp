@@ -4,8 +4,11 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
+#include <span>
 #include <atomic>
 #include <mutex>
 #include <thread>
@@ -23,6 +26,9 @@
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
+#include "engine/startup.h"
+#include "shader_recompiler/native/capture.h"
+#include "shader_recompiler/native/tone_curve.h"
 
 namespace Serialization {
 /* You should increment versions below once corresponding serialization scheme is changed. */
@@ -332,6 +338,7 @@ bool GraphicsPipeline::SerializationSupport::Deserialize(Serialization::Archive&
 }
 
 bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar, u32 version) {
+    warmup_motion_disagrees = false;
     sel.graphics_key.Deserialize(ar);
     // 0.4.4 beta 15: keys saved before it carry the motion attachment as RGBA32F.
     if (sel.graphics_key.motion_vectors) {
@@ -385,9 +392,13 @@ bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar, u32 version
         // its binding count needs the draw's descriptor, which the warm-up does not have.
         // The layout is built from the program's Info (the first permutation loaded): it must
         // have the bindings of this permutation's own record.
+        // 0.4.6 beta 17: a stage with no bindings at all starts anywhere, as play reuses it
+        // (StageSpecialization::HasNoBindings): its pipelines were left out at every start and
+        // compiled again in play every session (6 of the tester's 560 keys).
         const auto& layout_info = *sel.infos[stage_idx];
-        if (warmup_mip_bindings || warmup_start[stage_idx].unified != expected.unified ||
-            warmup_start[stage_idx].buffer != expected.buffer ||
+        const bool start_differs = warmup_start[stage_idx].unified != expected.unified ||
+                                   warmup_start[stage_idx].buffer != expected.buffer;
+        if (warmup_mip_bindings || (start_differs && !warmup_no_bindings[stage_idx]) ||
             layout_info.buffers.size() != warmup_count[stage_idx].buffer ||
             layout_info.buffers.size() + layout_info.images.size() + layout_info.samplers.size() !=
                 warmup_count[stage_idx].unified) {
@@ -412,6 +423,9 @@ bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar, u32 version
     // writes (undefined motion, found by validation), a vertex shader that reads the motion set
     // with a key whose layout has none (invalid Vulkan, a crash on stricter drivers; found by
     // Lantern 0.9.39 beta 26), or a motion attachment nothing writes.
+    // 0.4.6 beta 17: such a key never loads (the records under its stages' names stay this
+    // cache's), so the warm-up removes it: 46 of the shipped catalog's keys were left out at every
+    // start.
     const auto& fs_runtime = sel.runtime_infos[u32(Shader::SwStage::Fragment)];
     const auto& vs_runtime = sel.runtime_infos[u32(Shader::SwStage::Vertex)];
     const bool key_motion = sel.graphics_key.motion_vectors != 0;
@@ -419,6 +433,7 @@ bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar, u32 version
     const bool has_fs = sel.graphics_key.stage_hashes[u32(Shader::SwStage::Fragment)] != 0;
     const bool vs_motion = has_vs && vs_runtime.hw_stage == Shader::HwStage::Vertex && vs_runtime.hw.vs.motion_vectors;
     if (vs_motion != key_motion || (has_fs && fs_runtime.hw.fs.motion_vectors != key_motion)) {
+        warmup_motion_disagrees = true;
         return false;
     }
 
@@ -485,6 +500,7 @@ bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage, 
     if (stage < MaxShaderStages) {
         const auto& own = program->info;
         warmup_start[stage] = spec.start;
+        warmup_no_bindings[stage] = spec.HasNoBindings();
         warmup_count[stage] = {};
         warmup_count[stage].buffer = u32(own.buffers.size());
         warmup_count[stage].unified = u32(own.buffers.size() + own.images.size() + own.samplers.size());
@@ -512,15 +528,154 @@ bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage, 
     return true;
 }
 
+// --- 0.4.6 beta 17: the GPU cache settled by the engine at its start (docs/memory-model.md, "First
+// sight"). bb-start did it before the engine ran, without this PC's profile: a catalog was seeded with
+// the catalog's own profile, and the engine then emptied the folder for another profile. Here, before
+// the warm-up lists the folder: a new profile (another GPU, a driver with another feature, the
+// profile's engine switches) and a new engine (the shader compiler's identity, out/gpu-cache.id) have
+// the states translated again (bb-shader-lab --recompile-cache), and the shipped catalog
+// (engine/shader-catalog/<game>) is seeded with this PC's profile, once per catalog. The lab runs as a
+// child process (a compiler crash ends it, not the game); the splash shows its progress.
+namespace {
+std::vector<u8> ReadWhole(const std::filesystem::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
+
+std::string ReadTrimmed(const std::filesystem::path& path) {
+    const auto bytes = ReadWhole(path);
+    std::string text(bytes.begin(), bytes.end());
+    while (!text.empty() && (text.back() == '\n' || text.back() == '\r' || text.back() == ' ')) text.pop_back();
+    return text;
+}
+
+bool HasStates(const std::filesystem::path& folder) {
+    std::error_code error;
+    for (const auto& entry : std::filesystem::directory_iterator(folder, error)) {
+        if (entry.path().extension() == Shader::Native::StateExtension) return true;
+    }
+    return false;
+}
+
+/// The lab with `args`: its progress to the splash, its summary lines ("Shader catalog: ...",
+/// "Shader cache: ...") kept for the log.
+int RunLab(const std::filesystem::path& lab, const std::vector<std::string>& args, std::string& catalog_line,
+           std::string& cache_line) {
+    return BbStartup::RunTool(lab, args, [&](const std::string& row) {
+        unsigned long long done = 0, total = 0;
+        if (std::sscanf(row.c_str(), "@PROGRESS %llu %llu", &done, &total) == 2) {
+            BbStartup::SetProgress(done, total);
+        } else if (row.rfind("Shader catalog: ", 0) == 0) {
+            catalog_line = row.substr(16);
+        } else if (row.rfind("Shader cache: ", 0) == 0) {
+            cache_line = row.substr(14);
+        }
+    });
+}
+
+void SettleGpuCache(const Shader::Profile& profile) {
+    namespace fs = std::filesystem;
+    auto& database = Storage::DataBase::Instance();
+    const fs::path folder = database.FolderPath();
+    // The archive, or the tone curve's own folder (the lab translates without the curve): as before.
+    if (folder.empty() || Shader::Native::ToneCurveEnabled()) return;
+    const fs::path out = BbStartup::ProgramDir();
+    const fs::path lab = BbStartup::ToolPath("bb-shader-lab");
+    std::error_code error;
+    const bool have_lab = !lab.empty() && fs::is_regular_file(lab, error);
+    const std::string game = folder.filename().string();
+    const auto since = [](std::chrono::steady_clock::time_point start) {
+        return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+    };
+    const std::span<const u8> profile_bytes{reinterpret_cast<const u8*>(&profile), sizeof(profile)};
+
+    const auto stored = ReadWhole(folder / "profile.bin");
+    const bool first = stored.empty();
+    const bool new_profile = stored.size() != sizeof(profile) || std::memcmp(stored.data(), &profile, sizeof(profile)) != 0;
+    std::string identity = ReadTrimmed(out / "gpu-cache.id");
+    if (!identity.empty()) identity = "gpu " + identity;
+    const bool new_engine = !identity.empty() && ReadTrimmed(folder / "engine.txt") != identity;
+    if (new_profile) {
+        database.SaveNow(Storage::BlobType::ShaderProfile, "profile", profile_bytes);
+    }
+    if ((new_profile || new_engine) && HasStates(folder)) {
+        const bool for_gpu = new_profile && !first;
+        const char* states_off = std::getenv("BB_SHADER_STATES");
+        bool rebuilt = false;
+        if (have_lab && !(states_off && states_off[0] == '0')) {
+            BbStartup::SetStep(for_gpu ? BbStartup::Step::CacheForGpu : BbStartup::Step::CacheUpdate);
+            const auto start = std::chrono::steady_clock::now();
+            std::string catalog_line, cache_line;
+            const int code = RunLab(lab, {"--recompile-cache", BbStartup::Utf8(folder)}, catalog_line, cache_line);
+            rebuilt = code == 0 && !cache_line.empty();
+            if (rebuilt) {
+                std::printf("GPU cache %s: %s (%s; %.1f s)\n", game.c_str(), cache_line.c_str(),
+                            for_gpu ? "translated for this GPU" : "translated for this engine", since(start));
+            } else {
+                std::printf("GPU cache %s: not translated again (bb-shader-lab exit %d); started again\n", game.c_str(), code);
+            }
+        } else {
+            std::printf("GPU cache %s: %s; started again\n", game.c_str(),
+                        have_lab ? "shader states off (BB_SHADER_STATES=0)" : "no bb-shader-lab among the engine's helpers");
+        }
+        if (!rebuilt) {
+            database.Clear();
+            database.SaveNow(Storage::BlobType::ShaderProfile, "profile", profile_bytes);
+        }
+    }
+    if (!identity.empty()) {
+        std::ofstream(folder / "engine.txt", std::ios::trunc) << identity << '\n';
+    }
+
+    // The catalog shipped with the engine, once per catalog (its files' count and size, as shipped).
+    const char* catalog_off = std::getenv("BB_SHADER_CATALOG");
+    if (!have_lab || (catalog_off && catalog_off[0] == '0')) return;
+    const fs::path catalog = out.parent_path() / "shader-catalog" / game;
+    if (!fs::is_regular_file(catalog / "profile.bin", error)) return;
+    std::uint64_t files = 0, bytes = 0;
+    for (const auto& entry : fs::directory_iterator(catalog, error)) {
+        std::error_code e;
+        if (!entry.is_regular_file(e)) continue;
+        ++files;
+        bytes += entry.file_size(e);
+    }
+    const fs::path marker = folder / ("catalog-" + std::to_string(files) + "-" + std::to_string(bytes) + ".applied");
+    if (fs::exists(marker, error)) return;
+    fs::path game_folder = BbStartup::EnvPath("BB_GAME_MERGED");
+    if (game_folder.empty()) game_folder = BbStartup::EnvPath("BB_GAME_DIR");
+    const fs::path eboot = out / "eboot.elf";
+    if (game_folder.empty() || !fs::is_directory(game_folder / "dvdroot_ps4", error) || !fs::is_regular_file(eboot, error)) {
+        std::printf("GPU cache %s: the shader catalog not seeded (no game folder or eboot.elf)\n", game.c_str());
+        return;
+    }
+    BbStartup::SetStep(BbStartup::Step::Catalog);
+    const auto start = std::chrono::steady_clock::now();
+    std::string catalog_line, cache_line;
+    const int code = RunLab(lab,
+                            {"--seed-cache", BbStartup::Utf8(catalog), BbStartup::Utf8(folder),
+                             BbStartup::Utf8(game_folder), BbStartup::Utf8(eboot)},
+                            catalog_line, cache_line);
+    if (!catalog_line.empty()) std::printf("GPU cache %s: %s\n", game.c_str(), catalog_line.c_str());
+    if (!cache_line.empty()) std::printf("GPU cache %s: %s (%.1f s)\n", game.c_str(), cache_line.c_str(), since(start));
+    if (code != 0) std::printf("GPU cache %s: the shader catalog's seed ended with exit %d\n", game.c_str(), code);
+    // Once per catalog, whatever came of it.
+    std::ofstream(marker, std::ios::trunc) << code << '\n';
+    std::fflush(stdout);
+}
+} // namespace
+
 void PipelineCache::WarmUp() {
     {
         std::scoped_lock lock{progress_mutex};
         precache_progress = {};
     }
     const auto complete = [] {
-        std::scoped_lock lock{progress_mutex};
-        precache_progress.rejected = precache_progress.total - precache_progress.loaded;
-        precache_progress.complete = true;
+        {
+            std::scoped_lock lock{progress_mutex};
+            precache_progress.rejected = precache_progress.total - precache_progress.loaded;
+            precache_progress.complete = true;
+        }
+        BbStartup::SetStep(BbStartup::Step::Starting);
     };
     if (!EmulatorSettings.IsPipelineCacheEnabled()) {
         complete();
@@ -533,11 +688,14 @@ void PipelineCache::WarmUp() {
         return;
     }
     auto& database = Storage::DataBase::Instance();
+    SettleGpuCache(profile);
     const auto names = database.ListBlobs(Storage::BlobType::PipelineKey);
     {
         std::scoped_lock lock{progress_mutex};
         precache_progress.total = static_cast<u32>(names.size());
     }
+    BbStartup::SetStep(BbStartup::Step::Shaders);
+    BbStartup::SetProgress(0, names.size());
 
     // Check if cache is compatible
     std::vector<u8> profile_data{};
@@ -679,6 +837,15 @@ void PipelineCache::WarmUp() {
     // on BB_WARMUP_THREADS threads below; the game starts once all are there, as before.
     WarmupJobs batch;
     std::vector<const std::string*> job_names;
+    // 0.4.6 beta 17: keys whose record did not read, whose pipeline the driver refused, or whose
+    // stages and key disagree on object motion, removed alone after the warm-up (a catalog of
+    // another vendor may hold a few); the whole cache was emptied for one before.
+    std::vector<std::string> dropped;
+    u32 disagreeing = 0;
+    std::mutex dropped_mutex;
+    const auto counted = [&] { // under progress_mutex
+        BbStartup::SetProgress(precache_progress.loaded + precache_progress.rejected, precache_progress.total);
+    };
     warmup_jobs = &batch;
     for (const auto& name : names) {
         bool loaded = false;
@@ -686,6 +853,7 @@ void PipelineCache::WarmUp() {
         if (crashed.contains(name)) {
             std::scoped_lock lock{progress_mutex};
             ++precache_progress.rejected;
+            counted();
             continue;
         }
         building.assign(1, name);
@@ -702,9 +870,14 @@ void PipelineCache::WarmUp() {
             if ((version == 5 || version == 6 || version == Serialization::PipelineKeyVersion) &&
                 is_compute <= 1) {
                 loaded = is_compute ? LoadComputePipeline(ar) : LoadGraphicsPipeline(ar, version);
+                if (!loaded && !is_compute && warmup_motion_disagrees) {
+                    ++disagreeing;
+                    dropped.push_back(name);
+                }
             }
         } catch (const std::exception& error) {
             ++damaged;
+            dropped.push_back(name);
             LOG_WARNING(Render, "Skipping pipeline {}: {}", name, error.what());
         }
         job_names.resize(batch.jobs.size(), &name);
@@ -713,10 +886,13 @@ void PipelineCache::WarmUp() {
         }
         std::scoped_lock lock{progress_mutex};
         loaded ? ++precache_progress.loaded : ++precache_progress.rejected;
+        counted();
     }
     warmup_jobs = nullptr;
     const auto rebuilt_at = std::chrono::steady_clock::now();
-    u32 threads = std::clamp<u32>(BbThreads::Available() > 1 ? BbThreads::Available() - 1 : 1, 1, 8);
+    // 0.4.6 beta 15 part 1: all logical processors but one, at most 16 (was 8): nothing else runs
+    // before the game starts.
+    u32 threads = std::clamp<u32>(BbThreads::Available() > 1 ? BbThreads::Available() - 1 : 1, 1, 16);
     if (const char* env = std::getenv("BB_WARMUP_THREADS"); env && env[0]) {
         threads = std::clamp(std::atoi(env), 1, 32);
     }
@@ -739,9 +915,12 @@ void PipelineCache::WarmUp() {
             if (!created) {
                 refused.fetch_add(1);
                 LOG_WARNING(Render, "Skipping pipeline {}: the driver refused it", *job_names[i]);
+                std::scoped_lock lock{dropped_mutex};
+                dropped.push_back(*job_names[i]);
             }
             std::scoped_lock lock{progress_mutex};
             created ? ++precache_progress.loaded : ++precache_progress.rejected;
+            counted();
         }
     };
     building.clear();
@@ -753,35 +932,23 @@ void PipelineCache::WarmUp() {
     for (auto& thread : pool) {
         thread.join();
     }
-    // A pipeline the driver refuses is a damaged cache entry, as one whose record fails to load.
-    damaged += refused.load();
     sel = {.regs = regs};
     if (guard.is_open()) {
         guard.close();
         std::error_code ignored;
         std::filesystem::remove(guard_path, ignored);
     }
-    if (damaged) {
-        // A failed reconstruction may have inserted earlier stages of the damaged record.
-        // 0.4 discards those too, while retaining the fork's preload progress reporting.
-        graphics_pipelines.clear();
-        compute_pipelines.clear();
-        std::unordered_set<VkShaderModule> modules;
-        for (const auto& [_, program] : program_cache) {
-            if (!program) continue;
-            for (const auto& permutation : program->modules) {
-                if (permutation.module) modules.insert(VkShaderModule(permutation.module));
-            }
+    // 0.4.6 beta 17: a key whose record did not read, whose pipeline the driver refused, or whose
+    // stages and key disagree on object motion, removed alone (it compiles again in play if a draw
+    // needs it). The stages that loaded for it stay: each was read whole and checked before it
+    // joined its program. Before, one emptied the whole cache.
+    if (!dropped.empty()) {
+        for (const auto& name : dropped) {
+            database.Remove(Storage::BlobType::PipelineKey, name);
         }
-        for (const auto module : modules) instance.GetDevice().destroyShaderModule(vk::ShaderModule{module});
-        program_cache.clear();
-        database.Clear();
-        database.FinishPreload();
-        profile_data.resize(sizeof(profile));
-        std::memcpy(profile_data.data(), &profile, sizeof(profile));
-        database.Save(Storage::BlobType::ShaderProfile, "profile", std::move(profile_data));
-        std::scoped_lock lock{progress_mutex};
-        precache_progress.loaded = 0;
+        std::printf("GPU cache: %zu pipeline keys removed (%u records unreadable, %u pipelines the driver "
+                    "refused, %u whose stages and key disagree on object motion)\n",
+                    dropped.size(), damaged, refused.load(), disagreeing);
     }
     const auto status = GetPrecacheProgress();
     LOG_INFO(Render, "Preloaded {} of {} pipelines ({} rejected)", status.loaded, status.total,

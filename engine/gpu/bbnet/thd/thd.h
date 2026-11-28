@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // The Hunter's Dream backend, the engine's online play. BB_NET_BACKEND=thd (online_pool=huntersdream)
-// answers the game's NP, NetCtl and sceNet imports with droogie/bbhost's (566184a; see
+// answers the game's NP, NetCtl and sceNet imports with droogie/bbhost's (566184a; since 0.4.6 beta
+// 14 its signaling, P2P port and NP utilities follow v0.2.35, a317321; see
 // licenses/SHADPS4-NETWORK.md): matching and signaling over The Hunter's Dream's session service, its
 // STUN and relay, the PS4 P2P framing bbhost players use, and WebAPI answered here. The game's own
 // HTTP stays shadPS4's sceHttp, with the account token and ruleset added. Offline nothing here runs.
@@ -28,6 +29,10 @@ void Register(Core::Loader::SymbolsResolver* sym);
 void SetImage(std::uint8_t* image, std::uint64_t size);
 // sceHttp: the headers the game server binds a request to the account and ruleset with.
 void AddGameHeaders(std::vector<std::pair<std::string, std::string>>& headers);
+// 0.4.6 beta 14 part 6: sceHttp's answer to one of the game's requests. A 401 in the account
+// service's words ({ResKind, Message}) is the server refusing this PC's sign-in: the game is told it
+// is signed out from then on (bbhost 2602c3c).
+void GameReply(int status, const std::string& body);
 // The process is ending (the window closed, or Quit to Desktop): out of the server's room before it
 // does, as the game's own LeaveRoom would have been. ExitBegin sends, from a thread of its own, the
 // leave for the room the game is in and any leave the NP thread has not sent yet; ExitWait returns

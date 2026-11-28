@@ -113,8 +113,10 @@ to the image's real address. Such patches used to stop the start with the error
 # TAA sharpening
 
 The `sharpen` and `sharpness` settings also work for TAA, in the launcher and the in-game menu. The
-range is **0…2** (above 1 the RCAS change is extrapolated, stronger than AMD's maximum); at 0, or
-with the switch off, there is no extra pass. RCAS is applied to the finished scene before the HUD.
+strength is a **percentage** of RCAS's maximum, 0-100%, 25% by default (0.4.6 beta 16, the
+`sharpening` key; it was `sharpness`, 0…2, extrapolated above 1), the same sharpening as after AMD FSR
+and DLSS (`upscaler.md`, "Sharpening"), done in the merge or the copy into the UI image rather than a
+pass of its own; at 0%, or with the switch off (the default from 0.4.6 beta 16), nothing is sharpened. RCAS is applied to the finished scene before the HUD.
 The TAA history keeps the colour before sharpening, so that sharpening does not build up over
 repeated accumulation. Flat areas keep their original colour, HDR included; no extra buffer is
 needed.

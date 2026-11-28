@@ -68,14 +68,15 @@ if [[ ! -f out/gpu/build.ninja || $(cat out/gpu/bb-configure.txt 2>/dev/null) !=
 fi
 echo "GPU library: PGO $pgo, LTO ${BB_LTO:-ON}, march ${BB_MARCH:-default}"
 # A failed GPU build must stop here: an older libbbgpu.so would otherwise be used silently.
-if ! ninja -C out/gpu ${BB_JOBS:+-j "$BB_JOBS"} bbgpu bb-engine-assets bb-shader-lab > out/gpu-build.log 2>&1; then
+if ! ninja -C out/gpu ${BB_JOBS:+-j "$BB_JOBS"} bbgpu bb-engine-assets bb-shader-lab bb-splash > out/gpu-build.log 2>&1; then
     grep -v '^\[' out/gpu-build.log | tail -40 >&2
     echo 'GPU library build failed (full log: out/gpu-build.log)' >&2; exit 1
 fi
 cp -f out/gpu/bb-engine-assets* out/
-# The cache recompile after a compiler change (start/main.cpp RecompileGpuCache).
-cp -f out/gpu/bb-shader-lab* out/ 2>/dev/null || true
-# The GPU cache's identity (start/main.cpp ResetStaleGpuCache): a hash of the sources that decide
+# The GPU cache settled at the engine's start (translated again, the catalog seeded: the engine runs
+# it, vk_pipeline_serialization.cpp SettleGpuCache), and the start's splash (gpu/splash/main.cpp).
+cp -f out/gpu/bb-shader-lab* out/gpu/bb-splash* out/ 2>/dev/null || true
+# The GPU cache's identity (SettleGpuCache, out/gpu-cache.id): a hash of the sources that decide
 # what the shader and pipeline caches hold - the shader recompiler, the register layouts in the
 # keys, the keys and their records, the shader patches. An engine update that leaves them alone
 # keeps the players' compiled shaders; one that changes them starts the caches again (GitHub
@@ -140,6 +141,24 @@ echo "Built $PWD/out/bb-probe"
 # --fsr-versions (0.4.4 beta 27c) reads AMD's FSR API headers (MIT, gpu/third_party/amd-fsr-sdk).
 "$CC" "${cstd[@]}" -O2 -Wall -Wextra -Werror "${includes[@]}" -Igpu/third_party/amd-fsr-sdk tools/gpu_capabilities.c "${libraries[@]}" -o out/bb-gpu-capabilities
 fi
+# 0.4.6 beta 16: the Windows programs carry the engine's own FFmpeg (packaging/build-ffmpeg.sh); one
+# that imports an FFmpeg DLL linked a system FFmpeg instead (about 100 DLLs with it).
+if [[ -n $windows ]]; then
+    # Versioned LLVM names too (llvm-objdump-23: a cross toolchain may have only those).
+    objdump=$(command -v llvm-objdump || command -v objdump ||
+              compgen -c llvm-objdump- | grep -E '^llvm-objdump-[0-9]+$' | sort -t- -k3 -n | tail -n 1 || true)
+    if [[ -z $objdump ]]; then
+        echo 'Warning: no llvm-objdump or objdump found: the check that no program imports an FFmpeg DLL did not run' >&2
+    else
+        for program in out/bb-probe.exe out/bb-shader-lab.exe out/bb-splash.exe; do
+            [[ -f $program ]] || continue
+            if "$objdump" -p "$program" | grep -i -E 'DLL Name: (av(codec|format|util|device|filter)|sw(scale|resample)|postproc)-[0-9]+\.dll'; then
+                echo "$program imports an FFmpeg DLL: run packaging/build-ffmpeg.sh and build again (README, Build)" >&2
+                exit 1
+            fi
+        done
+    fi
+fi
 # The native start (Windows): boot image, mods, patches, engine assets, then bb-probe. One static
 # program: it runs before bb-probe's DLLs are found, and replaces the Python scripts.
 if [[ -n $windows ]] && [[ ! -f out/bb-start.exe || -n $(find start -newer out/bb-start.exe -print -quit) ]]; then
@@ -156,6 +175,9 @@ if [[ ${1:-} == --test ]]; then
     out/file-mods-test
     "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -pthread -I. -Isrc tests/test_sema.c "${runtime[@]}" out/libatrac9.a -lm "${gpu[@]}" "${libraries[@]}" -o out/sema-test
     out/sema-test
+    "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -pthread -I. -Isrc tests/test_sync.c "${runtime[@]}" out/libatrac9.a -lm "${gpu[@]}" "${libraries[@]}" -o out/sync-test
+    out/sync-test
+    BB_RUNTIME_SYNC=0 out/sync-test
     "$CC" -std=c11 -D_GNU_SOURCE -O2 -g -Wall -Wextra -Werror -I. -Isrc tests/test_content.c src/runtime_content.c -o out/content-test
     out/content-test
 fi

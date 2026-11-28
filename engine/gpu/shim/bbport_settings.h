@@ -6,6 +6,7 @@
 #pragma once
 
 #include <atomic>
+#include <cmath>
 #include <string>
 #include <vector>
 
@@ -55,7 +56,12 @@ inline constexpr float RenderScaleMin = 1.0f, RenderScaleMax = 3.0f;
 inline constexpr float MipBiasMin = -2.0f, MipBiasMax = 1.0f;
 /// bbport: where the FPS counter sits (fps_position).
 enum FpsPosition : int { FpsTopRight = 0, FpsTopLeft, FpsBottomRight, FpsBottomLeft, FpsTopCentre, FpsPositionCount };
-enum DebugView : int { DebugNone = 0, DebugReactive = 1, DebugMotion = 2, DebugViewCount };
+/// 0.4.6 beta 16: DebugAmdFsr is AMD's own debug view (AMD FSR only; its context made again with the view
+/// allowed, AmdFsr's key).
+enum DebugView : int { DebugNone = 0, DebugReactive = 1, DebugMotion = 2, DebugAmdFsr = 3, DebugViewCount };
+/// 0.4.6 beta 16: what the running FSR version says of the reactive mask (AMD's resource query): no
+/// FSR running or no answer; it does not read it; it reads it when given; it needs it.
+enum FsrReactive : int { FsrReactiveUnknown = -1, FsrReactiveUnread = 0, FsrReactiveRead = 1, FsrReactiveNeeded = 2 };
 /// The menu's language, in the Language selector's order (bbport_overlay.cpp).
 enum class MenuLanguage {
     English, Russian, Spanish, PortugueseBrazil, French, German, Italian, Polish, Turkish, ChineseSimplified
@@ -163,8 +169,11 @@ struct Values {
     std::atomic<MenuLanguage> menu_language{MenuLanguage::English};
     std::atomic<int> upscaler{UpscalerOff}; // 0.4.4 beta 28 (the tester): the game's own AA by default
     std::atomic<int> preset{PresetAuto};
-    std::atomic<bool> sharpen{true};
-    std::atomic<float> sharpness{0.2f};
+    // 0.4.6 beta 16: off by default (the tester's choice). Its strength (`sharpening`) is a percentage
+    // of RCAS's maximum, 0-100, 25 by default (the tester: a starting point), kept for when it is turned
+    // on; it replaces `sharpness` (SharpeningFromOld).
+    std::atomic<bool> sharpen{false};
+    std::atomic<int> sharpening{25};
     std::atomic<bool> jitter{true};
     std::atomic<bool> reactive{false};
     std::atomic<bool> object_motion{true};
@@ -270,10 +279,15 @@ struct Values {
     /// whether it is FSR 3.1 (it takes the fsr3_* tuning).
     std::atomic<const char*> fsr_running{nullptr};
     std::atomic<bool> fsr_runs_31{false};
+    /// Set by the renderer (0.4.6 beta 16): what the running FSR version says of the reactive mask
+    /// (AMD's resource query; FsrReactive*), for the menu's line.
+    std::atomic<int> fsr_reactive{FsrReactiveUnknown};
     /// Set by the renderer (0.4.4 beta 27c): the running FSR version is one AMD's driver provides.
     std::atomic<bool> fsr_running_driver{false};
     /// Set by DLSS at start (0.4.4 beta 27c): the version of the DLSS file it loads ("310.9.16"), or null.
     std::atomic<const char*> dlss_version{nullptr};
+    /// Set by DLSS at start (0.4.6 beta 17): its calls go to OptiScaler, whose menu chooses what runs.
+    std::atomic<bool> dlss_through_optiscaler{false};
     /// DLSS's render preset (DlssPreset*); live: its feature is created again (vk_dlss.cpp). Set by
     /// DLSS: the preset its feature runs (0 the DLL's default, a refused one included), -1 before.
     std::atomic<int> dlss_preset{DlssPresetAuto}, dlss_applied_preset{-1};
@@ -281,12 +295,6 @@ struct Values {
     std::atomic<float> render_scale{1.3f};
     /// mip_bias: texture LOD bias added while an upscaler runs (MipBiasMin..Max); live.
     std::atomic<float> mip_bias{0.0f};
-    /// OptiScaler's compatibility mode (vk_optiscaler.h), optiscaler_compat in config.ini: the menu
-    /// edits it; the engine reads startup_optiscaler_compat, and BB_OPTISCALER_COMPAT (the launcher's
-    /// switch) overrides that. (0.4.4 beta 28: optiscaler_ngx_lock, _clean_thread and _sync_submit,
-    /// its parts' own keys, went; they follow it.)
-    std::atomic<bool> optiscaler_compat{true};
-    bool startup_optiscaler_compat = true;
 
     /// Startup settings for the explicit BB_RENDER_RES compatibility patch only.
     int startup_preset = PresetAuto;
@@ -309,12 +317,30 @@ inline float HdrPeakNits(const Values& v) {
                            : v.hdr_peak.load(std::memory_order_relaxed);
     return peak < HdrPeakMin ? HdrPeakMin : peak > HdrPeakMax ? HdrPeakMax : peak;
 }
+/// 0.4.6 beta 16: the percentage (`sharpening`) for a file's old `sharpness`: the old default left as
+/// it was, 0.20, becomes the new default, 25; another value the strength the first beta 16 build gave
+/// it (AMD's mapping: 2 - 2s stops below the maximum; 1 and above the maximum), 0 or less 0.
+inline int SharpeningFromOld(float s) {
+    if (!(s > 0.0f)) {
+        return 0;
+    }
+    if (s > 0.199f && s < 0.201f) {
+        return 25;
+    }
+    if (s >= 1.0f) {
+        return 100;
+    }
+    return int(100.0 * std::exp2(2.0 * s - 2.0) + 0.5);
+}
 /// Localized overlay text; the Language selector itself stays in English. The other languages
 /// look the English text up (bbport_menu_i18n.cpp) and show it when they have no translation.
 const char* MenuText(const char* english, const char* russian);
 /// Text without a Russian translation at its call site: English in Russian too.
 inline const char* MenuText(const char* english) { return MenuText(english, english); }
 
+/// The menus' language alone, as Load finds it (the system's, then config.ini's menu_language), with
+/// nothing else read, printed or written: bb-splash, which runs beside the start, shows its text in it.
+MenuLanguage ReadMenuLanguage();
 /// Reads the file, then the environment overrides. Called once at start.
 void Load();
 /// Checks the loaded choice before the first frame: DLSS where it cannot run becomes AMD FSR, and AMD
@@ -322,7 +348,7 @@ void Load();
 void ConfigureUpscalerSupport(bool fsr, bool dlss);
 /// Startup-patched scene dimensions cannot change until run.sh prepares a new image.
 bool FixedRenderSession();
-/// 0.4.4 beta 26b: whether an output resolution chosen in game (the Insert menu, the pause menu's
+/// 0.4.4 beta 26b: whether an output resolution chosen in game (the in-game menu, the pause menu's
 /// Graphics page) applies at once: only with Live resolution changes on when the game started.
 bool OutputChangesLive();
 /// The preset in effect: Auto resolved for the output it applies to, NativeAA under TAA, the startup's

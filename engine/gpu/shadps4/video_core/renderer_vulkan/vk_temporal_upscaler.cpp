@@ -28,8 +28,11 @@
 #include "video_core/host_shaders/taa_sharpen_comp.h"
 #include "video_core/host_shaders/fsr4_decode_comp.h"
 #include "video_core/host_shaders/fsr4_encode_comp.h"
+#include "video_core/host_shaders/sharpen_copy_comp.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
 #include "video_core/renderer_vulkan/vk_camera_motion.h"
+#include "video_core/renderer_vulkan/vk_optiscaler.h"
+#include "engine/startup.h"
 #include "video_core/renderer_vulkan/vk_frame_capture.h"
 #include "video_core/renderer_vulkan/vk_hdr_native.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
@@ -40,6 +43,15 @@
 namespace Vulkan {
 
 namespace {
+
+/// BB_TAA_DIAGNOSTICS: TAA's diagnostic view (1-3), 0 without; read once.
+u32 TaaDiagnostics() {
+    static const u32 diagnostics = [] {
+        const char* env = std::getenv("BB_TAA_DIAGNOSTICS");
+        return env ? u32(std::clamp(std::atoi(env), 1, 3)) : 0u;
+    }();
+    return diagnostics;
+}
 
 /// One of the upscaler's own images: one level and layer, unwritten (undefined layout), and a
 /// view of all of it. `view` is released first: it may be a view of the image replaced.
@@ -159,8 +171,9 @@ struct DumpImage {
 void DumpImages(const Instance& instance, Scheduler& scheduler, vk::CommandBuffer cmdbuf,
                 int frame, std::initializer_list<DumpImage> images) {
     static const std::string dir = [] {
+        // Unnamed: engine/out/dump, beside the engine (not from the working folder).
         const char* env = std::getenv("BB_DUMP_DIR");
-        return std::string{env && env[0] ? env : "out/dump"};
+        return env && env[0] ? std::string{env} : BbStartup::Utf8(BbStartup::ProgramDir() / "dump");
     }();
     const vk::MemoryBarrier2 before{
         .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
@@ -298,8 +311,9 @@ TemporalUpscaler::TemporalUpscaler(const Instance& instance_, Scheduler& schedul
     : instance{instance_}, scheduler{scheduler_}, texture_cache{texture_cache_},
       runtime{runtime_}, camera_motion{camera_motion_}, scene_targets{scene_targets_},
       hdr_native{hdr_native_} {
-    // Reject unsupported upscalers before allocating resources or recording a frame.
-    if (instance.IsDlssCapable()) {
+    // Reject unsupported upscalers before allocating resources or recording a frame. DLSS: NVIDIA's
+    // driver on an RTX GPU, or OptiScaler on any GPU (vk_optiscaler.h).
+    if (instance.IsDlssCapable() || OptiScaler::DlssThrough()) {
         dlss = std::make_unique<DlssUpscaler>(instance, scheduler);
     }
     // 0.4.4 beta 27: AMD FSR through AMD's FSR SDK (vk_amd_fsr.h): its DLLs loaded and asked which FSR
@@ -382,6 +396,15 @@ bool TemporalUpscaler::FsrBuilding() const {
     return fsr_building;
 }
 
+/// 0.4.6 beta 16: AMD FSR's own debug view: the menu's row (not saved) or BB_AMD_FSR_DEBUG_VIEW=1.
+static bool AmdFsrDebugView() {
+    static const bool env = [] {
+        const char* value = std::getenv("BB_AMD_FSR_DEBUG_VIEW");
+        return value && value[0] == '1';
+    }();
+    return env || BbSettings::Get().debug_view == BbSettings::DebugAmdFsr;
+}
+
 void TemporalUpscaler::PrepareFsr() {
     const auto& settings = BbSettings::Get();
     fsr_building = false;
@@ -396,8 +419,9 @@ void TemporalUpscaler::PrepareFsr() {
     // third-party resolution patch; RecordFrameUpscaler), until the output changes.
     const u32 ow = fsr_width ? fsr_width : target_width, oh = fsr_height ? fsr_height : target_height;
     const std::string version = BbSettings::FsrVersion();
-    if (!amd_fsr->Ready(ow, oh, hdr, version)) {
-        amd_fsr->Prepare(ow, oh, hdr, version);
+    const bool debug_view = AmdFsrDebugView();
+    if (!amd_fsr->Ready(ow, oh, hdr, version, debug_view)) {
+        amd_fsr->Prepare(ow, oh, hdr, version, debug_view);
         fsr_building = !amd_fsr->Fatal();
     }
 }
@@ -556,6 +580,7 @@ bool TemporalUpscaler::OnFrameStart() {
         if (!running) {
             BbSettings::Get().fsr_running.store(nullptr, std::memory_order_relaxed);
             BbSettings::Get().fsr_runs_31.store(false, std::memory_order_relaxed);
+            BbSettings::Get().fsr_reactive.store(BbSettings::FsrReactiveUnknown, std::memory_order_relaxed);
             BbSettings::Get().fsr_running_driver.store(false, std::memory_order_relaxed);
         } else if (const std::string name = amd_fsr->VersionName(); name != shown_name ||
                    !BbSettings::Get().fsr_running.load(std::memory_order_relaxed)) {
@@ -565,6 +590,10 @@ bool TemporalUpscaler::OnFrameStart() {
             next_name = (next_name + 1) % names.size();
             BbSettings::Get().fsr_runs_31.store(amd_fsr->RunsFsr31(), std::memory_order_relaxed);
             BbSettings::Get().fsr_running_driver.store(amd_fsr->RunsDriverVersion(), std::memory_order_relaxed);
+        }
+        if (running) {
+            // 0.4.6 beta 16: its answer on the reactive mask, for the menu (asked as its context is made).
+            BbSettings::Get().fsr_reactive.store(amd_fsr->ReactiveUse(), std::memory_order_relaxed);
         }
     }
     const bool active = Active();
@@ -633,10 +662,28 @@ bool TemporalUpscaler::OnFrameStart() {
     // size, which survives the frame boundary (Performance 960 -> 1920 needs 32 phases).
     // 0.4.4 beta 25b: DLSS at least 16 (NVIDIA's checklist; DLAA had 8); FSR and TAA as AMD's.
     const u32 min_phases = upscaler == BbSettings::UpscalerDlss ? Motion::kDlssMinJitterPhases : 8;
-    const u32 phases = Scaled() ? Motion::JitterPhases(render_width, target_width, min_phases)
-        : Motion::JitterPhases(scene_targets.Size().width, 1920, min_phases);
+    const u32 jitter_render = Scaled() ? render_width : scene_targets.Size().width;
+    const u32 jitter_output = Scaled() ? target_width : 1920;
+    u32 phases = Motion::JitterPhases(jitter_render, jitter_output, min_phases);
+    // 0.4.6 beta 16: under AMD FSR, AMD's own jitter for the version that runs (its queries): its phase
+    // count can differ from the rule above (AMD truncates 8 x ratio^2: 23 at Balanced, against 24).
+    const u32 amd_phases = upscaler == BbSettings::UpscalerFsr && amd_fsr
+                               ? amd_fsr->JitterPhases(jitter_render, jitter_output)
+                               : 0;
+    if (amd_phases != 0) {
+        if (amd_phases != phases && (jitter_render != amd_jitter_logged[0] || jitter_output != amd_jitter_logged[1])) {
+            amd_jitter_logged = {jitter_render, jitter_output};
+            std::printf("Upscaler: AMD FSR's jitter for %u -> %u: %u phases (the engine's rule: %u)\n",
+                        jitter_render, jitter_output, amd_phases, phases);
+        }
+        phases = amd_phases;
+    }
     jitter_index = jitter_index % phases + 1;
     jitter = {Halton(jitter_index, 2) - 0.5f, Halton(jitter_index, 3) - 0.5f};
+    // AMD's offset for the same place in the sequence (index - 1: AMD counts from 0 and adds the 1).
+    if (float x = 0.0f, y = 0.0f; amd_phases != 0 && amd_fsr->JitterOffset(jitter_index - 1, phases, x, y)) {
+        jitter = {x, y};
+    }
     return changed;
 }
 
@@ -899,7 +946,11 @@ void TemporalUpscaler::CreatePipelines() {
     // 0.4.4 beta 21: the edge clamp in RGB only (edge_clamp.comp's Params: width, height).
     storage_layout(1, edge_clamp_desc_layout, edge_clamp_pipeline_layout, 2 * sizeof(u32));
     edge_clamp_pipeline = compute(EDGE_CLAMP_COMP, *edge_clamp_pipeline_layout);
-    storage_layout(2, taa_sharpen_desc_layout, taa_sharpen_pipeline_layout, sizeof(float));
+    // 0.4.6 beta 16: the strength and what the image holds (taa_sharpen.comp's Params).
+    storage_layout(2, taa_sharpen_desc_layout, taa_sharpen_pipeline_layout, 2 * sizeof(u32));
+    // 0.4.6 beta 16: the scaled path's copy into the UI image, sharpened (sharpen_copy.comp's Params).
+    storage_layout(2, sharpen_copy_desc_layout, sharpen_copy_pipeline_layout, 6 * sizeof(u32));
+    sharpen_copy_pipeline = compute(SHARPEN_COPY_COMP, *sharpen_copy_pipeline_layout);
     taa_sharpen_pipeline = compute(TAA_SHARPEN_COMP, *taa_sharpen_pipeline_layout);
     storage_layout(1, fsr4_encode_desc_layout, fsr4_encode_pipeline_layout, sizeof(u32));
     {
@@ -964,7 +1015,7 @@ void TemporalUpscaler::CreatePipelines() {
 }
 
 void TemporalUpscaler::RecordTaa(vk::CommandBuffer cmdbuf, vk::ImageView color,
-                                vk::ImageView depth) {
+                                vk::ImageView depth, u32 encoding, bool sharpen) {
     // Make scene writes and the last storage-image history writes visible to sampled reads.
     const vk::MemoryBarrier2 inputs{
         .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
@@ -979,9 +1030,7 @@ void TemporalUpscaler::RecordTaa(vk::CommandBuffer cmdbuf, vk::ImageView color,
     // opaque image, made for it (TAA has no reactive mask) and started in General below (made with
     // the context, it was never moved out of the undefined layout). Otherwise the output stands
     // in: in General, an RGBA16F storage image, never written through that binding.
-    const char* diagnostics_env = std::getenv("BB_TAA_DIAGNOSTICS");
-    const u32 diagnostics =
-        diagnostics_env ? u32(std::clamp(std::atoi(diagnostics_env), 1, 3)) : 0u;
+    const u32 diagnostics = TaaDiagnostics();
     const bool diagnostic_image = diagnostics != 0;
     if (diagnostic_image) {
         EnsureImage(opaque_image, opaque_view, vk::Format::eR16G16B16A16Sfloat,
@@ -1048,9 +1097,10 @@ void TemporalUpscaler::RecordTaa(vk::CommandBuffer cmdbuf, vk::ImageView color,
     cmdbuf.pushConstants(*taa_pipeline_layout, vk::ShaderStageFlagBits::eCompute, 0,
                          sizeof(params), &params);
     cmdbuf.dispatch((out_width + 7) / 8, (out_height + 7) / 8, 1);
-    const auto& settings = BbSettings::Get();
-    const float strength = std::clamp(settings.sharpness.load(), 0.0f, 2.0f);
-    if (settings.sharpen && strength > 0.0f && !(params.pad & 0xffu)) {
+    // 0.4.6 beta 16: only where neither the merge (the 1080p path) nor the copy into the UI image
+    // can sharpen; on what the colour holds (rcas_extra.glsl).
+    const float strength = sharpen ? ExtraSharpenAmount() : 0.0f;
+    if (strength > 0.0f && !(params.pad & 0xffu)) {
         const vk::MemoryBarrier2 resolved{
             .srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
             .srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
@@ -1068,20 +1118,59 @@ void TemporalUpscaler::RecordTaa(vk::CommandBuffer cmdbuf, vk::ImageView color,
         cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, *taa_sharpen_pipeline);
         cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute,
                                     *taa_sharpen_pipeline_layout, 0, sharpen_writes);
+        const struct {
+            float strength;
+            u32 encoding;
+        } sharpen_params{strength, encoding};
         cmdbuf.pushConstants(*taa_sharpen_pipeline_layout, vk::ShaderStageFlagBits::eCompute,
-                             0, sizeof(strength), &strength);
+                             0, sizeof(sharpen_params), &sharpen_params);
         cmdbuf.dispatch((out_width + 7) / 8, (out_height + 7) / 8, 1);
     }
     taa_next = 1 - taa_next;
 }
 
 float TemporalUpscaler::ExtraSharpenAmount() const {
+    // 0.4.6 beta 16: one sharpening for every upscaler, the engine's (rcas_extra.glsl), the menu's
+    // percentage of RCAS's maximum. Until beta 15, AMD FSR's own RCAS sharpened up to 1 and this pass
+    // above it, up to 2, and for DLSS this pass alone (NVIDIA retired DLSS's sharpening): AMD FSR's
+    // RCAS works on the light it upscales, linear on the 1080p path, where it sharpened about half as
+    // much on strong edges and nothing beside a value above 1 (BB_SHARPEN_FSR_OWN=1 compared it with
+    // this one until the release). Not over TAA's diagnostic view.
     const auto& settings = BbSettings::Get();
-    // FSR 3 and 4 sharpen up to 1 themselves (RCAS). DLSS has no sharpening of its own (NVIDIA
-    // retired its Sharpness parameter), so for DLSS this pass applies the whole 0..2.
-    const float own = settings.upscaler == BbSettings::UpscalerDlss ? 0.0f : 1.0f;
-    const float extra = std::clamp(settings.sharpness.load(), 0.0f, 2.0f) - own;
-    return settings.sharpen && extra > 0.0f ? extra : 0.0f;
+    if (settings.upscaler == BbSettings::UpscalerTaa && TaaDiagnostics()) {
+        return 0.0f;
+    }
+    return settings.sharpen ? float(std::clamp(settings.sharpening.load(), 0, 100)) / 100.0f : 0.0f;
+}
+
+void TemporalUpscaler::ReportSharpening(float strength, u32 encoding) {
+    const auto& settings = BbSettings::Get();
+    const SharpenState state{
+        .percent = int(std::lround(strength * 100.0f)),
+        .upscaler = settings.upscaler.load(),
+        .encoding = encoding,
+    };
+    const auto now = std::chrono::steady_clock::now();
+    if (!(state == sharpen_state)) {
+        sharpen_state = state;
+        sharpen_since = now;
+        sharpen_said = false;
+        return;
+    }
+    if (sharpen_said || now - sharpen_since < std::chrono::seconds(1)) {
+        return;
+    }
+    sharpen_said = true;
+    static constexpr const char* kHolds[] = {
+        "the HDR scene (tone mapped reversibly, gamma 2.0)", "linear light (gamma 2.0)",
+        "the display-encoded frame"};
+    const std::string who = BackendName();
+    if (state.percent > 0) {
+        std::printf("Upscaler: sharpening: RCAS at %d%% after %s, on %s\n",
+                    state.percent, who.c_str(), kHolds[std::min(encoding, 2u)]);
+    } else {
+        std::printf("Upscaler: sharpening: off (%s)\n", who.c_str());
+    }
 }
 
 void TemporalUpscaler::MarkRunStep(const char* label) {
@@ -1091,8 +1180,8 @@ void TemporalUpscaler::MarkRunStep(const char* label) {
     }
 }
 
-void TemporalUpscaler::ExtraSharpen(vk::Image target, u32 w, u32 h) {
-    const float extra = ExtraSharpenAmount();
+void TemporalUpscaler::ExtraSharpen(vk::Image target, u32 w, u32 h, u32 encoding, float strength) {
+    const float extra = strength;
     if (extra <= 0.0f) {
         return;
     }
@@ -1126,7 +1215,7 @@ void TemporalUpscaler::ExtraSharpen(vk::Image target, u32 w, u32 h) {
     const vk::ImageView target_view = *output_view;
     // bbport: the commands are recorded through the scheduler.
     scheduler.RecordCrumb({.name = "TAA extra sharpen"}, [target, copy = vk::Image(extra_sharpen_image),
-                      copy_view = *extra_sharpen_view, target_view, extra, w, h,
+                      copy_view = *extra_sharpen_view, target_view, extra, encoding, w, h,
                       pipeline = *taa_sharpen_pipeline,
                       layout = *taa_sharpen_pipeline_layout](vk::CommandBuffer cmdbuf) {
         const auto image_barrier = [&](vk::Image image, vk::ImageLayout old_layout,
@@ -1170,7 +1259,11 @@ void TemporalUpscaler::ExtraSharpen(vk::Image target, u32 w, u32 h) {
                 .descriptorType = vk::DescriptorType::eStorageImage, .pImageInfo = &infos[i]};
         cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline);
         cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute, layout, 0, writes);
-        cmdbuf.pushConstants(layout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(extra), &extra);
+        const struct {
+            float strength;
+            u32 encoding;
+        } params{extra, encoding};
+        cmdbuf.pushConstants(layout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(params), &params);
         cmdbuf.dispatch((w + 7) / 8, (h + 7) / 8, 1);
         image_barrier(target, vk::ImageLayout::eGeneral,
                       vk::PipelineStageFlagBits2::eComputeShader,
@@ -1178,7 +1271,64 @@ void TemporalUpscaler::ExtraSharpen(vk::Image target, u32 w, u32 h) {
     });
 }
 
-void TemporalUpscaler::DebugView(vk::Image target, u32 w, u32 h, u32 ow, u32 oh, bool reactive) {
+vk::ImageView TemporalUpscaler::UiStorageView(bool& srgb) {
+    if (!ui_image) {
+        return {};
+    }
+    if (!ui_storage_checked) {
+        ui_storage_checked = true;
+        // A storage view of an sRGB format is its UNORM twin, the shader encoding (as the blit did).
+        vk::Format view = ui_format;
+        bool encoded = true;
+        switch (ui_format) {
+        case vk::Format::eR8G8B8A8Srgb: view = vk::Format::eR8G8B8A8Unorm; break;
+        case vk::Format::eB8G8R8A8Srgb: view = vk::Format::eB8G8R8A8Unorm; break;
+        case vk::Format::eA8B8G8R8SrgbPack32: view = vk::Format::eA8B8G8R8UnormPack32; break;
+        default: encoded = false; break;
+        }
+        const auto features = instance.GetPhysicalDevice().getFormatProperties(view).optimalTilingFeatures;
+        if (sharpen_copy_pipeline && (features & vk::FormatFeatureFlagBits::eStorageImage)) {
+            const vk::ImageViewUsageCreateInfo usage{.usage = vk::ImageUsageFlagBits::eStorage};
+            ui_storage_view = Check(instance.GetDevice().createImageViewUnique({
+                .pNext = &usage,
+                .image = vk::Image(ui_image),
+                .viewType = vk::ImageViewType::e2D,
+                .format = view,
+                .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
+            }));
+            ui_storage_srgb = encoded;
+        }
+        std::printf("Upscaler: the UI image is %s: the scaled frame's sharpening %s\n",
+                    vk::to_string(ui_format).c_str(),
+                    ui_storage_view ? "in its copy into it (one pass)"
+                                    : "in place before the copy (its format has no storage view)");
+    }
+    srgb = ui_storage_srgb;
+    return ui_storage_view ? *ui_storage_view : vk::ImageView{};
+}
+
+void TemporalUpscaler::RecordSharpenCopy(vk::CommandBuffer cmdbuf, vk::ImageView ui, bool srgb,
+                                         float strength, u32 encoding, u32 w, u32 h) {
+    const vk::DescriptorImageInfo source{.imageView = *output_view, .imageLayout = vk::ImageLayout::eGeneral};
+    const vk::DescriptorImageInfo target{.imageView = ui, .imageLayout = vk::ImageLayout::eGeneral};
+    const std::array<vk::WriteDescriptorSet, 2> writes{{
+        {.dstBinding = 0, .descriptorCount = 1, .descriptorType = vk::DescriptorType::eStorageImage,
+         .pImageInfo = &source},
+        {.dstBinding = 1, .descriptorCount = 1, .descriptorType = vk::DescriptorType::eStorageImage,
+         .pImageInfo = &target},
+    }};
+    const struct {
+        float strength;
+        u32 encoding, srgb, width, height, pad;
+    } params{strength, encoding, srgb ? 1u : 0u, w, h, 0u};
+    cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, *sharpen_copy_pipeline);
+    cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute, *sharpen_copy_pipeline_layout, 0, writes);
+    cmdbuf.pushConstants(*sharpen_copy_pipeline_layout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(params),
+                         &params);
+    cmdbuf.dispatch((w + 7) / 8, (h + 7) / 8, 1);
+}
+
+bool TemporalUpscaler::DebugView(vk::Image target, u32 w, u32 h, u32 ow, u32 oh, bool reactive) {
     // As the 1080p path's merge (Run): the mask (menu or toggle 1 << 28) or the motion vectors.
     const int debug_view = BbSettings::Get().debug_view;
     const u32 mode = reactive && (debug_view == BbSettings::DebugReactive || BbToggle::Disabled(1u << 28))
@@ -1186,7 +1336,7 @@ void TemporalUpscaler::DebugView(vk::Image target, u32 w, u32 h, u32 ow, u32 oh,
                      : debug_view == BbSettings::DebugMotion ? 2
                                                              : 0;
     if (mode == 0) {
-        return;
+        return false;
     }
     const vk::ImageView target_view = *output_view;
     const vk::ImageView objects = camera_motion.ObjectMotionView();
@@ -1234,6 +1384,7 @@ void TemporalUpscaler::DebugView(vk::Image target, u32 w, u32 h, u32 ow, u32 oh,
             .image = target, .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1}};
         cmdbuf.pipelineBarrier2({.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &after});
     });
+    return true;
 }
 
 void TemporalUpscaler::OnBlendedSceneDraw() {
@@ -1610,7 +1761,9 @@ void TemporalUpscaler::Run() {
     MarkRunStep(taa ? "upscaler Run: TAA" : "upscaler Run: evaluate");
     BbSections::Scope eval_scope{BbSections::UpscalerEval};
     if (taa) {
-        RecordTaa(cmdbuf, input_color_view, input_depth_view);
+        // 0.4.6 beta 16: sharpened in the merge below, as after AMD FSR and DLSS (TAA's output is its
+        // history's colour): no pass of its own.
+        RecordTaa(cmdbuf, input_color_view, input_depth_view, 0, false);
         dispatched = true;
     } else {
         // AMD FSR or DLSS: the HDR scene colour, the mask when made (AMD FSR takes it).
@@ -1624,9 +1777,11 @@ void TemporalUpscaler::Run() {
     }
     reset = false;
     dispatched_last_frame = true;
-    // 0.4.4 beta 20: the extra sharpening done in the merge (upscale_merge.comp, rcas_extra.glsl):
-    // no RGBA32F copy of the output, no pass of its own and its barriers; the same result.
-    const float merge_sharpen = taa ? 0.0f : ExtraSharpenAmount();
+    // 0.4.4 beta 20: the sharpening done in the merge (upscale_merge.comp, rcas_extra.glsl): no
+    // RGBA32F copy of the output, no pass of its own and its barriers; the same result. On the HDR
+    // scene (0.4.6 beta 16: through AMD's reversible tone mapper and gamma 2.0; TAA's too).
+    const float merge_sharpen = ExtraSharpenAmount();
+    ReportSharpening(merge_sharpen, 0);
     // bbport: BB_DUMP_TRIGGER on this (HDR scene color) path too: the upscaler's inputs and
     // its result, for ghosting and history checks (tools/dump_view.py).
     if (const int dump_frame = DumpFrame(); dump_frame >= 0) {
@@ -1898,6 +2053,8 @@ void TemporalUpscaler::EnsureUiResources(u32 w, u32 h, vk::Format color, vk::For
     if (new_color) {
         ui_views.clear();
         ui_view.reset();
+        ui_storage_view.reset(); // 0.4.6 beta 16: made again for the new image (UiStorageView)
+        ui_storage_checked = false;
         ui_image = VideoCore::UniqueImage(device, allocator);
         ui_image.Create(vk::ImageCreateInfo{
             .flags = vk::ImageCreateFlagBits::eMutableFormat | vk::ImageCreateFlagBits::eExtendedUsage,
@@ -2209,8 +2366,19 @@ void TemporalUpscaler::RunScaled() {
                 vk::ImageLayout::eUndefined, all, vk::AccessFlagBits2::eNone,
                 vk::ImageLayout::eGeneral, all, rw);
         bool ok4 = true;
+        // An sRGB-format frame is decoded by its view already (and encoded by the blit).
+        const bool srgb_format =
+            vk::to_string(color.info.pixel_format).find("Srgb") != std::string::npos;
+        // 0.4.6 beta 16: what the upscalers' output holds, for the sharpening after them
+        // (rcas_extra.glsl): linear light from a frame in an sRGB format, else the frame as the
+        // game encoded it (AMD FSR's decoded input is encoded again before the sharpening).
+        const u32 encoding = srgb_format ? 1u : 2u;
+        // 0.4.6 beta 16: the copy into the UI image sharpens on the way, for every upscaler, where
+        // the UI image has a storage view; TAA sharpens itself otherwise.
+        bool ui_srgb = false;
+        const vk::ImageView ui_storage = UiStorageView(ui_srgb);
         if (BbSettings::Get().upscaler == BbSettings::UpscalerTaa) {
-            RecordTaa(cmdbuf, color_view, depth_view);
+            RecordTaa(cmdbuf, color_view, depth_view, encoding, !ui_storage);
         } else {
             if (BbSettings::Get().upscaler == BbSettings::UpscalerDlss) {
             ok4 = RecordFrameUpscaler(cmdbuf,
@@ -2226,9 +2394,6 @@ void TemporalUpscaler::RunScaled() {
                 const char* env = std::getenv("BB_FSR_LINEAR");
                 return !env || env[0] != '0';
             }();
-            // An sRGB-format frame is decoded by its view already (and encoded by the blit).
-            const bool srgb_format =
-                vk::to_string(color.info.pixel_format).find("Srgb") != std::string::npos;
             // 0.4.4 beta 21: its image, made when a frame is first decoded (it was made with the
             // context whenever FSR 4 or DLSS was selected; DLSS never decodes). The decode below
             // starts it from the undefined layout every frame.
@@ -2322,31 +2487,52 @@ void TemporalUpscaler::RunScaled() {
             }
         }
         if (ok4) {
-            if (BbSettings::Get().upscaler != BbSettings::UpscalerTaa) {
-                ExtraSharpen(vk::Image(output_image), ow, oh);
+            const bool taa_frame = BbSettings::Get().upscaler == BbSettings::UpscalerTaa;
+            // A debug view is not sharpened (it was until beta 16, under it).
+            const bool debug = DebugView(vk::Image(output_image), w, h, ow, oh, mask_ready && ReactiveOn());
+            const float strength = debug ? 0.0f : ExtraSharpenAmount();
+            ReportSharpening(strength, encoding);
+            if (ui_storage && strength > 0.0f) {
+                // 0.4.6 beta 16: one pass, the output sharpened into the UI image (sharpen_copy.comp),
+                // instead of an RGBA32F copy, the sharpening pass and the blit: at 4K about 100 MB of
+                // memory traffic instead of 500.
+                barrier(vk::Image(output_image), vk::ImageAspectFlagBits::eColor,
+                        vk::ImageLayout::eGeneral, all, rw, vk::ImageLayout::eGeneral,
+                        vk::PipelineStageFlagBits2::eComputeShader, vk::AccessFlagBits2::eShaderStorageRead);
+                barrier(vk::Image(ui_image), vk::ImageAspectFlagBits::eColor,
+                        vk::ImageLayout::eGeneral, all, rw, vk::ImageLayout::eGeneral,
+                        vk::PipelineStageFlagBits2::eComputeShader, vk::AccessFlagBits2::eShaderStorageWrite);
+                RecordSharpenCopy(cmdbuf, ui_storage, ui_srgb, strength, encoding, ow, oh);
+                barrier(vk::Image(ui_image), vk::ImageAspectFlagBits::eColor,
+                        vk::ImageLayout::eGeneral, vk::PipelineStageFlagBits2::eComputeShader,
+                        vk::AccessFlagBits2::eShaderStorageWrite, vk::ImageLayout::eGeneral,
+                        vk::PipelineStageFlagBits2::eColorAttachmentOutput, color_access);
+            } else {
+                if (!ui_storage && strength > 0.0f && !taa_frame) {
+                    ExtraSharpen(vk::Image(output_image), ow, oh, encoding, strength); // TAA's: in RecordTaa
+                }
+                barrier(vk::Image(output_image), vk::ImageAspectFlagBits::eColor,
+                        vk::ImageLayout::eGeneral, all, rw, vk::ImageLayout::eGeneral,
+                        vk::PipelineStageFlagBits2::eBlit, vk::AccessFlagBits2::eTransferRead);
+                barrier(vk::Image(ui_image), vk::ImageAspectFlagBits::eColor,
+                        vk::ImageLayout::eGeneral, all, rw, vk::ImageLayout::eGeneral,
+                        vk::PipelineStageFlagBits2::eBlit, vk::AccessFlagBits2::eTransferWrite);
+                const vk::ImageBlit region{
+                    .srcSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1},
+                    .srcOffsets = std::array{vk::Offset3D{0, 0, 0},
+                                             vk::Offset3D{s32(ow), s32(oh), 1}},
+                    .dstSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1},
+                    .dstOffsets = std::array{vk::Offset3D{0, 0, 0},
+                                             vk::Offset3D{s32(ow), s32(oh), 1}},
+                };
+                cmdbuf.blitImage(vk::Image(output_image), vk::ImageLayout::eGeneral,
+                                 vk::Image(ui_image), vk::ImageLayout::eGeneral, region,
+                                 vk::Filter::eNearest);
+                barrier(vk::Image(ui_image), vk::ImageAspectFlagBits::eColor,
+                        vk::ImageLayout::eGeneral, vk::PipelineStageFlagBits2::eBlit,
+                        vk::AccessFlagBits2::eTransferWrite, vk::ImageLayout::eGeneral,
+                        vk::PipelineStageFlagBits2::eColorAttachmentOutput, color_access);
             }
-            DebugView(vk::Image(output_image), w, h, ow, oh, mask_ready && ReactiveOn());
-            barrier(vk::Image(output_image), vk::ImageAspectFlagBits::eColor,
-                    vk::ImageLayout::eGeneral, all, rw, vk::ImageLayout::eGeneral,
-                    vk::PipelineStageFlagBits2::eBlit, vk::AccessFlagBits2::eTransferRead);
-            barrier(vk::Image(ui_image), vk::ImageAspectFlagBits::eColor,
-                    vk::ImageLayout::eGeneral, all, rw, vk::ImageLayout::eGeneral,
-                    vk::PipelineStageFlagBits2::eBlit, vk::AccessFlagBits2::eTransferWrite);
-            const vk::ImageBlit region{
-                .srcSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1},
-                .srcOffsets = std::array{vk::Offset3D{0, 0, 0},
-                                         vk::Offset3D{s32(ow), s32(oh), 1}},
-                .dstSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1},
-                .dstOffsets = std::array{vk::Offset3D{0, 0, 0},
-                                         vk::Offset3D{s32(ow), s32(oh), 1}},
-            };
-            cmdbuf.blitImage(vk::Image(output_image), vk::ImageLayout::eGeneral,
-                             vk::Image(ui_image), vk::ImageLayout::eGeneral, region,
-                             vk::Filter::eNearest);
-            barrier(vk::Image(ui_image), vk::ImageAspectFlagBits::eColor,
-                    vk::ImageLayout::eGeneral, vk::PipelineStageFlagBits2::eBlit,
-                    vk::AccessFlagBits2::eTransferWrite, vk::ImageLayout::eGeneral,
-                    vk::PipelineStageFlagBits2::eColorAttachmentOutput, color_access);
             reset = false;
             dispatched_last_frame = true;
             if (const int dump = DumpFrame(); dump >= 0) {
@@ -2578,6 +2764,8 @@ bool TemporalUpscaler::RecordFrameUpscaler(vk::CommandBuffer cmdbuf, UpscaleInpu
     // The jitter convention FSR 3 had; fsr_invert_jitter in config.ini flips it for tests.
     const float sign = settings.fsr_invert_jitter.load() ? -1.0f : 1.0f;
     const bool use_dlss = settings.upscaler == BbSettings::UpscalerDlss && dlss;
+    // 0.4.6 beta 16: AMD FSR's own RCAS off, the engine's sharpening after it as after DLSS
+    // (ExtraSharpenAmount).
     UpscaleInput::Frame frame{
         .cmdbuf = cmdbuf,
         .color = color,
@@ -2593,8 +2781,6 @@ bool TemporalUpscaler::RecordFrameUpscaler(vk::CommandBuffer cmdbuf, UpscaleInpu
         .near_plane = camera_motion.Near(),
         .far_plane = 3000.0f,
         .vertical_fov = camera_motion.VerticalFov(),
-        .sharpness = std::min(settings.sharpness.load(), 1.0f),
-        .sharpen = settings.sharpen,
         .reset = reset,
         .hdr = hdr,
     };
@@ -2602,7 +2788,7 @@ bool TemporalUpscaler::RecordFrameUpscaler(vk::CommandBuffer cmdbuf, UpscaleInpu
     if (!use_dlss && reactive && reactive_image) {
         frame.reactive = {vk::Image(reactive_image), *reactive_view, w, h, vk::Format::eR8Unorm};
     }
-    if (!use_dlss && !amd_fsr->Ready(ow, oh, hdr, BbSettings::FsrVersion())) {
+    if (!use_dlss && !amd_fsr->Ready(ow, oh, hdr, BbSettings::FsrVersion(), AmdFsrDebugView())) {
         // A frame of another size than the context was made for (a third-party resolution patch
         // renders the scene larger than the output): made again for it, the scene at full size
         // meanwhile (PrepareFsr, Active).

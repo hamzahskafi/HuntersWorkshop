@@ -13,6 +13,7 @@
 #include <cctype>
 #include <cstdio>
 #include <cmath>
+#include <optional>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
@@ -24,6 +25,10 @@
 namespace BbSettings {
 
 namespace {
+
+// 0.4.6 beta 16: config.ini's sign that the old sharpening default (on, at 0.20) was switched off
+// once (Load); every save writes it. The launcher's IniFile does the same (SharpenOffMarker).
+constexpr const char* kSharpenOffMarker = "sharpen_off_046";
 
 const char* Path() {
     const char* env = std::getenv("BB_CONFIG");
@@ -74,22 +79,26 @@ int CheatChoice(const std::string& key, const std::string& value, const int (&ch
     return choices[0];
 }
 
+// menu_language's value: a launcher's code (en, ru, pt_BR... zh_CN; zh and zh-CN too).
+std::optional<MenuLanguage> MenuLanguageOfCode(const std::string& value) {
+    if (value == "zh" || value == "zh-CN" || value == "zh_CN") {
+        return MenuLanguage::ChineseSimplified;
+    }
+    for (int l = 0; l < MenuLanguageCount; ++l) {
+        if (value == MenuLanguageCodes[l]) {
+            return MenuLanguage(l);
+        }
+    }
+    return std::nullopt;
+}
+
 void Set(Values& v, const std::string& key, const std::string& value) {
     const float f = float(std::atof(value.c_str()));
     const int i = std::atoi(value.c_str());
     if (key == "menu_language") {
-        if (value == "zh" || value == "zh-CN" || value == "zh_CN") {
-            v.menu_language = MenuLanguage::ChineseSimplified;
-            return;
-        }
-        bool known = false;
-        for (int l = 0; l < MenuLanguageCount; ++l) {
-            if (value == MenuLanguageCodes[l]) {
-                v.menu_language = MenuLanguage(l);
-                known = true;
-            }
-        }
-        if (!known) {
+        if (const auto language = MenuLanguageOfCode(value)) {
+            v.menu_language = *language;
+        } else {
             std::printf("Settings: unknown menu_language '%s' (expected en, ru, es, pt_BR, fr, de, it, pl "
                         "or tr, zh_CN)\n",
                         value.c_str());
@@ -112,8 +121,13 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         v.preset = value == "auto" || value.empty() ? PresetAuto : std::clamp(i, 0, PresetCount - 1);
     } else if (key == "sharpen") {
         v.sharpen = i != 0;
+    } else if (key == "sharpening") {
+        // 0.4.6 beta 16: a percentage of RCAS's maximum.
+        v.sharpening = std::clamp(i, 0, 100);
     } else if (key == "sharpness") {
-        v.sharpness = Clamp(f, 0.0f, 2.0f);
+        // Before it: AMD's sharpness (0-1 in beta 16's first build, 0-2 until then). Load reads it only
+        // where the file has no `sharpening`.
+        v.sharpening = SharpeningFromOld(f);
     } else if (key == "jitter") {
         v.jitter = i != 0;
     } else if (key == "reactive") {
@@ -181,8 +195,6 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         }
     } else if (key == "dlss_preset") {
         v.dlss_preset = DlssPresetFromText(value.c_str());
-    } else if (key == "optiscaler_compat") {
-        v.optiscaler_compat = i != 0;
     } else if (key == "fsr_invert_jitter" || key == "fsr4_invert_jitter") { // 0.4.4 beta 28: was fsr4_
         v.fsr_invert_jitter = i != 0;
     } else if (key == "widescreen") {
@@ -363,6 +375,15 @@ MenuLanguage LanguageOfLocale(const char* lang) {
     return MenuLanguage::English;
 }
 
+MenuLanguage SystemMenuLanguage() {
+    for (const char* key : {"LC_ALL", "LC_MESSAGES", "LANG", "LANGUAGE"}) {
+        if (const char* value = std::getenv(key); value && *value) {
+            return LanguageOfLocale(value);
+        }
+    }
+    return MenuLanguage::English;
+}
+
 } // namespace
 
 // The display's size for output_res = auto: BB_DISPLAY_SIZE ("WxH", from bb-start or run.sh), even
@@ -409,6 +430,26 @@ const char* MenuText(const char* english, const char* russian) {
     }
 }
 
+MenuLanguage ReadMenuLanguage() {
+    MenuLanguage language = SystemMenuLanguage();
+    if (FILE* file = std::fopen(Path(), "r")) {
+        char line[256];
+        while (std::fgets(line, sizeof(line), file)) {
+            std::string text{line};
+            text.erase(text.find_last_not_of(" \t\r\n") + 1);
+            const auto eq = text.find('=');
+            if (eq == std::string::npos || text.compare(0, eq, "menu_language") != 0) {
+                continue;
+            }
+            if (const auto chosen = MenuLanguageOfCode(text.substr(eq + 1))) {
+                language = *chosen;
+            }
+        }
+        std::fclose(file);
+    }
+    return language;
+}
+
 void Load() {
     auto& v = Get();
     for (int e = 0; e < EffectCount; ++e) {
@@ -416,18 +457,11 @@ void Load() {
     }
     // bbport: the menu's language until one is chosen in it (menu_language in config.ini): the
     // system's, as the launcher picks its own.
-    {
-        const char* lang = nullptr;
-        for (const char* key : {"LC_ALL", "LC_MESSAGES", "LANG", "LANGUAGE"}) {
-            if (const char* value = std::getenv(key); value && *value) {
-                lang = value;
-                break;
-            }
-        }
-        v.menu_language = LanguageOfLocale(lang);
-    }
+    v.menu_language = SystemMenuLanguage();
     if (FILE* file = std::fopen(Path(), "r")) {
         char line[256];
+        bool sharpen_marker = false, have_sharpening = false;
+        std::optional<float> old_sharpness;
         while (std::fgets(line, sizeof(line), file)) {
             std::string text{line};
             text.erase(text.find_last_not_of(" \t\r\n") + 1);
@@ -435,10 +469,33 @@ void Load() {
             if (text.empty() || text[0] == '#' || eq == std::string::npos) {
                 continue;
             }
+            if (text.compare(0, eq, kSharpenOffMarker) == 0) {
+                sharpen_marker = true;
+                continue;
+            }
+            if (text.compare(0, eq, "sharpness") == 0) {
+                old_sharpness = float(std::atof(text.c_str() + eq + 1));
+                continue;
+            }
+            have_sharpening |= text.compare(0, eq, "sharpening") == 0;
             Set(v, text.substr(0, eq), text.substr(eq + 1));
         }
         std::fclose(file);
         std::printf("Settings: %s\n", Path());
+        // 0.4.6 beta 16: the old strength as a percentage, where the file has no new one (the next
+        // save writes it in its place).
+        if (!have_sharpening && old_sharpness) {
+            v.sharpening = SharpeningFromOld(*old_sharpness);
+        }
+        // 0.4.6 beta 16 (the tester): sharpening off by default. A file with the old default
+        // untouched (on, at 0.20) has it switched off, any other choice kept; once: the next save
+        // writes the marker, so turning it on again stays.
+        const bool old_default = !have_sharpening && (!old_sharpness || std::fabs(*old_sharpness - 0.2f) < 0.001f);
+        if (!sharpen_marker && v.sharpen && old_default) {
+            v.sharpen = false;
+            std::printf("Settings: sharpening off, the new default (this config.ini had the old one "
+                        "untouched, on at 0.20); the menu turns it on again\n");
+        }
     }
     // The one environment override, for A/B runs: BB_UPSCALER (0.4.4 beta 28: the other settings'
     // aliases went; config.ini decides them).
@@ -456,7 +513,6 @@ void Load() {
     v.startup_output_res = v.output_res;
     v.startup_live_resolution = v.live_resolution;
     v.startup_hdr = v.hdr;
-    v.startup_optiscaler_compat = v.optiscaler_compat;
 }
 
 void ConfigureUpscalerSupport(bool fsr, bool dlss) {
@@ -542,7 +598,8 @@ void Save() {
     put("render_scale", fixed(v.render_scale, 2));
     put("mip_bias", fixed(v.mip_bias, 2));
     put("sharpen", flag(v.sharpen));
-    put("sharpness", fixed(v.sharpness, 2));
+    put("sharpening", std::to_string(std::clamp(v.sharpening.load(), 0, 100)));
+    put(kSharpenOffMarker, "1");
     put("jitter", flag(v.jitter));
     put("reactive", flag(v.reactive));
     put("object_motion", flag(v.object_motion));
@@ -576,7 +633,6 @@ void Save() {
     put("hide_cursor", flag(v.hide_cursor));
     put("fsr_invert_jitter", flag(v.fsr_invert_jitter));
     put("dlss_preset", DlssPresetText(v.dlss_preset));
-    put("optiscaler_compat", flag(v.optiscaler_compat));
     // Read by patches.py at start.
     for (int e = 0; e < EffectCount; ++e) {
         put(Effects[e].key, flag(v.effects[e]));
@@ -655,6 +711,10 @@ void Save() {
                 if (key == "fsr4_invert_jitter") {
                     key = "fsr_invert_jitter";
                 }
+                // 0.4.6 beta 16: the old strength's line becomes the percentage's.
+                if (key == "sharpness") {
+                    key = "sharpening";
+                }
                 const auto it = std::find_if(keys.begin(), keys.end(),
                                              [&](const auto& k) { return k.first == key; });
                 if (it != keys.end()) {
@@ -671,7 +731,7 @@ void Save() {
         std::fclose(file);
     }
     if (!had_lines) {
-        out = "# Hunter's Workshop settings (in-game menu: Insert / L3+R3)\n";
+        out = "# Hunter's Workshop settings (in-game menu: F1 / L3+R3)\n";
     }
     for (size_t k = 0; k < keys.size(); ++k) {
         if (!written[k]) {

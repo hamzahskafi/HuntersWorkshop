@@ -175,35 +175,6 @@ static bool MultiCopy(Rasterizer& rasterizer, const VideoCore::Buffer* src,
 }
 
 namespace {
-/// 0.4.5 beta 9 (vk_copy_hold.h): BB_COPY_HOLD=0 records each batch where it comes, ending the
-/// pass, as before.
-bool CopyHoldOn() {
-    static const bool on = [] {
-        const char* env = std::getenv("BB_COPY_HOLD");
-        const bool enabled = !(env && env[0] == '0');
-        std::printf("GPU steps: copy shader batches that come in a render pass %s\n",
-                    enabled ? "held to its end (BB_COPY_HOLD=0: recorded where they come)"
-                            : "recorded where they come, ending the pass (BB_COPY_HOLD=0)");
-        return enabled;
-    }();
-    return on;
-}
-
-/// 0.4.5 beta 10: BB_COPY_MERGE=0 records each batch on its own (MultiCopy or a buffer copy), as
-/// in beta 9.
-bool CopyMergeOn() {
-    static const bool on = [] {
-        const char* env = std::getenv("BB_COPY_MERGE");
-        const bool enabled = !(env && env[0] == '0');
-        std::printf("GPU steps: copy shader batches %s\n",
-                    enabled ? "recorded together, one dispatch by GPU address where their order "
-                              "allows (BB_COPY_MERGE=0: one command each)"
-                            : "recorded one command each (BB_COPY_MERGE=0)");
-        return enabled;
-    }();
-    return on;
-}
-
 /// One range of buffer_address_copy.comp's table (std430: 32 bytes).
 struct AddressRange {
     u32 src_lo, src_hi, dst_lo, dst_hi;
@@ -423,7 +394,9 @@ void FlushHeldCopies(void* context, GpuSavings::PassBreak why) {
     }
     // The statistics of the dispatch being run, if any (a flush can come from its uploads).
     const bool in_pass = std::exchange(copy_dispatch_in_pass, false);
-    if (CopyMergeOn() && runtime.GetInstance().IsBufferDeviceAddressSupported()) {
+    // 0.4.5 beta 10: merged, one dispatch by GPU address where their order allows; each batch on its
+    // own without buffer device address.
+    if (runtime.GetInstance().IsBufferDeviceAddressSupported()) {
         RecordMerged(rasterizer);
     } else {
         for (const auto& batch : held.batches) {
@@ -776,7 +749,7 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
     // 0.4.5 beta 9: in an open pass, the batches are held to its end (HoldBatch) and the pass
     // goes on; one that is not held ends it here, after the held ones.
     auto& scheduler = runtime.GetScheduler();
-    const bool hold = !batches.empty() && CopyHoldOn() && scheduler.IsRendering();
+    const bool hold = !batches.empty() && scheduler.IsRendering();
     if (!batches.empty()) {
         copy_dispatch_in_pass = scheduler.PassOpen(); // (or cut, nothing ended since)
         if (copy_dispatch_in_pass) {
@@ -788,8 +761,7 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
     }
     // 0.4.5 beta 10: the batches not held to the pass's end are held to the end of this dispatch
     // and recorded there, merged (FlushHeldCopies).
-    const bool merge = !batches.empty() && CopyMergeOn() &&
-                       runtime.GetInstance().IsBufferDeviceAddressSupported();
+    const bool merge = !batches.empty() && runtime.GetInstance().IsBufferDeviceAddressSupported();
     // Beta 12: this dispatch's number for its batches, when its sources and destinations are
     // apart in the game's memory (then no range reads what another writes; GroupByDestination
     // keeps the same rule); 0 when they overlap, and its batches keep their order.

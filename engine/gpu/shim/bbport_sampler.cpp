@@ -120,10 +120,43 @@ std::pair<unsigned long long, unsigned long long> EngineCode() {
     return range;
 }
 
+/// 0.4.6 beta 19: the suspended thread's frames walked with the x64 unwind data from `context`
+/// (a sample inside a system DLL) until one returns into [code, end): that return address, the
+/// engine function that called into the system; 0 when none within 24 frames or the walk leaves
+/// the stack. The first engine-looking value on the stack, used before, could be a stale return
+/// address of an earlier call (the stage A profile's waits after BbWriteLog::NoteIntent).
+unsigned long long UnwindToEngine(CONTEXT context, unsigned long long code, unsigned long long end) {
+    // The committed stack from Rsp up to its base, one region: the walk never reads past it.
+    MEMORY_BASIC_INFORMATION region{};
+    if (!VirtualQuery(reinterpret_cast<const void*>(context.Rsp), &region, sizeof(region)) ||
+        region.State != MEM_COMMIT) {
+        return 0;
+    }
+    const DWORD64 stack_lo = context.Rsp;
+    const DWORD64 stack_hi = reinterpret_cast<DWORD64>(region.BaseAddress) + region.RegionSize;
+    for (int depth = 0; depth < 24; ++depth) {
+        DWORD64 image = 0;
+        PRUNTIME_FUNCTION fn = RtlLookupFunctionEntry(context.Rip, &image, nullptr);
+        if (fn) {
+            PVOID handler_data = nullptr;
+            DWORD64 frame = 0;
+            RtlVirtualUnwind(UNW_FLAG_NHANDLER, image, context.Rip, fn, &context, &handler_data,
+                             &frame, nullptr);
+        } else { // a leaf: its return address is at the top of the stack
+            if (context.Rsp < stack_lo || context.Rsp + 8 > stack_hi) return 0;
+            context.Rip = *reinterpret_cast<const DWORD64*>(context.Rsp);
+            context.Rsp += 8;
+        }
+        if (!context.Rip || context.Rsp < stack_lo || context.Rsp > stack_hi) return 0;
+        if (context.Rip >= code && context.Rip < end) return context.Rip;
+    }
+    return 0;
+}
+
 bool Sample(Target& t, Site* site) {
     if (SuspendThread(t.handle) == static_cast<DWORD>(-1)) return false;
     CONTEXT context{};
-    context.ContextFlags = CONTEXT_CONTROL;
+    context.ContextFlags = CONTEXT_FULL; // the integer registers too, for the unwind
     unsigned long long rip = 0, caller = 0;
     if (GetThreadContext(t.handle, &context)) {
         rip = context.Rip;
@@ -138,6 +171,11 @@ bool Sample(Target& t, Site* site) {
                     }
                 }
                 const auto [code, code_end] = EngineCode();
+                if (!caller && (rip < code || rip >= code_end)) {
+                    if (const auto engine = UnwindToEngine(context, code, code_end)) {
+                        caller = engine | kHostCaller;
+                    }
+                }
                 if (!caller && (rip < code || rip >= code_end)) {
                     for (const auto value : stack) {
                         if (value >= code && value < code_end) {

@@ -119,7 +119,10 @@ inline std::atomic<std::uint64_t> bound_in_place_written_bytes{0};
 /// Command processor writes put into the GPU's VRAM data (no readback); blocks whose GPU data went
 /// back to the game's memory before moving in place; downloads of GPU data (readbacks).
 inline std::atomic<std::uint64_t> gpu_data_updates{0}, copied_back_blocks{0}, readbacks{0};
-inline std::atomic<std::uint64_t> late_vram_writes{0}; ///< labels and the like put into VRAM copies
+/// 0.4.6 beta 13: the engine's stores through the backing view (labels, occlusion results), which
+/// never fault: checked against the buffer cache's VRAM copies; those whose page held an uploaded copy
+/// (then marked to upload); those on a page the GPU wrote (left).
+inline std::atomic<std::uint64_t> backing_stores{0}, backing_stores_marked{0}, backing_stores_gpu{0};
 /// BB_HONEST_LABELS: submissions for fences: at the end of a guest submission with the GPU out of
 /// work, or on its last submission; on the GPU's announcement that it got to its last one; and by
 /// the GPU command thread's safety net (fence work nothing would submit: expected 0).
@@ -156,6 +159,11 @@ inline std::atomic<std::uint64_t> t_resident{0}, t_protect{0}, t_image_create{0}
 /// Image(), and RefreshImage's hashes, source buffer and detiling.
 inline std::atomic<std::uint64_t> t_image_query{0}, t_image_alloc{0}, t_refresh_hash{0},
     t_refresh_obtain{0}, t_refresh_detile{0};
+/// 0.4.6 beta 5: the buffer cache's sparse binds (BufferCache::SubmitPendingArenaBinds): calls,
+/// ranges bound or unbound, and the time in the driver's call (ns, the longest one too). Counted
+/// always (hitch reports, BB_FRAME_STATS).
+inline std::atomic<std::uint64_t> sparse_bind_calls{0}, sparse_bind_ranges{0}, sparse_bind_ns{0},
+    sparse_bind_max_ns{0};
 /// Images given memory (UniqueImage::Create) and images whose guest data was checked for changes
 /// (RefreshImage). Counted always (long frames).
 inline std::atomic<std::uint64_t> image_allocs{0}, image_checks{0};
@@ -203,6 +211,9 @@ inline std::atomic<std::uint64_t> device_alloc_bytes{0}, device_free_bytes{0};
 inline std::atomic<std::uint64_t> live_image_bytes{0}, live_images{0};
 /// Every Vulkan image we allocated (their memory as allocated: host sizes, mips, scene targets).
 inline std::atomic<std::uint64_t> vk_image_bytes{0};
+/// 0.4.6 beta 5: of them, those in system memory (not the GPU's: VRAM had no room), how many and
+/// their bytes now, and how many were placed there over its budget when VRAM refused them.
+inline std::atomic<std::uint64_t> system_images{0}, system_image_bytes{0}, image_over_budget{0};
 inline std::atomic<std::uint64_t> residency_alloc_bytes{0}, residency_unused_bytes{0};
 /// The texture cache collector: the usage it compares, the mark it starts at, images it freed.
 inline std::atomic<std::uint64_t> gc_used_bytes{0}, gc_trigger_bytes{0}, gc_freed_images{0};
@@ -215,6 +226,8 @@ inline std::atomic<std::uint64_t> vram_idle_bytes{0}, vram_unmapped_bytes{0}, vr
 inline std::atomic<std::uint64_t> residency_chunk_count{0}, evacuations{0}, evac_kept_gpu{0}, evac_kept_other{0};
 /// Images the collector passed over (GPU-written, not evictable without memory pressure).
 inline std::atomic<std::uint64_t> gc_kept_images{0};
+/// 0.4.5 beta 15: flips on time in a row (driver.cpp): the VRAM manager works in play only with slack.
+inline std::atomic<std::uint32_t> flips_on_time{0};
 struct WaitTimer {
     std::atomic<std::uint64_t>& total;
     std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();

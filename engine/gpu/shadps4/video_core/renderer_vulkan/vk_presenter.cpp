@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "common/debug.h"
+#include "engine/startup.h"
 #include "common/elf_info.h"
 #include "common/io_file.h"
 #include "common/path_util.h"
@@ -1079,6 +1080,13 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
     info.AddSignal(frame->present_done);
     scheduler.Flush(info);
 
+    // 0.4.6 beta 17: before the first frame the game window shows (hidden behind the start's
+    // splash until now) and the splash closes; a frame put into a window not shown yet is an error
+    // on Wayland, so this waits for it (a moment; at most 3 s).
+    if (!first_frame_shown) {
+        first_frame_shown = true;
+        BbStartup::FirstFrameReady(3000);
+    }
     // Present to swapchain.
     bool presented;
     {

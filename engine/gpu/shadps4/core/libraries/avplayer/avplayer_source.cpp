@@ -12,6 +12,9 @@
 
 #include <magic_enum/magic_enum.hpp>
 
+#include <cstdio>
+#include <cstring>
+
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
@@ -54,6 +57,7 @@ AvPlayerSource::~AvPlayerSource() {
 }
 
 bool AvPlayerSource::Init(const AvPlayerInitData& init_data, std::string_view path) {
+    m_path = std::string(path);
     m_memory_replacement = init_data.memory_replacement;
     m_max_num_video_framebuffers =
         std::min(std::max(2, init_data.num_output_video_framebuffers), 16);
@@ -294,6 +298,20 @@ bool AvPlayerSource::Start() {
             m_audio_buffers.Push(GuestBuffer(m_memory_replacement, 0x10, size, false));
         }
     }
+    // 0.4.6 beta 16: each movie in the log at every log level, with what the engine's FFmpeg decodes
+    // (packaging/build-ffmpeg.sh); its failures are the errors above.
+    char streams[192] = "";
+    if (m_video_codec_context) {
+        std::snprintf(streams, sizeof(streams), "video %s %dx%d", avcodec_get_name(m_video_codec_context->codec_id),
+                      m_video_codec_context->width, m_video_codec_context->height);
+    }
+    if (m_audio_codec_context) {
+        const size_t used = std::strlen(streams);
+        std::snprintf(streams + used, sizeof(streams) - used, "%saudio %s, %d channels, %d Hz", used ? "; " : "",
+                      avcodec_get_name(m_audio_codec_context->codec_id), m_audio_codec_context->ch_layout.nb_channels,
+                      m_audio_codec_context->sample_rate);
+    }
+    std::printf("Movie: %s: %s (FFmpeg %s)\n", m_path.c_str(), streams, av_version_info());
     m_demuxer_thread.Run([this](std::stop_token stop) { this->DemuxerThread(stop); });
     m_video_decoder_thread.Run([this](std::stop_token stop) { this->VideoDecoderThread(stop); });
     m_audio_decoder_thread.Run([this](std::stop_token stop) { this->AudioDecoderThread(stop); });

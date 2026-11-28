@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // bbport BB_TIMELINE=<file>: a timeline of the frame's way to the GPU (guest submissions and
-// waits, decoding, Vulkan submissions, GPU completion), to see where the GPU waits for work.
+// waits, decoding, stage B's waits for packets, Vulkan submissions, GPU completion), to see where
+// the GPU waits for work. tools/timeline_report.py reads it.
 // Recording starts BB_TIMELINE_START seconds (default 30) after the first event and stops when
-// the buffer is full (~15 s of play); the file is then written once: "ns event arg arg2" per line.
+// the buffer is full (several seconds of play); the file is then written once: "ns event arg
+// arg2" per line.
 #pragma once
 
 #include <atomic>
@@ -27,7 +29,28 @@ enum Event : std::uint32_t {
     FrameRetired,      ///< arg: frame
     DecoderIdleBegin,  ///< the GPU command thread has nothing to decode
     DecoderIdleEnd,
+    StageBWait,        ///< 0.4.6 beta 18: stage B waited for a packet, at its end; arg: microseconds
+                       ///< (20 or more: the gaps between packets of one frame are left out)
+    // 0.4.6 beta 18, engine id 132: what the game's threads wait for, and the flip's way.
+    GuestBlocked,      ///< a game thread's wait in the runtime, at its end; arg: microseconds (10 or
+                       ///< more); arg2: ThreadTag() with the kind in bits 24-31 (BlockKind)
+    FlipTaken,         ///< the flip thread takes a flip (VideoOutDriver::Flip); arg: buffer index
+    FlipShown,         ///< the game told of it (flip status, the buffer it replaced released)
+    VoLabelWaitBegin,  ///< stage A waits for a display buffer the game renders into to be released
+    VoLabelWaitEnd,
+    PresentBegin,      ///< the swap thread starts presenting a frame (acquire, copy, submit, present)
+    PresentEnd,
 };
+
+/// GuestBlocked's kinds (the runtime's runtime_wait_note).
+enum BlockKind : std::uint32_t { BlockCondition, BlockMutex, BlockSemaphore, BlockSleep };
+
+/// The calling thread and where it runs: thread id << 32 | 1 << 16 on an efficiency core of a hybrid
+/// CPU | the logical processor (its group << 8 | number). GuestSubmitDone carries it in arg2.
+std::uint64_t ThreadTag();
+
+/// Whether a timeline is being recorded (BB_TIMELINE set).
+inline bool On();
 
 struct Entry {
     std::uint64_t ns;
@@ -36,7 +59,8 @@ struct Entry {
     std::uint64_t arg2;
 };
 
-inline constexpr std::uint64_t Capacity = 400000;
+/// Several seconds of play with the game threads' waits (engine id 132; 400,000 before them).
+inline constexpr std::uint64_t Capacity = 1000000;
 
 struct State {
     const char* path = std::getenv("BB_TIMELINE");
@@ -72,6 +96,10 @@ inline void Write(State& s) {
         std::fclose(f);
         std::printf("Timeline: %llu events written to %s\n", (unsigned long long)Capacity, s.path);
     }
+}
+
+inline bool On() {
+    return Get().path != nullptr;
 }
 
 inline void Note(Event event, std::uint64_t arg = 0, std::uint64_t arg2 = 0) {

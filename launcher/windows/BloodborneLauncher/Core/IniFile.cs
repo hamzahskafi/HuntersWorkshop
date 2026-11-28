@@ -21,8 +21,8 @@ namespace BloodborneLauncher.Core
             ("upscaler", "off"), // 0.4.4 beta 28 (the tester): the game's own AA by default
             ("fsr_version", "auto"),
             ("preset", "auto"),
-            ("sharpen", "1"),
-            ("sharpness", "0.20"),
+            ("sharpen", "0"), // 0.4.6 beta 16 (the tester): off by default; Load switches the old default off once
+            ("sharpening", "25"), // 0.4.6 beta 16 (the tester): a percentage of RCAS's maximum (was sharpness)
             ("object_motion", "1"),
             ("show_fps", "0"),
             ("compile_note", "1"),
@@ -75,18 +75,64 @@ namespace BloodborneLauncher.Core
                 // Unreadable: start from the defaults.
             }
 
+            var fileKeys = new HashSet<string>(StringComparer.Ordinal);
             foreach (var line in _lines)
             {
                 if (!line.Contains('=') || line.TrimStart().StartsWith('#'))
                     continue;
                 var at = line.IndexOf('=');
-                _values[line[..at].Trim()] = line[(at + 1)..].Trim();
+                var key = line[..at].Trim();
+                fileKeys.Add(key);
+                _values[key] = line[(at + 1)..].Trim();
             }
             // 0.4.4 beta 27: FSR 3.1, FSR 4 and FSR 4.1.1 are AMD's FSR ("fsr"), as the engine reads them;
             // shown as it, the file left as it is until something is saved.
             if (_values.TryGetValue("upscaler", out var upscaler) && upscaler is "fsr3" or "fsr4" or "fsr411")
                 _values["upscaler"] = "fsr";
+            // 0.4.6 beta 16 (the tester): the strength is a percentage of RCAS's maximum (`sharpening`, 25
+            // by default) in place of AMD's sharpness (`sharpness`): an old value kept as the same
+            // strength, the old default (0.20) made the new one, the old line removed at the next save;
+            // as the engine does (bbport_settings.h, SharpeningFromOld).
+            double? oldSharpness = null;
+            if (_values.TryGetValue("sharpness", out var oldText))
+            {
+                if (double.TryParse(oldText, System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out var old))
+                    oldSharpness = old;
+                if (!fileKeys.Contains("sharpening") && oldSharpness is double s)
+                {
+                    _values["sharpening"] = SharpeningFromOld(s).ToString(System.Globalization.CultureInfo.InvariantCulture);
+                    _changed.Add("sharpening");
+                }
+                _values["sharpness"] = null;
+                _changed.Add("sharpness");
+            }
+            // 0.4.6 beta 16 (the tester): sharpening off by default. A config.ini with the old default
+            // untouched (on, at 0.20) has it switched off once, any other choice kept; the marker says
+            // it happened, so turning it on again later stays. The engine does the same when it reads a
+            // file without the marker (bbport_settings.cpp, kSharpenOffMarker), and writes the marker.
+            if (!_values.ContainsKey(SharpenOffMarker))
+            {
+                var oldDefault = !fileKeys.Contains("sharpening") &&
+                                 (oldSharpness is null || Math.Abs(oldSharpness.Value - 0.2) < 0.001);
+                if (_values.GetValueOrDefault("sharpen") == "1" && oldDefault)
+                {
+                    _values["sharpen"] = "0";
+                    _changed.Add("sharpen");
+                }
+                _values[SharpenOffMarker] = "1";
+                _changed.Add(SharpenOffMarker);
+            }
         }
+
+        /// <summary>0.4.6 beta 16: the percentage for an old `sharpness` (bbport_settings.h,
+        /// SharpeningFromOld): 0.20, the old default, the new default 25; another value the strength the
+        /// first beta 16 build gave it (2 - 2s stops below RCAS's maximum); 1 and above 100, 0 or less 0.</summary>
+        public static int SharpeningFromOld(double s) =>
+            !(s > 0) ? 0 : s > 0.199 && s < 0.201 ? 25 : s >= 1 ? 100 : (int)(100 * Math.Pow(2, 2 * s - 2) + 0.5);
+
+        /// <summary>0.4.6 beta 16: config.ini's sign that the old sharpening default was switched off.</summary>
+        public const string SharpenOffMarker = "sharpen_off_046";
 
         public void Save()
         {
@@ -115,7 +161,7 @@ namespace BloodborneLauncher.Core
             }
 
             if (_lines.Count == 0)
-                output.Add("# Hunter's Workshop settings (in-game menu: Insert / L3+R3)");
+                output.Add("# Hunter's Workshop settings (in-game menu: F1 / L3+R3)");
             foreach (var (key, value) in _values)
                 if (!written.Contains(key) && value != null)
                     output.Add($"{key}={value}");
@@ -124,6 +170,8 @@ namespace BloodborneLauncher.Core
             File.WriteAllText(Paths.IniPath, string.Join("\n", output) + "\n");
             FileTime = File.GetLastWriteTimeUtc(Paths.IniPath);
             _lines = output;
+            // Everything is in the file now, Load's own changes as well (0.4.6 beta 16's marker).
+            _changed.Clear();
         }
 
         /// <summary>The value, or null when the key is absent (e.g. a binding left at its default).</summary>

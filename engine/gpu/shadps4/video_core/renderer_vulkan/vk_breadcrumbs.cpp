@@ -54,6 +54,11 @@ bool enabled = false;
 /// there and one in the next command read alike without it. Beta 20 measured both at 0.10 ms of
 /// GPU time a frame at the lamp spot (about 3,600 markers).
 bool marker_before = false;
+/// 0.4.6 beta 21 (engine id 144): only commands whose number is a multiple of this write their
+/// marker after them (a power of two); 1 with BB_BREADCRUMBS=all or both. One marker after each of
+/// the ~1,800 commands a frame cost 1.3-2.3% of the frame rate on the RX 9070 XT (the tester's run
+/// of 142 with BB_BREADCRUMBS=0).
+u32 mark_every = 32;
 std::once_flag init_once;
 vk::Buffer marker_buffer{};
 VmaAllocation marker_allocation{};
@@ -230,6 +235,9 @@ void Init(const Instance& instance) {
         return;
     }
     marker_before = env && std::strcmp(env, "both") == 0;
+    if (marker_before || (env && std::strcmp(env, "all") == 0)) {
+        mark_every = 1;
+    }
     if (!instance.IsBufferMarkerSupported()) {
         std::printf("GPU breadcrumbs: VK_AMD_buffer_marker unavailable, GPU hangs will not be "
                     "located\n");
@@ -263,7 +271,14 @@ void Init(const Instance& instance) {
     enabled = true;
     if (marker_before) {
         std::printf("GPU breadcrumbs: a marker before and after each command (BB_BREADCRUMBS=both; "
-                    "default: after only)\n");
+                    "default: after every 32)\n");
+    } else if (mark_every == 1) {
+        std::printf("GPU breadcrumbs: a marker after each command (BB_BREADCRUMBS=all; default: "
+                    "after every 32)\n");
+    } else {
+        std::printf("GPU breadcrumbs: a marker after every %u commands, a hang named within them "
+                    "(BB_BREADCRUMBS=all: after each; 0: off)\n",
+                    mark_every);
     }
 }
 
@@ -423,11 +438,28 @@ u32 Note(u32 stream_index, const Crumb& crumb) {
 }
 
 void Mark(vk::CommandBuffer cmdbuf, u32 stream, u32 id, bool after) {
-    if (!enabled || stream >= MaxStreams || (!after && !marker_before)) {
+    if (!enabled || stream >= MaxStreams || (!after && !marker_before) ||
+        (after && (id & (mark_every - 1)) != 0)) {
         return;
     }
     cmdbuf.writeBufferMarkerAMD(vk::PipelineStageFlagBits::eBottomOfPipe, marker_buffer,
                                 stream * StreamStride, id * 2 + (after ? 1 : 0));
+}
+
+u32 LastNoted(u32 stream) {
+    if (!enabled || stream >= MaxStreams) {
+        return 0;
+    }
+    return u32(streams[stream].next.load(std::memory_order_relaxed) - 1);
+}
+
+void MarkLast(vk::CommandBuffer cmdbuf, u32 stream, u32 id) {
+    // With a marker after each command (mark_every 1) the last one has written its own.
+    if (!enabled || stream >= MaxStreams || id == 0 || mark_every == 1) {
+        return;
+    }
+    cmdbuf.writeBufferMarkerAMD(vk::PipelineStageFlagBits::eBottomOfPipe, marker_buffer,
+                                stream * StreamStride, id * 2 + 1);
 }
 
 u32 ArgsSlot() {
@@ -474,9 +506,9 @@ void ReportDeviceLost(const char* where) {
     }
     ReportDeviceFault();
     if (const auto& opti = OptiScaler::Detect(); opti.loaded) {
-        std::printf("Device lost with OptiScaler loaded (as %s, compatibility mode %s): it hooks "
+        std::printf("Device lost with OptiScaler loaded (as %s, compatibility mode on): it hooks "
                     "submissions and runs DLSS itself; to rule it out, remove %s and try again\n",
-                    opti.module.c_str(), OptiScaler::Compat() ? "on" : "off", opti.module.c_str());
+                    opti.module.c_str(), opti.module.c_str());
         if (!opti.frame_generation.empty()) {
             std::printf("OptiScaler's frame generation was on (FGOutput=%s): it runs through a D3D12 "
                         "bridge on Vulkan; set it to none in OptiScaler's menu first\n",
@@ -587,6 +619,25 @@ void Report(const char* title, const char* where) {
                 std::printf(", the GPU finished all\n");
                 continue;
             }
+            if (mark_every > 1) {
+                // Engine id 144: a marker after every mark_every-th command only: the GPU stopped
+                // in one of the next ones, or in the work recorded before them.
+                const u64 to = std::min(last, id + mark_every);
+                std::printf(", the GPU finished #%llu (a marker after every %u): stuck in one of "
+                            "#%llu to #%llu, or in the work recorded before them (copies, clears, "
+                            "barriers; BB_BREADCRUMBS=all names the one) (%llu noted after it)\n",
+                            (unsigned long long)id, mark_every, (unsigned long long)(id + 1),
+                            (unsigned long long)to, (unsigned long long)(last - id - 1));
+                PrintEntry(stream, id, "finished");
+                for (u64 next = id + 1; next <= to; ++next) {
+                    PrintEntry(stream, next, "one of these");
+                }
+                std::fflush(stdout);
+                for (u64 next = id + 1; next <= to; ++next) {
+                    DumpPrograms(stream, next);
+                }
+                continue;
+            }
             if (!marker_before) {
                 // Only markers after each command: the next one never finished, or the work
                 // recorded before it did not (copies, clears, barriers).
@@ -645,8 +696,12 @@ void PrintProgress() {
         const u64 value = marker ? newest - u32(u32(newest) - marker) : 0;
         // 2n + 1: n finished; 2n: n started, n - 1 finished.
         finished[s] = value ? value / 2 - (value & 1 ? 0 : 1) : 0;
-        std::printf(" stream %u (%s) %llu noted, %llu unfinished;", s, streams[s].name,
-                    (unsigned long long)last, (unsigned long long)(last - finished[s]));
+        // Engine id 144: with a marker after every mark_every-th command, those after the last
+        // one written may be finished too.
+        std::printf(mark_every > 1 ? " stream %u (%s) %llu noted, %llu after the GPU's last marker;"
+                                   : " stream %u (%s) %llu noted, %llu unfinished;",
+                    s, streams[s].name, (unsigned long long)last,
+                    (unsigned long long)(last - finished[s]));
     }
     // The largest indirect dispatches among the last ArgSlots the GPU finished, one per shader:
     // counts that only grow from frame to frame end in a dispatch that never finishes.

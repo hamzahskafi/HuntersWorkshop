@@ -106,6 +106,77 @@ public:
                             });
     }
 
+    /// 0.4.6 beta 5: as MarkRegionAsCpuModified, for the cache's own reasons (a VRAM copy leaving):
+    /// not counted as the game's writes (RegionManager::ChangeRegionState).
+    void MarkRegionAsCpuModifiedQuiet(VAddr dirty_cpu_addr, u64 query_size) {
+        IteratePages<false>(dirty_cpu_addr, query_size,
+                            [](RegionManager* manager, u64 offset, size_t size) {
+                                std::scoped_lock lk{manager->lock};
+                                manager->template ChangeRegionState<Type::CPU, true, false>(
+                                    manager->GetCpuAddr() + offset, size);
+                            });
+    }
+
+    /// 0.4.6 beta 12: see RegionManager::MarkToUploadButGpu (regions not made yet are all to upload).
+    /// Any thread: no region is made here.
+    void MarkToUploadButGpu(VAddr addr, u64 size) {
+        IteratePages<false>(addr, size, [](RegionManager* manager, u64 offset, size_t size) {
+            std::scoped_lock lk{manager->lock};
+            manager->MarkToUploadButGpu(offset, size);
+        });
+    }
+    /// 0.4.6 beta 13 (diagnostics): see RegionManager::PageWatch; 0 where no region was made.
+    u8 PageWatch(VAddr addr) const noexcept {
+        const std::size_t index = addr >> TRACKER_HIGHER_PAGE_BITS;
+        if (index >= top_tier.size()) {
+            return 0;
+        }
+        const RegionManager* manager = top_tier[index];
+        return manager ? manager->PageWatch(addr & TRACKER_HIGHER_PAGE_MASK) : 0;
+    }
+    /// 0.4.6 beta 13: see RegionManager::MarkStoreUploaded; {pages marked, pages the GPU wrote}. Any
+    /// thread: no region is made here (memory no region covers is all to upload already).
+    std::pair<u32, u32> MarkStoreUploaded(VAddr addr, u64 size) {
+        u32 marked = 0, gpu_pages = 0;
+        IteratePages<false>(addr, size, [&](RegionManager* manager, u64 offset, size_t size) {
+            std::scoped_lock lk{manager->lock};
+            const auto [m, g] = manager->MarkStoreUploaded(offset, size);
+            marked += m;
+            gpu_pages += g;
+        });
+        return {marked, gpu_pages};
+    }
+    /// 0.4.6 beta 15 part 4: see RegionManager::CopyComing ([addr, addr + size) whole pages). Any
+    /// thread: no region is made here (memory no region covers is all to upload already).
+    std::pair<u32, u32> CopyComing(VAddr addr, u64 size) {
+        u32 dropped = 0, writable = 0;
+        IteratePages<false>(addr, size, [&](RegionManager* manager, u64 offset, size_t size) {
+            std::scoped_lock lk{manager->lock};
+            const auto [d, w] = manager->CopyComing(offset, size);
+            dropped += d;
+            writable += w;
+        });
+        return {dropped, writable};
+    }
+    /// 0.4.6 beta 12: see RegionManager::CallsCreate; makes the regions (the thread that uploads only).
+    s64 CallsCreate(VAddr addr, u64 size, bool with_data) {
+        s64 pages = 0;
+        IteratePages<true>(addr, size, [&pages, with_data](RegionManager* manager, u64 offset, size_t size) {
+            std::scoped_lock lk{manager->lock};
+            pages += manager->CallsCreate(offset, size, with_data);
+        });
+        return pages;
+    }
+    /// 0.4.6 beta 12: see RegionManager::CallsRelease (regions not made yet hold no `calls`).
+    s64 CallsRelease(VAddr addr, u64 size, bool all) {
+        s64 pages = 0;
+        IteratePages<false>(addr, size, [&pages, all](RegionManager* manager, u64 offset, size_t size) {
+            std::scoped_lock lk{manager->lock};
+            pages += manager->CallsRelease(offset, size, all);
+        });
+        return pages;
+    }
+
     /// bbport: see RegionManager::ExtendWriteFault.
     void ExtendWriteFault(VAddr window_addr, u64 size) {
         IteratePages<false>(window_addr, size,

@@ -59,6 +59,10 @@ namespace BloodborneLauncher.Core
             name + ".exe";
 #endif
 
+        /// <summary>One of the engine's helper programs (bb-gpu-capabilities, bb-shader-lab), beside the
+        /// engine in engine\out (engines 126 to 128 had them in engine\out\tools).</summary>
+        public static string Tool(string name) => Path.Combine(EngineDir, "out", Program(name));
+
         /// <summary>A package's engine folder: its engine\, or the folder itself when it is the engine.</summary>
         public static string EngineDirOf(string dir) =>
             File.Exists(Path.Combine(dir, "engine", "out", Program("bb-probe")))

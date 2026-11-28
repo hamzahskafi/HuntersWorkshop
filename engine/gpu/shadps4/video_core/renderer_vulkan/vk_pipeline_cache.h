@@ -4,8 +4,10 @@
 #pragma once
 
 #include <unordered_map>
+#include <unordered_set>
 #include <mutex>
 #include <shared_mutex>
+#include "bbport_role_lock.h"
 #include <variant>
 #include <boost/container/static_vector.hpp>
 #include <tsl/robin_map.h>
@@ -15,6 +17,7 @@
 #include "video_core/renderer_vulkan/vk_compute_pipeline.h"
 #include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
 #include "video_core/renderer_vulkan/vk_resource_pool.h"
+#include "video_core/renderer_vulkan/translate_ahead.h"
 
 template <>
 struct std::hash<vk::ShaderModule> {
@@ -58,19 +61,31 @@ struct Program {
     /// bbport: `info` as translated, for draw-preparation workers (they must not read `info`,
     /// whose user data the GPU thread rewrites every draw). Guarded by programs_mutex.
     std::unique_ptr<Shader::Info> info_template;
+    /// 0.4.5 beta 17: a vertex program with an object-motion permutation (set when one is added;
+    /// read through std::atomic_ref): its draws ask for that permutation first
+    /// (PipelineCache::RefreshGraphicsKey), not for the ordinary one only to look at its buffers.
+    bool has_motion = false;
 
     Program() = default;
     Program(Shader::HwStage stage, Shader::SwStage l_stage, Shader::ShaderParams params)
         : info{stage, l_stage, params} {}
 
     void AddPermut(vk::ShaderModule module, Shader::StageSpecialization&& spec) {
+        NoteMotion(spec);
         modules.emplace_back(module, std::move(spec));
     }
 
     void InsertPermut(vk::ShaderModule module, Shader::StageSpecialization&& spec,
                       size_t perm_idx) {
+        NoteMotion(spec);
         modules.resize(std::max(modules.size(), perm_idx + 1)); // <-- beware of realloc
         modules[perm_idx] = {module, std::move(spec)};
+    }
+
+    void NoteMotion(const Shader::StageSpecialization& spec) {
+        if (spec.runtime_info.hw_stage == Shader::HwStage::Vertex && spec.runtime_info.hw.vs.motion_vectors) {
+            std::atomic_ref<bool>(has_motion).store(true, std::memory_order_relaxed);
+        }
     }
 };
 
@@ -101,6 +116,57 @@ struct PipelineSelection {
     struct PrepWorker* worker{}; ///< set: read-only selection for a draw-preparation worker
 };
 
+/// 0.4.6 beta 17 part 2 (translate_ahead.h): a stage a draw-preparation worker found not translated,
+/// queued ahead of the GPU command thread: a program not translated yet, or a variant of a known one
+/// (`variant_spec`, its specialization as the worker computed it). Its inputs are the worker's,
+/// copied (the user data live in the worker's register copy); the job fills in the rest.
+struct AheadStage {
+    u64 hash{};
+    Shader::HwStage hw_stage{};
+    Shader::SwStage sw_stage{};
+    std::array<u32, Shader::ShaderParams::NumShaderUserData> user_data{};
+    std::span<const u32> code;
+    /// The code's words as the worker read them: the job translates `code` in place (its address is
+    /// the program's base, which inline constant buffers are found by) and fails if the memory differs
+    /// from this before or after; the GPU thread uses the result only for code equal to it. A shader's
+    /// memory the game rewrote meanwhile is never published under the hash taken before.
+    std::vector<u32> code_copy;
+    Shader::RuntimeInfo runtime{};
+    Shader::Backend::Bindings start{};
+    bool start_known = false; ///< false: where the job's previous stage ends (a chain of programs)
+    std::optional<Shader::StageSpecialization> variant_spec;
+    // The job's results.
+    std::unique_ptr<Shader::Info> info;
+    Shader::RuntimeInfo runtime_after{};  ///< as the translation left it (CompileModule's)
+    Shader::Backend::Bindings actual_start{}, end{};
+    std::vector<u32> spv;
+    std::optional<Shader::StageSpecialization> spec; ///< a program's, from its translated Info
+    u64 ns = 0;
+    bool ok = false;
+
+    /// Whether `words` are the code this stage was queued with.
+    bool SameCode(std::span<const u32> words) const {
+        return words.size() == code_copy.size() &&
+               std::equal(words.begin(), words.end(), code_copy.begin());
+    }
+
+    /// The same request: one job serves both.
+    bool SameInputs(const AheadStage& other) const {
+        return hash == other.hash && hw_stage == other.hw_stage && runtime == other.runtime &&
+               start_known == other.start_known && (!start_known || start == other.start) &&
+               variant_spec.has_value() == other.variant_spec.has_value() &&
+               (!variant_spec || *variant_spec == *other.variant_spec);
+    }
+};
+
+/// A job: one draw's stages not translated yet, in the order the draw binds them. Self-contained (its
+/// own profile copy): a compile thread runs it without the pipeline cache.
+struct TranslationJob {
+    std::vector<AheadStage> stages;
+    Shader::Profile profile{};
+    Ahead::Progress progress;
+};
+
 /// bbport: a draw-preparation worker's own program state (see vk_draw_prep.h).
 struct PrepWorker {
     struct Stage {
@@ -114,6 +180,11 @@ struct PrepWorker {
     std::unordered_map<const Program*, Shader::Info> infos;
     boost::container::static_vector<Stage, MaxShaderStages> stages;
     bool failed = false;
+    /// 0.4.6 beta 17 part 2: this draw's stages not translated yet, to queue (cleared per draw);
+    /// `ahead_closed`: a later stage cannot join (its bindings would start where an untranslated
+    /// stage ends, or it is a variant after one).
+    std::vector<AheadStage> ahead;
+    bool ahead_closed = false;
 };
 
 struct PreparedDraw;
@@ -165,6 +236,11 @@ public:
         return used_prepared;
     }
 
+    /// 0.4.6 beta 17 part 2 (BB_TRANSLATE_AHEAD=0: off): a draw-preparation worker's stages not
+    /// translated yet (PrepWorker::ahead), queued on the compile threads unless an equal job is.
+    void QueueAhead(std::vector<AheadStage>&& stages);
+    static bool TranslateAheadEnabled();
+
     const ComputePipeline* GetComputePipeline();
 
     using Result = std::tuple<const Shader::Info*, vk::ShaderModule,
@@ -201,6 +277,24 @@ private:
     vk::ShaderModule CompileModule(Shader::Info& info, Shader::RuntimeInfo& runtime_info,
                                    const std::span<const u32>& code, size_t perm_idx,
                                    Shader::Backend::Bindings& binding);
+    /// The part of CompileModule after the translation (it needs the variant's index): the module
+    /// (or the shader patch's), the stored binary and state, the dumps and names.
+    vk::ShaderModule FinishModule(const Shader::Info& info, const Shader::RuntimeInfo& runtime_before,
+                                  const std::span<const u32>& code, size_t perm_idx, std::vector<u32>&& spv,
+                                  bool ahead);
+    /// 0.4.6 beta 17 part 2: where the GPU command thread would translate, the queued job's stage
+    /// for it (found by `pred`), run here if no compile thread has started it, waited for if one has;
+    /// none when there is no such job or it failed.
+    template <typename Pred>
+    std::optional<std::pair<std::shared_ptr<TranslationJob>, u32>> AcquireAhead(u64 hash, Shader::HwStage stage,
+                                                                                std::span<const u32> code,
+                                                                                Pred&& pred);
+    static void RunAhead(TranslationJob& job);
+    static void TranslateAheadStages(TranslationJob& job, Shader::Pools& pools);
+    std::optional<Result> PublishAheadProgram(Shader::HwStage hw_stage, Shader::SwStage sw_stage,
+                                              const Shader::ShaderParams& params,
+                                              const Shader::RuntimeInfo& runtime_info,
+                                              Shader::Backend::Bindings& binding);
     const Shader::RuntimeInfo& BuildRuntimeInfo(PipelineSelection& sel, Shader::HwStage stage,
                                                 Shader::SwStage l_stage);
 
@@ -219,17 +313,32 @@ private:
     Shader::Pools pools;
     tsl::robin_map<size_t, std::unique_ptr<Program>> program_cache;
     /// bbport: exclusive for program/permutation insertions, shared for worker lookups.
-    std::shared_mutex programs_mutex;
+    /// 0.4.6 beta 20: role-aware (bbport_role_lock.h): the GPU command thread and the draw
+    /// preparation threads (Assist) share it.
+    BbRoles::SharedMutex programs_mutex{"shader programs"};
+    /// 0.4.6 beta 17 part 2: the translations queued ahead (workers add, the GPU thread takes; an
+    /// entry no draw took goes after 10 s).
+    Ahead::Registry<TranslationJob> ahead_registry{10'000'000'000ull, 4096};
+    /// Requests the GPU thread never took (a job done and unused 2 s after it was queued): a worker's
+    /// view of that draw differs from the GPU thread's, so the request is not queued again (the
+    /// engine id 115 run: 33 such stages asked for 13,748 times a minute). By program, stage and kind.
+    std::mutex ahead_phantom_mutex;
+    std::unordered_set<u64> ahead_phantoms;
     u64 prepared_hits = 0, prepared_misses = 0;
     const PreparedDraw* used_prepared = nullptr;
     tsl::robin_map<ComputePipelineKey, std::unique_ptr<ComputePipeline>> compute_pipelines;
     tsl::robin_map<GraphicsPipelineKey, std::unique_ptr<GraphicsPipeline>> graphics_pipelines;
     PipelineSelection sel{}; ///< GPU thread selection state
     /// bbport: the warm-up's loaded stages: where each one's bindings start (its specialization)
-    /// and how many it has; `warmup_mip_bindings`: one has an image bound per mip level, whose
+    /// and how many it has, and whether it has none at all (StageSpecialization::HasNoBindings: its
+    /// start does not matter); `warmup_mip_bindings`: one has an image bound per mip level, whose
     /// count needs the draw's descriptor.
     std::array<Shader::Backend::Bindings, MaxShaderStages> warmup_start{}, warmup_count{};
+    std::array<bool, MaxShaderStages> warmup_no_bindings{};
     bool warmup_mip_bindings = false;
+    /// 0.4.6 beta 17: the last key LoadGraphicsPipeline read has stages and a key that disagree on
+    /// object motion: it never loads, and the warm-up removes it.
+    bool warmup_motion_disagrees = false;
     ComputePipelineKey compute_key{};
     u32 num_new_pipelines{}; // new pipelines added to the cache since the game start
     bool object_motion_enabled{};

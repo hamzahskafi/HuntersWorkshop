@@ -61,10 +61,57 @@ The sections after this one are the record of the work from the first frame anal
   not upscaled until the game starts again. The menu shows the upscaler in use and why.
 - **DLSS's model** (`dlss_preset`): Auto from 0.4.4 beta 27c (NVIDIA's pairing: K for DLAA, Quality and
   Balanced, M for Performance, L for Ultra Performance), was K; J, K, L, M or the DLL's default.
-- **Sharpening:** `sharpen` (on) and `sharpness` (0-2, default 0.20). AMD FSR applies its own
-  RCAS up to 1 and an extra RCAS pass above it; DLSS, which has no sharpening of its own, gets the
-  whole range from that pass; TAA has its own pass (docs/MODS.md, "TAA sharpening"). The launcher's
-  and the menu's lines say which, for the upscaler chosen (0.4.4 beta 27d).
+- **Sharpening** (0.4.6 beta 16, the tester's go-ahead 2026-11-25): `sharpen` (off by default) and
+  `sharpening` (a percentage of RCAS's maximum, 0-100%, 25% by default: a starting point, the
+  tester; 50% in engine id 107; kept for when it is turned on). The menu's and the launchers' rows
+  name no vendor and give no line per upscaler (the tester: it is RCAS, the same after each); only
+  why the row is off without an upscaler or TAA. One pass for every upscaler and TAA, the engine's
+  (`host_shaders/rcas_extra.glsl`): AMD's RCAS (FSR 1's `FsrRcasF`, with its noise detection),
+  applied in full, its lobe scaled by the percentage (linear: 0% none, 100% AMD's maximum; AMD's
+  `FsrRcasCon` takes the same as stops below the maximum, and FSR 2 and 3 map their sharpness s to
+  2 - 2s stops, so 50% is their 0.5 and their weakest, 0, is 25%). On a display-like picture, as
+  RCAS is made for (AMD: gamma 2.0): the 1080p path's HDR scene through AMD's reversible tone mapper
+  (`FsrSrtmF`, c / (max(rgb) + 1)) and gamma 2.0, and back after; the scaled path's frame as the game
+  encoded it (AMD FSR's decoded input is encoded again before), or in gamma 2.0 when it is in an
+  sRGB format (its view decodes it). Where it runs: in the merge on the 1080p path, after AMD FSR,
+  DLSS and TAA alike (TAA's own pass is not run there); on the scaled path in the copy of the output
+  into the UI image (`sharpen_copy.comp`: one pass where there were three, an RGBA32F copy, the
+  sharpening pass and the blit; at 4K about 100 MB of memory traffic a frame instead of 500), an
+  sRGB UI image written through its UNORM twin and encoded in the shader as the blit's conversion
+  did; where the UI image's format has no storage view, in place before the blit as before (the
+  log says which: "Upscaler: the UI image is ..."). A debug view is not sharpened. AMD FSR's own
+  RCAS is off (`BB_SHARPEN_FSR_OWN=1`: AMD FSR's instead, for comparison, at the sharpness the
+  percentage maps to, `FsrSharpness`; FSR 4's own mapping is not published). Where AMD's code meets
+  input it was not written for, the engine's differs: exact reciprocals (the approximate one in
+  AMD's resolve is 0.32% low even with nothing to sharpen; through the HDR inverse a pixel at 100
+  came back at 61); no division by zero (a channel at 0 across the ring is no limit, as AMD's 0 / 0
+  is on most GPUs); on the HDR scene the result held at twice the brightest of the five pixels plus
+  one, scaled down whole (AMD's ceiling, 1, is infinite light there: where one channel stands out
+  of its ring RCAS lifts it toward 1 and the inverse multiplies the whole pixel, a blue of 0.47 out
+  at 12; grey and tinted edges never reach the cap); a pixel RCAS leaves is returned exactly as
+  read. One log line once a change has held for a second ("Upscaler: sharpening: RCAS at 25% after
+  FSR 4.1.2, on the HDR scene (tone mapped reversibly, gamma 2.0)"; the first build wrote one a
+  slider step, 1,272 lines in the tester's `4bc9ea19`). No measurable cost: in the tester's
+  `64880ba6` the same spot ran at 186-188 FPS off and at 20, 50 and 100%. Until beta 15 the slider ran 0-2 and meant
+  different things: under AMD FSR its own RCAS up to 1 (on linear light on the 1080p path: about
+  half the sharpening on strong edges, none beside a value above 1) and the engine's pass above 1;
+  under DLSS and TAA the engine's pass blended in at s (so 0.20 was about a fifth of FSR's 0.20),
+  extrapolated above 1. Beta 16's first build took AMD's sharpness s (0-1, 0.20): the tester found
+  0.20 much weaker than FSR 4's own 0.20 before, and cleaner. AMD and NVIDIA leave sharpening to the
+  player (NVIDIA retired DLSS's own in 2.5.1; AMD asks for a slider and measures FSR 4 without it).
+  Off by default in the engine, both launchers and the shipped settings; a `config.ini` with the old
+  default untouched (on, at 0.20) is switched off once, any other choice kept (`sharpen_off_046`,
+  written by the engine's and the launcher's saves); an old `sharpness` becomes `sharpening` (0.20,
+  the old default, 25%; another value the same strength, 100 x 2^(2s - 2); the line replaced in
+  place), the Linux launcher's 0.5 fallback gone with it. The HDR encoding's research: the 1080p
+  scene is almost all below 1 (the tester's `4bc9ea19`: 0.01-0.15% of pixels above 1 a minute, at
+  most 0.29% in a frame, above 4 at most 0.001%, the brightest 2.6-23.3), so the tone mapper matters
+  only for lamps, fire and the moon; the line ("Upscaler: the 1080p scene's light") stays a minute
+  line. Tests: `rcas-test` (the GLSL compiled as C++: the encodings there and back, AMD's RCAS on
+  each against a double-precision copy of AMD's, the strength linear, the cap, 0 as off; fails on
+  each of 14 deliberate breaks and 3 wrong strength mappings), `taa-shader-test` (on a GPU: the
+  passes in each encoding, the copy into an sRGB UI image against the separate pass), `settings-test`
+  (the percentage, the conversion, the switch-off and its marker).
 - **Texture mip bias** (`mip_bias`, -2..+1, live): the scene's texture LOD bias while AMD FSR or DLSS
   runs is log2(render / output) - 1, as both NVIDIA's DLSS guide and AMD's FSR docs ask
   (`mipBias = log2(renderResolution/displayResolution) - 1.0`), plus `mip_bias`. From 0.4.4 beta 27d
@@ -74,8 +121,10 @@ The sections after this one are the record of the work from the first frame anal
   (AMD recommends it unless there is a reason not to); DLSS with its own for the HDR scene (a
   1920x1080 output), none for the game's tonemapped frame. 0.4.4 beta 27d: no settings for them
   (`fsr4_auto_exposure`, on by default, and `dlss_auto_exposure`, off, are ignored if a file has them).
-- **Reactive mask** (`reactive`, off by default): AMD FSR's reactive mask (FSR 3.1 uses it; FSR 4
-  may; up to 0.4.4 beta 26 FSR 4 got it blended over its output, `fsr4_reactive.comp`, removed); TAA
+- **Reactive mask** (`reactive`, off by default): AMD FSR's reactive mask (FSR 3.1 uses it; FSR 4.1.2
+  does not read it, by its own answer to AMD's resource query, which the menu's line shows for the
+  version that runs from 0.4.6 beta 16; up to 0.4.4 beta 26 FSR 4 got it blended over its output,
+  `fsr4_reactive.comp`, removed); TAA
   and DLSS do not use it, and it is not made for them. FSR 3.1's tuning (`fsr3_*`) goes to AMD's FSR
   3.1 through its key-value configuration. Up to 0.4.4 beta
   25a DLSS was given it as its bias-current-colour mask, which NVIDIA's guide (310.4.0, §3.15) says
@@ -88,7 +137,29 @@ The sections after this one are the record of the work from the first frame anal
   frame statistics, the resets by cause and the largest turn and move of the other frames.
   `BB_CAMERA_CUT_RESET=0`: logged and counted, the history kept.
 - **Jitter:** a Halton(2,3) pattern of 8 x (output / render)^2 phases (AMD's and NVIDIA's formula);
-  DLSS at least 16 (NVIDIA's checklist; from 0.4.4 beta 25b), so DLAA has 16 instead of 8.
+  DLSS at least 16 (NVIDIA's checklist; from 0.4.4 beta 25b), so DLAA has 16 instead of 8. From 0.4.6
+  beta 16, under AMD FSR the phase count and offsets come from AMD's own queries for the version that
+  runs (`AmdFsr::JitterPhases`, `JitterOffset`): AMD truncates 8 x ratio^2 where the engine's rule rounds
+  up (Balanced: 23 phases, not 24); the log says so when they differ. The engine's rule until the context
+  is ready.
+- **AMD FSR's checks (0.4.6 beta 16):** `BB_AMD_FSR_DEBUG=1` turns on AMD's API checks (its findings in
+  the log as `Upscaler: AMD FSR warning`). AMD's debug view in place of the picture: the in-game menu's
+  "Show AMD FSR's own view (debug)" under Motion vectors (AMD FSR only, not saved, beside the engine's
+  own motion vector view) or `BB_AMD_FSR_DEBUG_VIEW=1`. The view must be allowed when the context is made
+  (`FFX_UPSCALE_ENABLE_DEBUG_VISUALIZATION`, more GPU memory): the context is made again in the
+  background when it is turned on or off (part of `AmdFsr`'s key, as the version is). Before, the
+  dispatch flag alone drew nothing. When the
+  context is made, the log names the inputs the running version says it needs and uses if given
+  (AMD's resource requirements query), and its GPU memory.
+- **Checked against AMD's API (2026-11-24, the tester's question; `ffx_upscale.h`, SDK 2.4):** the inputs
+  match (render-size colour, depth and motion vectors in pixels, previous minus current, without jitter;
+  standard depth with the game's near plane and its far plane, 3000 in its scene constants; reset on
+  camera cuts; dynamic resolution; auto exposure with pre-exposure 1, right at 1080p, where FSR runs
+  before YEBIS applies its exposure). Open: AMD's own checks never run (`BB_AMD_FSR_DEBUG=1`, in the
+  next runs). At outputs other than 1080p FSR runs on the game's finished frame, after its tonemap and
+  post effects, against AMD's order (upscaling before them): the game's post-processing cannot run at
+  another size; kept so (the tester, 2026-11-24: too much work; motion blur is off by default). The
+  reactive mask stays opt-in and the transparency and composition mask is not made: both optional.
 - **Frame generation (not offered since 0.4.4), DLSS's options and the mip bias:**
   [archive/dlss_frame_generation.md](archive/dlss_frame_generation.md).
 

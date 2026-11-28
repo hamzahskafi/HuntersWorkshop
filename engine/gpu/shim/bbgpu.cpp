@@ -13,6 +13,7 @@
 #include "bbport_platform.h"
 #include "bbport_toggles.h"
 #include "engine/engine_hooks.h"
+#include "engine/gx_resources.h"
 #include <algorithm>
 #include <atomic>
 #include <condition_variable>
@@ -31,6 +32,7 @@
 #include <vector>
 #include <SDL3/SDL.h>
 #include "../bbgpu.h"
+#include "engine/startup.h"
 #include "common/elf_info.h"
 #include "shader_recompiler/native/table_plan.h"
 #include "common/logging/log.h"
@@ -151,7 +153,12 @@ void MemoryManager::SetRasterizer(Vulkan::Rasterizer* rasterizer_) {
             r->RegisterMemory(address, size);
             r->MapMemory(address, size);
         },
-        [](uintptr_t address, uint64_t size) { Memory::Instance()->GetRasterizer()->UnmapMemory(address, size); },
+        [](uintptr_t address, uint64_t size) {
+            // 0.4.6 beta 6: the game's resources there hold no memory from now on (it releases an
+            // area's texture memory under holders it keeps).
+            BbEngine::GxResources::MemoryReleased(address, size);
+            Memory::Instance()->GetRasterizer()->UnmapMemory(address, size);
+        },
         [](uintptr_t address, uint64_t size) {
             Memory::Instance()->GetRasterizer()->InvalidateMemory(address, size);
         });
@@ -159,6 +166,33 @@ void MemoryManager::SetRasterizer(Vulkan::Rasterizer* rasterizer_) {
     // invalidated.
     runtime_memory_set_note_write_hook([](uintptr_t address, uint64_t size) {
         Memory::Instance()->GetRasterizer()->NoteAssetWrite(address, size);
+    });
+    // 0.4.5 beta 16: a texture the game destroyed (engine/gx_resources.h, the game's thread).
+    BbEngine::GxResources::SetDestroyedHook([](std::uint64_t address, std::uint64_t size) {
+        if (auto* rasterizer = Memory::Instance()->GetRasterizer()) {
+            rasterizer->ReleaseDestroyedTexture(address, size);
+        }
+    });
+    // 0.4.6 beta 12: the game's calls about memory, for the buffer cache (the game's thread).
+    BbEngine::GxResources::SetMemoryHook(
+        [](std::uint64_t address, std::uint64_t size, BbEngine::GxResources::MemoryEvent event) {
+            if (auto* rasterizer = Memory::Instance()->GetRasterizer()) {
+                rasterizer->NoteGameMemory(address, size, static_cast<u8>(event));
+            }
+        });
+    // 0.4.6 beta 15 part 4: a create call's copy of its data, told before it runs (the game's thread).
+    BbEngine::GxResources::SetCopyHook([](std::uint64_t address, std::uint64_t size) {
+        if (auto* rasterizer = Memory::Instance()->GetRasterizer()) {
+            rasterizer->NoteCopyComing(address, size);
+        }
+    });
+        // 0.4.6 beta 4: a texture the game created with its data (the game's thread, inside its create).
+    BbEngine::GxResources::SetCreatedHook([](const BbEngine::GxResources::Ahead& job) {
+        if (auto* rasterizer = Memory::Instance()->GetRasterizer()) {
+            rasterizer->PrepareCreatedTexture(job);
+        } else {
+            BbEngine::GxResources::NoteAhead(BbEngine::GxResources::AheadResult::NoRenderer, 0);
+        }
     });
 }
 void MemoryManager::InvalidateMemory(VAddr address, u64 size) {
@@ -384,7 +418,14 @@ extern "C" int bbgpu_init(const BbGpuConfig* config) {
     const s32 width = config->width, height = config->height;
     g_window_thread = std::thread([title, width, height] {
         Common::SetCurrentThreadName("bb:window");
-        auto* window = new Frontend::WindowSDL(width, height, title.c_str());
+        // 0.4.6 beta 17: with the start's splash on the screen (bb-splash, startup.h) the game window
+        // stays hidden until the game's first frame.
+        bool hidden = BbStartup::SplashRunning();
+        auto splash_check = std::chrono::steady_clock::now();
+        auto* window = new Frontend::WindowSDL(width, height, title.c_str(), hidden);
+        if (!hidden) {
+            BbStartup::NoteGameWindowShown();
+        }
         {
             std::scoped_lock lock{g_window_mutex};
             g_window = window;
@@ -395,6 +436,22 @@ extern "C" int bbgpu_init(const BbGpuConfig* config) {
         // keyboard input is handled as it arrives, and at most 2 ms still pass between rounds (as
         // with SDL_PollEvent, on the thread that created the window).
         while (window->PollEvents()) {
+            // Shown for the first frame, or before it when the splash went (closed by the player, or
+            // it could not show): not a start with nothing on the screen.
+            if (hidden) {
+                const auto now = std::chrono::steady_clock::now();
+                bool show = BbStartup::FirstFrame();
+                if (!show && now >= splash_check) {
+                    splash_check = now + std::chrono::milliseconds(250);
+                    show = !BbStartup::SplashRunning();
+                }
+                if (show) {
+                    hidden = false;
+                    window->Show();
+                    BbStartup::NoteGameWindowShown();
+                    BbStartup::CloseSplash();
+                }
+            }
             SDL_WaitEventTimeout(nullptr, 2);
         }
         LOG_INFO(Frontend, "Window closed by user");
@@ -528,7 +585,11 @@ extern "C" int bbgpu_handle_fault(void* ucontext, void* address) {
     if (bb_fault_recovers_only && runtime_fault_recover) {
         return 0; // the loader jumps to the recovery point (bbport_toggles.h)
     }
-    if (Core::Signals::Instance()->DispatchAccessViolation(ucontext, address)) {
+    // 0.4.6 beta 9: the fault's context, for naming the code that writes a texture made with its data.
+    BbEngine::GxResources::SetFaultContext(ucontext);
+    const bool dispatched = Core::Signals::Instance()->DispatchAccessViolation(ucontext, address);
+    BbEngine::GxResources::SetFaultContext(nullptr);
+    if (dispatched) {
         if (FaultRepeats(ucontext, address)) {
             runtime_memory_restore_access(ucontext, reinterpret_cast<uintptr_t>(address), 1);
         }

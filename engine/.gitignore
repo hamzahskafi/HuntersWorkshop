@@ -18,3 +18,7 @@ patches.json
 # AMD's FSR SDK files (tools/fetch_amd_fsr.sh, engine/amd-fsr) and NVIDIA's DLSS files: never in the repository
 amd-fsr/
 *.dll
+# The engine's FFmpeg (packaging/build-ffmpeg.sh) and its source tarball
+deps/
+# The movie test's synthetic movies (tests/test_movie_decode.cpp) are kept, unlike other *.mp4
+!tests/data/movies/*.mp4

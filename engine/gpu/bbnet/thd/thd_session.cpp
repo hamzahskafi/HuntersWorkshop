@@ -6,6 +6,8 @@
 
 #include "thd.h"
 #include "thd_internal.h"
+#include "thd_poll_gate.h"
+#include "thd_sign_in.h"
 #include "windows_trust.h"
 
 #include <algorithm>
@@ -16,6 +18,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <deque>
 #include <functional>
 #include <map>
@@ -138,8 +141,12 @@ void MarkRefused(const std::string& reason) {
         g_refused = true;
         name = g_name;
     }
-    Log("the server refused this PC's sign-in as %s (%s): sign in again on the launcher's Online "
-        "page; until then nobody can summon or invite this player",
+    // 0.4.6 beta 14 (bbhost 2602c3c): the game is told it is signed out from now on (np_get_state), so
+    // it plays offline and says so in its own words instead of asking all session for answers the
+    // server refuses.
+    Log("the server refused this PC's sign-in as %s (%s): the game is told it is signed out and plays "
+        "offline; sign in again on the launcher's Online page. Until then nobody can summon or invite "
+        "this player",
         name.c_str(), reason.c_str());
 }
 std::string OnlineId() {
@@ -147,11 +154,16 @@ std::string OnlineId() {
     return name.empty() ? "Player" : name;
 }
 
+namespace {
+void SignInCheckStart();
+}
+
 void Initialize() {
     const Config& c = Cfg();
     if (SignedIn()) {
         Log("The Hunter's Dream as %s: session service %s, P2P port %d", AccountName().c_str(),
             c.np_base.c_str(), c.p2p_port);
+        SignInCheckStart();
     } else {
         Log("not signed in to The Hunter's Dream (the launcher's Online page): the game stays offline");
     }
@@ -186,11 +198,28 @@ struct HttpResult {
     int status = 0;
     std::string body;
     std::string error;
+    bool cut = false; // given up: its `over` said so (a stop), or Cuttable::Cut cut it short
+};
+
+// 0.4.6 beta 14 part 7: a request another thread may cut short (the poller's held poll, at a stop),
+// as bbhost's HttpCall::abandon. httplib's Client::stop() is the one call safe from another thread
+// while a request is in flight (it shuts the socket). The client is registered only while its request
+// is out, and the requesting thread takes it back under the same lock before it may destroy it. The
+// request goes out only while its `over` says no, checked under that lock too: a stop (its `over`
+// then yes) followed by Cut either finds it registered and cuts it, or it sees the stop and never
+// goes out.
+struct Cuttable {
+    std::mutex mu;
+    httplib::Client* active = nullptr;
+    void Cut() {
+        std::lock_guard lk(mu);
+        if (active) active->stop();
+    }
 };
 
 // One keep-alive connection per thread and server: the poller asks four times a second.
 HttpResult Perform(const std::string& base, const std::string& path, const std::string* post,
-                   int timeout_ms) {
+                   int timeout_ms, Cuttable* cuttable = nullptr, const std::function<bool()>& over = {}) {
     thread_local std::map<std::string, std::unique_ptr<httplib::Client>> clients;
     auto& cli = clients[base];
     const auto timeout = std::chrono::milliseconds(timeout_ms);
@@ -211,22 +240,36 @@ HttpResult Perform(const std::string& base, const std::string& path, const std::
     if (const std::string token = AccountToken(); !token.empty()) {
         headers.emplace("X-BB-Token", token);
     }
+    // Whether the request is given up; with a cuttable, the client is registered while it is out.
+    auto was_cut = [&] { return over && over(); };
     auto send = [&] {
         // Connecting stays at a few seconds; only the read waits as long as the request asks (a held poll).
         cli->set_connection_timeout(std::min(timeout, std::chrono::milliseconds(5000)));
         cli->set_read_timeout(timeout);
         cli->set_write_timeout(timeout);
-        return post ? cli->Post(path, headers, *post, "application/json") : cli->Get(path, headers);
+        if (cuttable) {
+            std::lock_guard lk(cuttable->mu);
+            if (was_cut()) return httplib::Result{nullptr, httplib::Error::Canceled};
+            cuttable->active = cli.get();
+        }
+        httplib::Result res = post ? cli->Post(path, headers, *post, "application/json") : cli->Get(path, headers);
+        if (cuttable) {
+            std::lock_guard lk(cuttable->mu);
+            cuttable->active = nullptr;
+        }
+        return res;
     };
     HttpResult r;
     httplib::Result res = send();
     // A kept-alive connection the server closed meanwhile fails on its first read or write
     // ("Failed to read connection"): once more on a new one, as bbhost's fresh request would.
-    if (!res && reused && (res.error() == httplib::Error::Read || res.error() == httplib::Error::Write)) {
+    if (!res && reused && !was_cut() &&
+        (res.error() == httplib::Error::Read || res.error() == httplib::Error::Write)) {
         open();
         res = send();
     }
     if (!res) {
+        r.cut = was_cut();
         r.error = httplib::to_string(res.error());
         cli.reset(); // a fresh connection next time
         return r;
@@ -266,6 +309,55 @@ bool NpPost(const std::string& path, const Json& body, Json& out, std::string& e
             int timeout_ms) {
     const std::string text = body.dump();
     return ParseReply("POST " + path, Perform(Cfg().np_base, path, &text, timeout_ms), out, error);
+}
+
+namespace {
+// 0.4.6 beta 14 part 6 (bbhost's account_check_start, 2602c3c): once at the start, on a thread of its
+// own that nothing waits for, the account service is asked whether it still takes this PC's sign-in
+// (POST /auth/whoami {Token}, 5 s at most), so a refused one is known before the game's own online
+// login and the game is told it is signed out (np_get_state). Only the service's own refusal is a
+// verdict (thd_sign_in.h): no answer, a busy server or an answer not in its words changes nothing.
+void SignInCheckStart() {
+    const std::string token = AccountToken(), name = AccountName();
+    if (token.empty() || name.empty()) return;
+    std::thread([token, name] {
+        const std::string url = Cfg().auth_base + "/auth/whoami";
+        const std::string body = Json{{"Token", token}}.dump();
+        const HttpResult r = Perform(Cfg().auth_base, "/auth/whoami", &body, 5000);
+        const SignIn::Reply v = SignIn::Read(r.status, r.body, r.error);
+        if (v.verdict == SignIn::Verdict::Refused) {
+            MarkRefused(v.why);
+            return;
+        }
+        if (v.verdict == SignIn::Verdict::Unchecked) {
+            Log("account: the sign-in could not be checked at %s: %s", url.c_str(), v.why.c_str());
+            return;
+        }
+        {
+            // The server takes it now (bbhost: a valid answer clears an earlier refusal).
+            std::lock_guard lk(g_account_mu);
+            g_refused = false;
+        }
+        char until[32] = "?";
+        if (v.expires_at > 0) {
+            const std::time_t t = static_cast<std::time_t>(v.expires_at);
+            std::tm tm{};
+#if defined(_WIN32)
+            const bool ok = gmtime_s(&tm, &t) == 0;
+#else
+            const bool ok = gmtime_r(&t, &tm) != nullptr;
+#endif
+            if (ok) std::strftime(until, sizeof(until), "%Y-%m-%d", &tm);
+        }
+        Log("account: sign-in checked: the server knows this PC as %s (its expiry %s UTC)", v.name.c_str(), until);
+        if (v.name != name) Log("account: the server spells the account %s, this PC %s", v.name.c_str(), name.c_str());
+    }).detach();
+}
+} // namespace
+
+void GameReply(int status, const std::string& body) {
+    std::string why;
+    if (SignIn::GameReplyRefuses(status, body, &why)) MarkRefused(why);
 }
 
 void AddGameHeaders(std::vector<std::pair<std::string, std::string>>& headers) {
@@ -575,7 +667,8 @@ void MappedRefresh(bool force) {
     std::snprintf(text, sizeof(text), "%u.%u.%u.%u", addr & 0xff, (addr >> 8) & 0xff,
                   (addr >> 16) & 0xff, addr >> 24);
     if (g_mapped.addr != text || g_mapped.port != port) {
-        Log("stun: %s:%u sees our P2P port %d as %s:%u", host.c_str(), sport, P2pPort(), text, port);
+        Log("stun: %s:%u sees our P2P port %d as %s:%u", host.c_str(), sport, P2pPort(),
+            MaskedEndpoint(text).c_str(), port);
     }
     g_mapped.addr = text;
     g_mapped.port = port;
@@ -700,18 +793,25 @@ void RoomClear() {
 // ---- the event poller and the keepalive -------------------------------------------------------------
 
 namespace {
-std::mutex g_pollmu;
-std::condition_variable g_pollcv;
-std::atomic<bool> g_pollrun{false};
+std::mutex g_pollmu; // the handler, and PollerStart/PollerStop
 std::function<void(const Json&)> g_handler;
-long long g_cursor = 0;
 
 // The server holds an empty poll open until an event for this player arrives or the wait ends
 // (WaitMs; droogie's long polling): invites arrive at once and the server is not asked four times a
 // second. Every answer from such a server carries WaitMaxMs; one without it answers at once, so
-// the poller goes back to the 250 ms pacing against it. One poll in flight per player: a poller
-// left over from a stop (still inside a held poll) ends instead of polling beside the new one.
-std::atomic<unsigned> g_pollgen{0};
+// the poller goes back to the 250 ms pacing against it.
+//
+// 0.4.6 beta 14 part 7 (bbhost 2e40749): one poll out per player, whatever the game's stops and starts.
+// Each start is a generation (thd_poll_gate.h). A poller whose generation ended while its poll was
+// held (a stop, maybe a start again) gives up what that poll brought: no handler, no ack, no cursor
+// moved (its cursor is its own), so the next generation's poller gets the same event. A stop cuts the
+// held poll short (g_poll_cut), and a new poller's first poll waits for the old one's to end. The
+// keepalive sleeps under the same generation: a stop and a start within its 15 s leave one, not two.
+// Until beta 13 an old poller back from its held poll handed its event to the new session's handler
+// and acked it, two polls were out for up to 25 s, and a quick stop and start could leave two
+// keepalives.
+PollGate g_gate;
+Cuttable g_poll_cut;
 
 int Jitter(int ms) {
     thread_local unsigned seed = static_cast<unsigned>(
@@ -721,28 +821,46 @@ int Jitter(int ms) {
     return span > 0 ? ms - span + static_cast<int>((seed >> 8) % static_cast<unsigned>(2 * span + 1)) : ms;
 }
 
-void PollerMain(unsigned gen) {
+// One generation's poller.
+void PollerMain(std::uint64_t gen) {
     const std::string me = OnlineId();
-    const auto running = [gen] { return g_pollrun.load() && g_pollgen.load() == gen; };
+    long long cursor = 0;
     int wait_ms = 25000; // long polling from the first poll
     int backoff_ms = 0;
-    while (running()) {
-        Json body = {{"OnlineId", me}, {"Cursor", g_cursor}, {"Categories", Json::array({"matching2"})}};
+    const std::function<bool()> over = [gen] { return !g_gate.Live(gen); };
+    for (;;) {
+        if (!g_gate.Begin(gen)) break; // one poll out at a time; a stop ends the thread
+        Json body = {{"OnlineId", me}, {"Cursor", cursor}, {"Categories", Json::array({"matching2"})}};
         if (wait_ms > 0) body["WaitMs"] = wait_ms;
+        const std::string text = body.dump();
         Json reply;
         std::string err;
         int pause_ms = 0;
         // The read timeout sits above the wait, or every empty poll would end as an error.
-        if (NpPost("/np/events/poll", body, reply, err, wait_ms > 0 ? wait_ms + 5000 : 4000)) {
+        const HttpResult r =
+            Perform(Cfg().np_base, "/np/events/poll", &text, wait_ms > 0 ? wait_ms + 5000 : 4000, &g_poll_cut, over);
+        if (r.cut || !g_gate.Live(gen)) {
+            // Stopped while the poll was out (and maybe started again): what it brought is the next
+            // poller's, which gets it again since nothing acked it.
+            g_gate.End();
+            break;
+        }
+        if (ParseReply("POST /np/events/poll", r, reply, err)) {
             backoff_ms = 0;
             const long long max_wait = IntOf(reply, "WaitMaxMs", 0);
             wait_ms = max_wait > 0 ? static_cast<int>(std::min<long long>(25000, max_wait)) : 0;
-            const long long next = IntOf(reply, "NextCursor", g_cursor);
+            const long long next = IntOf(reply, "NextCursor", cursor);
             if (IntOf(reply, "HasEvent", 0) != 0) {
                 std::function<void(const Json&)> handler;
+                bool mine = false;
                 {
                     std::lock_guard lk(g_pollmu);
-                    handler = g_handler;
+                    mine = g_gate.Live(gen);
+                    if (mine) handler = g_handler;
+                }
+                if (!mine) {
+                    g_gate.End();
+                    break;
                 }
                 Log("np: event #%lld %s", IntOf(reply, "EventId", 0), StrOf(reply, "Name").c_str());
                 if (handler) {
@@ -756,12 +874,16 @@ void PollerMain(unsigned gen) {
                 Json ack_reply;
                 std::string ack_err;
                 NpPost("/np/events/ack", ack, ack_reply, ack_err, 4000);
-                g_cursor = next;
+                cursor = next;
+                g_gate.End();
                 continue; // drain without waiting while there are events
             }
-            g_cursor = std::max(g_cursor, next);
-            if (wait_ms > 0) continue; // the server did the waiting: poll again now
-            pause_ms = 250;            // a server without long polling answers at once
+            cursor = std::max(cursor, next);
+            if (wait_ms > 0) {
+                g_gate.End();
+                continue; // the server did the waiting: poll again now
+            }
+            pause_ms = 250; // a server without long polling answers at once
         } else if (Refused()) {
             pause_ms = 60000; // nothing arrives until this PC signs in again
         } else {
@@ -769,14 +891,10 @@ void PollerMain(unsigned gen) {
             backoff_ms = backoff_ms ? std::min(backoff_ms * 2, 30000) : 1000;
             pause_ms = Jitter(backoff_ms);
         }
-        std::unique_lock lk(g_pollmu);
-        g_pollcv.wait_for(lk, std::chrono::milliseconds(pause_ms), [&] { return !running(); });
+        g_gate.End();
+        if (!g_gate.Sleep(gen, pause_ms)) break;
     }
 }
-
-std::atomic<bool> g_keeprun{false};
-std::mutex g_keepmu;
-std::condition_variable g_keepcv;
 
 // Our new reflexive address to the server (a relay port that changed).
 void ServerSignalingUpdate() {
@@ -798,19 +916,15 @@ void ServerSignalingUpdate() {
 }
 
 // The STUN binding every 15 s while the context runs: it keeps our NAT's mapping to the server
-// open (routers forget an idle UDP mapping in 30 s to a few minutes) and the relay port alive.
-void KeepaliveMain() {
+// open (routers forget an idle UDP mapping in 30 s to a few minutes) and the relay port alive. It
+// runs with the poller, for the same generation.
+void KeepaliveMain(std::uint64_t gen) {
     std::string last;
     {
         std::lock_guard lk(g_mapped.mu);
         last = g_mapped.addr + ":" + std::to_string(g_mapped.port);
     }
-    while (g_keeprun.load()) {
-        {
-            std::unique_lock lk(g_keepmu);
-            g_keepcv.wait_for(lk, std::chrono::seconds(15), [] { return !g_keeprun.load(); });
-        }
-        if (!g_keeprun.load()) break;
+    while (g_gate.Sleep(gen, 15000)) {
         MappedRefresh(true);
         std::string now;
         {
@@ -818,7 +932,8 @@ void KeepaliveMain() {
             now = g_mapped.addr + ":" + std::to_string(g_mapped.port);
         }
         if (now != last && now != ":0") {
-            Log("stun: our address is now %s (was %s); telling the server", now.c_str(), last.c_str());
+            Log("stun: our address is now %s (was %s); telling the server", MaskedEndpoint(now).c_str(),
+                MaskedEndpoint(last).c_str());
             ServerSignalingUpdate();
             last = now;
         }
@@ -826,24 +941,21 @@ void KeepaliveMain() {
 }
 } // namespace
 
+// A new generation's poller and keepalive. The threads are detached and no one waits for them: a
+// stop ends their sleeps at once and a held poll as soon as its socket is shut.
 void PollerStart(std::function<void(const Json&)> handler) {
     std::lock_guard lk(g_pollmu);
     g_handler = std::move(handler);
-    if (g_pollrun.exchange(true)) return;
-    g_cursor = 0;
-    std::thread(PollerMain, g_pollgen.fetch_add(1) + 1).detach();
-    if (!g_keeprun.exchange(true)) std::thread(KeepaliveMain).detach();
+    if (g_gate.Running()) return; // running: the new handler is its
+    const std::uint64_t gen = g_gate.Start();
+    std::thread(PollerMain, gen).detach();
+    std::thread(KeepaliveMain, gen).detach();
 }
 
 void PollerStop() {
-    {
-        std::lock_guard lk(g_keepmu);
-        g_keeprun.store(false);
-        g_keepcv.notify_all();
-    }
     std::lock_guard lk(g_pollmu);
-    g_pollrun.store(false);
-    g_pollcv.notify_all();
+    g_gate.Stop();
+    g_poll_cut.Cut();
 }
 
 // ---- game memory: 1.09's addresses (Binary Ninja, image base 0x400000) -------------------------------
@@ -931,4 +1043,10 @@ extern "C" bool bbthd_enabled() {
 }
 extern "C" void bbthd_add_game_headers(std::vector<std::pair<std::string, std::string>>* headers) {
     if (headers) BbThd::AddGameHeaders(*headers);
+}
+// 0.4.6 beta 14 part 6: the game's own request answered (a 401 in the account service's words marks
+// the sign-in refused).
+extern "C" void bbthd_game_reply(int status, const unsigned char* body, std::size_t len) {
+    if (status != 401) return;
+    BbThd::GameReply(status, std::string(reinterpret_cast<const char*>(body), body ? len : 0));
 }

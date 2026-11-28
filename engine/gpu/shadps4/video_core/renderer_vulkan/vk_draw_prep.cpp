@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// bbport: speculative draw preparation on worker threads (see vk_draw_prep.h).
+// bbport: speculative draw preparation on worker threads (see vk_draw_prep.h). 0.4.6 beta 17 part 2: a
+// draw whose shader or variant is not translated yet has it queued on the compile threads
+// (PipelineCache::QueueAhead, translate_ahead.h); the draw itself stays the GPU thread's.
 
 #include <algorithm>
 #include <chrono>
@@ -8,6 +10,8 @@
 #include <cstring>
 
 #include "bbport_native_calls.h"
+#include "bbport_park.h"
+#include "bbport_roles.h"
 #include "bbport_threads.h"
 #include "bbport_toggles.h"
 #include "common/thread.h"
@@ -54,18 +58,8 @@ void ForEachPacket(std::span<const u32> commands, Func&& func) {
 }
 
 u32 DefaultWorkerCount() {
-    if (const char* env = std::getenv("BB_PREP_WORKERS")) {
-        return static_cast<u32>(std::clamp(std::atoi(env), 0, 16));
-    }
-    // Workers are SCHED_IDLE (Windows: THREAD_PRIORITY_IDLE) and claim whole buffers. Below 16
-    // hardware threads idle ones still share cores with the render chain (GPU command thread,
-    // draw recording, Vulkan recording and copy threads) and the game's threads: a quarter of
-    // them (8 threads 2, 12 threads 3). From 16 on, 3/8 of them, 6 to 8.
-    const u32 available = BbThreads::Available();
-    if (available < 16) {
-        return std::max<u32>(available / 4, 1);
-    }
-    return std::clamp<u32>(available * 3 / 8, 6, 8);
+    // BB_PREP_WORKERS. Workers are idle priority (the Assist role) and claim whole buffers.
+    return BbRoles::PoolSize(BbRoles::Pool::DrawPrep);
 }
 
 /// Flattened user data of one submission: chunks never move, so the GPU thread can read a
@@ -227,10 +221,17 @@ DrawPreparation::~DrawPreparation() {
     }
     if (scanner.joinable()) {
         scanner.request_stop();
+        BbPark::Bump(scan_word, true);
     }
     cv.notify_all();
     workers.clear();
     scanner = {};
+    // Buffers handed over but never moved into the queue.
+    for (Submission* p = incoming.exchange(nullptr); p;) {
+        Submission* next = p->next_incoming;
+        p->incoming_ref.reset();
+        p = next;
+    }
 }
 
 std::shared_ptr<DrawPreparation::Submission> DrawPreparation::Build(
@@ -247,39 +248,72 @@ std::shared_ptr<DrawPreparation::Submission> DrawPreparation::Build(
     return submission;
 }
 
-void DrawPreparation::Enqueue(u64 seq, std::shared_ptr<Submission> submission) {
+void DrawPreparation::Enqueue(u64 seq, std::shared_ptr<Submission> submission, bool notify) {
     if (!submission) {
         return;
     }
-    submission->seq = seq;
-    {
-        std::scoped_lock lk{mutex};
-        submissions.push_back(std::move(submission));
+    Submission* const p = submission.get();
+    p->seq = seq;
+    p->incoming_ref = std::move(submission); // the list's reference, moved into the queue later
+    Submission* head = incoming.load(std::memory_order_relaxed);
+    do {
+        p->next_incoming = head;
+    } while (!incoming.compare_exchange_weak(head, p, std::memory_order_release,
+                                             std::memory_order_relaxed));
+    if (notify) {
+        WakeScanner();
     }
-    cv.notify_all();
 }
 
-void DrawPreparation::BeginSubmission(u64 seq, const AmdGpu::Regs& regs, u64 reg_checksum) {
+void DrawPreparation::NotifyWorkers() {
+    WakeScanner();
+}
+
+void DrawPreparation::WakeScanner() {
+    // With the scanner's sleep (ScannerLoop): it announces it, then looks at the word again, so
+    // either it sees this bump or this sees it asleep.
+    scan_word.fetch_add(1, std::memory_order_seq_cst);
+    if (scan_sleeping.load(std::memory_order_seq_cst)) {
+        BbPark::WakeOne(scan_word);
+    }
+}
+
+void DrawPreparation::BeginSubmission(u64 seq, const AmdGpu::Regs& regs, u64 reg_checksum,
+                                      std::shared_ptr<Submission> prepared) {
     current_draw = 0;
-    current.reset();
+    current = std::move(prepared);
     if (!Enabled()) {
+        current.reset();
         return;
     }
     gpu_seq.store(seq, std::memory_order_release);
-    std::scoped_lock lk{mutex};
-    if (!baseline_ready) {
-        initial_regs = std::make_unique<AmdGpu::Regs>(regs);
-        tail_regs = std::make_unique<AmdGpu::Regs>(regs);
-        initial_checksum = tail_checksum = reg_checksum;
-        baseline_seq = tail_seq = seq;
-        baseline_ready = true;
-        cv.notify_all();
+    if (!gpu_baseline_set) {
+        // Once, at the first submission: the state everyone starts from.
+        gpu_baseline_set = true;
+        {
+            std::scoped_lock lk{mutex};
+            initial_regs = std::make_unique<AmdGpu::Regs>(regs);
+            tail_regs = std::make_unique<AmdGpu::Regs>(regs);
+            initial_checksum = tail_checksum = reg_checksum;
+            baseline_seq = tail_seq = seq;
+            baseline_ready = true;
+        }
+        WakeScanner();
+        return;
     }
     // Idle helpers can starve on a busy CPU. Rather than queueing without bound, restart
-    // them from the GPU thread's own state (one register copy) once the scanner lags.
+    // them from the GPU thread's own state (one register copy) once the scanner lags. 0.4.6 beta
+    // 20: only if the lock is free now; else at a later submission (the helpers hold it).
     constexpr u64 MaxScanLag = 64;
-    if (!submissions.empty() && seq > tail_seq + MaxScanLag &&
-        submissions.front()->seq < seq && !submissions.front()->scanned.load()) {
+    if (seq <= scan_next.load(std::memory_order_acquire) + MaxScanLag) {
+        return;
+    }
+    std::unique_lock lk{mutex, std::defer_lock};
+    if (!lk.try_lock()) {
+        return;
+    }
+    if (seq > tail_seq + MaxScanLag && !submissions.empty() && submissions.front()->seq < seq &&
+        !submissions.front()->scanned.load()) {
         *tail_regs = regs;
         tail_seq = seq;
         tail_checksum = reg_checksum;
@@ -287,21 +321,40 @@ void DrawPreparation::BeginSubmission(u64 seq, const AmdGpu::Regs& regs, u64 reg
             submissions.pop_front();
         }
         ++rebases;
-        cv.notify_all();
-    }
-    if (!submissions.empty() && seq >= submissions.front()->seq &&
-        seq - submissions.front()->seq < submissions.size()) {
-        current = submissions[seq - submissions.front()->seq];
+        lk.unlock();
+        WakeScanner();
     }
 }
 
 void DrawPreparation::EndSubmission() {
     if (current) {
-        current->gpu_done.store(true, std::memory_order_release);
+        // Its reference let go before it is marked: the queue's keeps it until the scanner
+        // collects it (after the mark), so it is freed there, not on this thread.
+        Submission* const done = current.get();
         current.reset();
+        done->gpu_done.store(true, std::memory_order_release);
     }
-    if (Enabled()) {
-        Collect();
+}
+
+void DrawPreparation::DrainIncoming() {
+    Submission* list = incoming.exchange(nullptr, std::memory_order_acquire);
+    // Newest first: reversed into submission order.
+    Submission* ordered = nullptr;
+    while (list) {
+        Submission* next = list->next_incoming;
+        list->next_incoming = ordered;
+        ordered = list;
+        list = next;
+    }
+    while (ordered) {
+        Submission* next = ordered->next_incoming;
+        ordered->next_incoming = nullptr;
+        auto ref = std::move(ordered->incoming_ref);
+        // A rebase passed it (its draws are the GPU thread's): never queued.
+        if (!baseline_ready || ref->seq >= tail_seq) {
+            submissions.push_back(std::move(ref));
+        }
+        ordered = next;
     }
 }
 
@@ -317,7 +370,6 @@ const PreparedDraw* DrawPreparation::NextDraw() {
 }
 
 void DrawPreparation::Collect() {
-    std::scoped_lock lk{mutex};
     while (!submissions.empty()) {
         const auto& front = submissions.front();
         if (!baseline_ready || !front->gpu_done.load(std::memory_order_acquire)) {
@@ -342,37 +394,44 @@ void DrawPreparation::ScannerLoop(std::stop_token stop) {
     std::unique_ptr<AmdGpu::Regs> regs;
     u64 checksum = 0;
     u64 next_seq = 0;
-    {
-        std::unique_lock lk{mutex};
-        cv.wait(lk, stop, [&] { return baseline_ready; });
-        if (stop.stop_requested()) {
-            return;
-        }
-        regs = std::make_unique<AmdGpu::Regs>(*initial_regs);
-        checksum = initial_checksum;
-        next_seq = baseline_seq;
-    }
     AmdGpu::RegDirty dirty;
     while (!stop.stop_requested()) {
+        // 0.4.6 beta 20 (docs/chain-waits.md, item 1): it sleeps on a word of its own; the game's
+        // submit and the GPU thread bump it after their change, without the lock.
+        const u32 word = scan_word.load(std::memory_order_seq_cst);
         std::shared_ptr<Submission> submission;
         {
-            std::unique_lock lk{mutex};
-            cv.wait(lk, stop, [&] {
-                return next_seq < tail_seq ||
-                       (!submissions.empty() && submissions.back()->seq >= next_seq);
-            });
-            if (stop.stop_requested()) {
-                return;
+            std::scoped_lock lk{mutex};
+            DrainIncoming();
+            if (baseline_ready) {
+                Collect();
+                if (!regs) {
+                    regs = std::make_unique<AmdGpu::Regs>(*initial_regs);
+                    checksum = initial_checksum;
+                    next_seq = baseline_seq;
+                    scan_next.store(next_seq, std::memory_order_release);
+                }
+                if (next_seq < tail_seq) {
+                    // Rebased by the GPU thread: continue from its state.
+                    *regs = *tail_regs;
+                    checksum = tail_checksum;
+                    next_seq = tail_seq;
+                    scan_next.store(next_seq, std::memory_order_release);
+                }
+                // Unscanned buffers are only collected by a rebase, so `next_seq` is still queued.
+                if (!submissions.empty() && next_seq >= submissions.front()->seq &&
+                    next_seq - submissions.front()->seq < submissions.size()) {
+                    submission = submissions[next_seq - submissions.front()->seq];
+                }
             }
-            if (next_seq < tail_seq) {
-                // Rebased by the GPU thread: continue from its state.
-                *regs = *tail_regs;
-                checksum = tail_checksum;
-                next_seq = tail_seq;
-                continue;
+        }
+        if (!submission) {
+            scan_sleeping.store(true, std::memory_order_seq_cst);
+            if (scan_word.load(std::memory_order_seq_cst) == word && !stop.stop_requested()) {
+                BbPark::Wait(scan_word, word);
             }
-            // Unscanned buffers are only collected by a rebase, so `next_seq` is still queued.
-            submission = submissions[next_seq - submissions.front()->seq];
+            scan_sleeping.store(false, std::memory_order_relaxed);
+            continue;
         }
         submission->start_checksum = checksum;
         dirty.Clear();
@@ -384,9 +443,12 @@ void DrawPreparation::ScannerLoop(std::stop_token stop) {
         {
             std::scoped_lock lk{mutex};
             submission->scanned.store(true, std::memory_order_release);
+            Collect();
         }
         ++next_seq;
-        cv.notify_all();
+        scan_next.store(next_seq, std::memory_order_release);
+        // One buffer to claim: one worker (a busy one looks again when it finishes its own).
+        cv.notify_one();
     }
 }
 
@@ -473,7 +535,19 @@ void DrawPreparation::WorkerLoop(std::stop_token stop, u32 index) {
                 runtime_fault_recover = &recover;
                 prep_worker.stages.clear();
                 prep_worker.failed = false;
+                prep_worker.ahead.clear();
+                prep_worker.ahead_closed = false;
                 sel.draw_indirect_params = {};
+                // 0.4.6 beta 17: a draw the GPU thread looks up no pipeline for (a pass of its own,
+                // or skipped) is not prepared: its stages, never translated there, would be queued
+                // ahead at every frame and never taken (the "never taken" of the shader report).
+                if (!DrawSelectsPipeline(*regs)) {
+                    passes_left.fetch_add(1, std::memory_order_relaxed);
+                    runtime_fault_recover = nullptr;
+                    draw.state.store(PreparedDraw::Unavailable, std::memory_order_release);
+                    ++ordinal;
+                    return;
+                }
                 if (pipeline_cache.PrepareGraphicsPipeline(sel)) {
                     draw.reg_checksum = checksum;
                     draw.key = sel.graphics_key;
@@ -499,6 +573,13 @@ void DrawPreparation::WorkerLoop(std::stop_token stop, u32 index) {
                     draw.state.store(PreparedDraw::Ready, std::memory_order_release);
                 } else {
                     draw.state.store(PreparedDraw::Unavailable, std::memory_order_release);
+                    // 0.4.6 beta 17 part 2: its stages not translated yet go to the compile threads,
+                    // so the GPU thread finds them translated, or under way, when it gets here.
+                    if (!prep_worker.ahead.empty()) {
+                        runtime_fault_recover = nullptr;
+                        pipeline_cache.QueueAhead(std::move(prep_worker.ahead));
+                        prep_worker.ahead.clear();
+                    }
                 }
                 runtime_fault_recover = nullptr;
             }
@@ -524,9 +605,10 @@ void DrawPreparation::Count(bool was_used) {
     }
     window = now;
     std::printf("Draw preparation: %llu prepared pipelines used, %llu not (%u workers, "
-                "%llu scanner rebases)\n",
+                "%llu scanner rebases); left to the GPU thread's own passes %llu\n",
                 static_cast<unsigned long long>(used), static_cast<unsigned long long>(unused),
-                worker_count, static_cast<unsigned long long>(rebases));
+                worker_count, static_cast<unsigned long long>(rebases),
+                static_cast<unsigned long long>(passes_left.exchange(0, std::memory_order_relaxed)));
     used = unused = 0;
 }
 

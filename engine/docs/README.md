@@ -6,7 +6,7 @@ features are in [archive/](archive/README.md) (was `history/`).
 
 ## For players and testers
 
-- [release-notes-0.4.5.md](release-notes-0.4.5.md), [0.4.4](release-notes-0.4.4.md),
+- [release-notes-0.4.6.md](release-notes-0.4.6.md), [0.4.5](release-notes-0.4.5.md), [0.4.4](release-notes-0.4.4.md),
   [0.4.3](release-notes-0.4.3.md), [0.4.2](release-notes-0.4.2.md), [0.4.0](release-notes-0.4.0.md):
   what changed in each release.
 - [MODS.md](MODS.md): file mods, where they go and how the engine merges them.
@@ -15,8 +15,9 @@ features are in [archive/](archive/README.md) (was `history/`).
 
 ## The plan, the log and the map
 
-- [plan.md](plan.md): what comes next (the performance work after 0.4.4, then the rest), the ground
-  rules, the decisions that stand, the checks still to make and what waits on the tester.
+- [plan.md](plan.md): what comes next (0.4.6, the memory model release, then the rest), the ground
+  rules, the decisions that stand, what waits on the tester, and the register: every open item with
+  where it is scheduled.
 - [performance.md](performance.md): what the 0.4.4 logs show about smoothness and frame rate: the
   VRAM cleanup's long frames, where the GPU's frame goes, and what each costly item is.
 - [changelog.md](changelog.md): every change since Hunter's Workshop began, with its measurements and
@@ -42,6 +43,8 @@ features are in [archive/](archive/README.md) (was `history/`).
 - [upscaler.md](upscaler.md): the upscalers (TAA, DLSS, AMD FSR through AMD's FSR SDK), where they run
   and their inputs.
 - [hdr-scene-path.md](hdr-scene-path.md): the plan for HDR from the scene (the next HDR mode).
+- [online-update.md](online-update.md): 0.4.6 beta 14, The Hunter's Dream's 0.2.31 update (the games'
+  greeting, from bbhost): what changed, why HW breaks, and the design.
 
 ## Frame rate
 
@@ -51,5 +54,8 @@ features are in [archive/](archive/README.md) (was `history/`).
 
 ## GPU memory
 
+- [memory-model.md](memory-model.md): 0.4.6's memory model (the engine following the game's own
+  calls, not its memory): the design, the research of 2026-11-08 (YEBIS in 1.09, bbhost, bbport,
+  Lantern) and the roadmap beta by beta, with what each must show before the next.
 - [gpu-memory.md](gpu-memory.md): why frames were late while memory was moved, and what 0.4.4 did
   about it (the GX region read in place, fences written when the GPU is done).

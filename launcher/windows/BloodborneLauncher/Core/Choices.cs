@@ -283,11 +283,11 @@
         public static readonly Choice[] OverlayKeys =
         {
             new(L.T("Off"), "off", L.T("The menu never opens; settings stay in the launcher and the game's PC menus")),
-            new(L.T("Insert only"), "insert", L.T("Pressing both sticks in a fight no longer opens it")),
-            new(L.T("Insert or L3 + R3"), "both", L.T("The keyboard's Insert key, or both sticks pressed on a controller")),
+            new(L.T("F1 only"), "keyboard", L.T("Pressing both sticks in a fight no longer opens it")),
+            new(L.T("F1 or L3 + R3"), "both", L.T("The keyboard's F1 key, or both sticks pressed on a controller")),
         };
 
-        /// <summary>The port's in-game settings menu (Insert / L3+R3).</summary>
+        /// <summary>The port's in-game settings menu (F1 / L3+R3).</summary>
         public static readonly Choice[] MenuLanguages =
         {
             new("简体中文", "zh_CN"),

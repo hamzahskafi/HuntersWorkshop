@@ -1,0 +1,45 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// 0.4.6 beta 19 (docs/stage-a-cost.md, part 2): the engine's threads sleep on a word of their own, as
+// the runtime's do since beta 18 (src/host_sync.h, host_park): Windows' WaitOnAddress and
+// WakeByAddress (looked up at run time), a private futex on Linux (bbport_park.cpp; <windows.h>
+// stays out of the renderer's headers). A wait returns when the word no longer holds `expected`,
+// when woken, at the timeout, or spuriously: callers look again. std::atomic's wait and notify went
+// through libc++'s global table of locks and condition variables on Windows: every wake took a lock
+// shared by every waiting engine thread.
+#pragma once
+
+#include <atomic>
+#include <cstdint>
+#include <cstdlib>
+
+namespace BbPark {
+
+constexpr std::uint32_t kForever = 0xffffffffu;
+
+/// Sleeps while `word` holds `expected`, at most `timeout_ms` (kForever: no limit). False at the
+/// timeout.
+bool Wait(std::atomic<std::uint32_t>& word, std::uint32_t expected, std::uint32_t timeout_ms = kForever);
+void WakeOne(std::atomic<std::uint32_t>& word);
+void WakeAll(std::atomic<std::uint32_t>& word);
+
+/// 0.4.6 beta 20 (docs/chain-waits.md, item 7): a fence across the process, for a handshake whose
+/// one side runs millions of times a second and whose other side waits rarely. The busy side writes
+/// and reads with plain loads and stores (no fence of its own); the rare side writes, calls this,
+/// then reads. When this returns every thread's earlier stores are visible to the caller, and the
+/// caller's to every thread's later loads (FlushProcessWriteBuffers on Windows, a registered
+/// membarrier on Linux). Only where HeavyFenceAvailable() (not under Wine, whose fence is a stub;
+/// not where Linux refuses the registration): elsewhere the busy side keeps its fence. Its users
+/// still wake to look again now and then, so a missed wake (a system that hides being Wine) costs
+/// a few milliseconds, never a hang.
+bool HeavyFenceAvailable();
+void HeavyFence();
+
+/// The usual pairing: a waiter reads the word, checks its condition, and waits on the value it
+/// read; a waker changes its condition, bumps the word and wakes. A bump between the waiter's read
+/// and its wait makes the wait return at once.
+inline void Bump(std::atomic<std::uint32_t>& word, bool all = false) {
+    word.fetch_add(1, std::memory_order_seq_cst);
+    all ? WakeAll(word) : WakeOne(word);
+}
+
+} // namespace BbPark

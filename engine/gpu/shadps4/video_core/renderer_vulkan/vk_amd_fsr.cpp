@@ -21,6 +21,8 @@
 #include <type_traits>
 #include <vector>
 
+#include "bbport_settings.h" // BbSettings::FsrReactive* (0.4.6 beta 16), for both builds
+
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -32,7 +34,6 @@
 #include "api/include/vk/ffx_api_vk.h"
 #include "upscalers/include/ffx_upscale.h"
 
-#include "bbport_settings.h"
 #include "bbport_toggles.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
@@ -130,6 +131,25 @@ bool Fsr31Name(const std::string& name) {
     return false;
 }
 
+/// The inputs named by AMD's resource bits (FfxApiQueryResourceIdentifiers).
+std::string InputNames(uint64_t bits) {
+    static constexpr std::pair<uint64_t, const char*> kNames[] = {
+        {FFX_API_QUERY_RESOURCE_INPUT_COLOR, "colour"},
+        {FFX_API_QUERY_RESOURCE_INPUT_DEPTH, "depth"},
+        {FFX_API_QUERY_RESOURCE_INPUT_MV, "motion vectors"},
+        {FFX_API_QUERY_RESOURCE_INPUT_EXPOSURE, "exposure"},
+        {FFX_API_QUERY_RESOURCE_INPUT_REACTIVEMASK, "reactive mask"},
+        {FFX_API_QUERY_RESOURCE_INPUT_TRANSPARENCYCOMPOSITION, "transparency and composition mask"},
+    };
+    std::string names;
+    for (const auto& [bit, name] : kNames) {
+        if (bits & bit) {
+            names += (names.empty() ? "" : ", ") + std::string{name};
+        }
+    }
+    return names.empty() ? "none" : names;
+}
+
 /// AMD's backend keeps a few frames' descriptors and constants in rings (FFX_MAX_QUEUED_FRAMES, 4, in
 /// its internal types): a dispatch never gets more than three frames ahead of the GPU.
 constexpr size_t FramesInFlight = 3;
@@ -155,10 +175,12 @@ struct AmdFsr::Impl {
         u32 width{}, height{};
         bool hdr{};
         std::string version = "auto"; ///< fsr_version: "auto" or a version's name
+        bool debug_view{}; ///< 0.4.6 beta 16: AMD's debug view allowed and drawn (the menu, BB_AMD_FSR_DEBUG_VIEW)
         bool operator==(const Key&) const = default;
     } made{}, wanted{};
     std::string provider_name;
     bool runs_fsr31{}, runs_driver{};
+    int reactive_use = BbSettings::FsrReactiveUnknown; ///< 0.4.6 beta 16: its answer on the mask
     std::array<float, 5> tuning{};
     bool tuned{};
     std::deque<u64> ticks; ///< scheduler ticks of the frames in flight
@@ -208,6 +230,7 @@ struct AmdFsr::Impl {
         tuned = false;
         provider_name.clear();
         runs_fsr31 = runs_driver = false;
+        reactive_use = BbSettings::FsrReactiveUnknown;
     }
 
     bool Load() {
@@ -316,6 +339,18 @@ struct AmdFsr::Impl {
         }();
         if (debug) {
             desc.flags |= FFX_UPSCALE_ENABLE_DEBUG_CHECKING;
+            // 0.4.6 beta 16: said in the log, so that a run with no findings reads as checked.
+            static bool told = false;
+            if (!told) {
+                told = true;
+                std::printf("Upscaler: AMD FSR's own checks on (BB_AMD_FSR_DEBUG=1): their findings follow as "
+                            "'Upscaler: AMD FSR warning' lines\n");
+            }
+        }
+        // 0.4.6 beta 16: AMD's debug view (the menu, BB_AMD_FSR_DEBUG_VIEW=1) must be allowed when the context
+        // is made; the dispatch flag alone drew nothing. It takes more memory: only while it is shown.
+        if (key.debug_view) {
+            desc.flags |= FFX_UPSCALE_ENABLE_DEBUG_VISUALIZATION;
         }
         desc.maxRenderSize = {key.width, key.height};
         desc.maxUpscaleSize = {key.width, key.height};
@@ -368,7 +403,61 @@ struct AmdFsr::Impl {
         }
         runs_fsr31 = Fsr31Name(name);
         provider_name = name.empty() ? "FSR" : name.rfind("FSR", 0) == 0 ? name : "FSR " + name;
+        // 0.4.6 beta 16: what the version that runs says it reads, and its GPU memory (AMD's queries; a
+        // version that does not answer one is said so).
+        ffxQueryDescUpscaleGetResourceRequirements needs{};
+        needs.header.type = FFX_API_QUERY_DESC_TYPE_UPSCALE_GET_RESOURCE_REQUIREMENTS;
+        const bool needs_ok = query(&context, &needs.header) == FFX_API_RETURN_OK;
+        reactive_use = !needs_ok ? BbSettings::FsrReactiveUnknown
+                       : needs.required_resources & FFX_API_QUERY_RESOURCE_INPUT_REACTIVEMASK
+                           ? BbSettings::FsrReactiveNeeded
+                       : needs.optional_resources & FFX_API_QUERY_RESOURCE_INPUT_REACTIVEMASK
+                           ? BbSettings::FsrReactiveRead
+                           : BbSettings::FsrReactiveUnread;
+        FfxApiEffectMemoryUsage usage{};
+        ffxQueryDescUpscaleGetGPUMemoryUsage memory{};
+        memory.header.type = FFX_API_QUERY_DESC_TYPE_UPSCALE_GPU_MEMORY_USAGE;
+        memory.gpuMemoryUsageUpscaler = &usage;
+        const bool memory_ok = query(&context, &memory.header) == FFX_API_RETURN_OK;
+        char memory_text[96] = "not reported";
+        if (memory_ok) {
+            std::snprintf(memory_text, sizeof(memory_text), "%.1f MiB (%.1f MiB of it aliasable)",
+                          double(usage.totalUsageInBytes) / (1 << 20), double(usage.aliasableUsageInBytes) / (1 << 20));
+        }
+        std::printf("Upscaler: %s reads %s%s%s%s; its GPU memory %s\n", provider_name.c_str(),
+                    needs_ok ? InputNames(needs.required_resources).c_str() : "(its inputs not reported)",
+                    needs_ok ? " (needed), " : "", needs_ok ? InputNames(needs.optional_resources).c_str() : "",
+                    needs_ok ? " (if given)" : "", memory_text);
         return true;
+    }
+
+    /// 0.4.6 beta 16: AMD's jitter for the version that runs (its queries): the phase count for these widths
+    /// (0 while no context is ready), and the offset of `index` (0-based) in a sequence of `phases`.
+    u32 JitterPhases(u32 render_width, u32 output_width) {
+        Settle();
+        if (preparing || !context || render_width == 0 || output_width == 0) {
+            return 0;
+        }
+        int32_t count = 0;
+        ffxQueryDescUpscaleGetJitterPhaseCount phase{};
+        phase.header.type = FFX_API_QUERY_DESC_TYPE_UPSCALE_GETJITTERPHASECOUNT;
+        phase.renderWidth = render_width;
+        phase.displayWidth = output_width;
+        phase.pOutPhaseCount = &count;
+        return query(&context, &phase.header) == FFX_API_RETURN_OK && count > 0 ? u32(count) : 0;
+    }
+
+    bool JitterOffset(u32 index, u32 phases, float& x, float& y) {
+        if (preparing || !context || phases == 0) {
+            return false;
+        }
+        ffxQueryDescUpscaleGetJitterOffset offset{};
+        offset.header.type = FFX_API_QUERY_DESC_TYPE_UPSCALE_GETJITTEROFFSET;
+        offset.index = int32_t(index % phases);
+        offset.phaseCount = int32_t(phases);
+        offset.pOutX = &x;
+        offset.pOutY = &y;
+        return query(&context, &offset.header) == FFX_API_RETURN_OK;
     }
 
     void Prepare(Key key) {
@@ -381,10 +470,11 @@ struct AmdFsr::Impl {
         DestroyContextNow(false);
         wanted = key;
         preparing = true;
-        std::printf("Upscaler: AMD FSR building its shaders in the background (output %ux%u, %s%s); "
+        std::printf("Upscaler: AMD FSR building its shaders in the background (output %ux%u, %s%s%s); "
                     "the scene at full size meanwhile\n",
                     key.width, key.height, key.hdr ? "HDR scene" : "linear frame",
-                    key.version == "auto" ? "" : (", FSR " + key.version + " asked for").c_str());
+                    key.version == "auto" ? "" : (", FSR " + key.version + " asked for").c_str(),
+                    key.debug_view ? ", AMD's debug view" : "");
         prep = std::thread([this, key] {
             const auto start = std::chrono::steady_clock::now();
             created_ok = CreateContextNow(key);
@@ -550,8 +640,8 @@ struct AmdFsr::Impl {
         d.motionVectorScale = {1.0f, flip_y ? -1.0f : 1.0f};
         d.renderSize = {f.render_width, f.render_height};
         d.upscaleSize = {f.output.width, f.output.height};
-        d.enableSharpening = f.sharpen;
-        d.sharpness = std::clamp(f.sharpness, 0.0f, 1.0f);
+        d.enableSharpening = false; // the engine's own sharpening runs after every upscaler (0.4.6 beta 16)
+        d.sharpness = 0.0f;
         d.frameTimeDelta = f.frame_ms;
         d.preExposure = 1.0f;
         d.reset = f.reset;
@@ -559,11 +649,7 @@ struct AmdFsr::Impl {
         d.cameraFar = f.far_plane;
         d.cameraFovAngleVertical = f.vertical_fov;
         d.viewSpaceToMetersFactor = 1.0f;
-        static const bool debug_view = [] {
-            const char* env = std::getenv("BB_AMD_FSR_DEBUG_VIEW");
-            return env && env[0] == '1';
-        }();
-        d.flags = debug_view ? FFX_UPSCALE_FLAG_DRAW_DEBUG_VIEW : 0u;
+        d.flags = made.debug_view ? FFX_UPSCALE_FLAG_DRAW_DEBUG_VIEW : 0u;
         Transition(f.cmdbuf, f, true);
         const auto result = dispatch(&context, &d.header);
         Transition(f.cmdbuf, f, false);
@@ -587,13 +673,13 @@ bool AmdFsr::Probe() {
     return impl->Probe();
 }
 
-void AmdFsr::Prepare(u32 ow, u32 oh, bool hdr, const std::string& version) {
+void AmdFsr::Prepare(u32 ow, u32 oh, bool hdr, const std::string& version, bool debug_view) {
     impl->Settle();
-    impl->Prepare({ow, oh, hdr, BbSettings::FsrVersionKey(version)});
+    impl->Prepare({ow, oh, hdr, BbSettings::FsrVersionKey(version), debug_view});
 }
 
-bool AmdFsr::Ready(u32 ow, u32 oh, bool hdr, const std::string& version) const {
-    return impl->Ready({ow, oh, hdr, BbSettings::FsrVersionKey(version)});
+bool AmdFsr::Ready(u32 ow, u32 oh, bool hdr, const std::string& version, bool debug_view) const {
+    return impl->Ready({ow, oh, hdr, BbSettings::FsrVersionKey(version), debug_view});
 }
 
 bool AmdFsr::Preparing() const noexcept {
@@ -607,6 +693,14 @@ bool AmdFsr::Record(const UpscaleInput::Frame& frame) {
 void AmdFsr::Tune(float velocity_factor, float reactiveness_scale, float shading_change_scale,
                   float accumulation, float min_disocclusion) {
     impl->Tune({velocity_factor, reactiveness_scale, shading_change_scale, accumulation, min_disocclusion});
+}
+
+u32 AmdFsr::JitterPhases(u32 render_width, u32 output_width) {
+    return impl->JitterPhases(render_width, output_width);
+}
+
+bool AmdFsr::JitterOffset(u32 index, u32 phases, float& x, float& y) {
+    return impl->JitterOffset(index, phases, x, y);
 }
 
 const char* AmdFsr::Problem() const noexcept {
@@ -632,6 +726,10 @@ bool AmdFsr::RunsDriverVersion() const noexcept {
     return !impl->preparing && impl->runs_driver;
 }
 
+int AmdFsr::ReactiveUse() const noexcept {
+    return impl->preparing ? BbSettings::FsrReactiveUnknown : impl->reactive_use;
+}
+
 void AmdFsr::ClearFailure() noexcept {
     impl->Settle();
     if (impl->preparing) {
@@ -653,8 +751,8 @@ AmdFsr::~AmdFsr() = default;
 bool AmdFsr::Probe() {
     return false;
 }
-void AmdFsr::Prepare(u32, u32, bool, const std::string&) {}
-bool AmdFsr::Ready(u32, u32, bool, const std::string&) const {
+void AmdFsr::Prepare(u32, u32, bool, const std::string&, bool) {}
+bool AmdFsr::Ready(u32, u32, bool, const std::string&, bool) const {
     return false;
 }
 bool AmdFsr::Preparing() const noexcept {
@@ -664,6 +762,12 @@ bool AmdFsr::Record(const UpscaleInput::Frame&) {
     return false;
 }
 void AmdFsr::Tune(float, float, float, float, float) {}
+u32 AmdFsr::JitterPhases(u32, u32) {
+    return 0;
+}
+bool AmdFsr::JitterOffset(u32, u32, float&, float&) {
+    return false;
+}
 const char* AmdFsr::Problem() const noexcept {
     return "AMD FSR runs on Windows only (AMD's FSR SDK has no Linux build)";
 }
@@ -678,6 +782,9 @@ bool AmdFsr::RunsFsr31() const noexcept {
 }
 bool AmdFsr::RunsDriverVersion() const noexcept {
     return false;
+}
+int AmdFsr::ReactiveUse() const noexcept {
+    return BbSettings::FsrReactiveUnknown;
 }
 void AmdFsr::ClearFailure() noexcept {}
 

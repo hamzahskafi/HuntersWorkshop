@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <string>
+
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -244,6 +246,7 @@ private:
     Kernel::Thread m_video_decoder_thread{};
     Kernel::Thread m_audio_decoder_thread{};
 
+    std::string m_path; ///< 0.4.6 beta 16: for the log's movie line (Start)
     AVFormatContextPtr m_avformat_context{nullptr, &ReleaseAVFormatContext};
     AVCodecContextPtr m_video_codec_context{nullptr, &ReleaseAVCodecContext};
     AVCodecContextPtr m_audio_codec_context{nullptr, &ReleaseAVCodecContext};

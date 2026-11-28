@@ -18,15 +18,18 @@
 #include <vector>
 #include <queue>
 
+#include "bbport_role_lock.h"
 #include "common/assert.h"
 #include "common/slot_vector.h"
 #include "common/types.h"
 #include "common/unique_function.h"
 #include "video_core/amdgpu/cb_db_extent.h"
 #include "video_core/amdgpu/regs.h"
+#include "video_core/amdgpu/submit_queue.h"
 
 namespace Vulkan {
 class Rasterizer;
+struct PrepSubmission;
 }
 
 namespace Libraries::VideoOut {
@@ -40,6 +43,10 @@ bool SubmitLockOnDecode(); // gnmdriver.cpp
 namespace AmdGpu {
 
 union PM4Header;
+
+// bbport 0.4.6 beta 19 (liverpool.cpp, bbport_frame_pool.h): the decode tasks' frames.
+void* TakeTaskFrame(std::size_t size);
+void GiveTaskFrame(void* frame, std::size_t size);
 
 struct Liverpool {
     static constexpr u32 GfxQueueId = 0u;
@@ -121,6 +128,7 @@ public:
         }
         submit_done = true;
         submit_cv.notify_one();
+        WakeDecoder();
     }
 
     void WaitGpuIdle() noexcept {
@@ -136,6 +144,7 @@ public:
             gpu_wants_work.store(true, std::memory_order_relaxed);
         }
         submit_cv.notify_all();
+        WakeDecoder();
     }
 
     /// bbport: this thread is waiting for the game's next submission, everything before decoded.
@@ -175,6 +184,7 @@ public:
                 });
                 ++num_commands;
                 submit_cv.notify_one();
+                WakeDecoder();
             }
             sem.acquire();
         } else {
@@ -182,6 +192,7 @@ public:
             command_queue.emplace(std::move(func));
             ++num_commands;
             submit_cv.notify_one();
+            WakeDecoder();
         }
     }
 
@@ -237,6 +248,13 @@ private:
             std::suspend_always yield_value(empty&&) {
                 return {};
             }
+            // bbport 0.4.6 beta 19 (bbport_frame_pool.h): frames kept for the next task.
+            static void* operator new(std::size_t size) {
+                return TakeTaskFrame(size);
+            }
+            static void operator delete(void* frame, std::size_t size) {
+                GiveTaskFrame(frame, size);
+            }
         };
 
         using Handle = std::coroutine_handle<promise_type>;
@@ -254,8 +272,11 @@ private:
         std::size_t ccb_dwords{};
         std::chrono::steady_clock::time_point submitted;
     };
+    /// `prep`: the draw preparation's record of the buffer (0.4.6 beta 20: carried with the task, so
+    /// the GPU command thread doesn't look it up under the preparation's lock).
     Task ProcessGraphics(std::span<const u32> dcb, std::span<const u32> ccb, u64 seq = NoSeq,
-                         std::shared_ptr<SubmittedCopy> copy = {});
+                         std::shared_ptr<SubmittedCopy> copy = {},
+                         std::shared_ptr<Vulkan::PrepSubmission> prep = {});
     /// After a copied submission is decoded: whether the guest changed its command buffers since.
     static void CheckSubmittedCopy(const SubmittedCopy& copy, u64 seq);
     Task ProcessCeUpdate(std::span<const u32> ccb);
@@ -266,8 +287,11 @@ private:
     void Process(std::stop_token stoken);
 
     struct GpuQueue {
+        /// 0.4.6 beta 20 (docs/chain-waits.md, item 2): the game's submitting threads' lock among
+        /// themselves (numbering, the draw preparation's queue and the push in one order); the GPU
+        /// command thread reads `submits` without it.
         std::mutex m_access{};
-        std::queue<Task::Handle> submits{};
+        SubmitQueue<Task::Handle> submits{};
         ComputeProgram cs_state{};
     };
     std::array<GpuQueue, NumTotalQueues> mapped_queues{};
@@ -336,8 +360,16 @@ private:
     u64 submissions_total = 0;
     std::atomic<u32> num_commands{};
     std::atomic<bool> submit_done{};
-    std::mutex submit_mutex;
+    /// 0.4.6 beta 20: role-aware (bbport_role_lock.h): the game's submit (the Frame role) holds it
+    /// for its counters, the GPU command thread takes it once a submission; a game thread set aside
+    /// while it holds it is raised to the chain's priority, and the wait counted.
+    BbRoles::Mutex submit_mutex{"submission counters"};
     std::condition_variable_any submit_cv;
+    /// bbport 0.4.6 beta 19: the word the GPU command thread's idle wait sleeps on (BbPark,
+    /// liverpool.cpp), bumped wherever submit_cv is notified for it; submit_cv stays for
+    /// WaitGpuIdle.
+    std::atomic<u32> decoder_word{0};
+    void WakeDecoder();
     /// bbport BB_HONEST_LABELS: set by WakeForGpu (under submit_mutex), taken by the idle wait.
     std::atomic<bool> gpu_wants_work{false};
     std::atomic<bool> decoder_idle{false};

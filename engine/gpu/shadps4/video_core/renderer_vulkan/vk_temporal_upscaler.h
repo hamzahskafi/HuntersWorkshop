@@ -13,6 +13,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <memory>
 #include <mutex>
@@ -217,7 +218,11 @@ private:
     /// and AMD FSR to TAA. `reactive`: the mask is made this frame (AMD FSR takes it).
     bool RecordFrameUpscaler(vk::CommandBuffer cmdbuf, UpscaleInput::Image color, UpscaleInput::Image depth,
                              u32 w, u32 h, u32 ow, u32 oh, float frame_ms, bool hdr, bool reactive);
-    void RecordTaa(vk::CommandBuffer cmdbuf, vk::ImageView color, vk::ImageView depth);
+    /// `sharpen`: TAA's own sharpening pass after it, on what the colour holds (`encoding`,
+    /// rcas_extra.glsl: 0 the HDR scene, 1 linear 0..1, 2 display-encoded). 0.4.6 beta 16: only where
+    /// the merge or the copy into the UI image cannot sharpen instead.
+    void RecordTaa(vk::CommandBuffer cmdbuf, vk::ImageView color, vk::ImageView depth, u32 encoding,
+                   bool sharpen);
     /// 0.4.4 beta 21: BB_DUMP_TRIGGER's images of frame `dump` (Run and RunScaled had a copy
     /// each): `input` (none: null) and `depth` as the upscaler read them (`sw` x `sh`), the motion
     /// vectors and the result, TAA's history and diagnostic image (`taa_diagnostics`), and the
@@ -226,16 +231,31 @@ private:
     void DumpUpscale(vk::CommandBuffer cmdbuf, int dump, vk::Image input, u32 input_bytes,
                      const char* input_format, bool input_alone, vk::Image depth, u32 sw, u32 sh,
                      u32 w, u32 h, u32 ow, u32 oh, bool taa_diagnostics);
-    /// Additional RCAS sharpening; DLSS applies the whole requested range here.
-    void ExtraSharpen(vk::Image target, u32 w, u32 h);
-    /// The strength ExtraSharpen applies (0: none): the menu's 0..2, less what the backend's own
-    /// RCAS already did (FSR 3 and 4 up to 1; DLSS none).
+    /// The scaled path's sharpening in place, through an RGBA32F copy of the output (rcas_extra.glsl),
+    /// the frame holding `encoding`: 0.4.6 beta 16, only where the UI image has no storage view
+    /// (RecordSharpenCopy does it otherwise).
+    void ExtraSharpen(vk::Image target, u32 w, u32 h, u32 encoding, float strength);
+    /// 0.4.6 beta 16: the strength the engine's sharpening applies after any upscaler (0: none): the
+    /// menu's percentage of RCAS's maximum, as a share; none when TAA's diagnostic view is on.
     [[nodiscard]] float ExtraSharpenAmount() const;
+    /// 0.4.6 beta 16: one line once the sharpening has changed and held for a second (who sharpens,
+    /// how strongly, on what); a dragged slider wrote one a step (1,272 lines in the tester's
+    /// `4bc9ea19`). Nothing formatted while it holds.
+    void ReportSharpening(float strength, u32 encoding);
+    /// 0.4.6 beta 16: the scaled path's copy of the output into the UI image, sharpened on the way
+    /// (sharpen_copy.comp): one pass instead of the RGBA32F copy, the sharpening pass and the blit.
+    /// Recorded on `cmdbuf`; the caller places the barriers.
+    void RecordSharpenCopy(vk::CommandBuffer cmdbuf, vk::ImageView ui, bool srgb, float strength,
+                           u32 encoding, u32 w, u32 h);
+    /// 0.4.6 beta 16: a storage view of the UI image (its sRGB format's UNORM twin, `srgb` set), or
+    /// null where its format has no storage support (the blit then, and ExtraSharpen).
+    vk::ImageView UiStorageView(bool& srgb);
     /// 0.4.4 beta 20: Run's profiler label for one of its steps (GPU profile).
     void MarkRunStep(const char* label);
     /// bbport: the menu's mask / motion debug view over the scaled path's output, in place;
     /// upscale_merge.comp draws it on the 1080p path. `reactive`: a mask was made this frame.
-    void DebugView(vk::Image target, u32 w, u32 h, u32 ow, u32 oh, bool reactive);
+    /// Returns whether it drew (0.4.6 beta 16: a debug view is not sharpened).
+    bool DebugView(vk::Image target, u32 w, u32 h, u32 ow, u32 oh, bool reactive);
 
     const Instance& instance;
     Scheduler& scheduler;
@@ -319,6 +339,8 @@ private:
     bool resources_taa = false;
     /// 0.4.4 beta 27: AMD FSR (AMD's FSR SDK; Windows); probed once at start.
     std::unique_ptr<AmdFsr> amd_fsr;
+    /// 0.4.6 beta 16: the sizes whose AMD jitter phase count was last logged (it differed from the engine's).
+    std::array<u32, 2> amd_jitter_logged{};
     bool amd_fsr_available = false;
     std::unique_ptr<DlssUpscaler> dlss; ///< NVIDIA devices only
     bool fsr_building = false; ///< AMD FSR's context is being made (PrepareFsr)
@@ -366,6 +388,21 @@ private:
     vk::UniqueDescriptorSetLayout fsr4_encode_desc_layout;
     vk::UniquePipelineLayout fsr4_encode_pipeline_layout;
     vk::UniquePipeline fsr4_encode_pipeline;
+    /// 0.4.6 beta 16: ReportSharpening's last state, since when it holds, and whether it was said.
+    struct SharpenState {
+        int percent = -1, upscaler = -1;
+        u32 encoding = 0;
+        bool operator==(const SharpenState&) const = default;
+    } sharpen_state;
+    std::chrono::steady_clock::time_point sharpen_since{};
+    bool sharpen_said = true;
+    /// 0.4.6 beta 16: RecordSharpenCopy's pipeline, and the UI image's storage view (made on first
+    /// use for the UI image's format; `ui_storage_checked`: its format looked at).
+    vk::UniqueDescriptorSetLayout sharpen_copy_desc_layout;
+    vk::UniquePipelineLayout sharpen_copy_pipeline_layout;
+    vk::UniquePipeline sharpen_copy_pipeline;
+    vk::UniqueImageView ui_storage_view;
+    bool ui_storage_checked = false, ui_storage_srgb = false;
     // ExtraSharpen: a copy of the upscaled frame (RCAS reads neighbours).
     // 0.4.4 beta 21: the copy is released by EnsureResources (made again when next needed).
     VideoCore::UniqueImage extra_sharpen_image;

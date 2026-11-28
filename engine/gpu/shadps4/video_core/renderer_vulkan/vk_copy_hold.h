@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Hunter's Workshop 0.4.5 beta 9: the copy shader's copies held to the end of the render pass
-// they come in (BB_COPY_HOLD=0: off, recorded where they come, ending the pass, as before).
+// they come in (0.4.6: no longer a switch; before, BB_COPY_HOLD=0 recorded them where they came).
 //
 // Beta 8's trace (performance.md, "The copy shader"): no draw later in the same pass reads what a
 // copy-shader dispatch inside it wrote; later passes do. So a copy batch that comes while a pass

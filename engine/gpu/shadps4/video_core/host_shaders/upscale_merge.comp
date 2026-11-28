@@ -20,8 +20,9 @@ layout(binding = 4) uniform utexture2D objects;
 
 layout(push_constant) uniform Params {
     uint mode;
-    // 0.4.4 beta 20: the port's extra sharpening done here (0: none), as taa_sharpen.comp would
-    // before the merge, without its RGBA32F copy and pass (rcas_extra.glsl).
+    // 0.4.4 beta 20: the port's sharpening done here (0: none; 0.4.6 beta 16: 0..1), as
+    // taa_sharpen.comp would before the merge, without its RGBA32F copy and pass
+    // (rcas_extra.glsl). The image is the HDR scene (its encoding 0).
     float sharpen;
 };
 
@@ -34,7 +35,7 @@ void main() {
         return;
     }
     const vec4 original = imageLoad(scene, pixel);
-    vec3 color = sharpen > 0.0 ? ExtraSharpen(pixel, sharpen) : imageLoad(upscaled, pixel).rgb;
+    vec3 color = sharpen > 0.0 ? ExtraSharpen(pixel, sharpen, 0u) : imageLoad(upscaled, pixel).rgb;
     const uint view = mode & 3u;
     if (view == 1) {
         const float mask = imageLoad(reactive, min(pixel * imageSize(reactive) / imageSize(scene), imageSize(reactive) - 1)).r;

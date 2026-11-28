@@ -11,7 +11,7 @@ namespace BloodborneLauncher.Core
     public static class CrashReport
     {
         private static readonly string[] Experimental =
-            { "exp_vram_cleanup", "exp_frame_pacing", "exp_vblank_lock", "exp_particle_cap", "exp_vram_budget", "exp_thread_priority", "exp_sleep_spin", "exp_async_pipelines", "exp_occlusion", "exp_fast_draws", "exp_compile_skip", "exp_fast_loading", "exp_frame_fixes", "exp_hot_pages", "exp_gx_in_place", "exp_sfx_workaround", "exp_sharp_ui" };
+            { "less_vram", "exp_frame_pacing", "exp_vblank_lock", "exp_particle_cap", "exp_thread_priority", "exp_sleep_spin", "exp_async_pipelines", "exp_occlusion", "exp_fast_draws", "exp_compile_skip", "exp_fast_loading", "exp_frame_fixes", "exp_hot_pages", "exp_gx_in_place", "exp_sfx_workaround", "exp_sharp_ui" };
 
         /// <summary>What stopped the game, from the end of the session log (exit code 23 is the
         /// engine stopping itself, for several reasons).</summary>
@@ -22,15 +22,15 @@ namespace BloodborneLauncher.Core
             var memory = LowMemory(tail);
             if (memory != null) why += " " + memory;
             // OptiScaler hooks the submissions and runs DLSS itself: a device lost with it loaded
-            // says so (the engine runs a compatibility mode for it, Engine switches › OptiScaler compatibility).
+            // says so (the engine always runs its compatibility mode for it, vk_optiscaler.h).
             if (tail.Any(DeviceLost) && OptiScalerVersion() is { } opti)
             {
                 // Its own frame generation on Vulkan runs through a D3D12 device it creates on the
                 // first upscaled frames (the engine prints FGOutput from OptiScaler.ini).
                 var fg = OptiScalerFrameGeneration();
                 why += " " + (fg != null
-                    ? L.F($"OptiScaler {opti} was loaded with its own frame generation on ({fg}); on Vulkan it runs through a D3D12 bridge that loses the GPU. Set Frame Generation to none in OptiScaler's menu (FGOutput=nofg in OptiScaler.ini) and use the launcher's frame generation instead.")
-                    : L.F($"OptiScaler {opti} was loaded: it hooks the game's GPU submissions and runs DLSS itself. Keep Engine switches › OptiScaler compatibility on; if the crash comes back, take OptiScaler's files out of engine\\out to rule it out."));
+                    ? L.F($"OptiScaler {opti} was loaded with its frame generation set ({fg}), which the engine does not support yet. Set Frame Generation to none in OptiScaler's menu, then play again.")
+                    : L.F($"OptiScaler {opti} was loaded: it hooks the game's GPU submissions and runs DLSS itself. If the crash comes back, take OptiScaler's files out of engine\\out to rule it out."));
             }
             return why;
         }
@@ -41,13 +41,16 @@ namespace BloodborneLauncher.Core
             line.Contains("device lost", StringComparison.OrdinalIgnoreCase) ||
             line.Contains("ErrorDeviceLost", StringComparison.Ordinal);
 
-        /// <summary>OptiScaler's frame generation output from the engine's line
-        /// ("OptiScaler: its frame generation is on (FGOutput=dlssg in OptiScaler.ini): ..."); null when off.</summary>
+        /// <summary>OptiScaler's frame generation from the engine's line ("OptiScaler: its frame generation is
+        /// set (dlssg in OptiScaler.ini): ...", 0.4.6 beta 17; before it "... is on (FGOutput=dlssg ..."); null when off.</summary>
         private static string? OptiScalerFrameGeneration()
         {
-            const string start = "OptiScaler: its frame generation is on (FGOutput=";
-            var line = Tail(GameRunner.SessionLog, int.MaxValue).FirstOrDefault(l => l.StartsWith(start, StringComparison.Ordinal));
-            return line?[start.Length..].Split(' ')[0];
+            foreach (var start in new[] { "OptiScaler: its frame generation is set (", "OptiScaler: its frame generation is on (FGOutput=" })
+            {
+                var line = Tail(GameRunner.SessionLog, int.MaxValue).FirstOrDefault(l => l.StartsWith(start, StringComparison.Ordinal));
+                if (line != null) return line[start.Length..].Split(' ')[0];
+            }
+            return null;
         }
 
         /// <summary>OptiScaler's version from its own start line ("OptiScaler v0.9.5-pre4 (8dac650) ... loaded")
@@ -96,7 +99,7 @@ namespace BloodborneLauncher.Core
             if (Has("ErrorOutOfDeviceMemory") || Has("ErrorOutOfHostMemory"))
                 return L.T("The graphics card ran out of video memory. A lower output resolution or upscaler preset (Visuals), ") +
                        L.T("fewer texture or model mods, and closing other programs (browsers, recorders) leave it more room; ") +
-                       L.T("keep \"Use more VRAM for textures\" off on cards with 4-6 GB.");
+                       L.T("turning on Engine switches › Use less VRAM helps as well.");
             if (tail.Any(DeviceLost))
                 return L.T("The graphics driver stopped responding: the GPU hung or lost the game's memory.");
             // The engine's own message: "GPU [Debug] <Critical> file:line Function: text", maybe
@@ -130,6 +133,8 @@ namespace BloodborneLauncher.Core
                 0xC0000005 => L.T("The engine crashed on a bad memory access (0xC0000005)."),
                 0xC0000409 => L.T("The engine stopped on a failed safety check (0xC0000409)."),
                 0xC00000FD => L.T("The engine ran out of stack (0xC00000FD)."),
+                // A DLL the engine links was not found where Windows looks (its own folder, the system's).
+                0xC0000135 => L.T("The engine could not start: a DLL it needs is missing from engine\\out. Reinstall the package to put it back."),
                 > 0xFFFF => L.F($"The game closed unexpectedly (0x{code:X8})."),
                 _ => L.F($"The game closed unexpectedly (exit code {code}).")
             };
@@ -198,7 +203,7 @@ namespace BloodborneLauncher.Core
             if (RamTrend() is { } ram) text.AppendLine(ram);
             text.AppendLine(L.F($"Upscaler {ini.Get("upscaler")}, preset {ini.Get("preset")}, output {ini.Get("output_res")}, ") +
                             L.F($"FPS {s.Str("fps_mode")}, live resolution {ini.Get("live_resolution")}, mods {(s.Bool("mods_enabled") ? "on" : "off")}"));
-            text.AppendLine(L.T("Experimental: ") + string.Join(", ", Experimental.Select(k => $"{k[4..].Replace('_', ' ')} {(s.Bool(k) ? "on" : "off")}")));
+            text.AppendLine(L.T("Experimental: ") + string.Join(", ", Experimental.Select(k => $"{(k.StartsWith("exp_") ? k[4..] : k).Replace('_', ' ')} {(s.Bool(k) ? "on" : "off")}")));
             text.AppendLine();
             text.AppendLine(L.F($"Last {logLines} lines of logs\\last_session.log (repeats folded):"));
             text.AppendLine("```");

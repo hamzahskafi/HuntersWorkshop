@@ -26,11 +26,11 @@ namespace BloodborneLauncher.Views
                 L.T("Menus, HUD and text drawn at the output resolution instead of 1080p stretched up: much sharper at 1440p and 4K. New: on by default in betas while it is tested. Applied on the next launch"),
                 "exp_sharp_ui", line: L.T("Menus, HUD and text drawn at the output resolution"));
             IniToggle(SymbolRegular.Wrench24, L.T("Note while shaders build"),
-                L.T("\"Building shaders\" in a corner while the game builds shaders for a place it shows for the first time. Also in game: Insert or L3 + R3"),
+                L.T("\"Building shaders\" in a corner while the game builds shaders for a place it shows for the first time. Also in game: F1 or L3 + R3"),
                 "compile_note", line: L.T("Shows \"Building shaders\" while new shaders compile"));
 
             Group(L.T("FPS counter"));
-            _counter = FoldToggle(SymbolRegular.DataUsage24, L.T("FPS counter"), L.T("Also in game: Insert or L3 + R3"),
+            _counter = FoldToggle(SymbolRegular.DataUsage24, L.T("FPS counter"), L.T("Also in game: F1 or L3 + R3"),
                 () => Ini.Flag("show_fps"), v => Ini.Set("show_fps", v ? "1" : "0"), out _, out _, line: L.T("Frame rate and timings in a corner of the game"), defaultOn: IniOn("show_fps") ?? false);
             // What the counter shows (on unless turned off).
             foreach (var (icon, key, title) in new[]
@@ -52,7 +52,7 @@ namespace BloodborneLauncher.Views
                 new(L.T("Top right"), "0"), new(L.T("Top left"), "1"), new(L.T("Bottom right"), "2"), new(L.T("Bottom left"), "3"), new(L.T("Top centre"), "4"),
             }, "fps_position", look);
             IniSlider(SymbolRegular.TextFontSize24, L.T("FPS counter size"), 0.75, 2.0, "fps_scale", look);
-            IniCombo(SymbolRegular.Color24, L.T("FPS counter text colour"), L.T("Any colour in game: Insert or L3 + R3 › Other"), new Choice[]
+            IniCombo(SymbolRegular.Color24, L.T("FPS counter text colour"), L.T("Any colour in game: F1 or L3 + R3 › Other"), new Choice[]
             {
                 new(L.T("White"), "#FFFFFF"), new(L.T("Yellow"), "#FFD54A"), new(L.T("Green"), "#7CFC8A"), new(L.T("Cyan"), "#6FE3FF"),
                 new(L.T("Red"), "#FF5A5A"), new(L.T("Orange"), "#FFA040"), new(L.T("Pink"), "#FF8AD8"), new(L.T("Black"), "#000000"),

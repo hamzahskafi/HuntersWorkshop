@@ -188,6 +188,14 @@ struct StageSpecialization {
         }
     }
 
+    /// bbport: a stage with no bindings at all (no buffer, image, FMASK or sampler, the engine's own
+    /// buffers included): where its bindings start changes nothing in its module or its pipeline's
+    /// layout, so a permutation compiled after one fragment shader serves beside any other (operator==)
+    /// and the start-up's warm-up builds such a pipeline as play does (0.4.6 beta 17).
+    [[nodiscard]] bool HasNoBindings() const {
+        return bitset.none() && buffers.empty() && images.empty() && samplers.empty() && fmasks.empty();
+    }
+
     [[nodiscard]] bool Valid() const {
         return info != nullptr;
     }
@@ -223,8 +231,7 @@ struct StageSpecialization {
         // from `start` on. A vertex shader with only those was reused after a fragment shader with
         // another binding count: its pipeline layout did not match it (15% of a cache's pipelines;
         // NVIDIA read other descriptors, AMD's driver ended the process building them).
-        if (bitset.none() && other.bitset.none() && buffers.empty() && images.empty() &&
-            samplers.empty() && fmasks.empty()) {
+        if (HasNoBindings() && other.HasNoBindings()) {
             return true;
         }
 

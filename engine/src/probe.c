@@ -519,7 +519,11 @@ static HANDLE crash_dump_request, crash_dump_done;
 static EXCEPTION_POINTERS *volatile crash_dump_exception;
 static volatile DWORD crash_dump_thread_id;
 static volatile LONG crash_dump_written;
-static char crash_dump_dir[MAX_PATH], crash_dump_path[MAX_PATH];
+/* Wide: a logs folder outside the system's code page (a user name in another script) still gets it. */
+static wchar_t crash_dump_dir[MAX_PATH], crash_dump_path[MAX_PATH];
+/* Its UTF-8 form for the log line, made once at start: the faulting thread's stack may be nearly
+ * gone (a stack overflow), so the handler keeps its own use small. */
+static char crash_dump_path_utf8[MAX_PATH * 3];
 typedef BOOL (WINAPI *MiniDumpWriteDumpFn)(HANDLE, DWORD, HANDLE, MINIDUMP_TYPE, PMINIDUMP_EXCEPTION_INFORMATION,
                                           PMINIDUMP_USER_STREAM_INFORMATION, PMINIDUMP_CALLBACK_INFORMATION);
 static unsigned __stdcall crash_helper_thread(void *unused) {
@@ -533,10 +537,10 @@ static unsigned __stdcall crash_helper_thread(void *unused) {
             fprintf(stderr, "Crash reports: another module replaced the unhandled exception filter (an overlay?); set again\n");
         }
     }
-    if (crash_dump_dir[0]) CreateDirectoryA(crash_dump_dir, NULL);
+    if (crash_dump_dir[0]) CreateDirectoryW(crash_dump_dir, NULL);
     HMODULE dbghelp = LoadLibraryW(L"dbghelp.dll");
     MiniDumpWriteDumpFn write_dump = dbghelp ? (MiniDumpWriteDumpFn)(void *)GetProcAddress(dbghelp, "MiniDumpWriteDump") : NULL;
-    HANDLE file = write_dump ? CreateFileA(crash_dump_path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL)
+    HANDLE file = write_dump ? CreateFileW(crash_dump_path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL)
                              : INVALID_HANDLE_VALUE;
     if (file != INVALID_HANDLE_VALUE) {
         MINIDUMP_EXCEPTION_INFORMATION exception = {crash_dump_thread_id, crash_dump_exception, FALSE};
@@ -548,16 +552,24 @@ static unsigned __stdcall crash_helper_thread(void *unused) {
     return 0;
 }
 static void start_crash_helper(void) {
-    /* The session log's folder (BB_LOG_FILE, set by the launcher), else logs\ here. */
-    const char *log = getenv("BB_LOG_FILE");
-    const char *slash = log ? strrchr(log, '\\') : NULL, *other = log ? strrchr(log, '/') : NULL;
+    /* The session log's folder: BB_LOG_FILE's when output goes to a file, else BB_CRASH_DIR (the
+     * launcher's logs folder, where it keeps last_session.log), else logs\ here. */
+    const wchar_t *log = _wgetenv(L"BB_LOG_FILE"), *crash_dir = _wgetenv(L"BB_CRASH_DIR");
+    const wchar_t *slash = log ? wcsrchr(log, L'\\') : NULL, *other = log ? wcsrchr(log, L'/') : NULL;
+    const size_t name = wcslen(L"\\crash.dmp") + 1;
     if (other > slash) slash = other;
-    if (slash && (size_t)(slash - log) + sizeof("\\crash.dmp") < sizeof(crash_dump_path)) {
-        snprintf(crash_dump_path, sizeof(crash_dump_path), "%.*s\\crash.dmp", (int)(slash - log), log);
+    if (slash && (size_t)(slash - log) + name <= MAX_PATH) {
+        swprintf(crash_dump_path, MAX_PATH, L"%.*ls\\crash.dmp", (int)(slash - log), log);
+    } else if (crash_dir && crash_dir[0] && wcslen(crash_dir) + name <= MAX_PATH) {
+        swprintf(crash_dump_dir, MAX_PATH, L"%ls", crash_dir);
+        swprintf(crash_dump_path, MAX_PATH, L"%ls\\crash.dmp", crash_dir);
     } else {
-        snprintf(crash_dump_dir, sizeof(crash_dump_dir), "logs");
-        snprintf(crash_dump_path, sizeof(crash_dump_path), "logs\\crash.dmp");
+        swprintf(crash_dump_dir, MAX_PATH, L"logs");
+        swprintf(crash_dump_path, MAX_PATH, L"logs\\crash.dmp");
     }
+    if (!WideCharToMultiByte(CP_UTF8, 0, crash_dump_path, -1, crash_dump_path_utf8, (int)sizeof(crash_dump_path_utf8),
+                             NULL, NULL))
+        crash_dump_path_utf8[0] = 0;
     crash_dump_request = CreateEventW(NULL, FALSE, FALSE, NULL);
     crash_dump_done = CreateEventW(NULL, TRUE, FALSE, NULL);
     HANDLE thread = crash_dump_request && crash_dump_done ? (HANDLE)_beginthreadex(NULL, 0, crash_helper_thread, NULL, 0, NULL) : NULL;
@@ -571,9 +583,9 @@ static void write_crash_dump(EXCEPTION_POINTERS *e) {
     crash_dump_thread_id = GetCurrentThreadId();
     SetEvent(crash_dump_request);
     const DWORD waited = WaitForSingleObject(crash_dump_done, 30000);
-    char line[MAX_PATH + 64];
+    static char line[sizeof(crash_dump_path_utf8) + 64]; /* one thread gets here (report_exception) */
     snprintf(line, sizeof(line), waited == WAIT_OBJECT_0 && crash_dump_written ? "Crash dump: %s\n" : "Crash dump: not written (%s)\n",
-             crash_dump_path);
+             crash_dump_path_utf8);
     DWORD written;
     WriteFile(GetStdHandle(STD_ERROR_HANDLE), line, (DWORD)strlen(line), &written, NULL);
 }
@@ -816,6 +828,7 @@ static char **main_argv;
 static unsigned __stdcall loader_thread(void *unused) {
     (void)unused;
     runtime_win_set_thread_name("main"); /* the game's main loop (BB_SAMPLE_THREADS=main) */
+    bbgpu_thread_named("main",700); /* 0.4.6 beta 18: a game thread (Frame), at the game's priority */
     return (unsigned)loader_main(main_argc, main_argv);
 }
 int main(int argc, char **argv) {
@@ -852,6 +865,7 @@ int main(int argc, char **argv) {
 #endif
     if (argc == 2 && !strcmp(argv[1], "--vulkan-only")) return vulkan_smoke();
     check_cpu();
+    bbgpu_test_cpus(); /* 0.4.6 beta 18: BB_TEST_CPUS=<n>, before any thread or count is made */
     int cpu_only = 0, strict_imports = 0;
     unsigned timeout_seconds = 10;
     const char *content_profile=NULL, *app0=NULL, *user_dir=NULL, *patch_file=NULL;

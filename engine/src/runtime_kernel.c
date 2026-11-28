@@ -3,6 +3,7 @@
  * use FreeBSD numbering; host errno values never reach the guest directly. */
 #define _GNU_SOURCE
 #include "runtime.h"
+#include "gpu/bbgpu.h"
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -375,6 +376,7 @@ static void guest_call_sites(uint64_t out[3]) {
     for (int i=0;i<400 && found<3 && (uintptr_t)(sp+i+1)<=stack_hi;++i) if (sp[i]>=text_lo && sp[i]<text_hi) out[found++]=sp[i]-text_lo;
 }
 void runtime_wait_note(int kind, uint64_t ns) {
+    bbgpu_timeline_wait(kind, ns);
     static int enabled=-1;
     if (enabled<0) enabled=getenv("BB_FRAME_STATS")!=NULL;
     if (!enabled) return;
@@ -527,7 +529,7 @@ static void sample_report(void) {
 /* The first three return addresses into the game's code on the calling thread's stack. */
 void runtime_guest_call_sites(uint64_t out[3]) { guest_call_sites(out); }
 #else
-void runtime_wait_note(int kind, uint64_t ns) { (void)kind; (void)ns; }
+void runtime_wait_note(int kind, uint64_t ns) { bbgpu_timeline_wait(kind, ns); }
 void runtime_wait_report(double frames) { (void)frames; }
 void runtime_guest_call_sites(uint64_t out[3]) { out[0]=out[1]=out[2]=0; }
 #endif

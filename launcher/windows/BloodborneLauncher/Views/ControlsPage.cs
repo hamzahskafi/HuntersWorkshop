@@ -16,7 +16,7 @@ namespace BloodborneLauncher.Views
     /// bound to one key and one mouse input (config.ini bind.*, the same records the in-game
     /// System › Key Bindings menu edits). Clicking an action listens for the next key, mouse button
     /// or wheel step: a key replaces the key, a mouse input the mouse input. × removes one,
-    /// right-click unbinds the action. Inputs used twice, and the port's Insert key, are flagged.
+    /// right-click unbinds the action. Inputs used twice, and the port's F1 key, are flagged.
     /// </summary>
     public sealed class ControlsPage : LauncherPage
     {

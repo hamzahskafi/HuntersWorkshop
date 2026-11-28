@@ -10,7 +10,8 @@
 //                                                 one capture, a CSV line on stdout
 //   bb-shader-lab --export-catalog <cache folder> <catalog folder>
 //                                                 a cache as a shader catalog: specializations,
-//                                                 pipeline keys and draw states, without code
+//                                                 pipeline keys and draw states, without code;
+//                                                 the keys --check-cache passes only
 //   bb-shader-lab --seed-cache <catalog folder> <cache folder> <game folder> <eboot.elf>
 //                                                 a catalog into a player's cache, the shader code
 //                                                 from their own game files, then recompiled
@@ -31,20 +32,30 @@
 // --spv-dir: each compile's SPIR-V written there (<capture>.spv) for spirv-val.
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <exception>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <map>
+#include <mutex>
 #include <new>
 #include <string>
+#include <thread>
 #include <vector>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #else
+#include <sys/mman.h>
 #include <sys/wait.h>
+#ifndef MAP_FIXED_NOREPLACE
+#define MAP_FIXED_NOREPLACE 0x100000 // Linux 4.17; older C libraries do not name it
+#endif
 #endif
 
 #include "shader_recompiler/backend/bindings.h"
@@ -167,20 +178,39 @@ size_t CopyTrailerAt(const Bytes& b) {
 }
 
 /// Dwords below 2^44 (a V#'s address range), reused by the next capture: the heap is above it.
+/// 0.4.6 beta 17: on Linux too. Only Windows had it, so every hull and domain shader's state (the
+/// tessellation constants live here) failed to load there: the Linux lab left out the catalog's 32
+/// (the builder session, engine id 122).
 u32* LowWords(size_t count) {
     static u32* block = nullptr;
     static size_t capacity = 0;
     if (count <= capacity) return block;
+    const size_t bytes = (count * 4 + 0xFFFF) & ~size_t(0xFFFF);
 #ifdef _WIN32
     if (block) VirtualFree(block, 0, MEM_RELEASE);
     block = nullptr;
     capacity = 0;
-    const size_t bytes = (count * 4 + 0xFFFF) & ~size_t(0xFFFF);
     for (uintptr_t at = 0x10000000; at < (uintptr_t(1) << 40) && !block; at += 0x10000000) {
         block = static_cast<u32*>(VirtualAlloc(reinterpret_cast<void*>(at), bytes, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
     }
-    if (block) capacity = bytes / 4;
+#else
+    if (block) munmap(block, capacity * 4);
+    block = nullptr;
+    capacity = 0;
+    for (uintptr_t at = 0x10000000; at < (uintptr_t(1) << 40) && !block; at += 0x10000000) {
+        // Never over a mapping already there (MAP_FIXED_NOREPLACE; a kernel older than 4.17 takes
+        // the address as a hint only, so where it lands is checked too).
+        void* mapped = mmap(reinterpret_cast<void*>(at), bytes, PROT_READ | PROT_WRITE,
+                            MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+        if (mapped == MAP_FAILED) continue;
+        if (mapped != reinterpret_cast<void*>(at)) {
+            munmap(mapped, bytes);
+            continue;
+        }
+        block = static_cast<u32*>(mapped);
+    }
 #endif
+    if (block) capacity = bytes / 4;
     return block;
 }
 
@@ -483,27 +513,61 @@ std::string ShellQuote(const std::string& text) {
     return quoted + "'";
 }
 
+/// Hands each complete line of `pending` (text read so far) to `on_line`, keeping the rest.
+void SplitLines(std::string& pending, const std::function<void(const std::string&)>& on_line) {
+    size_t at = 0;
+    for (size_t end; (end = pending.find('\n', at)) != std::string::npos; at = end + 1) {
+        std::string row = pending.substr(at, end - at);
+        if (!row.empty() && row.back() == '\r') row.pop_back();
+        on_line(row);
+    }
+    pending.erase(0, at);
+}
+
+/// Runs this program with `args` (already quoted for /bin/sh), handing each line of its stdout to
+/// `on_line` as it comes; returns its exit code (-1: it did not exit by itself, e.g. the compiler
+/// crashed it).
+int RunSelfLines(const fs::path& self, const std::string& args, const std::function<void(const std::string&)>& on_line) {
+    int exit_code = -1;
+    const std::string line = ShellQuote(fs::absolute(self).string()) + " " + args;
+    if (FILE* pipe = popen(line.c_str(), "r")) {
+        char buffer[4096];
+        std::string pending;
+        for (size_t got; (got = std::fread(buffer, 1, sizeof buffer, pipe)) > 0;) {
+            pending.append(buffer, got);
+            SplitLines(pending, on_line);
+        }
+        if (!pending.empty()) on_line(pending);
+        const int status = pclose(pipe);
+        exit_code = status != -1 && WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+    }
+    return exit_code;
+}
+
 /// Runs this program with `args` (already quoted for /bin/sh) and returns its whole stdout and
 /// exit code (-1: it did not exit by itself, e.g. the compiler crashed it).
 std::string RunSelf(const fs::path& self, const std::string& args, int& exit_code) {
     std::string out;
-    exit_code = -1;
-    const std::string line = ShellQuote(fs::absolute(self).string()) + " " + args;
-    if (FILE* pipe = popen(line.c_str(), "r")) {
-        char buffer[4096];
-        for (size_t got; (got = std::fread(buffer, 1, sizeof buffer, pipe)) > 0;) {
-            out.append(buffer, got);
-        }
-        const int status = pclose(pipe);
-        exit_code = status != -1 && WIFEXITED(status) ? WEXITSTATUS(status) : -1;
-    }
+    exit_code = RunSelfLines(self, args, [&](const std::string& row) { out += row + "\n"; });
     return out;
 }
 #endif
 
 #ifdef _WIN32
-/// Runs this program with `args` and returns its whole stdout and exit code.
-std::string RunSelf(const fs::path& self, const std::wstring& args, DWORD& exit_code) {
+/// Hands each complete line of `pending` (text read so far) to `on_line`, keeping the rest.
+void SplitLines(std::string& pending, const std::function<void(const std::string&)>& on_line) {
+    size_t at = 0;
+    for (size_t end; (end = pending.find('\n', at)) != std::string::npos; at = end + 1) {
+        std::string row = pending.substr(at, end - at);
+        if (!row.empty() && row.back() == '\r') row.pop_back();
+        on_line(row);
+    }
+    pending.erase(0, at);
+}
+
+/// Runs this program with `args`, handing each line of its stdout to `on_line` as it comes;
+/// returns its exit code (~0u when it could not be started).
+DWORD RunSelfLines(const fs::path& self, const std::wstring& args, const std::function<void(const std::string&)>& on_line) {
     SECURITY_ATTRIBUTES sa{sizeof sa, nullptr, TRUE};
     HANDLE read = nullptr, write = nullptr;
     CreatePipe(&read, &write, &sa, 0);
@@ -515,17 +579,19 @@ std::string RunSelf(const fs::path& self, const std::wstring& args, DWORD& exit_
     si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
     std::wstring line = L"\"" + self.wstring() + L"\" " + args;
     PROCESS_INFORMATION pi{};
-    std::string out;
-    exit_code = ~0u;
+    DWORD exit_code = ~0u;
     if (CreateProcessW(nullptr, line.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr,
                        nullptr, &si, &pi)) {
         CloseHandle(write);
         write = nullptr;
         char buffer[4096];
         DWORD got = 0;
+        std::string pending;
         while (ReadFile(read, buffer, sizeof buffer, &got, nullptr) && got) {
-            out.append(buffer, got);
+            pending.append(buffer, got);
+            SplitLines(pending, on_line);
         }
+        if (!pending.empty()) on_line(pending);
         WaitForSingleObject(pi.hProcess, INFINITE);
         GetExitCodeProcess(pi.hProcess, &exit_code);
         CloseHandle(pi.hProcess);
@@ -535,6 +601,13 @@ std::string RunSelf(const fs::path& self, const std::wstring& args, DWORD& exit_
         CloseHandle(write);
     }
     CloseHandle(read);
+    return exit_code;
+}
+
+/// Runs this program with `args` and returns its whole stdout and exit code.
+std::string RunSelf(const fs::path& self, const std::wstring& args, DWORD& exit_code) {
+    std::string out;
+    exit_code = RunSelfLines(self, args, [&](const std::string& row) { out += row + "\n"; });
     return out;
 }
 
@@ -808,10 +881,11 @@ void Leave(const fs::path& dir, const std::string& name, u64 pgm, size_t perm) {
     fs::remove(MetaPath(dir, pgm, perm), error);
 }
 
-/// Child: the permutations from `start` on, one line each ("@OK i", "@OUT i why"), then "@END".
-/// It only reports what to leave out: the parent removes those files once every batch is done, so
-/// each batch lists the same names in the same order.
-int RecompileBatch(const fs::path& dir, size_t start, const fs::path& only) {
+/// Child: the permutations from `start` up to `end` (0.4.6 beta 17: a slice; ~0 for the rest), one
+/// line each ("@OK i", "@OUT i why"), then "@END". It only reports what to leave out: the parent
+/// removes those files once every batch is done, so each batch lists the same names in the same
+/// order.
+int RecompileBatch(const fs::path& dir, size_t start, const fs::path& only, size_t end = ~size_t{}) {
     const auto profile_bytes = ReadAll(dir / "profile.bin");
     Profile profile{};
     if (profile_bytes.size() != sizeof(Profile)) {
@@ -821,7 +895,7 @@ int RecompileBatch(const fs::path& dir, size_t start, const fs::path& only) {
     std::memcpy(&profile, profile_bytes.data(), sizeof(Profile));
     const auto names = BatchNames(dir, only);
     Pools pools;
-    for (size_t i = start; i < names.size(); ++i) {
+    for (size_t i = start; i < std::min(end, names.size()); ++i) {
         const auto& name = names[i];
         unsigned long long pgm = 0;
         size_t perm = 0;
@@ -956,8 +1030,8 @@ int FixKeys(const fs::path& dir) {
         StageSpecialization wanted = from.spec;
         wanted.start = start;
         const auto used = UsedPerms(dir, from.pgm);
-        // The start compared as the warm-up does: the specialization's own comparison leaves it out
-        // for a stage without guest resources.
+        // The start compared as the warm-up does (the specialization's comparison leaves it out only
+        // for a stage with no bindings at all, which never comes here).
         for (const size_t perm : used) {
             StageRecord* other = record(HashCombine(from.pgm, u64(perm)));
             if (other && other->pgm == from.pgm && other->spec == wanted &&
@@ -1025,7 +1099,10 @@ int FixKeys(const fs::path& dir) {
                 ok = ok && image.mip_fallback_mode != MipStorageFallbackMode::DynamicIndex;
             }
             if (!ok) break;
-            if (r->spec.start.unified != expected.unified || r->spec.start.buffer != expected.buffer) {
+            // A stage with no bindings at all is left as it is: it starts anywhere (HasNoBindings),
+            // and play forms its keys with the permutation it finds first (0.4.6 beta 17).
+            if (!r->spec.HasNoBindings() &&
+                (r->spec.start.unified != expected.unified || r->spec.start.buffer != expected.buffer)) {
                 const u64 target = with_start(*r, expected);
                 if (!target) {
                     ok = false;
@@ -1085,72 +1162,110 @@ int FixKeys(const fs::path& dir) {
 }
 
 /// Parent: batches in child processes; a permutation that crashes the compiler is left out and
-/// the next batch starts after it.
+/// the next batch starts after it. 0.4.6 beta 17: the permutations in slices, one child per slice at
+/// a time on as many threads as the PC has (less one, at most 16; BB_LAB_JOBS), and "@PROGRESS
+/// done total" printed as they finish (the engine's start shows it).
 int RecompileCache(const fs::path& self, const fs::path& dir, const fs::path& only = {}) {
     const auto names = BatchNames(dir, only);
-    size_t next = 0, kept = 0, left = 0, crashed = 0;
+    size_t kept = 0, left = 0, crashed = 0;
     std::vector<size_t> leave;
     const char* verbose_env = std::getenv("BB_LAB_VERBOSE");
     const bool verbose = verbose_env && verbose_env[0] == '1';
     std::map<std::string, u32> reasons; // why permutations were left out, for BB_LAB_VERBOSE=1
-    while (next < names.size()) {
+    bool other_profile = false;
+    size_t jobs = std::clamp<size_t>(std::thread::hardware_concurrency() > 1 ? std::thread::hardware_concurrency() - 1 : 1, 1, 16);
+    if (const char* env = std::getenv("BB_LAB_JOBS"); env && std::atoi(env) > 0) {
+        jobs = std::min<size_t>(size_t(std::atoi(env)), 64);
+    }
+    jobs = std::clamp<size_t>(names.size() / 16, 1, jobs); // at least 16 permutations a slice
+    std::mutex mutex;
+    size_t done = 0;
+    auto last_print = std::chrono::steady_clock::now() - std::chrono::seconds(1);
+    const auto progress = [&](size_t finished) { // under `mutex`
+        done += finished;
+        const auto now = std::chrono::steady_clock::now();
+        if (now - last_print >= std::chrono::milliseconds(100) || done == names.size()) {
+            last_print = now;
+            std::printf("@PROGRESS %zu %zu\n", done, names.size());
+            std::fflush(stdout);
+        }
+    };
+    const auto run_slice = [&](size_t begin, size_t end) {
+        size_t next = begin;
+        while (next < end) {
+            long long last = -1;
+            std::string at_stage;
+            bool ended = false, profile_refused = false;
+            const auto on_line = [&](const std::string& row) {
+                size_t index = 0;
+                if (std::sscanf(row.c_str(), "@OK %zu", &index) == 1) {
+                    std::scoped_lock lock{mutex};
+                    ++kept;
+                    last = (long long)index;
+                    progress(1);
+                } else if (std::sscanf(row.c_str(), "@OUT %zu", &index) == 1) {
+                    std::scoped_lock lock{mutex};
+                    ++left;
+                    leave.push_back(index);
+                    last = (long long)index;
+                    const auto why = row.find(' ', 5);
+                    ++reasons[why == std::string::npos ? "?" : row.substr(why + 1)];
+                    progress(1);
+                } else if (row.rfind("@AT ", 0) == 0) {
+                    at_stage = row.substr(4);
+                } else if (row.rfind("@END", 0) == 0) {
+                    ended = true;
+                } else if (row.rfind("@PROFILE", 0) == 0) {
+                    profile_refused = true;
+                }
+            };
 #ifdef _WIN32
-        DWORD code = 0;
-        const std::string output =
-            RunSelf(self, L"--recompile-batch \"" + dir.wstring() + L"\" " + std::to_wstring(next) +
-                              (only.empty() ? std::wstring{} : L" \"" + only.wstring() + L"\""),
-                    code);
+            RunSelfLines(self, L"--recompile-batch \"" + dir.wstring() + L"\" " + std::to_wstring(next) + L" " +
+                                   (only.empty() ? std::wstring{L"-"} : L"\"" + only.wstring() + L"\"") + L" " +
+                                   std::to_wstring(end),
+                         on_line);
 #else
-        int code = 0;
-        const std::string output =
-            RunSelf(self, "--recompile-batch " + ShellQuote(dir.string()) + " " + std::to_string(next) +
-                              (only.empty() ? std::string{} : " " + ShellQuote(only.string())),
-                    code);
+            RunSelfLines(self, "--recompile-batch " + ShellQuote(dir.string()) + " " + std::to_string(next) + " " +
+                                   (only.empty() ? std::string{"-"} : ShellQuote(only.string())) + " " +
+                                   std::to_string(end),
+                         on_line);
 #endif
-        if (output.find("@PROFILE") != std::string::npos) {
-            std::printf("Shader cache: written by an engine with another profile; started again\n");
-            return 3;
-        }
-        long long last = -1;
-        std::string at_stage;
-        bool ended = false;
-        size_t at = 0;
-        while (at < output.size()) {
-            const size_t end = output.find('\n', at);
-            const std::string row = output.substr(at, end == std::string::npos ? std::string::npos : end - at);
-            size_t index = 0;
-            if (std::sscanf(row.c_str(), "@OK %zu", &index) == 1) {
-                ++kept;
-                last = (long long)index;
-            } else if (std::sscanf(row.c_str(), "@OUT %zu", &index) == 1) {
-                ++left;
-                leave.push_back(index);
-                last = (long long)index;
-                const auto why = row.find(' ', 5);
-                ++reasons[why == std::string::npos ? "?" : row.substr(why + 1)];
-            } else if (row.rfind("@AT ", 0) == 0) {
-                at_stage = row.substr(4);
-            } else if (row.rfind("@END", 0) == 0) {
-                ended = true;
+            if (profile_refused) {
+                std::scoped_lock lock{mutex};
+                other_profile = true;
+                return;
             }
-            if (end == std::string::npos) {
-                break;
+            if (ended) {
+                return;
             }
-            at = end + 1;
+            // The child stopped at the permutation after its last line: that one is left out.
+            const size_t failed = last < 0 ? next : size_t(last) + 1;
+            if (failed >= end) {
+                return;
+            }
+            std::scoped_lock lock{mutex};
+            leave.push_back(failed);
+            ++crashed;
+            ++reasons["compiler refused, hw/sw stage " + at_stage.substr(at_stage.find(' ') + 1)];
+            progress(1);
+            next = failed + 1;
         }
-        if (ended) {
-            break;
+    };
+    {
+        std::vector<std::thread> threads;
+        for (size_t j = 0; j < jobs; ++j) {
+            const size_t begin = names.size() * j / jobs, end = names.size() * (j + 1) / jobs;
+            if (begin < end) {
+                threads.emplace_back(run_slice, begin, end);
+            }
         }
-        // The child stopped at the permutation after its last line: that one is left out.
-        const size_t failed = last < 0 ? next : size_t(last) + 1;
-        if (failed >= names.size()) {
-            break;
+        for (auto& thread : threads) {
+            thread.join();
         }
-        leave.push_back(failed);
-        ++crashed;
-        ++reasons["compiler refused, hw/sw stage " + at_stage.substr(at_stage.find(' ') + 1)];
-        next = failed + 1;
-        (void)code;
+    }
+    if (other_profile) {
+        std::printf("Shader cache: written by an engine with another profile; started again\n");
+        return 3;
     }
     for (const size_t index : leave) {
         unsigned long long pgm = 0;
@@ -1270,7 +1385,9 @@ u32 LayoutMismatches(const std::map<u32, char>& used, const std::map<u32, std::p
     return bad;
 }
 
-int CheckCache(const fs::path& dir) {
+/// `unbuildable` (0.4.6 beta 17): the keys the warm-up would not build, or would build with a layout
+/// their shaders do not match, by file name (ExportCatalog leaves them out).
+int CheckCache(const fs::path& dir, std::set<std::string>* unbuildable = nullptr) {
     std::vector<fs::path> keys;
     std::error_code error;
     for (const auto& entry : fs::directory_iterator(dir, error)) {
@@ -1300,6 +1417,7 @@ int CheckCache(const fs::path& dir) {
         }
         if (!(version >= 5 && version <= 7) || is_compute > 1) { // PipelineKeyVersion 7, legacy 5 and 6
             ++reasons["key version " + std::to_string(version)];
+            if (unbuildable) unbuildable->insert(path.filename().string());
             continue;
         }
         std::string why;
@@ -1396,7 +1514,10 @@ int CheckCache(const fs::path& dir) {
                     why = "an image bound per mip level (built in play)";
                     break;
                 }
-                if (spec.start.unified != expected.unified || spec.start.buffer != expected.buffer) {
+                // A stage with no bindings at all starts anywhere (HasNoBindings, as play and the
+                // warm-up since 0.4.6 beta 17).
+                if (!spec.HasNoBindings() &&
+                    (spec.start.unified != expected.unified || spec.start.buffer != expected.buffer)) {
                     why = "a stage compiled after another fragment shader (binding start)";
                     break;
                 }
@@ -1426,8 +1547,20 @@ int CheckCache(const fs::path& dir) {
             }
             if (!is_compute && stage < 5) warmup_stages[stage] = infos[at.first].get();
         }
-        if (why.empty() && fs_motion && !vs_motion) {
-            why = "motion vectors read by the fragment stage, not written by the vertex stage";
+        // Object motion, as the warm-up decides it (LoadGraphicsPipeline, 0.4.6 beta 17): the key's
+        // motion attachment, the vertex stage's motion varyings and the fragment stage's motion output
+        // one choice; a key where they disagree never loads, and the warm-up removes it.
+        if (why.empty() && !is_compute) {
+            Vulkan::GraphicsPipelineKey graphics{};
+            if (key.size() >= 8 + sizeof(graphics)) {
+                std::memcpy(&graphics, key.data() + 8, sizeof(graphics));
+                const bool key_motion = graphics.motion_vectors != 0;
+                const bool has_fs = graphics.stage_hashes[u32(SwStage::Fragment)] != 0;
+                if (vs_motion != key_motion || (has_fs && fs_motion != key_motion)) {
+                    why = std::string("object motion: the key ") + (key_motion ? "on" : "off") + ", the vertex stage " +
+                          (vs_motion ? "on" : "off") + (has_fs ? std::string(", the fragment stage ") + (fs_motion ? "on" : "off") : "");
+                }
+            }
         }
         if (why.empty()) {
             ++good;
@@ -1443,6 +1576,7 @@ int CheckCache(const fs::path& dir) {
                 }
                 if (w) {
                     ++warmup_bad;
+                    if (unbuildable) unbuildable->insert(path.filename().string());
                     if (warmup_examples.size() < 6) ++warmup_examples[path.filename().string() + ": " + first];
                     // BB_LAB_VERBOSE=1: the layout and what each stage's module uses.
                     if (const char* v = std::getenv("BB_LAB_VERBOSE"); v && v[0] == '1' && warmup_bad <= 4) {
@@ -1465,6 +1599,7 @@ int CheckCache(const fs::path& dir) {
             }
         } else {
             ++reasons[why];
+            if (unbuildable) unbuildable->insert(path.filename().string());
         }
     }
     std::printf("Cache check: %u of %zu pipeline keys would be built at the start\n", good, keys.size());
@@ -1660,10 +1795,37 @@ struct StateLayout {
     }
 };
 
+/// A state as a catalog holds it: without the program's code, the fetch shader's code and a
+/// geometry shader's copy shader (the seed puts them back from this PC's game files). A player's
+/// cache keeps them inline.
+std::vector<u8> CatalogForm(const std::vector<u8>& bytes, const StateLayout& layout) {
+    std::vector<u8> stripped(bytes.begin(), bytes.begin() + layout.code_at);
+    const size_t end = std::max(layout.rest_at, CopyTrailerAt(bytes));
+    stripped.insert(stripped.end(), bytes.begin() + layout.rest_at, bytes.begin() + end);
+    auto header = layout.header;
+    header.code_dwords = 0;
+    header.fetch_dwords = 0;
+    std::memcpy(stripped.data(), &header, sizeof(header));
+    return stripped;
+}
+
 int ExportCatalog(const fs::path& cache, const fs::path& out) {
     std::error_code error;
     fs::create_directories(out, error);
-    u32 states = 0, metas = 0, keys = 0, dead_keys = 0;
+    u32 states = 0, metas = 0, keys = 0, dead_keys = 0, unbuildable_keys = 0;
+    // 0.4.6 beta 17: only keys the warm-up builds (CheckCache, its rules: the stages' records and
+    // SPIR-V, their binding starts, object motion, the layout): the catalog of 0.4.6 beta 17 shipped
+    // 46 that every player's first start removed, its merge with the tester's caches 55. A folder
+    // without SPIR-V (a catalog itself) is exported as it is.
+    std::set<std::string> unbuildable;
+    bool has_spirv = false;
+    for (const auto& entry : fs::directory_iterator(cache, error)) {
+        if (entry.path().extension() == ".spv") {
+            has_spirv = true;
+            break;
+        }
+    }
+    if (has_spirv) CheckCache(cache, &unbuildable);
     std::string listed; // files.txt: the files of this catalog, one a line
     const auto has_meta = [&](u64 hash) {
         char name[40];
@@ -1678,6 +1840,10 @@ int ExportCatalog(const fs::path& cache, const fs::path& out) {
             const auto hashes = KeyStageHashes(ReadAll(path));
             if (hashes.empty() || std::ranges::any_of(hashes, [&](u64 h) { return h && !has_meta(h); })) {
                 ++dead_keys;
+                continue;
+            }
+            if (unbuildable.contains(path.filename().string())) {
+                ++unbuildable_keys;
                 continue;
             }
         }
@@ -1699,13 +1865,7 @@ int ExportCatalog(const fs::path& cache, const fs::path& out) {
             StateLayout layout;
             if (!layout.Parse(bytes)) continue;
             // Without the code and the fetch shader's code: what is left is the draw's state.
-            std::vector<u8> stripped(bytes.begin(), bytes.begin() + layout.code_at);
-            stripped.insert(stripped.end(), bytes.begin() + layout.rest_at, bytes.begin() + CopyTrailerAt(bytes));
-            auto header = layout.header;
-            header.code_dwords = 0;
-            header.fetch_dwords = 0;
-            std::memcpy(stripped.data(), &header, sizeof(header));
-            if (WriteBytes(out / path.filename(), stripped)) {
+            if (WriteBytes(out / path.filename(), CatalogForm(bytes, layout))) {
                 ++states;
                 listed += path.filename().string() + "\n";
             }
@@ -1728,8 +1888,8 @@ int ExportCatalog(const fs::path& cache, const fs::path& out) {
     // beside this one's: --seed-cache reads only the files listed here.
     WriteAtomically(out / "files.txt", listed.data(), listed.size());
     std::printf("Shader catalog: %u states, %u specializations, %u pipeline keys in %s (%u keys without "
-                "their shaders left out)\n",
-                states, metas, keys, out.string().c_str(), dead_keys);
+                "their shaders left out, %u the warm-up would not build)\n",
+                states, metas, keys, out.string().c_str(), dead_keys, unbuildable_keys);
     return 0;
 }
 
@@ -1768,12 +1928,16 @@ struct CodeIndex {
             u64 hash;
             std::memcpy(&hash, blob.data() + at + 16, 8);
             // The program starts with s_mov_b32 vcc_hi, #imm whose immediate puts the footer at
-            // code + (imm + 1) * 8 bytes (AmdGpu::SearchBinaryInfo).
-            for (size_t p = at & ~size_t(3); p >= 8 && at - p < 0x40000; p -= 4) {
+            // code + (imm + 1) * 8 bytes (AmdGpu::SearchBinaryInfo). 0.4.6: so only the places a
+            // multiple of 8 bytes before the footer are looked at, at any alignment. 4-byte steps
+            // from a 4-byte boundary missed 5,139 of the eboot's 5,493 programs, which start 2
+            // bytes past one (the builder, 2026-11-28): no catalog state of theirs ever seeded.
+            for (size_t back = 8; back <= at && back < 0x40000; back += 8) {
+                const size_t p = at - back;
                 u32 token, imm;
                 std::memcpy(&token, blob.data() + p, 4);
                 std::memcpy(&imm, blob.data() + p + 4, 4);
-                if (token == 0xBEEB03FFu && p + (size_t(imm) + 1) * 8 == at) {
+                if (token == 0xBEEB03FFu && (size_t(imm) + 1) * 8 == back) {
                     u32 bits;
                     std::memcpy(&bits, blob.data() + at + 8, 4);
                     ((bits >> 2 & 15) == 6 ? copies : programs).try_emplace(hash, index, p);
@@ -1822,13 +1986,10 @@ std::set<size_t> UsedPerms(const fs::path& cache, u64 pgm) {
 int SeedCache(const fs::path& self, const fs::path& catalog, const fs::path& cache, const fs::path& game,
               const fs::path& eboot) {
     std::error_code error;
-    // Only into a cache made on a GPU with the catalog's profile: another profile gives other
-    // specializations, and the engine would start a cache of another profile again anyway.
-    // bbport: only the GPU's part of the profile, the fields before the engine's own compile
-    // switches (uniform buffers on, their layout...). Those switches grew the profile in 0.9.34
-    // beta 9.9 and every catalog shipped since was refused on every PC (docs/pipeline_compiles.md).
-    // A catalog permutation compiled with other switches is kept only if this compiler, with this
-    // cache's switches, specializes it the same (RecompileBatch); the others are left out.
+    // Into a cache with this PC's profile (0.4.6 beta 17: the engine writes it before it seeds). A
+    // catalog permutation compiled with another profile or other compile switches is kept only if
+    // this compiler, with this cache's profile, specializes it the same (RecompileBatch); the others
+    // are left out. A profile of another engine's layout is refused.
     const auto catalog_profile = ReadBytes(catalog / "profile.bin");
     const auto cache_profile = ReadBytes(cache / "profile.bin");
     static constexpr size_t GpuBytes = offsetof(Profile, uniform_constant_buffers);
@@ -1836,29 +1997,13 @@ int SeedCache(const fs::path& self, const fs::path& catalog, const fs::path& cac
         std::printf("Shader catalog: made on another kind of GPU than this one; not used\n");
         return 5;
     }
-    // bbport (0.9.37 beta 6): another GPU of the catalog's vendor (an RTX 3080's profile differs
-    // from the RTX 5060 the catalog was made on by one extension) gets it too: every permutation is
-    // compiled with this cache's profile and kept only if its specialization comes out the same,
-    // as for other compile switches. The vendors come from the catalog's gpu.txt and the driver
-    // cache beside this cache (its first start writes it); pipeline state of another vendor (formats
-    // its driver lacks) is not risked.
+    // bbport (0.9.37 beta 6): another GPU of the catalog's vendor gets it too: every permutation is
+    // compiled with this cache's profile and kept only if its specialization comes out the same, as
+    // for other compile switches. 0.4.6 beta 17: any vendor's (Lantern 0.9.43's NVIDIA and AMD
+    // catalogs each lost nothing under the other's profile: the states are the translations' inputs,
+    // only the SPIR-V is per profile). A pipeline another driver refuses is dropped alone at the start.
     if (std::memcmp(catalog_profile.data(), cache_profile.data(), GpuBytes) != 0) {
-        unsigned catalog_vendor = 0;
-        if (const auto text = ReadBytes(catalog / "gpu.txt"); !text.empty()) {
-            std::sscanf(std::string(text.begin(), text.end()).c_str(), "vendor %x", &catalog_vendor);
-        }
-        u32 cache_vendor = 0;
-        auto driver_cache = cache;
-        driver_cache += ".vkcache";
-        if (const auto blob = ReadBytes(driver_cache); blob.size() >= 16 && std::memcmp(blob.data(), "BPBC", 4) == 0) {
-            std::memcpy(&cache_vendor, blob.data() + 8, 4);
-        }
-        if (catalog_vendor == 0 || catalog_vendor != cache_vendor) {
-            std::printf("Shader catalog: made on another kind of GPU than this one; not used\n");
-            return 5;
-        }
-        std::printf("Shader catalog: made on another GPU of this vendor (%04X); each shader compiled for this one\n",
-                    catalog_vendor);
+        std::printf("Shader catalog: made on another GPU; each shader compiled for this one\n");
     }
     const bool other_switches = catalog_profile != cache_profile;
     // The catalog's own files (files.txt, since 0.9.37 beta 3): an older catalog's left beside
@@ -1892,6 +2037,15 @@ int SeedCache(const fs::path& self, const fs::path& catalog, const fs::path& cac
         if (!layout.Parse(bytes) || meta.size() < 24) {
             ++unreadable;
             continue;
+        }
+        // 0.4.6: a player's cache (its states carry their code inline: every state of the
+        // tester's cache written by engine id 146) seeds as its catalog form would; the game
+        // files' code is put in below. Seeded as it was, the old code stayed behind the new under
+        // a header counting one, and a later read took a wrong count (std::bad_alloc; the
+        // builder, 2026-11-28).
+        if (layout.header.code_dwords != 0 || layout.header.fetch_dwords != 0) {
+            bytes = CatalogForm(bytes, layout);
+            layout.Parse(bytes);
         }
         // bbport: a version 7 record (before 0.9.34 beta 9.9) differs from version 8 only by
         // HwFragmentRuntimeInfo::depth_first, then padding, which the state's RuntimeInfo carries
@@ -2971,9 +3125,20 @@ int RunCurves(const fs::path& self, const fs::path& dir, const fs::path& report)
 }
 #endif
 
-} // namespace
+int Usage() {
+    std::fprintf(stderr,
+                 "usage: bb-shader-lab <capture folder> [report.csv]\n"
+                 "       bb-shader-lab --check-cache <cache folder>\n"
+                 "       bb-shader-lab --fix-keys <cache folder>\n"
+                 "       bb-shader-lab --recompile-cache <cache folder>\n"
+                 "       bb-shader-lab --export-catalog <cache folder> <catalog folder>\n"
+                 "       bb-shader-lab --seed-cache <catalog folder> <cache folder> <game folder> <eboot.elf>\n"
+                 "       bb-shader-lab --bench <capture folder> [rounds] [report.csv]\n"
+                 "       (and the research commands in tests/shader_lab.cpp's main)\n");
+    return 2;
+}
 
-int main(int argc, char** argv) {
+int Run(int argc, char** argv) {
     // Options anywhere after the positional arguments.
     std::vector<char*> args;
     for (int i = 0; i < argc; ++i) {
@@ -3022,7 +3187,10 @@ int main(int argc, char** argv) {
 #endif
     }
     if (argc >= 4 && std::strcmp(argv[1], "--recompile-batch") == 0) {
-        return RecompileBatch(argv[2], std::strtoull(argv[3], nullptr, 10), argc >= 5 ? fs::path(argv[4]) : fs::path{});
+        // <dir> <start> [<only> | -] [<end>]
+        const fs::path only = argc >= 5 && std::strcmp(argv[4], "-") != 0 ? fs::path(argv[4]) : fs::path{};
+        const size_t end = argc >= 6 ? size_t(std::strtoull(argv[5], nullptr, 10)) : ~size_t{};
+        return RecompileBatch(argv[2], std::strtoull(argv[3], nullptr, 10), only, end);
     }
     if (argc >= 3 && std::strcmp(argv[1], "--bench") == 0) {
         // The compiler books its phase times only then.
@@ -3082,9 +3250,9 @@ int main(int argc, char** argv) {
         const fs::path file = argv[2];
         return RunOne(file, file.parent_path() / "profile.bin");
     }
-    if (argc < 2) {
-        std::fprintf(stderr, "usage: bb-shader-lab <capture folder> [report.csv]\n");
-        return 2;
+    // No command, an unknown one, or one without its arguments (--help): the usage, not a folder named so.
+    if (argc < 2 || argv[1][0] == '-') {
+        return Usage();
     }
     const fs::path dir = argv[1];
     const fs::path report = argc >= 3 ? fs::path(argv[2]) : dir / "lab-report.csv";
@@ -3095,4 +3263,18 @@ int main(int argc, char** argv) {
 #else
     return RunAll(argv[0], dir, report);
 #endif
+}
+
+} // namespace
+
+int main(int argc, char** argv) {
+    // A folder that is not there, or one the lab cannot read, is said plainly (exit 3), not an
+    // uncaught exception.
+    try {
+        return Run(argc, argv);
+    } catch (const std::exception& error) {
+        std::fflush(stdout);
+        std::fprintf(stderr, "bb-shader-lab: %s\n", error.what());
+        return 3;
+    }
 }

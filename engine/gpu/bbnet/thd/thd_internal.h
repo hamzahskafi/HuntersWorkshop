@@ -12,6 +12,7 @@
 #include <nlohmann/json.hpp>
 
 #include "common/types.h"
+#include "thd_addr_text.h" // 0.4.6 beta 14 part 8: MaskedIpv4, MaskedEndpoint for every address in the log
 
 extern "C" int32_t runtime_thread_spawn(void** out, void* PS4_SYSV_ABI (*entry)(void*),
                                         void* argument, uint64_t stack, const char* name);
@@ -130,6 +131,19 @@ void P2pPunch(const char* label, std::uint32_t addr, std::uint16_t port, std::ui
               std::uint16_t local_port);
 // The address of this machine that reaches `host` (the LAN address peers on it use).
 std::string DetectLanAddress(const std::string& host);
+// 0.4.6 beta 14: NpSignaling's control datagram (the greeting between games, thd_signaling.h) to
+// addr (network order):port (host order), from the P2P port; through the relay when the peer is
+// behind it. 512 bytes at most (bbhost's hle_net_p2p_signal).
+void P2pSignalSend(std::uint32_t addr, std::uint16_t port, const std::uint8_t* data, std::size_t len);
+// 0.4.6 beta 14 part 9, the session's line: whether addr (network order):port (host order) is reached
+// through the server's relay; and the game's datagrams since the last take (those sent as pieces, the
+// largest on the wire each way).
+bool P2pRelayed(std::uint32_t addr, std::uint16_t port);
+struct P2pSession {
+    std::uint64_t split = 0;
+    std::size_t largest_out = 0, largest_in = 0;
+};
+P2pSession P2pTakeSession();
 
 // ---- game memory (1.09 only)
 void SetSignalingGate();
@@ -139,10 +153,26 @@ void HostExtra(Json& extra);
 void FillNpId(void* out, const char* online);
 std::string NpIdText(const void* npid);
 
-// ---- signaling (thd_np.cpp), driven by matching2
+// ---- signaling (thd_np.cpp, the class in thd_signaling.cpp), driven by matching2 and the P2P port
+// 0.4.6 beta 14 part 9: one line for the links since the last one (when a room ends, and at exit;
+// nothing when there were none).
+void OnlineSessionReport(const char* when);
 void SignalingPeerKnown(std::uint16_t member_id);
 void SignalingPeerDead(const std::string& online_id);
-void SignalingReset();
+// 0.4.6 beta 14 (bbhost #217): the greeting from another game, on the dispatcher; Matching2's
+// view of NpSignaling (a live connection of the game's; start and stop the handshake to a member;
+// that member's transport status: 0 none, 1 in its handshake, 2 up).
+void SignalingControl(const std::uint8_t* data, std::size_t len, std::uint32_t addr, std::uint16_t port_nbo);
+bool SignalingLive(const std::string& online_id);
+void SignalingM2Connect(const std::string& online_id);
+void SignalingM2Stop(const std::string& online_id);
+int SignalingTransportStatus(const std::string& online_id);
+// ---- matching2 (thd_matching2.cpp), driven by NpSignaling: a member's transport up (its 0x5102 a
+// second after), dead (its 0x5101), and the game's NpSignaling connection to it closed (the 0x5101
+// its LeaveRoom kept).
+void Matching2TransportUp(const std::string& online_id);
+void Matching2TransportDead(const std::string& online_id, int error);
+void Matching2PeerClosed(const std::string& online_id);
 
 void RegisterNet(Core::Loader::SymbolsResolver* sym);
 void RegisterMatching2(Core::Loader::SymbolsResolver* sym);

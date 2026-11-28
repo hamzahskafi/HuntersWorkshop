@@ -119,20 +119,26 @@ namespace BloodborneLauncher.Views
             };
 
             // DLSS's model, with DLSS only (Auto, the default: NVIDIA's pairing for each quality).
-            IniCombo(SymbolRegular.BrainCircuit24, L.T("DLSS model"), L.T("Which NVIDIA model DLSS runs; also in game (Insert or L3 + R3)"),
+            IniCombo(SymbolRegular.BrainCircuit24, L.T("DLSS model"), L.T("Which NVIDIA model DLSS runs; also in game (F1 or L3 + R3)"),
                 Choices.DlssModels, "dlss_preset", changed: UpdateUpscaler);
             _dlssModel = Nest();
             _dlssModel.SetTip(L.T("Auto: K from DLAA to Balanced, M at Performance, L at Ultra Performance."));
             _dlssHint = (TextBlock)_dlssModel.Tag;
 
-            // Sharpening: its line says where it runs, for what runs (UpdateUpscaler; 27d, the tester).
-            IniToggle(SymbolRegular.Eyedropper24, L.T("Sharpening (RCAS)"), null, "sharpen", changed: UpdateUpscaler);
+            // Sharpening: its line under the title, as the other rows have (0.4.6 beta 16, the tester); the
+            // info line says why it is off without an upscaler or TAA (UpdateUpscaler).
+            IniToggle(SymbolRegular.Eyedropper24, L.T("Sharpening (RCAS)"), L.T("Brings back detail that upscaling softens"),
+                "sharpen", changed: UpdateUpscaler);
             _sharpenCard = LastRow;
-            _sharpenCard.SetTip(L.T("AMD's RCAS. Brings back detail that upscaling softens."));
-            SliderRow(SymbolRegular.SlideSize24, L.T("Sharpening strength"), null, 0, 2, 0.05,
-                () => ParseDouble(Ini.Get("sharpness"), 0.2), v => Ini.Set("sharpness", Fmt(v)), defaultValue: 0.2);
+            // 0.4.6 beta 16 (the tester): a percentage of RCAS's maximum, 25% by default (a starting
+            // point).
+            SliderRow(SymbolRegular.SlideSize24, L.T("Sharpening strength"), null, 0, 100, 1,
+                () => ParseDouble(Ini.Get("sharpening"), 25),
+                v => Ini.Set("sharpening", ((int)Math.Round(v)).ToString(System.Globalization.CultureInfo.InvariantCulture)),
+                "0'%'", defaultValue: 25);
             _sharpnessCard = Nest();
-            _sharpnessCard.SetTip(L.T("0.20 is light. High values can halo edges and show grain."));
+            _sharpnessCard.SetTip(L.T("100% is the strongest. High values can halo edges and show grain.") + " " +
+                                  L.T("The default is 25%."));
 
             // The fine settings most players leave alone (27d: two; DLSS's sharper textures folded into the
             // bias, auto exposure as NVIDIA and AMD advise, without a row).
@@ -307,16 +313,12 @@ namespace BloodborneLauncher.Views
             _sharpnessCard.IsEnabled = temporal && Ini.Flag("sharpen"); // as in game
             _mipBiasCard.IsEnabled = upscaling;
             _motionVectors.IsEnabled = temporal;
-            // Where the sharpening runs, for what runs: FSR sharpens up to 1 itself and an RCAS pass adds
-            // the rest; DLSS has none of its own, so the pass does it all; TAA's runs after it.
-            _sharpenCard.SetInfo(value switch
-            {
-                "dlss" => L.T("After DLSS (it has none of its own)"),
-                "fsr" => L.T("FSR's own sharpening"),
-                "taa" => L.T("After TAA"),
-                _ => L.T("Needs an upscaler or TAA"),
-            });
-            _sharpnessCard.SetInfo(value == "fsr" ? L.T("Above 1 adds a second pass") : L.T("Higher is sharper"));
+            // 0.4.6 beta 16 (the tester): no line per upscaler (the same sharpening runs after each); only
+            // why the row is off without one.
+            // Its description is the line under the title (SettingRow.ShowInfo): kept while the row is on
+            // (null cleared it, beta 16's first launcher), why it is off otherwise.
+            _sharpenCard.SetInfo(temporal ? L.T("Brings back detail that upscaling softens") : L.T("Needs an upscaler or TAA"));
+            _sharpnessCard.SetInfo(L.T("Higher brings back more detail; too high halos edges"));
             _fsrRow.Visibility = value == "fsr" ? Visibility.Visible : Visibility.Collapsed;
             if (value == "fsr") ShowFsrVersions();
             var dlss = value == "dlss" ? Visibility.Visible : Visibility.Collapsed;

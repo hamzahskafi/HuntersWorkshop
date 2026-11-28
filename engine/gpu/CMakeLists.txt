@@ -66,6 +66,19 @@ find_package(tsl-robin-map REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(XXHASH REQUIRED IMPORTED_TARGET libxxhash)
 pkg_check_modules(SDL3 REQUIRED IMPORTED_TARGET sdl3)
+# SDL3's pkg-config adds -mwindows on Windows (the GUI subsystem). Every engine program is a console
+# one: bb-shader-lab linked with it (through bbgpu) had no console, so run from a terminal it printed
+# nothing and the shell did not wait for it (bb-start reads it through pipes, which worked). bb-probe's
+# link drops it too (cmake/LinkClosure.cmake, build.sh).
+if (WIN32)
+    foreach(property INTERFACE_LINK_OPTIONS INTERFACE_LINK_LIBRARIES)
+        get_target_property(items PkgConfig::SDL3 ${property})
+        if (items)
+            list(REMOVE_ITEM items -mwindows)
+            set_target_properties(PkgConfig::SDL3 PROPERTIES ${property} "${items}")
+        endif()
+    endforeach()
+endif()
 find_package(Zydis REQUIRED)
 if (WIN32)
     # bbport: Windows (MSYS2 MINGW64). bbgpu is a static library linked into bb-probe.exe
@@ -157,6 +170,7 @@ add_host_shader(upscale_reactive.comp upscale_reactive_comp)
 add_host_shader(edge_clamp.comp edge_clamp_comp)
 add_host_shader(taa.comp taa_comp)
 add_host_shader(taa_sharpen.comp taa_sharpen_comp)
+add_host_shader(sharpen_copy.comp sharpen_copy_comp)
 add_host_shader(fsr4_color.comp fsr4_decode_comp)
 add_host_shader(fsr4_color.comp fsr4_encode_comp ENCODE=1)
 add_host_shader(depth_to_color.comp depth_to_color_comp)
@@ -188,7 +202,74 @@ set(COMMON
     shadps4/common/string_util.cpp shadps4/common/thread.cpp shadps4/common/signal_context.cpp
     shim/common/logging/log.cpp)
 file(GLOB AVPLAYER CONFIGURE_DEPENDS shadps4/core/libraries/avplayer/*.cpp)
-pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET libavformat libavcodec libavutil libswscale libswresample)
+# FFmpeg, for the movie player (shadps4/core/libraries/avplayer): 0.4.6 beta 16, the engine's own build,
+# static and trimmed to what the game's movies need (packaging/build-ffmpeg.sh), from BB_FFMPEG_PREFIX
+# (the environment or the cache; ../deps/ffmpeg, where the script installs it, when unset). Its archives
+# are linked by their paths, so a system FFmpeg (MSYS2's, a distribution's) is never picked up instead.
+# Windows requires it: MSYS2's shared FFmpeg brought about 100 DLLs (120 MB) with it. Linux takes it
+# when it is there (the package: /opt/deps/ffmpeg, packaging/linux/setup-ubuntu.sh), a system FFmpeg
+# otherwise.
+# The environment wins over a build folder's cache (packaging/linux/build.sh sets it).
+set(BB_FFMPEG_PREFIX "" CACHE PATH "The engine's FFmpeg (packaging/build-ffmpeg.sh)")
+if (NOT "$ENV{BB_FFMPEG_PREFIX}" STREQUAL "")
+    set(BB_FFMPEG_PREFIX "$ENV{BB_FFMPEG_PREFIX}" CACHE PATH "The engine's FFmpeg (packaging/build-ffmpeg.sh)" FORCE)
+endif()
+set(ffmpeg_prefix "${BB_FFMPEG_PREFIX}")
+if (NOT ffmpeg_prefix AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../deps/ffmpeg/lib/libavcodec.a")
+    set(ffmpeg_prefix "${CMAKE_CURRENT_SOURCE_DIR}/../deps/ffmpeg")
+endif()
+if (ffmpeg_prefix)
+    add_library(bb_ffmpeg INTERFACE IMPORTED)
+    set(ffmpeg_archives)
+    set(ffmpeg_system)
+    # Dependants first: libavformat uses libavcodec, and every one libavutil.
+    foreach(lib avformat avcodec swscale swresample avutil)
+        set(archive "${ffmpeg_prefix}/lib/lib${lib}.a")
+        if (NOT EXISTS "${archive}")
+            message(FATAL_ERROR "${archive} is missing: run packaging/build-ffmpeg.sh (BB_FFMPEG_PREFIX=${ffmpeg_prefix})")
+        endif()
+        list(APPEND ffmpeg_archives "${archive}")
+        # The system libraries it needs, from its pkg-config file (a static build lists them in Libs).
+        file(STRINGS "${ffmpeg_prefix}/lib/pkgconfig/lib${lib}.pc" pc_libs REGEX "^Libs(\\.private)?:")
+        foreach(line IN LISTS pc_libs)
+            string(REGEX MATCHALL "(-l[^ ]+|-pthread)" tokens "${line}")
+            foreach(token IN LISTS tokens)
+                if (token STREQUAL "-pthread")
+                    list(APPEND ffmpeg_system Threads::Threads)
+                    continue()
+                endif()
+                string(SUBSTRING "${token}" 2 -1 name)
+                # FFmpeg's configure tries -latomic first and keeps it wherever the library exists;
+                # x86-64's atomics are native, so it would only add a run-time dependency.
+                if (name MATCHES "^(avformat|avcodec|swscale|swresample|avutil)$" OR
+                    (name STREQUAL "atomic" AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$"))
+                    continue()
+                endif()
+                list(APPEND ffmpeg_system "${name}")
+            endforeach()
+        endforeach()
+    endforeach()
+    list(REMOVE_DUPLICATES ffmpeg_system)
+    if ("Threads::Threads" IN_LIST ffmpeg_system)
+        find_package(Threads REQUIRED)
+    endif()
+    set_target_properties(bb_ffmpeg PROPERTIES
+        INTERFACE_INCLUDE_DIRECTORIES "${ffmpeg_prefix}/include"
+        INTERFACE_LINK_LIBRARIES "${ffmpeg_archives};${ffmpeg_system}")
+    set(ffmpeg_version "")
+    if (EXISTS "${ffmpeg_prefix}/share/hunters-workshop-ffmpeg.txt")
+        file(STRINGS "${ffmpeg_prefix}/share/hunters-workshop-ffmpeg.txt" ffmpeg_version LIMIT_COUNT 1)
+    endif()
+    message(STATUS "FFmpeg: the engine's static build in ${ffmpeg_prefix} (${ffmpeg_version}; system libraries: ${ffmpeg_system})")
+elseif (WIN32)
+    message(FATAL_ERROR "Windows links the engine's own static FFmpeg: run packaging/build-ffmpeg.sh "
+        "(README, Build), or set BB_FFMPEG_PREFIX to where it is installed")
+else()
+    pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET libavformat libavcodec libavutil libswscale libswresample)
+    add_library(bb_ffmpeg INTERFACE IMPORTED)
+    set_target_properties(bb_ffmpeg PROPERTIES INTERFACE_LINK_LIBRARIES PkgConfig::FFMPEG)
+    message(STATUS "FFmpeg: the system's (${FFMPEG_libavcodec_VERSION}); packaging/build-ffmpeg.sh builds the engine's own")
+endif()
 file(GLOB SHIM_SOURCES CONFIGURE_DEPENDS shim/*.cpp shim/*/*.cpp)
 if (WIN32)
     # These optional experiments use Linux SIGTRAP hooks (the libGnm entry hooks,
@@ -236,11 +317,17 @@ if(NOT WIN32)
     target_link_options(bbgpu PRIVATE
         -Wl,--exclude-libs,libavcodec.a:libavformat.a:libavutil.a:libswscale.a:libswresample.a)
 endif()
+# 0.4.6 beta 16: the engine's FFmpeg headers ahead of every other include folder. A system FFmpeg's
+# (MSYS2's beside SDL3's in /clang64/include) would otherwise be compiled against: another version's
+# structures, linked with this version's archives.
+if (ffmpeg_prefix)
+    target_include_directories(bbgpu BEFORE PRIVATE "${ffmpeg_prefix}/include")
+endif()
 # bbport 0.4.4 beta 27: AMD FSR through AMD's FSR SDK 2.4 (vk_amd_fsr.cpp): the AMD FSR API's headers
 # (MIT, third_party/amd-fsr-sdk); AMD's signed DLLs are loaded at run time, not linked.
 target_include_directories(bbgpu PRIVATE third_party/amd-fsr-sdk)
 target_link_libraries(bbgpu PUBLIC Vulkan::Headers fmt::fmt Boost::headers magic_enum::magic_enum
-    tsl::robin_map GPUOpen::VulkanMemoryAllocator PkgConfig::XXHASH PkgConfig::SDL3 PkgConfig::FFMPEG miniz::miniz Zydis::Zydis sirit
+    tsl::robin_map GPUOpen::VulkanMemoryAllocator PkgConfig::XXHASH PkgConfig::SDL3 bb_ffmpeg miniz::miniz Zydis::Zydis sirit
     xbyak::xbyak)
 if (WIN32)
     # Windows headers: no min/max macros, no winsock 1 clash; Windows 10+ APIs (SetThreadDescription).
@@ -413,6 +500,152 @@ add_executable(crash-guards-test EXCLUDE_FROM_ALL ../tests/test_crash_guards.cpp
     shim/engine/engine_hooks.cpp)
 target_compile_options(crash-guards-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(crash-guards-test PRIVATE shim shim/engine)
+# The Hunter's Dream backend (0.4.6 beta 14): the NpId compares and the character name's sanitize;
+# how the P2P port sends the game's datagrams (pieces, headers, the relay's framing, the limit);
+# NpSignaling's handshake against bbhost's own np_signaling.cpp (test-only, tests/third_party/bbhost).
+add_executable(thd-np-util-test EXCLUDE_FROM_ALL ../tests/test_thd_np_util.cpp)
+target_compile_options(thd-np-util-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(thd-np-util-test PRIVATE ..)
+add_executable(thd-p2p-split-test EXCLUDE_FROM_ALL ../tests/test_thd_p2p_split.cpp)
+target_compile_options(thd-p2p-split-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(thd-p2p-split-test PRIVATE ..)
+add_executable(thd-signaling-test EXCLUDE_FROM_ALL ../tests/test_thd_signaling.cpp bbnet/thd/thd_signaling.cpp
+    ../tests/third_party/bbhost/np_signaling.cpp)
+target_compile_options(thd-signaling-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(thd-signaling-test PRIVATE .. ../tests/third_party/bbhost/shim)
+# Beta 14 parts 6-8: the account service's verdict on the sign-in (bbhost's sign_in_check_test cases);
+# the event poller's generations and one poll out; addresses as the log prints them.
+add_executable(thd-sign-in-test EXCLUDE_FROM_ALL ../tests/test_thd_sign_in.cpp)
+target_compile_options(thd-sign-in-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(thd-sign-in-test PRIVATE ..)
+target_link_libraries(thd-sign-in-test PRIVATE nlohmann_json::nlohmann_json)
+add_executable(thd-poll-gate-test EXCLUDE_FROM_ALL ../tests/test_thd_poll_gate.cpp)
+target_compile_options(thd-poll-gate-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(thd-poll-gate-test PRIVATE ..)
+target_link_libraries(thd-poll-gate-test PRIVATE Threads::Threads)
+add_executable(thd-addr-text-test EXCLUDE_FROM_ALL ../tests/test_thd_addr_text.cpp)
+target_compile_options(thd-addr-text-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(thd-addr-text-test PRIVATE ..)
+# 0.4.6 beta 15 part 1: compile bursts (the burst threads' count from the CPU's layout; the queue's
+# backlog rule, raise-on-wait and burst accounting with real threads).
+add_executable(pipeline-burst-test EXCLUDE_FROM_ALL ../tests/test_pipeline_burst.cpp
+    shim/bbport_roles.cpp shim/bbport_cpu_layout.cpp) # 0.4.6 beta 20: the queue's role-aware lock
+target_compile_options(pipeline-burst-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(pipeline-burst-test PRIVATE shim shadps4)
+if (WIN32)
+    target_sources(pipeline-burst-test PRIVATE shim/bbport_platform.cpp)
+    target_link_libraries(pipeline-burst-test PRIVATE psapi)
+endif()
+target_link_libraries(pipeline-burst-test PRIVATE Threads::Threads)
+# 0.4.6 beta 16: the engine's FFmpeg plays what the movie player accepts (tests/data/movies: the MP4
+# family, H.264, HEVC 8- and 10-bit, AAC stereo and 5.1; by path and through custom I/O, the streams on
+# threads of their own at once, converted as the player converts them).
+add_executable(movie-decode-test EXCLUDE_FROM_ALL ../tests/test_movie_decode.cpp)
+target_compile_options(movie-decode-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_compile_definitions(movie-decode-test PRIVATE
+    BB_MOVIE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../tests/data/movies")
+target_link_libraries(movie-decode-test PRIVATE bb_ffmpeg Threads::Threads)
+# 0.4.6 beta 16 parts 1-3: which images are left to the game's calls, under each setting, and which of
+# those the texture net checks.
+add_executable(watch-rules-test EXCLUDE_FROM_ALL ../tests/test_watch_rules.cpp)
+target_compile_options(watch-rules-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(watch-rules-test PRIVATE shim shadps4)
+# 0.4.6 beta 17 part 2: the registry of translations queued ahead and a job's progress (translate_ahead.h).
+# 0.4.6 beta 17: bb-splash, the start's splash (splash/main.cpp): a program of its own that bb-start and
+# run.sh start first, so it shows from the start's first step. The menus' language and translations
+# (bbport_settings.cpp, bbport_menu_i18n.cpp), the game's art read with miniz (splash_art.cpp), the
+# menus' font embedded.
+add_executable(bb-splash EXCLUDE_FROM_ALL splash/main.cpp splash/splash_art.cpp shim/bbport_settings.cpp
+    shim/bbport_menu_i18n.cpp)
+target_include_directories(bb-splash PRIVATE .. shim third_party/imgui)
+target_compile_definitions(bb-splash PRIVATE MINIZ_NO_ZLIB_COMPATIBLE_NAMES
+    BB_FONT_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/DejaVuSans.ttf")
+set_source_files_properties(splash/main.cpp PROPERTIES
+    OBJECT_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/DejaVuSans.ttf)
+target_compile_options(bb-splash PRIVATE -Wall -Wextra)
+target_link_libraries(bb-splash PRIVATE PkgConfig::SDL3 miniz::miniz)
+if (WIN32)
+    target_compile_definitions(bb-splash PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0A00)
+    # A window program: no console of its own (SDL3's -mwindows, taken off above for the others).
+    target_link_options(bb-splash PRIVATE -mwindows)
+    target_link_libraries(bb-splash PRIVATE shell32)
+endif()
+# Its status file (splash/status.h).
+add_executable(splash-status-test EXCLUDE_FROM_ALL ../tests/test_splash_status.cpp)
+target_compile_options(splash-status-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(splash-status-test PRIVATE splash)
+# What the engine reads from OptiScaler.ini (renderer_vulkan/optiscaler_ini.h).
+add_executable(optiscaler-ini-test EXCLUDE_FROM_ALL ../tests/test_optiscaler_ini.cpp)
+target_compile_options(optiscaler-ini-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(optiscaler-ini-test PRIVATE shadps4)
+# Its picture readers (PNG on miniz, BC1 DDS).
+add_executable(splash-art-test EXCLUDE_FROM_ALL ../tests/test_splash_art.cpp splash/splash_art.cpp)
+target_compile_options(splash-art-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(splash-art-test PRIVATE splash)
+target_link_libraries(splash-art-test PRIVATE miniz::miniz)
+# Only miniz's own names (mz_*): its zlib-compatible wrappers are static functions the test never
+# calls, unused-function errors under -Werror.
+target_compile_definitions(splash-art-test PRIVATE MINIZ_NO_ZLIB_COMPATIBLE_NAMES)
+add_executable(translate-ahead-test EXCLUDE_FROM_ALL ../tests/test_translate_ahead.cpp)
+target_compile_options(translate-ahead-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(translate-ahead-test PRIVATE shadps4)
+target_link_libraries(translate-ahead-test PRIVATE Threads::Threads)
+# 0.4.6 beta 16: the sharpening's maths (host_shaders/rcas_extra.glsl, its GLSL compiled as C++): the
+# encodings there and back, AMD's RCAS on each, the HDR scene's cap.
+add_executable(rcas-test EXCLUDE_FROM_ALL ../tests/test_rcas.cpp)
+target_compile_options(rcas-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(rcas-test PRIVATE shadps4)
+# 0.4.6 beta 15 part 4: the create calls' copy caves, run for real (x86-64, mmap: not on Windows).
+if (NOT WIN32)
+    add_executable(copy-cave-test EXCLUDE_FROM_ALL ../tests/test_copy_cave.cpp)
+    target_compile_options(copy-cave-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+    target_include_directories(copy-cave-test PRIVATE ..)
+endif()
+# 0.4.6 beta 18: the thread roles on Windows (or Wine): priorities by role, the loading phase, raises.
+if (WIN32)
+    add_executable(roles-test EXCLUDE_FROM_ALL ../tests/test_roles.cpp shim/bbport_roles.cpp
+        shim/bbport_cpu_layout.cpp shim/bbport_platform.cpp)
+    target_compile_options(roles-test PRIVATE -UNDEBUG -Wall -Wextra)
+    target_include_directories(roles-test PRIVATE shim)
+    target_link_libraries(roles-test PRIVATE psapi Threads::Threads)
+endif()
+# 0.4.6 beta 20: the lock that carries priority (bbport_role_lock.h), with real threads. The counts
+# everywhere; the raise on Windows (or Wine).
+add_executable(role-lock-test EXCLUDE_FROM_ALL ../tests/test_role_lock.cpp shim/bbport_roles.cpp
+    shim/bbport_cpu_layout.cpp)
+target_compile_options(role-lock-test PRIVATE -UNDEBUG -Wall -Wextra)
+target_include_directories(role-lock-test PRIVATE shim)
+target_link_libraries(role-lock-test PRIVATE Threads::Threads)
+if (WIN32)
+    target_sources(role-lock-test PRIVATE shim/bbport_platform.cpp)
+    target_link_libraries(role-lock-test PRIVATE psapi)
+endif()
+# 0.4.6 beta 20: the submission queue the GPU command thread reads without a lock (submit_queue.h).
+add_executable(submit-queue-test EXCLUDE_FROM_ALL ../tests/test_submit_queue.cpp)
+target_compile_options(submit-queue-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(submit-queue-test PRIVATE shadps4)
+target_link_libraries(submit-queue-test PRIVATE Threads::Threads)
+# 0.4.6 beta 19: stage A's record of pending reads and writes (vk_pending.h).
+add_executable(pending-test EXCLUDE_FROM_ALL ../tests/test_pending.cpp)
+target_compile_options(pending-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(pending-test PRIVATE shadps4)
+# 0.4.6 beta 19: the draw pipe's hand-over (the fence every 8 packets) with real threads.
+add_executable(draw-pipe-handover-test EXCLUDE_FROM_ALL ../tests/test_draw_pipe_handover.cpp shim/bbport_park.cpp)
+target_compile_options(draw-pipe-handover-test PRIVATE -UNDEBUG -Wall -Wextra)
+target_include_directories(draw-pipe-handover-test PRIVATE shim shadps4 .)
+target_link_libraries(draw-pipe-handover-test PRIVATE Threads::Threads fmt::fmt)
+if (WIN32)
+    target_sources(draw-pipe-handover-test PRIVATE shim/bbport_platform.cpp shim/bbport_roles.cpp
+        shim/bbport_cpu_layout.cpp)
+    target_link_libraries(draw-pipe-handover-test PRIVATE psapi)
+endif()
+# 0.4.6 beta 18: the fork-join dispatcher's wait caves, run for real (x86-64, mmap: not on Windows).
+if (NOT WIN32)
+    add_executable(job-barrier-test EXCLUDE_FROM_ALL ../tests/test_job_barrier.cpp)
+    target_compile_options(job-barrier-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+    target_include_directories(job-barrier-test PRIVATE ..)
+    target_link_libraries(job-barrier-test PRIVATE Threads::Threads)
+endif()
 # Local game-derived native menu assets. No game data is embedded in this tool.
 find_package(ZLIB REQUIRED)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS

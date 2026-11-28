@@ -2,6 +2,16 @@
 
 As of 0.4.4 beta 19 (commit `9b8b057`, 2026-10-31). Written for the project owner. What has been done about each item since is kept in `changelog.md` (from 0.4.4 beta 20 on); this document is not updated after the fact.
 
+## Status at 0.4.6 (engine id 146, 2026-11-28)
+
+The memory parts of section 1 (images filled and hashed from the game's memory, pages watched by
+write protection, the VRAM cleanup) describe 0.4.4. In 0.4.6 the caches follow the game's own calls:
+[memory-model.md](memory-model.md), "Where it stands at the release candidate". The threads of 1.2
+gained roles and lighter handoffs in betas 18 to 21 ([handoffs-and-placement.md](handoffs-and-placement.md),
+[stage-a-cost.md](stage-a-cost.md), [chain-waits.md](chain-waits.md)); the GPU hand-over stays as 1.3
+describes it ([gpu-fences.md](gpu-fences.md): a queue in its place was built, measured and taken out).
+`renderer-7`'s breadcrumbs are now one after every 32nd command (`BB_BREADCRUMBS=all` for each).
+
 ## Status after 0.4.4 beta 21
 
 Since 0.4.4 (2026-11-05): the open items below are ordered in [plan.md](plan.md), "Now: performance", on the evidence in [performance.md](performance.md).

@@ -14,6 +14,7 @@
 #include "online.h"
 #include "patches.h"
 #include "prepare.h"
+#include "splash.h"
 
 #include <windows.h>
 
@@ -56,184 +57,10 @@ std::optional<std::string> SettingValue(const fs::path& config, const std::strin
     return Setting(ReadSettings(config), key);
 }
 
-// bbport: a new shader compiler: each cache folder (one per game, CUSA03173...) is recompiled by
-// bb-shader-lab from the shader states kept beside its shaders (--recompile-cache), so its
-// pipelines are built at the start instead of every shader compiling again in play. A folder it
-// cannot recompile is removed, as every folder was before 0.9.34 beta 6. BB_SHADER_STATES=0: removed.
-bool RecompileGpuCache(const fs::path& cache, const fs::path& recompiler) {
-    std::error_code error;
-    if (Env("BB_SHADER_STATES", "1") == "0" || !fs::is_regular_file(recompiler, error)) return false;
-    bool all = true;
-    for (const auto& entry : fs::directory_iterator(cache, error)) {
-        std::error_code e;
-        if (!entry.is_directory(e) || !fs::is_regular_file(entry.path() / "profile.bin", e)) continue;
-        std::string output;
-        const auto start = std::chrono::steady_clock::now();
-        const int code = RunProgram(recompiler, {L"--recompile-cache", entry.path().native()}, &output);
-        const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-        const auto line = output.rfind("Shader cache:");
-        if (code == 0 && line != std::string::npos) {
-            Log("GPU cache %s: %s (%.1f s)", Utf8(entry.path().filename()).c_str(),
-                Trim(output.substr(line + 14, output.find('\n', line) - line - 14)).c_str(), seconds);
-        } else {
-            fs::remove_all(entry.path(), e);
-            Log("GPU cache %s: not recompiled (exit %d); its shaders compile again in play",
-                Utf8(entry.path().filename()).c_str(), code);
-            all = false;
-        }
-    }
-    return all;
-}
-
-// bbport: the shader catalog shipped in engine\shader-catalog\<game> (specializations, pipeline keys
-// and draw states, no code): once per catalog, into a cache made on a GPU with the catalog's
-// profile (its first start makes it), the code taken from this PC's game files. Its shaders are
-// then compiled before the start instead of in play. BB_SHADER_CATALOG=0: not used.
-// bbport: the GPU vendor in a catalog's gpu.txt ("vendor 10DE device 2D05", written by
-// bb-shader-lab --export-catalog); 0 without one.
-unsigned CatalogGpuVendor(const fs::path& catalog) {
-    std::string text;
-    try {
-        text = ReadText(catalog / "gpu.txt");
-    } catch (const Error&) {
-        return 0;
-    }
-    unsigned vendor = 0;
-    return std::sscanf(text.c_str(), "vendor %x", &vendor) == 1 ? vendor : 0;
-}
-
-// bbport: whether a display adapter of this PC is of `vendor`.
-bool HasGpuVendor(unsigned vendor) {
-    char wanted[16];
-    std::snprintf(wanted, sizeof(wanted), "VEN_%04X", vendor);
-    DISPLAY_DEVICEW device{};
-    device.cb = sizeof(device);
-    for (DWORD i = 0; EnumDisplayDevicesW(nullptr, i, &device, 0); ++i) {
-        if (Lower(Utf8(device.DeviceID)).find(Lower(wanted)) != std::string::npos) return true;
-    }
-    return false;
-}
-
-// bbport: the vendor of the GPU the engine last ran a cache on: the header of the driver cache it
-// keeps beside the cache folder ("BPBC", the vendor at 8); 0 before its first start.
-unsigned CacheGpuVendor(const fs::path& cache_folder) {
-    fs::path driver_cache = cache_folder;
-    driver_cache += ".vkcache";
-    std::ifstream in(driver_cache, std::ios::binary);
-    char header[12]{};
-    if (!in.read(header, sizeof header) || std::memcmp(header, "BPBC", 4) != 0) return 0;
-    std::uint32_t vendor = 0;
-    std::memcpy(&vendor, header + 8, 4);
-    return vendor;
-}
-
-void SeedGpuCache(const fs::path& cache, const fs::path& catalogs, const fs::path& game, const fs::path& eboot,
-                  const fs::path& recompiler) {
-    std::error_code error;
-    if (Env("BB_SHADER_CATALOG", "1") == "0" || !fs::is_regular_file(recompiler, error)) return;
-    // bbport (0.9.37 beta 9): a game's catalog per GPU vendor: engine\shader-catalog\<game> (made on
-    // NVIDIA) and engine\shader-catalog\<vendor>\<game> (amd). One per game is seeded, of the vendor
-    // the engine last ran this cache on, else (a first start) of this PC's adapters NVIDIA first,
-    // then AMD, then Intel, as the engine picks the faster GPU: a Ryzen APU beside an RTX card must
-    // not get the AMD one's profile, which would leave the NVIDIA one applied to nothing.
-    std::map<fs::path, std::vector<fs::path>> by_game;
-    for (const auto& entry : fs::directory_iterator(catalogs, error)) {
-        std::error_code e;
-        if (!entry.is_directory(e)) continue;
-        if (fs::is_regular_file(entry.path() / "profile.bin", e)) {
-            by_game[entry.path().filename()].push_back(entry.path());
-            continue;
-        }
-        for (const auto& sub : fs::directory_iterator(entry.path(), e))
-            if (sub.is_directory(e) && fs::is_regular_file(sub.path() / "profile.bin", e))
-                by_game[sub.path().filename()].push_back(sub.path());
-    }
-    for (const auto& [game_name, candidates] : by_game) {
-        std::error_code e;
-        const fs::path target = cache / game_name;
-        unsigned vendor = CacheGpuVendor(target);
-        if (!vendor) {
-            for (const unsigned preferred : {0x10DEu, 0x1002u, 0x8086u}) {
-                if (HasGpuVendor(preferred)) {
-                    vendor = preferred;
-                    break;
-                }
-            }
-        }
-        const auto chosen = std::find_if(candidates.begin(), candidates.end(),
-                                         [&](const fs::path& c) { return vendor && CatalogGpuVendor(c) == vendor; });
-        if (chosen == candidates.end()) continue; // none for this GPU's vendor
-        const fs::path& catalog = *chosen;
-        // bbport (docs/pipeline_compiles.md): the first start has no cache yet, so no profile of
-        // this GPU (the engine writes it): the catalog's own is put there, so the first session has
-        // the catalog's pipelines too. Another kind of GPU of that vendor gets its cache started
-        // again by the engine (PipelineCache::WarmUp: another profile), which costs only this
-        // seeding's time.
-        if (!fs::exists(target, e)) {
-            fs::create_directories(target, e);
-            fs::copy_file(catalog / "profile.bin", target / "profile.bin", e);
-            Log("GPU cache %s: first start; the shader catalog's GPU profile used until the engine checks it",
-                Utf8(game_name).c_str());
-        }
-        if (!fs::is_regular_file(target / "profile.bin", e)) continue;
-        // The catalog's identity: its files' count and size, as shipped.
-        std::uint64_t files = 0, bytes = 0;
-        for (const auto& file : fs::directory_iterator(catalog, e)) {
-            ++files;
-            bytes += file.file_size(e);
-        }
-        const fs::path marker = target / ("catalog-" + std::to_string(files) + "-" + std::to_string(bytes) + ".applied");
-        if (fs::exists(marker, e)) continue;
-        std::string output;
-        const auto start = std::chrono::steady_clock::now();
-        const int code = RunProgram(recompiler, {L"--seed-cache", catalog.native(), target.native(),
-                                                 game.native(), eboot.native()}, &output);
-        const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-        const auto first = output.find("Shader catalog:");
-        const auto last = output.rfind("Shader cache:");
-        if (first != std::string::npos)
-            Log("GPU cache %s: %s", Utf8(game_name).c_str(),
-                Trim(output.substr(first + 16, output.find('\n', first) - first - 16)).c_str());
-        if (code == 0 && last != std::string::npos)
-            Log("GPU cache %s: %s (%.1f s)", Utf8(game_name).c_str(),
-                Trim(output.substr(last + 14, output.find('\n', last) - last - 14)).c_str(), seconds);
-        // Once per catalog, whatever came of it (another GPU's catalog stays unused).
-        WriteText(marker, std::to_string(code) + "\n");
-    }
-}
-
-void ResetStaleGpuCache(const fs::path& cache, const std::string& identity, const fs::path& recompiler) {
-    if (identity.empty()) return;
-    const fs::path stamp = cache / "engine.txt";
-    std::error_code error;
-    try {
-        if (Trim(ReadText(stamp)) == identity) return;
-    } catch (const Error&) {
-    }
-    if (fs::is_directory(cache, error) && RecompileGpuCache(cache, recompiler)) {
-        WriteText(stamp, identity + "\n");
-        Log("GPU cache: the shader compiler changed (%s); recompiled before the start", identity.c_str());
-        return;
-    }
-    bool removed = false;
-    if (fs::is_directory(cache, error)) {
-        for (const auto& entry : fs::directory_iterator(cache, error)) {
-            if (entry.path() == stamp || Lower(Utf8(entry.path().extension())) == ".vkcache") continue;
-            std::error_code e;
-            if (entry.is_directory(e) && !entry.is_symlink(e)) fs::remove_all(entry.path(), e);
-            else fs::remove(entry.path(), e);
-            if (e) {
-                Log("GPU cache: cannot remove %s: %s", Utf8(entry.path().filename()).c_str(), e.message().c_str());
-                return;
-            }
-            removed = true;
-        }
-    }
-    fs::create_directories(cache, error);
-    WriteText(stamp, identity + "\n");
-    if (removed)
-        Log("GPU cache: cleared (%s: the shader compiler changed); shaders compile again on this start", identity.c_str());
-}
+// 0.4.6 beta 17: the GPU cache is settled by the engine at its start (a new engine or profile: its
+// states translated again; the shipped catalog seeded with this PC's profile): PipelineCache::WarmUp,
+// docs/memory-model.md, "First sight". bb-start's RecompileGpuCache, SeedGpuCache and
+// ResetStaleGpuCache did it before the engine ran, without this PC's profile.
 
 std::string ConfigureFrameRate() {
     std::string fps = Env("BB_FPS", "60");
@@ -307,9 +134,11 @@ int RunProbe(const fs::path& probe, const std::vector<std::wstring>& arguments, 
 // 0.4.4 beta 28: switches that stand for several (the launcher passes one value; the engine's own
 // switches keep their names for tests). Safe mode (BB_SAFE_MODE=1, the run after a crash): every
 // experimental option and the mods off, a crash guard on; it sets its values whatever was set. Fast
-// draws, compile skipping and the VRAM budget off (BB_FAST_DRAWS=0, BB_COMPILE_SKIP=0, BB_VRAM_BUDGET=0)
-// turn off their parts, except a part set on its own; BB_SYNC=legacy puts back the synchronisation of
-// before the GPU work's fences were honest (every fallback the A/B tests kept, the GX region tracked). The same table is in run.sh (switch groups);
+// draws and compile skipping off (BB_FAST_DRAWS=0, BB_COMPILE_SKIP=0) turn off their parts, except a
+// part set on its own (0.4.5 beta 14: BB_VRAM_BUDGET went with the one VRAM manager); 0.4.6 beta 5: safe mode turns
+// the VRAM manager on (off by default while the game's own calls are tested alone); BB_SYNC=legacy puts back the synchronisation of
+// before the GPU work's fences were honest (every fallback the A/B tests kept, the GX region tracked). 0.4.6 beta 21: safe mode
+// also turns off the thread roles and the runtime's rebuilt semaphores and read/write locks (beta 18). The same table is in run.sh (switch groups);
 // tests/test_switch_groups.py checks they agree.
 // switch-groups-begin
 struct SwitchGroup {
@@ -323,10 +152,15 @@ const SwitchGroup kSwitchGroups[] = {
      {
          {"BB_FAST_LOADING", "0"}, {"BB_FRAME_FIXES", "0"}, {"BB_HOT_PAGES", "0"}, {"BB_GX_IN_PLACE", "0"},
          {"BB_NATIVE_CALLS", "0"}, {"BB_PRECISE_PACING", "0"}, {"BB_VBLANK_PACING", "0"},
-         {"BB_INDIRECT_CLAMP", "1"}, {"BB_IMAGE_WRITEBACK_GC", "0"}, {"BB_GPU_THREAD_PRIORITY", "0"},
+         {"BB_INDIRECT_CLAMP", "1"}, {"BB_GPU_THREAD_PRIORITY", "0"},
+         {"BB_THREAD_ROLES", "0"}, {"BB_RUNTIME_SYNC", "0"},
          {"BB_AUDIO_THREAD_PRIORITY", "0"}, {"BB_NATIVE_SHADERS", "0"}, {"BB_SLEEP_SPIN_US", "600"},
          {"BB_ASYNC_PIPELINES", "0"}, {"BB_OCCLUSION", "0"}, {"BB_MODS_ENABLED", "0"},
-         {"BB_FAST_DRAWS", "0"}, {"BB_COMPILE_SKIP", "0"}, {"BB_VRAM_BUDGET", "0"}}},
+         {"BB_FAST_DRAWS", "0"}, {"BB_COMPILE_SKIP", "0"}, {"BB_VRAM_MANAGER", "1"},
+         {"BB_EMPTY_SURFACES", "0"},
+         {"BB_WATCH_GAME_TEXTURES", "1"}, {"BB_IMAGE_OWNERS", "0"},
+         {"BB_WATCH_GAME_BUFFERS", "1"}, {"BB_PIPELINE_BURST", "0"}, {"BB_LOAD_UPLOAD", "0"},
+         {"BB_READY_SURFACES", "0"}, {"BB_COPY_NOTICE", "0"}, {"BB_TRANSLATE_AHEAD", "0"}}},
     {"BB_FAST_DRAWS", "0", false,
      {
          {"BB_SUBMIT_END_TASKS", "0"}, {"BB_MEMO_REVALIDATE", "0"}, {"BB_SAMPLER_MEMO", "0"},
@@ -334,9 +168,6 @@ const SwitchGroup kSwitchGroups[] = {
     {"BB_COMPILE_SKIP", "0", false,
      {
          {"BB_SKIP_UNCOMPILED", "0"}, {"BB_LATE_PIPELINE_BIND", "0"}, {"BB_PIPELINE_TAKE", "0"}}},
-    {"BB_VRAM_BUDGET", "0", false,
-     {
-         {"BB_GC_PRESSURE_PERCENT", "0"}, {"BB_GC_PRESSURE_SECONDS", "0"}}},
     {"BB_SYNC", "legacy", false,
      {
          {"BB_HONEST_LABELS", "0"}, {"BB_GX_IN_PLACE", "0"}, {"BB_PIPE_SIGNALS", "0"}, {"BB_SUBMIT_LOCK", "gpu"},
@@ -427,21 +258,11 @@ int Main(std::vector<std::wstring> arguments) {
     // which has no user folder): shared with the shadPS4 emulator, never reset with an
     // engine update nor by the launcher's Clear, so a damaged or outdated shader stayed.
     if (Env("BB_GPU_USER_DIR", "").empty()) SetEnv("BB_GPU_USER_DIR", Utf8(folders.package / "user"));
+    // The engine's crash dump: the launcher names its logs folder; started without it, the package's.
+    if (Env("BB_CRASH_DIR", "").empty()) SetEnv("BB_CRASH_DIR", Utf8(folders.package / "logs"));
     {
         std::error_code error;
         fs::create_directories(Path(Env("BB_GPU_USER_DIR", "")), error); // bb-probe falls back without it
-    }
-    try {
-        const auto package = nlohmann::json::parse(ReadText(folders.package / "package.json"));
-        const std::string engine = package.value("engine", "");
-        std::string identity = engine;
-        try {
-            const std::string id = Trim(ReadText(out / "gpu-cache.id"));
-            if (!id.empty()) identity = "gpu " + id;
-        } catch (const Error&) {
-        }
-        ResetStaleGpuCache(Path(Env("BB_GPU_USER_DIR", "")) / "cache", identity, out / "bb-shader-lab.exe");
-    } catch (const std::exception&) {
     }
     fs::create_directories(out);
     // bbport: a package in a OneDrive folder (the Desktop and Documents usually are) has every log,
@@ -487,6 +308,10 @@ int Main(std::vector<std::wstring> arguments) {
     const fs::path original = fs::canonical(game_dir);
     WriteText(remembered, Utf8(original));
     SetEnv("BB_GAME_DIR", Utf8(original));
+    // 0.4.6 beta 17: the start's splash, from here until the game's first frame (splash.h); the
+    // engine writes its steps into the splash's file too.
+    Splash splash;
+    splash.Start(out, original);
     // The in-game menu's "Apply and restart" runs this program again (probe.c runtime_restart).
     {
         std::vector<std::wstring> all(arguments);
@@ -711,18 +536,18 @@ int Main(std::vector<std::wstring> arguments) {
     } else {
         PoolHandOff(0);
     }
-    try {
-        SeedGpuCache(Path(Env("BB_GPU_USER_DIR", "")) / "cache", folders.engine / "shader-catalog", merged,
-                     out / "eboot.elf", out / "bb-shader-lab.exe");
-    } catch (const std::exception&) {
-    }
     const fs::path probe = out / "bb-probe.exe";
     std::vector<std::wstring> command{(out / "boot-linked.bin").native(), L"--content-profile", (out / "content.bin").native(),
                                       L"--patches", (out / "patches.bin").native(), L"--app0", merged.native(), L"--user",
                                       Path(Env("BB_USER_DIR", Utf8(data / "user"))).native(), L"--timeout",
                                       Wide(Env("BB_TIMEOUT", "0"))};
     command.insert(command.end(), arguments.begin(), arguments.end());
-    return RunProbe(probe, command, folders.engine);
+    splash.Step(BbSplashStatus::Step::Engine);
+    // 0.4.6 beta 17: in its own folder, as a game runs. Tools put beside it give their paths from
+    // there: d4r's OptiScaler.ini names d4r\nvngx.dll, which OptiScaler looks for from the working
+    // folder (the tester's 126 runs: not found from engine\, so its DLSS had no runtime and crashed).
+    // The engine itself is given every path whole.
+    return RunProbe(probe, command, out);
 }
 
 } // namespace

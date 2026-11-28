@@ -133,7 +133,7 @@ u32 DisplayRefreshHz() {
     return display_refresh_hz.load(std::memory_order_relaxed);
 }
 
-WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}, height{height_} {
+WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title, bool hidden) : width{width_}, height{height_} {
     // Gamepads are sampled by runtime_pad.c; their events are pumped here with the window's.
     if (!SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
         UNREACHABLE_MSG("Failed to initialize SDL video: {}", SDL_GetError());
@@ -170,6 +170,9 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}
             SDL_Log("Monitor selection: invalid bounds; using primary monitor");
         }
     }
+    // 0.4.6 beta 17: behind the start's splash (bb-splash), shown just before the game's first frame
+    // (Show).
+    SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_HIDDEN_BOOLEAN, hidden);
     SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, width_);
     SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, height_);
     SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_RESIZABLE_BOOLEAN, true);
@@ -214,6 +217,17 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}
     UpdateDisplayRefresh(window);
     UpdateDisplayPeak(window);
     LOG_INFO(Frontend, "Window {}x{} on {}", w, h, driver);
+}
+
+void WindowSDL::Show() {
+    SDL_ShowWindow(window);
+    // The window shown (and, on Wayland, configured by the compositor) before its first frame.
+    SDL_SyncWindow(window);
+    SDL_RaiseWindow(window);
+    int w = 0, h = 0;
+    SDL_GetWindowSizeInPixels(window, &w, &h);
+    width = w;
+    height = h;
 }
 
 WindowSDL::~WindowSDL() {

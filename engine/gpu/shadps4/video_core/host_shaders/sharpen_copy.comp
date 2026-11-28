@@ -1,0 +1,42 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// Hunter's Workshop 0.4.6 beta 16: the scaled path's copy of the upscaled frame into the UI image,
+// sharpened on the way (rcas_extra.glsl): one pass where there were three (an RGBA32F copy of the
+// output, the sharpening pass back into it, and the blit into the UI image). The UI image is written
+// through a storage view of its format, an sRGB format's UNORM twin (`srgb`: encoded here, as the
+// blit's conversion did); its alpha is the output's, as the blit copied it.
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0, rgba16f) uniform readonly image2D source; // the upscaler's output
+layout(binding = 1) uniform writeonly image2D target;         // the UI image (any storage format)
+
+layout(push_constant) uniform Params {
+    float strength; // the share of RCAS's maximum (0: copied as it is)
+    uint encoding;  // what the output holds (rcas_extra.glsl)
+    uint srgb;      // the UI image's format is sRGB: encode
+    uint width, height, pad;
+};
+
+#define RCAS_SOURCE source
+#include "rcas_extra.glsl"
+
+// The sRGB transfer function, as a format conversion applies it.
+vec3 SrgbEncode(vec3 c) {
+    c = clamp(c, vec3(0.0), vec3(1.0));
+    return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, greaterThan(c, vec3(0.0031308)));
+}
+
+void main() {
+    const ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    if (p.x >= int(width) || p.y >= int(height)) {
+        return;
+    }
+    const vec4 original = imageLoad(source, p);
+    vec3 color = strength > 0.0 ? ExtraSharpen(p, strength, encoding) : original.rgb;
+    if (srgb != 0u) {
+        color = SrgbEncode(color);
+    }
+    imageStore(target, p, vec4(color, original.a));
+}

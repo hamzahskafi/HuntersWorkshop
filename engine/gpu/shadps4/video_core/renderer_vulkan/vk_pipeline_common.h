@@ -39,8 +39,25 @@ void SubmitPipelineJob(const void* owner, std::function<void()> job);
 /// bbport: `owner`'s job when no compile thread has started it yet (the caller runs it), else
 /// empty (BB_PIPELINE_TAKE=0: always empty).
 std::function<void()> TakePipelineJob(const void* owner);
+/// 0.4.6 beta 17 part 2: a shader translation queued ahead (PipelineCache::QueueAhead), on the same
+/// threads and queue as the pipelines, not counted as one; and taking it back as TakePipelineJob does.
+void SubmitTranslationJob(const void* owner, std::function<void()> job);
+std::function<void()> TakeTranslationJob(const void* owner);
 /// The number of compile threads.
 u32 PipelineCompileThreads();
+/// 0.4.6 beta 15 part 1: the burst threads beside them (bbport_cpu_layout.h).
+u32 PipelineBurstThreads();
+/// A thread about to wait for a pipeline or compile one itself: every burst thread running a job is
+/// raised to its priority (at least normal) until that job is done (the waiter may depend on them,
+/// directly or through the driver's locks). How many were raised.
+unsigned RaisePipelineBursts();
+/// Since start (part 5's line takes differences); `threads_most`: the most compile threads a burst
+/// used (standing and burst) since a call with `reset_most`.
+struct PipelineBurstTotals {
+    u64 jobs = 0, compile_ns = 0, bursts = 0, burst_wall_ns = 0;
+    u32 threads_most = 0;
+};
+PipelineBurstTotals PipelineBurstTotalsNow(bool reset_most);
 
 /// bbport: the start's cached pipelines are created on several threads (PipelineCache::WarmUp,
 /// BB_WARMUP_THREADS). While this is set on the thread that rebuilds them, a pipeline that would

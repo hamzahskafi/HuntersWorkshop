@@ -52,7 +52,7 @@ int main() {
         auto& v = BbSettings::Get();
         assert(v.upscaler == fresh.upscaler.load() && v.preset == fresh.preset.load() &&
                v.dlss_preset == fresh.dlss_preset.load() && BbSettings::FsrVersion() == "auto");
-        assert(v.sharpen == fresh.sharpen.load() && v.sharpness == fresh.sharpness.load() && v.jitter == fresh.jitter.load());
+        assert(v.sharpen == fresh.sharpen.load() && v.sharpening == fresh.sharpening.load() && v.jitter == fresh.jitter.load());
         assert(v.reactive == fresh.reactive.load() && v.object_motion == fresh.object_motion.load());
         assert(v.reactive_scale == fresh.reactive_scale.load() && v.reactive_threshold == fresh.reactive_threshold.load() &&
                v.reactive_max == fresh.reactive_max.load() && v.debug_view == fresh.debug_view.load());
@@ -346,28 +346,24 @@ int main() {
                text.find("fsr_invert_jitter=1\n") == text.rfind("fsr_invert_jitter=1\n"));
     }
     s.fsr_invert_jitter = false;
-    // The DLSS model (live in the menu), OptiScaler's compatibility mode (read at start). dlss_mip_bias
-    // went in 0.4.4 beta 27d (NVIDIA's extra level always), the OptiScaler parts' own keys in beta 28
-    // (they follow the mode): read as nothing, left in the file as they were.
+    // The DLSS model (live in the menu). dlss_mip_bias went in 0.4.4 beta 27d (NVIDIA's extra level
+    // always), the OptiScaler parts' own keys in beta 28, and optiscaler_compat in 0.4.6 beta 17 (the
+    // compatibility mode always on with OptiScaler loaded): read as nothing, left in the file as they were.
     {
         std::ofstream file(path);
         file << "dlss_preset=j\ndlss_mip_bias=0\noptiscaler_compat=0\noptiscaler_sync_submit=1\n";
     }
     BbSettings::Load();
-    assert(s.dlss_preset == 10 && !s.optiscaler_compat && !s.startup_optiscaler_compat);
+    assert(s.dlss_preset == 10);
     s.dlss_preset = BbSettings::DlssPresetDefault;
-    s.optiscaler_compat = true;
     BbSettings::Save();
     {
         const std::string text = Read(path);
         assert(text.find("dlss_preset=default\n") != std::string::npos);
         assert(text.find("dlss_mip_bias=0\n") != std::string::npos);
-        assert(text.find("optiscaler_compat=1\n") != std::string::npos);
+        assert(text.find("optiscaler_compat=0\n") != std::string::npos);
         assert(text.find("optiscaler_sync_submit=1\n") != std::string::npos);
     }
-    assert(!s.startup_optiscaler_compat); // the menu's change waits for a restart
-    BbSettings::Load();
-    assert(s.optiscaler_compat && s.startup_optiscaler_compat);
     assert(BbSettings::DlssPresetFromText("m") == 13 && std::string(BbSettings::DlssPresetText(13)) == "m");
     // 0.4.4 beta 27c: Auto (NVIDIA's model for each quality mode) by default and for unknown text.
     {
@@ -506,6 +502,54 @@ int main() {
     assert(BbSettings::GameAaApplies(true, BbSettings::UpscalerOff));
     assert(!BbSettings::GameAaApplies(true, BbSettings::UpscalerFsr) && !BbSettings::GameAaApplies(true, BbSettings::UpscalerTaa));
     assert(!BbSettings::GameAaApplies(false, BbSettings::UpscalerOff));
+    {
+        // 0.4.6 beta 16 (the tester): sharpening off by default, its strength a percentage of RCAS's
+        // maximum (25 by default). The old default untouched (on, at 0.20) switched off once and made
+        // 25; any other old strength kept as the same strength; the new key wins over the old.
+        const auto load = [&](const char* text) {
+            { std::ofstream file(path); file << text; assert(file.good()); }
+            BbSettings::Load();
+        };
+        load("sharpen=1\nsharpness=0.20\n");
+        assert(!s.sharpen && s.sharpening == 25);
+        load("sharpness=0.20\nsharpen=1\n");
+        assert(!s.sharpen && s.sharpening == 25);
+        s.sharpening = 7;
+        load("sharpen=1\n"); // an old file without the strength: the old default too
+        assert(!s.sharpen);
+        load("sharpen=1\nsharpness=0.50\n");
+        assert(s.sharpen && s.sharpening == 50); // 2^-1 of the maximum, as beta 16's first build
+        load("sharpen=1\nsharpness=0.73\n");
+        assert(s.sharpen && s.sharpening == 69);
+        load("sharpen=1\nsharpness=1.50\n");
+        assert(s.sharpen && s.sharpening == 100);
+        load("sharpen=1\nsharpness=0\n");
+        assert(s.sharpen && s.sharpening == 0);
+        load("sharpen=0\nsharpness=0.20\n");
+        assert(!s.sharpen && s.sharpening == 25);
+        load("sharpen=1\nsharpness=0.20\nsharpen_off_046=1\n");
+        assert(s.sharpen && s.sharpening == 25);
+        load("sharpen=1\nsharpening=35\nsharpness=0.90\n");
+        assert(s.sharpen && s.sharpening == 35);
+        load("sharpen=1\nsharpening=250\n");
+        assert(s.sharpen && s.sharpening == 100);
+        // Every save writes the marker and the percentage in the old line's place: turned on again at
+        // the default, it stays on.
+        load("sharpen=1\nsharpness=0.20\n");
+        assert(!s.sharpen);
+        s.sharpen = true;
+        BbSettings::Save();
+        assert(Read(path).find("sharpen=1\nsharpening=25\n") == 0);
+        assert(Read(path).find("sharpness") == std::string::npos);
+        assert(Read(path).find("\nsharpen_off_046=1\n") != std::string::npos);
+        s.sharpen = false;
+        BbSettings::Load();
+        assert(s.sharpen && s.sharpening == 25);
+        // The old line and the new one both there: one line, the new one's value.
+        load("sharpening=40\nsharpness=0.80\n");
+        BbSettings::Save();
+        assert(Read(path).find("sharpening=40\n") == 0 && Read(path).find("sharpening", 5) == std::string::npos);
+    }
     std::filesystem::remove(temporary);
     std::puts("PASS: settings save keeps other keys, menu position");
 }

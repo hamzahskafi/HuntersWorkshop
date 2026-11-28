@@ -11,6 +11,8 @@
 #include <unistd.h>
 #endif
 #include <time.h>
+#include "bbport_frame_pool.h"
+#include "bbport_park.h"
 #include "bbport_threads.h"
 #include "bbport_ce_stats.h"
 #include "bbport_timeline.h"
@@ -18,6 +20,7 @@
 #include "bbport_toggles.h"
 #include <atomic>
 #include <cstdio>
+#include <cstring>
 #include <boost/preprocessor/stringize.hpp>
 
 #include "common/assert.h"
@@ -41,6 +44,22 @@
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
 
 extern "C" int runtime_memory_vma_info(uintptr_t address, int* prot, int* type, uintptr_t* end);
+
+namespace AmdGpu {
+
+void* TakeTaskFrame(std::size_t size) {
+    return BbFramePool::Take(size);
+}
+
+void GiveTaskFrame(void* frame, std::size_t size) {
+    BbFramePool::Give(frame, size);
+}
+
+void Liverpool::WakeDecoder() {
+    BbPark::Bump(decoder_word);
+}
+
+}
 
 namespace AmdGpu {
 
@@ -228,6 +247,9 @@ void Liverpool::Process(std::stop_token stoken) {
                 }
             }
         }
+        if (rasterizer) {
+            rasterizer->PublishDrawPipe(); // 0.4.6 beta 19: nothing more comes for a while
+        }
         {
             const auto idle_start = std::chrono::steady_clock::now();
             BbTimeline::Note(BbTimeline::DecoderIdleBegin);
@@ -255,12 +277,23 @@ void Liverpool::Process(std::stop_token stoken) {
             }
             bool gpu_wants_work_now = false;
             {
-                std::unique_lock lk{submit_mutex};
-                Common::CondvarWait(submit_cv, lk, stoken, [this] {
-                    return num_commands || num_submits || submit_done ||
-                           gpu_wants_work.load(std::memory_order_relaxed);
-                });
-                gpu_wants_work_now = gpu_wants_work.exchange(false, std::memory_order_relaxed);
+                // 0.4.6 beta 19: on its own word (BbPark). The word is read before the state is
+                // looked at: a submission after that bumps it, so the wait returns at once.
+                std::stop_callback on_stop{stoken, [this] { BbPark::Bump(decoder_word); }};
+                for (;;) {
+                    const u32 seen = decoder_word.load(std::memory_order_seq_cst);
+                    {
+                        std::scoped_lock lk{submit_mutex};
+                        if (num_commands || num_submits || submit_done ||
+                            gpu_wants_work.load(std::memory_order_relaxed) ||
+                            stoken.stop_requested()) {
+                            gpu_wants_work_now =
+                                gpu_wants_work.exchange(false, std::memory_order_relaxed);
+                            break;
+                        }
+                    }
+                    BbPark::Wait(decoder_word, seen);
+                }
             }
             decoder_idle.store(false, std::memory_order_release);
             BbStats::gpu_idle_ns.fetch_add(
@@ -294,12 +327,9 @@ void Liverpool::Process(std::stop_token stoken) {
             auto& queue = mapped_queues[curr_qid];
 
             Task::Handle task{};
-            {
-                std::scoped_lock lock{queue.m_access};
-                if (queue.submits.empty()) {
-                    continue;
-                }
-                task = queue.submits.front();
+            // 0.4.6 beta 20 (docs/chain-waits.md, item 2): no lock on this side.
+            if (!queue.submits.Front(task)) {
+                continue;
             }
             if (task.address() != last_decoded) {
                 last_decoded = task.address();
@@ -313,8 +343,7 @@ void Liverpool::Process(std::stop_token stoken) {
 
                 bool frame_end = false;
                 {
-                    std::scoped_lock lock{queue.m_access};
-                    queue.submits.pop();
+                    queue.submits.Pop();
 
                     --num_submits;
                     std::scoped_lock lock2{submit_mutex};
@@ -528,18 +557,38 @@ void StoreLabel(void* address, u64 value, u32 num_bytes) {
     }
 }
 
+// 0.4.6 beta 12: a label stored straight into guest memory (no backing view) used to fault on a page
+// the buffer cache watched and so reach it; a page of a live GX buffer is writable now, so it is told
+// (BufferCache::NoteEngineStore). Labels written through the backing view never reached the buffer
+// cache, before beta 12 either.
+void StoreLabelTold(void* address, u64 value, u32 num_bytes) {
+    StoreLabel(address, value, num_bytes);
+    if (auto* rasterizer = Core::Memory::Instance()->GetRasterizer()) {
+        rasterizer->NoteEngineStore(reinterpret_cast<VAddr>(address), num_bytes);
+    }
+}
+
+// 0.4.6 beta 13: a label written through the backing view (the usual path) never faults, so a VRAM copy
+// of its page kept the old bytes; the buffer cache is told (BufferCache::NoteBackingStore), or the
+// fallback store when there is no backing view.
+void WriteLabel(void* address, u64 value, u32 num_bytes) {
+    auto* memory = Core::Memory::Instance();
+    if (!memory->TryWriteBacking(address, &value, num_bytes)) {
+        StoreLabelTold(address, value, num_bytes);
+    } else if (auto* rasterizer = memory->GetRasterizer()) {
+        rasterizer->NoteBackingStore(reinterpret_cast<VAddr>(address), num_bytes);
+    }
+}
+
 void SignalEop(const PM4CmdEventWriteEop& eop, u64 seq) {
     eop.SignalFence(
         [seq](void* address, u64 data, u32 num_bytes) {
-            auto* memory = Core::Memory::Instance();
             BbFreeCheck::Check(reinterpret_cast<u64>(address), num_bytes, &data, BbFreeCheck::Eop,
                                seq);
             BbFreeCheck::NoteFenceWriting(reinterpret_cast<u64>(address));
             BbWriteLog::Note(reinterpret_cast<u64>(address), &data, num_bytes, BbWriteLog::Fence);
             const auto write_start = std::chrono::steady_clock::now();
-            if (!memory->TryWriteBacking(address, &data, num_bytes)) {
-                StoreLabel(address, data, num_bytes);
-            }
+            WriteLabel(address, data, num_bytes);
             BbStats::eop_written.fetch_add(1, std::memory_order_relaxed);
             BbFreeCheck::NoteFenceWritten(
                 reinterpret_cast<u64>(address),
@@ -703,6 +752,8 @@ void RunWriteData(Vulkan::Rasterizer& rasterizer, const u8* data) {
                      (header->type3.count.Value() - 2) * sizeof(u32), BbWriteLog::WriteData);
     std::memcpy(write_data->Address<u64*>(), write_data->data,
                 (header->type3.count.Value() - 2) * sizeof(u32));
+    // 0.4.6 beta 12: told to the buffer cache, as a fault on a watched page would have.
+    rasterizer.NoteEngineStore(write_data->Address<VAddr>(), (header->type3.count.Value() - 2) * sizeof(u32));
 }
 
 // bbport: the stand-in occlusion counts (BB_OCCLUSION=0) in stream order. The game starts every
@@ -752,6 +803,9 @@ void WriteZpassCounters(Vulkan::Rasterizer* rasterizer, const ZpassDump& dump, b
         }
         StoreLabel(results, dump.value, sizeof(dump.value));
     }
+    if (rasterizer) {
+        rasterizer->NoteEngineStore(dump.address, size); // 0.4.6 beta 12: as a fault would have
+    }
 }
 
 void RunZpassDump(Vulkan::Rasterizer& rasterizer, const u8* data) {
@@ -761,13 +815,10 @@ void RunZpassDump(Vulkan::Rasterizer& rasterizer, const u8* data) {
 }
 
 void WriteEosLabel(void* address, u64 value, u32 num_bytes) {
-    auto* memory = Core::Memory::Instance();
     BbFreeCheck::Check(reinterpret_cast<u64>(address), num_bytes, &value, BbFreeCheck::Eos);
     BbFreeCheck::NoteFenceWriting(reinterpret_cast<u64>(address));
     BbWriteLog::Note(reinterpret_cast<u64>(address), &value, num_bytes, BbWriteLog::Fence);
-    if (!memory->TryWriteBacking(address, &value, num_bytes)) {
-        StoreLabel(address, value, num_bytes);
-    }
+    WriteLabel(address, value, num_bytes);
     BbFreeCheck::NoteFenceWritten(reinterpret_cast<u64>(address));
 }
 
@@ -1299,13 +1350,14 @@ void VerifyNativeDraw(std::span<const u32> packet, u64 address, u64 checksum_bef
 } // namespace
 
 Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<const u32> ccb,
-                                           u64 seq, std::shared_ptr<SubmittedCopy> copy) {
+                                           u64 seq, std::shared_ptr<SubmittedCopy> copy,
+                                           std::shared_ptr<Vulkan::PrepSubmission> prep) {
     FIBER_ENTER(dcb_task_name);
     // Top-level buffers enqueued for the draw preparation workers (nested IBs are not).
     Vulkan::DrawPreparation* draw_prep =
         seq != NoSeq && rasterizer ? &rasterizer->GetDrawPreparation() : nullptr;
     if (draw_prep) {
-        draw_prep->BeginSubmission(seq, regs, gfx_reg_checksum);
+        draw_prep->BeginSubmission(seq, regs, gfx_reg_checksum, std::move(prep));
         rasterizer->OcclusionSubmissionStart();
     }
     static const bool dcb_stats = EmulatorSettingsImpl::Flag("BB_DCB_STATS", false);
@@ -1375,8 +1427,10 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
             const u32 count = header->type3.NumWords();
             const PM4ItOpcode opcode = header->type3.opcode;
             // bbport BB_NATIVE_CALLS: a draw call's record NOP (mode 1), the checksum before the
-            // packet (verify), the packet's start (BB_FRAME_STATS).
-            const u64 packet_start = native_timing ? BbNativeCalls::Ticks() : 0;
+            // packet (verify), the packet's start (BB_FRAME_STATS; 0.4.6 beta 19: about one packet
+            // in 16 is timed, BbNativeCalls::TimePacket).
+            const bool timed = native_timing && BbNativeCalls::TimePacket();
+            const u64 packet_start = timed ? BbNativeCalls::Ticks() : 0;
             const u64 checksum_before = gfx_reg_checksum;
             BbNativeCalls::DrawRecord native_record;
             const bool native_draw =
@@ -1952,7 +2006,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                 // instead and allow other tasks to run.
                 const u64* wait_addr = wait_reg_mem->Address<u64*>();
                 if (vo_port->IsVoLabel(wait_addr) &&
-                    num_submits == mapped_queues[GfxQueueId].submits.size()) {
+                    num_submits == mapped_queues[GfxQueueId].submits.Size()) {
                     if (rasterizer) {
                         rasterizer->DrainDrawPipe(static_cast<u32>(opcode));
                     }
@@ -2060,10 +2114,13 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                 // bbport BB_FRAME_STATS: this thread's time per packet (nested IBs count their
                 // own packets), per draw; the "Native calls" lines every 5 s.
                 const bool is_draw = native_draw || IsDrawOpcode(opcode);
-                if (native_timing && opcode != PM4ItOpcode::IndirectBuffer) {
+                if (timed && opcode != PM4ItOpcode::IndirectBuffer) {
                     BbNativeCalls::AddPacketTicks(BbNativeCalls::Ticks() - packet_start, is_draw);
                 }
                 if (is_draw) {
+                    if (native_timing) {
+                        BbNativeCalls::CountDraw();
+                    }
                     BbNativeCalls::MaybeReport();
                 }
             }
@@ -2088,14 +2145,21 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
     if (rasterizer && seq != NoSeq && !EndsSignalledFrame()) {
         rasterizer->SubmitForSignals();
     }
+    // 0.4.6 beta 20 (docs/chain-waits.md, item 6): the thread's times (a system call) read 10 times
+    // a second, not at every submission (1.5-1.7% of this thread with the statistics on).
+    static std::chrono::steady_clock::time_point next_usage{};
     if (seq != NoSeq && BbStats::enabled) {
         BbStats::submissions.fetch_add(1, std::memory_order_relaxed);
-        if (BbPlatform::Usage usage; BbPlatform::GetUsage(true, usage)) {
-            BbStats::gpu_user_us.store(usage.user_us, std::memory_order_relaxed);
-            BbStats::gpu_sys_us.store(usage.sys_us, std::memory_order_relaxed);
-            BbStats::gpu_invol_switches.store(usage.invol_switches, std::memory_order_relaxed);
-            BbStats::gpu_vol_switches.store(usage.vol_switches, std::memory_order_relaxed);
-            BbStats::gpu_minor_faults.store(usage.minor_faults, std::memory_order_relaxed);
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= next_usage) {
+            next_usage = now + std::chrono::milliseconds(100);
+            if (BbPlatform::Usage usage; BbPlatform::GetUsage(true, usage)) {
+                BbStats::gpu_user_us.store(usage.user_us, std::memory_order_relaxed);
+                BbStats::gpu_sys_us.store(usage.sys_us, std::memory_order_relaxed);
+                BbStats::gpu_invol_switches.store(usage.invol_switches, std::memory_order_relaxed);
+                BbStats::gpu_vol_switches.store(usage.vol_switches, std::memory_order_relaxed);
+                BbStats::gpu_minor_faults.store(usage.minor_faults, std::memory_order_relaxed);
+            }
         }
     }
 
@@ -2470,26 +2534,39 @@ void Liverpool::SubmitGfx(std::span<const u32> dcb, std::span<const u32> ccb) {
     // the GPU thread needs to pick up work.
     auto* draw_prep = rasterizer ? &rasterizer->GetDrawPreparation() : nullptr;
     auto prep_submission = draw_prep ? draw_prep->Build(dcb) : nullptr;
+    const void* noted_dcb = copy ? copy->guest_dcb : dcb.data();
+    u64 seq = NoSeq;
     {
         // Numbering, enqueueing and queueing under one lock keep the three orders identical.
+        // 0.4.6 beta 19 (docs/stage-a-cost.md, item 4): only that under it. The decode task's
+        // frame comes from a pool (bbport_frame_pool.h), the draw preparation threads are woken
+        // and the free check told after the lock is let go: the GPU command thread waited for
+        // this lock about 4% of its time.
         std::scoped_lock lock{queue.m_access};
-        u64 seq = NoSeq;
         if (draw_prep) {
             seq = gfx_submit_seq++;
-            draw_prep->Enqueue(seq, std::move(prep_submission));
+            draw_prep->Enqueue(seq, prep_submission, /*notify=*/false);
         }
-        BbFreeCheck::NoteSubmit(seq, copy ? copy->guest_dcb : dcb.data(), dcb.size_bytes());
-        auto task = ProcessGraphics(dcb, ccb, seq, std::move(copy));
-        queue.submits.emplace(task.handle);
+        auto task = ProcessGraphics(dcb, ccb, seq, std::move(copy), std::move(prep_submission));
+        queue.submits.Push(task.handle);
     }
+    if (draw_prep) {
+        draw_prep->NotifyWorkers();
+    }
+    BbFreeCheck::NoteSubmit(seq, noted_dcb, dcb.size_bytes());
 
-    std::scoped_lock lk{submit_mutex};
-    ++num_submits;
-    ++submissions_total;
-    ++gfx_submitted;
-    BbTimeline::Note(BbTimeline::GuestSubmit, 0, submissions_total);
-    work_retired = false;
+    u64 total;
+    {
+        std::scoped_lock lk{submit_mutex};
+        ++num_submits;
+        total = ++submissions_total;
+        ++gfx_submitted;
+        work_retired = false;
+    }
+    // 0.4.6 beta 20: the wakes after the lock is let go (the GPU command thread takes it next).
+    BbTimeline::Note(BbTimeline::GuestSubmit, 0, total);
     submit_cv.notify_one();
+    WakeDecoder();
 }
 
 bool Liverpool::EndsSignalledFrame() {
@@ -2575,15 +2652,18 @@ void Liverpool::SubmitAsc(u32 gnm_vqid, std::span<const u32> acb) {
     const auto& task = ProcessCompute(acb, vqid);
     {
         std::scoped_lock lock{queue.m_access};
-        queue.submits.emplace(task.handle);
+        queue.submits.Push(task.handle);
     }
 
-    std::scoped_lock lk{submit_mutex};
-    num_mapped_queues = std::max(num_mapped_queues, gnm_vqid + 1);
-    ++num_submits;
-    ++submissions_total;
-    work_retired = false;
+    {
+        std::scoped_lock lk{submit_mutex};
+        num_mapped_queues = std::max(num_mapped_queues, gnm_vqid + 1);
+        ++num_submits;
+        ++submissions_total;
+        work_retired = false;
+    }
     submit_cv.notify_one();
+    WakeDecoder();
 }
 
 

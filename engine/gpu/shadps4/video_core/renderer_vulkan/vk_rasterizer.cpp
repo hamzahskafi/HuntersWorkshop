@@ -45,6 +45,7 @@
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
 #include "video_core/renderer_vulkan/vk_pipeline_serialization.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
+#include "video_core/load_work.h"
 #include "video_core/renderer_vulkan/vk_gpu_profiler.h"
 #include "bbport_threads.h"
 #include "video_core/renderer_vulkan/vk_runtime.h"
@@ -204,7 +205,10 @@ void Rasterizer::PublishSignals() {
     bool was_empty;
     {
         std::scoped_lock lk{gpu_signals_mutex};
-        if (!gpu_signal_thread.joinable()) {
+        // 0.4.6 beta 20 (docs/chain-waits.md, item 8): a flag, not joinable() (on Windows it asks
+        // the system for the thread's id: a system call on every publish, about 1% of stage B).
+        if (!gpu_signal_started) {
+            gpu_signal_started = true;
             gpu_signal_thread =
                 std::jthread([this](std::stop_token token) { GpuSignalLoop(token); });
         }
@@ -243,7 +247,10 @@ void Rasterizer::SignalAfterGpu(std::function<void()> signal, VAddr label, u64 v
     bool was_empty;
     {
         std::scoped_lock lk{gpu_signals_mutex};
-        if (!gpu_signal_thread.joinable()) {
+        // 0.4.6 beta 20 (docs/chain-waits.md, item 8): a flag, not joinable() (on Windows it asks
+        // the system for the thread's id: a system call on every publish, about 1% of stage B).
+        if (!gpu_signal_started) {
+            gpu_signal_started = true;
             gpu_signal_thread =
                 std::jthread([this](std::stop_token token) { GpuSignalLoop(token); });
         }
@@ -820,9 +827,12 @@ void Rasterizer::NotifyUiDraw(const GraphicsPipeline* pipeline) {
                      UiComposition::WidenedUiViewport(viewport.xscale * 2, viewport.yscale * 2));
 }
 
+// 0.4.6 beta 20 (docs/chain-waits.md, item 9): the pipeline's own type (optional<const ...>). Taken
+// as optional<FetchShaderData>, every call made a converted copy, its attribute list on the heap:
+// an allocation and a free a draw on the draw recording thread.
 static std::pair<u32, u32> GetDrawOffsets(
     const AmdGpu::Regs& regs, const Shader::Info& info,
-    const std::optional<Shader::Gcn::FetchShaderData>& fetch_shader) {
+    const std::optional<const Shader::Gcn::FetchShaderData>& fetch_shader) {
     u32 vertex_offset = regs.index_offset;
     u32 instance_offset = 0;
     if (fetch_shader) {
@@ -954,13 +964,27 @@ void Rasterizer::NotePendingGpuWrite(VAddr address, u64 size) {
         return;
     }
     // Numbered by packet (a position, the packet's start, counted as reached once the packet
-    // before it had run, while this one was not recorded yet), in hashed granules: a lookup per
-    // constant binding instead of a scan of the writes (a list scan was ~5% of this thread).
-    pending_write_table.Note(address, size, draw_pipe->NextPacket());
+    // before it had run, while this one was not recorded yet).
+    const u64 packet = draw_pipe->NextPacket();
+    // 0.4.6 beta 19: the list of the writes stage B hasn't reached (the hashed table's notes were
+    // about 2.5% of this thread, its lookups 4%).
+    pending_writes.Prune([this](u64 p) { return draw_pipe->ReachedPacket(p); });
+    if (!pending_writes.Note(address, size, packet)) {
+        pending_write_table.Note(address, size, packet); // the list is full
+        pending_write_table_newest = packet;
+        ++pending_stats.writes_tabled;
+        return;
+    }
+    ++pending_stats.writes_listed;
 }
 
 void Rasterizer::NotePendingRead(VAddr address, u64 size) {
     if (draw_pipe && size && OnStageA()) {
+        if (!dump_pages.Touches(address, size)) {
+            ++pending_stats.reads_skipped; // no dump writes there (WaitForPendingReads)
+            return;
+        }
+        ++pending_stats.reads_noted;
         pending_reads.Note(address, size, draw_pipe->NextPacket());
     }
 }
@@ -977,6 +1001,14 @@ void Rasterizer::WaitForPendingReads(VAddr address, u64 size) {
         DrainDrawPipe(DrawPipe::ReasonConstRam);
         return;
     }
+    if (!dump_pages.Covers(address, size)) {
+        // 0.4.6 beta 19: bytes no dump wrote before: reads of them were not noted. Every queued
+        // packet is waited for once; from now on reads of these pages are noted.
+        ++pending_stats.dump_ranges_new;
+        dump_pages.Add(address, size);
+        DrainDrawPipe(DrawPipe::ReasonConstRam);
+        return;
+    }
     const u64 packet = std::max(untracked_reads_packet, pending_reads.Newest(address, size));
     if (draw_pipe->ReachedPacket(packet)) {
         ++constram_waits_skipped;
@@ -989,6 +1021,16 @@ bool Rasterizer::PendingWriteOverlaps(VAddr address, u64 size) {
     if (!draw_pipe || size == 0) {
         return false;
     }
+    ++pending_stats.write_lookups;
+    pending_writes.Prune([this](u64 p) { return draw_pipe->ReachedPacket(p); });
+    if (pending_writes.Overlaps(address, size)) {
+        return true;
+    }
+    if (pending_write_table_newest == 0 || draw_pipe->ReachedPacket(pending_write_table_newest)) {
+        pending_write_table_newest = 0; // every write the table holds has been reached
+        return false;
+    }
+    // The writes the list had no room for (it was full).
     const u64 packet = pending_write_table.Newest(address, size);
     return packet != 0 && !draw_pipe->ReachedPacket(packet);
 }
@@ -1312,6 +1354,7 @@ bool Rasterizer::RunInOrder(OrderedTask task, const void* data, u32 size, u64 to
     *reinterpret_cast<TaskPacket*>(out) = {PacketKind::Task, size, task};
     std::memcpy(out + sizeof(TaskPacket), data, size);
     draw_pipe->Commit(total);
+    draw_pipe->Publish(); // tasks are fences, signals and flips the game waits for: at once
     return true;
 }
 
@@ -1754,13 +1797,41 @@ void Rasterizer::PrintPipeStats() {
     const u64 busy = draw_pipe->busy_cycles.load(std::memory_order_relaxed);
     static u64 last_sleeps = 0;
     std::printf("Draw pipe: %.0f draws/s pipelined, %.0f drains/s that waited (%.1f/s slept), "
-                "stage A waited %.1f%%, stage B busy %.1f%%\n",
+                "stage A waited %.1f%%, stage B busy %.1f%%; hand-over %s, late wakes %llu "
+                "(expected 0); stage B's count %s, stage A's missed wakes %llu (expected 0)\n",
                 (draw_pipe->packets - last_packets) / seconds,
                 (draw_pipe->drains - last_drains) / seconds,
                 (draw_pipe->sleeps - last_sleeps) / seconds,
                 100.0 * (draw_pipe->drain_cycles - last_drain_cycles) / cycles,
-                100.0 * (busy - last_busy) / cycles);
+                100.0 * (busy - last_busy) / cycles,
+                "fenced every 8 packets",
+                static_cast<unsigned long long>(draw_pipe->late_wakes.exchange(0)),
+                DrawPipe::PlainCount() ? "plain (a process-wide fence when stage A sleeps)"
+                                       : "fenced",
+                static_cast<unsigned long long>(draw_pipe->stage_a_missed_wakes.exchange(0)));
     last_sleeps = draw_pipe->sleeps;
+    // 0.4.6 beta 19: what the pending tables were given and asked (item 3).
+    {
+        auto& p = pending_stats;
+        std::printf("  pending tables/s: reads noted %.0f, skipped %.0f (no dump writes there; the "
+                    "dumps' pages: %zu ranges, %llu new%s); GPU writes listed %.0f, to the table "
+                    "%.0f (list full), lookups %.0f (%.0f answered without the list, %.0f "
+                    "scanned it: %.0f of them as more than %u wide writes were live, %.0f entries "
+                    "a scan; %u writes listed now, %u of them wide)\n",
+                    p.reads_noted / seconds, p.reads_skipped / seconds, dump_pages.ranges.size(),
+                    static_cast<unsigned long long>(p.dump_ranges_new),
+                    dump_pages.overflow ? ", too many: every read noted" : "",
+                    p.writes_listed / seconds, p.writes_tabled / seconds, p.write_lookups / seconds,
+                    pending_writes.filtered / seconds, pending_writes.scanned / seconds,
+                    pending_writes.scanned_wide / seconds, PendingWriteList::kMaxWide,
+                    pending_writes.scanned
+                        ? double(pending_writes.scanned_entries) / pending_writes.scanned
+                        : 0.0,
+                    pending_writes.Size(), pending_writes.Wide());
+        p = {};
+        pending_writes.filtered = pending_writes.scanned = 0;
+        pending_writes.scanned_wide = pending_writes.scanned_entries = 0;
+    }
     std::printf("  drains by reason/s:");
     for (u32 r = 0; r < DrawPipe::NumReasons; ++r) {
         if (const u64 n = draw_pipe->drains_by_reason[r]) {
@@ -1885,10 +1956,7 @@ void Rasterizer::PrintPipeStats() {
     last_busy = busy;
 }
 
-bool Rasterizer::FilterDrawPasses() const {
-    // FilterDraw's checks without its side effects: false when it would skip the draw or run
-    // a pass of its own (fast clear elimination, resolve, depth/stencil copy).
-    const auto& regs = Regs();
+bool DrawSelectsPipeline(const AmdGpu::Regs& regs) {
     using Mode = AmdGpu::ColorControl::OperationMode;
     const auto mode = regs.color_control.mode;
     if (mode == Mode::EliminateFastClear || mode == Mode::FmaskDecompress ||
@@ -1905,6 +1973,12 @@ bool Rasterizer::FilterDrawPasses() const {
         regs.depth_buffer.StencilWriteValid() &&
         regs.depth_buffer.StencilAddress() != regs.depth_buffer.StencilWriteAddress();
     return !(mode == Mode::Disable && (depth_copy || stencil_copy));
+}
+
+bool Rasterizer::FilterDrawPasses() const {
+    // FilterDraw's checks without its side effects: false when it would skip the draw or run
+    // a pass of its own (fast clear elimination, resolve, depth/stencil copy).
+    return DrawSelectsPipeline(Regs());
 }
 
 void Rasterizer::Draw(bool is_indexed, u32 index_offset, const PreparedDraw* prepared) {
@@ -2135,6 +2209,8 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
             return (env ? std::strtoull(env, nullptr, 10) : 16ull) << 20;
         }();
         buffer_cache.Preupload(budget);
+        // 0.4.6 beta 15 part 2: the game's buffers made during a loading screen, uploaded during it.
+        buffer_cache.LoadUpload();
     }
     const auto& regs = Regs();
     // bbport: the pass copying a finished frame to a display buffer; the previous draw's
@@ -3276,6 +3352,7 @@ void Rasterizer::ShadowRedirectPassBegun(const GraphicsPipeline* pipeline,
     const u32 clear_width = std::min<u32>(info.size.width, state.width);
     const u32 clear_height = std::min<u32>(info.size.height, state.height);
     r.clear_pending = false;
+    image.ResolveDeferredHashes(); // 0.4.6 beta 4: before the GPU draws into it
     image.flags |= VideoCore::ImageFlagBits::GpuModified; // as ClearImage marks it
     image.flags &= ~VideoCore::ImageFlagBits::Dirty;
     const vk::ClearAttachment attachment{.aspectMask = vk::ImageAspectFlagBits::eColor,
@@ -3369,6 +3446,7 @@ void Rasterizer::ShadowRedirectRestore(const char* why) {
         cmdbuf.copyImage(src, vk::ImageLayout::eTransferSrcOptimal, dst,
                          vk::ImageLayout::eTransferDstOptimal, region);
     });
+    cube.ResolveDeferredHashes(); // 0.4.6 beta 4: before the GPU draws into it
     cube.flags |= VideoCore::ImageFlagBits::GpuModified;
     auto& savings = GpuSavings::Get();
     GpuSavings::Count(after_copy ? savings.shadow_restores_after : savings.shadow_restores_before);
@@ -4006,6 +4084,21 @@ bool Rasterizer::IsComputeImageCopy(const Pipeline* pipeline) {
     // statistics on, with the images found (as bbport's BB_IMAGE_COPY_LOG).
     const auto reject = [&](int why, const VideoCore::Image* a, const VideoCore::Image* b) {
         CountImageCopy(&ImageCopyStats::through_memory);
+        // 0.4.6 beta 10 (counted only): whether the copy's source and destination are images of the
+        // game's textures, at their start (the owner rule could copy those image to image).
+        if (BbEngine::GxResources::Following()) {
+            const auto owned_at = [&](const VideoCore::Image* image, VAddr address) {
+                if (!image || image->info.guest_address != address) { // none, or the other side's
+                    if (const auto there = texture_cache.FindImageFromRange(address, size, false)) {
+                        image = &texture_cache.GetImage(there);
+                    }
+                }
+                return image && image->gx_whole && image->gx_owner != 0;
+            };
+            const VAddr source_at = desc0.is_written ? buf1.base_address : buf0.base_address;
+            const VAddr destination_at = desc0.is_written ? buf0.base_address : buf1.base_address;
+            BbEngine::GxResources::NoteCopyThroughMemory(owned_at(a, source_at), owned_at(b, destination_at));
+        }
         if (!BbStats::enabled || size < 1_MB) {
             return false;
         }
@@ -4144,6 +4237,10 @@ bool Rasterizer::IsComputeImageCopy(const Pipeline* pipeline) {
         source.info.array_mode != dst.info.array_mode) {
         return reject(7, &source, &dst);
     }
+    // 0.4.6 beta 11: both images used by this submission, as FindImage marks the ones it finds (the
+    // collector's GPU check and the owner rule's "used since" read it).
+    texture_cache.MarkFound(src_id);
+    texture_cache.MarkFound(dst_id);
     const u64 tail = size - image_size;
     auto outcome = made ? &ImageCopyStats::made : &ImageCopyStats::exact;
     if (tail && !made) {
@@ -5949,6 +6046,8 @@ void Rasterizer::FillBuffer(VAddr address, u32 num_bytes, u32 value, bool is_gds
             u32* buffer = std::bit_cast<u32*>(address);
             std::fill(buffer, buffer + (num_bytes / sizeof(u32)), value);
             BbWriteLog::Note(address, buffer, num_bytes, BbWriteLog::Dma);
+            buffer_cache.NoteEngineStore(address, num_bytes); // 0.4.6 beta 12
+            texture_cache.NoteEngineStore(address, num_bytes); // 0.4.6 beta 16, YEBIS by its calls
             return;
         }
     }
@@ -6010,6 +6109,10 @@ void Rasterizer::CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, b
             BbFreeCheck::Check(dst, num_bytes, std::bit_cast<const void*>(src), BbFreeCheck::DmaCopy);
             std::memcpy(std::bit_cast<void*>(dst), std::bit_cast<void*>(src), num_bytes);
             BbWriteLog::Note(dst, std::bit_cast<const void*>(dst), num_bytes, BbWriteLog::Dma);
+            buffer_cache.NoteEngineStore(dst, num_bytes); // 0.4.6 beta 12
+            // 0.4.6 beta 16 (YEBIS by its calls, part 2): and the texture cache, for the images left to the
+            // calls over it (a watched image faults on this store; one left to the calls would not learn of it).
+            texture_cache.NoteEngineStore(dst, num_bytes);
             return;
         }
     }
@@ -6060,6 +6163,30 @@ bool Rasterizer::InvalidateMemory(VAddr addr, u64 size, bool assume_locks) {
 void Rasterizer::NoteAssetWrite(VAddr addr, u64 size) {
     const VideoCore::InvalidateReason reason{"asset or DMA"};
     InvalidateMemory(addr, size);
+    // 0.4.6 beta 12: a write told over live GX buffers (beta 12's net does not count it as untold).
+    BbEngine::GxResources::NoteToldWrite(addr, size);
+}
+
+void Rasterizer::NoteCopyComing(VAddr addr, u64 size) {
+    using VideoCore::PageManager;
+    const VAddr first = PageManager::GetPageAddr(addr) == addr ? addr : PageManager::GetNextPageAddr(addr);
+    const VAddr last = PageManager::GetPageAddr(addr + size);
+    auto& c = VideoCore::LoadWork::counters;
+    c.copies_told.fetch_add(1, std::memory_order_relaxed);
+    if (first >= last) {
+        return; // within a page or two: their faults as before
+    }
+    const VideoCore::InvalidateReason reason{"create call's copy"};
+    DrainDrawPipe(); // as a fault does before the caches change
+    if (!IsMapped(first, last - first)) {
+        return;
+    }
+    const auto [dropped, writable] = buffer_cache.CopyComing(first, last - first);
+    if (texture_cache.WatchesPages(first, last - first)) {
+        texture_cache.InvalidateMemory(first, last - first);
+    }
+    c.pages_dropped.fetch_add(dropped, std::memory_order_relaxed);
+    c.pages_writable.fetch_add(writable, std::memory_order_relaxed);
 }
 
 bool Rasterizer::FaultSkipsTextureCache() {
@@ -6081,15 +6208,32 @@ bool Rasterizer::OnWriteFault(VAddr addr, bool assume_locks) {
     // an image: a guest thread writing its constants waited for that (0.6 s with memory short:
     // the frame with it). Images learn of CPU writes through their own page protection only
     // (WatchedPages). BB_FAULT_SKIP_TEXTURES=0: the lock is taken for every fault, as before.
-    if (FaultSkipsTextureCache() && !texture_cache.WatchesPages(addr, size)) {
+    // 0.4.6 beta 13: what watched the page, read before the invalidation clears it (the write fault
+    // breakdown): bits 1 the GPU's data, 2 the buffer cache's uploaded copy, 4 an image, 8 none.
+    const bool image_watch = texture_cache.WatchesPages(addr, size);
+    const u8 buffer_watch = buffer_cache.PageWatch(addr);
+    if (FaultSkipsTextureCache() && !image_watch) {
         if (!IsMapped(addr, size)) {
             return false;
         }
         buffer_cache.InvalidateMemory(addr, size, assume_locks);
-    } else if (!InvalidateMemory(addr, size, assume_locks)) {
-        return false;
+    } else {
+        // 0.4.6 beta 16 part 4: the images watching this page are counted by their resource's kind.
+        VideoCore::t_write_fault = true;
+        const bool handled = InvalidateMemory(addr, size, assume_locks);
+        VideoCore::t_write_fault = false;
+        if (!handled) {
+            return false;
+        }
     }
     buffer_cache.ExtendWriteFault(addr);
+    const u32 watched = (buffer_watch == 2 ? 1u : buffer_watch == 1 ? 2u : 0u) | (image_watch ? 4u : 0u);
+    VideoCore::PageManager::NoteFaultWatch(watched != 0 ? watched : 8u);
+    // 0.4.6 beta 8 (part 5): the CPU's writes to the game's live GX buffers (beta 12's measurement).
+    if (BbEngine::GxResources::Active()) {
+        BbEngine::GxResources::NoteBufferCpuWrite(addr, size);
+        BbEngine::GxResources::NoteWriteFault(addr, watched != 0 ? watched : 8u);
+    }
     return true;
 }
 
@@ -6136,6 +6280,7 @@ void Rasterizer::RegisterMemory(VAddr addr, u64 size) {
 }
 
 void Rasterizer::UnmapMemory(VAddr addr, u64 size) {
+    buffer_cache.NoteGameMemoryUnmapped(addr, size); // 0.4.6 beta 12: leaves the calls' watch
     buffer_cache.NotePreuploadMapping(addr, size, false);
     buffer_cache.UnmapInPlace(addr, size);
     buffer_cache.DropTwins(addr, size);

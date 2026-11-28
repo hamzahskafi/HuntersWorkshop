@@ -1,0 +1,207 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// 0.4.6 beta 19 (vk_draw_pipe.h, docs/stage-a-cost.md item 2): the draw pipe's hand-over with the
+// fence every 8 packets, with real threads. Stage A commits packets in bursts with pauses long
+// enough for stage B to go to sleep between them. Checked: every packet runs, in order; a burst
+// ended by Publish (as stage A does before it goes idle or waits) runs at once, with no late wake;
+// a burst left without one still runs at once, as the hand-over sees stage B asleep (and would
+// within the sleep's check interval if it didn't); Drain and WaitForPacket return with everything
+// before them run.
+#include "video_core/renderer_vulkan/vk_draw_pipe.h"
+
+#include <chrono>
+#include <cstdio>
+#include <algorithm>
+#include <random>
+#include <thread>
+
+// What the draw pipe's header reaches outside it (the engine's logger and assert handler, the
+// roles' clock on Windows), as the test has no engine library.
+namespace Common {
+void SetCurrentThreadName(const char*) {}
+namespace Log {
+bool ShouldLog(Level) {
+    return false;
+}
+void Write(std::string_view, Level, const char*, int, const char*, std::string&&) {}
+} // namespace Log
+} // namespace Common
+void assert_fail_impl() {
+    std::abort();
+}
+extern "C" std::uint64_t runtime_tsc_frequency() {
+    return 3'000'000'000ull;
+}
+
+namespace {
+
+int g_fail = 0;
+void check(bool ok, const char* what) {
+    if (!ok) {
+        ++g_fail;
+        std::printf("FAIL: %s\n", what);
+    }
+}
+
+using Clock = std::chrono::steady_clock;
+struct Payload {
+    u64 number;
+    Clock::rep committed;
+    u32 slow_us; ///< the handler takes this long (stage A's waits sleep behind it)
+};
+std::atomic<u64> g_run{0};
+std::atomic<u64> g_out_of_order{0};
+std::atomic<long long> g_worst_us{0};
+
+void Handler(void*, const u8* packet, u32 size) {
+    if (size < sizeof(Payload)) {
+        return;
+    }
+    Payload p;
+    std::memcpy(&p, packet, sizeof p);
+    if (p.number != g_run.load(std::memory_order_relaxed) + 1) {
+        g_out_of_order.fetch_add(1, std::memory_order_relaxed);
+    }
+    if (p.slow_us) {
+        std::this_thread::sleep_for(std::chrono::microseconds(p.slow_us));
+    }
+    g_run.store(p.number, std::memory_order_release);
+    const long long us = std::chrono::duration_cast<std::chrono::microseconds>(
+                             Clock::now() - Clock::time_point(Clock::duration(p.committed)))
+                             .count();
+    long long worst = g_worst_us.load(std::memory_order_relaxed);
+    while (us > worst && !g_worst_us.compare_exchange_weak(worst, us)) {
+    }
+}
+
+u64 g_next = 0;
+void Send(Vulkan::DrawPipe& pipe, u32 slow_us = 0) {
+    u8* out = pipe.Begin(sizeof(Payload));
+    const Payload p{++g_next, Clock::now().time_since_epoch().count(), slow_us};
+    std::memcpy(out, &p, sizeof p);
+    pipe.Commit(sizeof p);
+}
+
+bool WaitRun(u64 number, int ms) {
+    const auto until = Clock::now() + std::chrono::milliseconds(ms);
+    while (g_run.load(std::memory_order_acquire) < number) {
+        if (Clock::now() > until) {
+            return false;
+        }
+        std::this_thread::sleep_for(std::chrono::microseconds(50));
+    }
+    return true;
+}
+
+} // namespace
+
+int main() {
+    Vulkan::DrawPipe pipe(&Handler, nullptr);
+    std::mt19937 rng{12345};
+
+    // Bursts ended by Publish, with pauses past stage B's spin (it sleeps between them).
+    for (int burst = 0; burst < 200; ++burst) {
+        const int n = 1 + static_cast<int>(rng() % 20);
+        g_worst_us = 0;
+        for (int i = 0; i < n; ++i) {
+            Send(pipe);
+        }
+        pipe.Publish();
+        if (!WaitRun(g_next, 1000)) {
+            check(false, "a published burst runs");
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::microseconds(300 + rng() % 700));
+    }
+    check(pipe.late_wakes.load() == 0, "published bursts need no late wake");
+    check(g_out_of_order.load() == 0, "packets run in order");
+
+    // A burst stage A leaves without Publish while stage B sleeps: the hand-over sees the sleep.
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    const u64 before = g_next;
+    g_worst_us = 0;
+    Send(pipe);
+    Send(pipe);
+    Send(pipe);
+    check(WaitRun(before + 3, 100), "an unpublished burst still runs");
+    std::printf("  an unpublished burst after stage B slept: run within %lld us, late wakes %llu\n",
+                static_cast<long long>(g_worst_us.load()),
+                static_cast<unsigned long long>(pipe.late_wakes.load()));
+    check(g_worst_us.load() < 20000, "an unpublished burst runs within the sleep's check interval");
+    check(pipe.late_wakes.load() == 0, "a sleep announced before the burst is seen by the hand-over");
+
+    // Drains and waits for a packet, back to back with commits.
+    for (int round = 0; round < 2000; ++round) {
+        const int n = 1 + static_cast<int>(rng() % 12);
+        for (int i = 0; i < n; ++i) {
+            Send(pipe);
+        }
+        if (round & 1) {
+            pipe.Drain();
+            if (g_run.load(std::memory_order_acquire) != g_next) {
+                check(false, "Drain returns with every packet run");
+                break;
+            }
+        } else {
+            const u64 number = pipe.NextPacket() - 1;
+            pipe.WaitForPacket(number, Vulkan::DrawPipe::ReasonConstRam);
+            if (!pipe.ReachedPacket(number)) {
+                check(false, "WaitForPacket returns with its packet run");
+                break;
+            }
+        }
+        if (round % 97 == 0) {
+            std::this_thread::sleep_for(std::chrono::microseconds(400));
+        }
+    }
+    check(g_out_of_order.load() == 0, "packets run in order under drains");
+
+    // 0.4.6 beta 20 (item 7): stage A sleeping behind slow packets, woken by stage B's count
+    // without a fence a packet (the process-wide fence on stage A's side). A lost wake would leave
+    // a wait to its end: none may take much longer than the packets it waits for.
+    std::printf("  stage B's count %s\n", Vulkan::DrawPipe::PlainCount()
+                                               ? "without a fence (a process-wide fence when stage A sleeps)"
+                                               : "fenced (no process-wide fence here)");
+    const u64 sleeps_before = pipe.sleeps;
+    long long worst_extra_us = 0;
+    for (int round = 0; round < 300; ++round) {
+        const u32 slow = 700 + static_cast<u32>(rng() % 1500);
+        const int n = 1 + static_cast<int>(rng() % 3);
+        for (int i = 0; i < n; ++i) {
+            Send(pipe, slow);
+        }
+        if (rng() % 3 == 0) {
+            Send(pipe); // a quick one after: stage B sees the waiter at its next packet too
+        }
+        const auto start = Clock::now();
+        if (round & 1) {
+            pipe.Drain();
+        } else {
+            const u64 number = pipe.NextPacket() - 1;
+            pipe.WaitForPacket(number, Vulkan::DrawPipe::ReasonConstRam);
+        }
+        const long long took =
+            std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - start).count();
+        worst_extra_us = std::max(worst_extra_us, took - static_cast<long long>(n) * slow);
+        if (g_run.load(std::memory_order_acquire) != g_next) {
+            check(false, "a wait behind slow packets returns with them run");
+            break;
+        }
+    }
+    const u64 slept = pipe.sleeps - sleeps_before;
+    std::printf("  behind slow packets: stage A slept %llu times, worst wait past its packets %lld us\n",
+                static_cast<unsigned long long>(slept), worst_extra_us);
+    check(slept >= 100, "stage A slept behind slow packets");
+    std::printf("  stage A's missed wakes (a packet run, no wake): %llu\n",
+                static_cast<unsigned long long>(pipe.stage_a_missed_wakes.load()));
+    check(pipe.stage_a_missed_wakes.load() == 0, "stage B woke every sleeping stage A");
+    check(worst_extra_us < 50000, "no wake was lost (a wait ends with its packets)");
+    pipe.Drain();
+    if (g_fail) {
+        std::printf("draw-pipe-handover-test: %d failed\n", g_fail);
+        return 1;
+    }
+    std::printf("draw-pipe-handover-test: ok (%llu packets, late wakes %llu)\n",
+                static_cast<unsigned long long>(g_next),
+                static_cast<unsigned long long>(pipe.late_wakes.load()));
+    return 0;
+}

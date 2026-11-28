@@ -9,12 +9,14 @@
 #include "bbport_freeze.h"
 #include "bbport_platform.h"
 #include "bbport_toggles.h"
+#include "engine/gx_resources.h"
 #include "engine/loading.h"
 
 #ifdef _WIN32
 #include <windows.h>
 #include <tlhelp32.h>
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdio>
@@ -30,6 +32,33 @@ extern "C" void runtime_blocked_report(const char* prefix);
 namespace BbFreeze {
 namespace {
 std::atomic<long long> last_flip_ms{0};
+
+// 0.4.6 beta 4: the engine's own texture work, as running totals at each flip, so a hitch report
+// says what of it fell between the last frame and the late one.
+struct OwnWork {
+    std::uint64_t build_ns = 0, build_images = 0, registered = 0, create_ns = 0, refresh_ns = 0, upload = 0;
+    // 0.4.6 beta 5: the buffer cache's sparse binds (calls, ranges, ns).
+    std::uint64_t bind_calls = 0, bind_ranges = 0, bind_ns = 0;
+    // 0.4.6 beta 5: images a draw made (not prepared ahead), by the game resource at their memory.
+    std::array<std::uint64_t, std::size_t(BbEngine::GxResources::Owner::kCount)> draw_made{};
+};
+OwnWork CurrentOwnWork() {
+    OwnWork w;
+    BbEngine::GxResources::BuildPassTotals(w.build_ns, w.build_images);
+    for (std::size_t i = 0; i < w.draw_made.size(); ++i) {
+        w.draw_made[i] = BbEngine::GxResources::DrawMadeTotal(BbEngine::GxResources::Owner(i));
+    }
+    w.registered = BbStats::images_registered.load(std::memory_order_relaxed);
+    w.create_ns = BbStats::t_image_create.load(std::memory_order_relaxed);
+    w.refresh_ns = BbStats::t_refresh.load(std::memory_order_relaxed);
+    w.upload = BbStats::image_upload_bytes.load(std::memory_order_relaxed);
+    w.bind_calls = BbStats::sparse_bind_calls.load(std::memory_order_relaxed);
+    w.bind_ranges = BbStats::sparse_bind_ranges.load(std::memory_order_relaxed);
+    w.bind_ns = BbStats::sparse_bind_ns.load(std::memory_order_relaxed);
+    return w;
+}
+std::mutex own_work_mutex;
+OwnWork own_work_at_flip;
 std::once_flag started;
 std::mutex reporter_mutex;
 std::function<void()> state_reporter;
@@ -392,6 +421,7 @@ void HitchWatch() {
         SetThreadDescription(GetCurrentThread(), L"bb:HitchWatch");
         int reports = 0;
         long long reported_flip = -1, last_report = -kHitchGapMs, quiet_until = NowMs() + kHitchQuietStartMs;
+        OwnWork hitch_start;
         bool open = false;
         for (;;) {
             std::this_thread::sleep_for(std::chrono::milliseconds(2));
@@ -400,8 +430,42 @@ void HitchWatch() {
                 quiet_until = std::max(quiet_until, now + kHitchQuietAfterLoadMs);
             }
             if (open && flip != reported_flip) {
-                std::printf("== Hitch %d: the next frame came %lld ms after the last one\n", reports,
-                            flip - reported_flip);
+                // Up to the late frame's flip (taken there, NoteFlip).
+                OwnWork end;
+                {
+                    std::scoped_lock lock{own_work_mutex};
+                    end = own_work_at_flip;
+                }
+                std::printf("== Hitch %d: the next frame came %lld ms after the last one (the report itself "
+                            "stopped the threads for part of it); meanwhile the texture cache registered %llu "
+                            "images, %llu of them prepared when the game created them (%.1f ms on the GPU "
+                            "thread), and uploaded %.1f MiB; image creation %.1f ms, refreshes %.1f ms "
+                            "(timed with BB_FRAME_STATS=1)\n",
+                            reports, flip - reported_flip,
+                            (unsigned long long)(end.registered - hitch_start.registered),
+                            (unsigned long long)(end.build_images - hitch_start.build_images),
+                            double(end.build_ns - hitch_start.build_ns) / 1e6,
+                            double(end.upload - hitch_start.upload) / (1024.0 * 1024.0),
+                            double(end.create_ns - hitch_start.create_ns) / 1e6,
+                            double(end.refresh_ns - hitch_start.refresh_ns) / 1e6);
+                std::string drawn;
+                for (std::size_t i = 0; i < end.draw_made.size(); ++i) {
+                    if (const std::uint64_t n = end.draw_made[i] - hitch_start.draw_made[i]) {
+                        drawn += (drawn.empty() ? "" : ", ") + std::to_string(n) + " " +
+                                 BbEngine::GxResources::OwnerName(BbEngine::GxResources::Owner(i));
+                    }
+                }
+                if (!drawn.empty()) {
+                    std::printf("   images draws made in it, by the game resource at their memory: %s\n",
+                                drawn.c_str());
+                }
+                if (end.bind_calls != hitch_start.bind_calls) {
+                    std::printf("   the game's data in VRAM: %llu sparse bind calls (%llu ranges bound or unbound), "
+                                "%.1f ms in the driver\n",
+                                (unsigned long long)(end.bind_calls - hitch_start.bind_calls),
+                                (unsigned long long)(end.bind_ranges - hitch_start.bind_ranges),
+                                double(end.bind_ns - hitch_start.bind_ns) / 1e6);
+                }
                 std::fflush(stdout);
                 open = false;
             }
@@ -412,6 +476,10 @@ void HitchWatch() {
             reported_flip = flip;
             last_report = now;
             open = true;
+            {
+                std::scoped_lock lock{own_work_mutex};
+                hitch_start = own_work_at_flip; // at the last frame before the hitch
+            }
             HitchReport(++reports, now - flip, limit_ms);
         }
     }).detach();
@@ -443,6 +511,11 @@ void Watch() {
 } // namespace
 
 void NoteFlip() {
+    {
+        const OwnWork work = CurrentOwnWork();
+        std::scoped_lock lock{own_work_mutex};
+        own_work_at_flip = work;
+    }
     last_flip_ms.store(NowMs(), std::memory_order_relaxed);
     std::call_once(started, [] {
         Watch();

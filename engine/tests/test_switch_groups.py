@@ -52,8 +52,7 @@ def run_sh_diag_parts():
 class SwitchGroupTests(unittest.TestCase):
     def test_bb_start_and_run_sh_hold_the_same_table(self):
         start = bb_start_groups()
-        self.assertEqual(set(start), {'BB_SAFE_MODE', 'BB_FAST_DRAWS', 'BB_COMPILE_SKIP', 'BB_VRAM_BUDGET',
-                                      'BB_SYNC'})
+        self.assertEqual(set(start), {'BB_SAFE_MODE', 'BB_FAST_DRAWS', 'BB_COMPILE_SKIP', 'BB_SYNC'})
         self.assertEqual(start, run_sh_groups())
 
     def expand(self, **env):

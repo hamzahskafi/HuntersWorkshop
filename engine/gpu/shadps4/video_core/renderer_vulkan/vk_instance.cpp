@@ -985,6 +985,49 @@ void Instance::CollectDeviceParameters() {
     std::printf("GPU: %s%s, driver %s (%s), Vulkan %s\n", model_name.c_str(),
                 IsIntegrated() ? " (integrated)" : "", driver_version.c_str(), vendor_name.c_str(),
                 api_version.c_str());
+    // 0.4.6 beta 17: the GPU's identity in numbers, its parts checked against each other and against
+    // an extension only AMD's drivers list: a spoof (OptiScaler.ini's [Spoofing] Vulkan) shows here.
+    // The engine's choices for the GPU (its shader profile) follow the driver's id.
+    {
+        const auto by_vendor_id = [](u32 id) -> const char* {
+            switch (id) {
+            case 0x10DE: return "NVIDIA";
+            case 0x1002: return "AMD";
+            case 0x8086: return "Intel";
+            default: return nullptr;
+            }
+        };
+        const auto by_driver_id = [](vk::DriverId id) -> const char* {
+            switch (id) {
+            case vk::DriverId::eNvidiaProprietary:
+            case vk::DriverId::eMesaNvk: return "NVIDIA";
+            case vk::DriverId::eAmdProprietary:
+            case vk::DriverId::eAmdOpenSource:
+            case vk::DriverId::eMesaRadv: return "AMD";
+            case vk::DriverId::eIntelProprietaryWindows:
+            case vk::DriverId::eIntelOpenSourceMESA: return "Intel";
+            default: return nullptr;
+            }
+        };
+        const char* const by_id = by_vendor_id(properties.vendorID);
+        const char* const by_driver = by_driver_id(driver_id);
+        const char* const by_extensions =
+            std::ranges::find(available_extensions, std::string{VK_AMD_SHADER_CORE_PROPERTIES_EXTENSION_NAME}) !=
+                    available_extensions.end()
+                ? "AMD"
+                : nullptr;
+        const auto named = [](const char* vendor) { return vendor ? vendor : "unknown"; };
+        std::printf("GPU: identity: vendor 0x%04x (%s), device 0x%04x, driver %s (id %u), driver version 0x%08x\n",
+                    properties.vendorID, named(by_id), properties.deviceID, vk::to_string(driver_id).c_str(),
+                    unsigned(driver_id), properties.driverVersion);
+        const auto differ = [](const char* a, const char* b) { return a && b && std::strcmp(a, b) != 0; };
+        if (differ(by_id, by_driver) || differ(by_id, by_extensions) || differ(by_driver, by_extensions)) {
+            std::printf("GPU: this identity disagrees with itself (vendor ID: %s, driver: %s, extensions: %s): "
+                        "spoofed, as OptiScaler.ini's [Spoofing] Vulkan=true does; the engine's choices for "
+                        "the GPU follow the driver's id (%s); the engine's DLSS needs no spoofing\n",
+                        named(by_id), named(by_driver), named(by_extensions), named(by_driver));
+        }
+    }
     // 0.4.4 beta 20: the wave size the pipelines ask for (64, every stage) against the stages the
     // driver allows a required size on (the engine map's shader-3). Said, not changed: graphics
     // shaders count on 64 lanes, so dropping it where it is not allowed needs the recompiler to

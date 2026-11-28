@@ -21,6 +21,8 @@ typedef SRWLOCK HostMutex;
 static inline void host_mutex_init(HostMutex *m) { InitializeSRWLock(m); }
 static inline void host_lock(HostMutex *m) { AcquireSRWLockExclusive(m); }
 static inline void host_unlock(HostMutex *m) { ReleaseSRWLockExclusive(m); }
+/* 1 when taken. */
+static inline int host_trylock(HostMutex *m) { return TryAcquireSRWLockExclusive(m) != 0; }
 
 /* SRW locks are not recursive: the owner and depth make this one so. */
 typedef struct { SRWLOCK lock; DWORD owner; unsigned depth; } HostRecursiveMutex;
@@ -44,6 +46,8 @@ static inline void host_read_lock(HostRwlock *l) { AcquireSRWLockShared(l); }
 static inline void host_read_unlock(HostRwlock *l) { ReleaseSRWLockShared(l); }
 static inline void host_write_lock(HostRwlock *l) { AcquireSRWLockExclusive(l); }
 static inline void host_write_unlock(HostRwlock *l) { ReleaseSRWLockExclusive(l); }
+static inline int host_try_read_lock(HostRwlock *l) { return TryAcquireSRWLockShared(l) != 0; }
+static inline int host_try_write_lock(HostRwlock *l) { return TryAcquireSRWLockExclusive(l) != 0; }
 
 typedef CONDITION_VARIABLE HostCond;
 #define HOST_COND_INIT CONDITION_VARIABLE_INIT
@@ -67,6 +71,51 @@ static inline void host_thread_set_high_priority(int high) {
     SetThreadPriority(GetCurrentThread(), high ? THREAD_PRIORITY_HIGHEST : THREAD_PRIORITY_NORMAL);
 }
 typedef HANDLE HostThread;
+
+/* 0.4.6 beta 18: a thread parks on a 32-bit word of its own while it holds `expected`, and another
+ * wakes it after changing the word (WaitOnAddress / WakeByAddress: in-process, no kernel object; they
+ * spin briefly before sleeping). Returns 0 when woken or the word differs, ETIMEDOUT after `ns`
+ * (0: no limit; Windows waits in whole milliseconds, so it is rounded up). Spurious returns happen,
+ * and a wake can reach a word whose waiter has already gone (harmless): callers check the word. Looked
+ * up at run time, as MinGW declares them only for newer targets. */
+typedef BOOL (WINAPI *HostWaitOnAddress)(volatile VOID *, PVOID, SIZE_T, DWORD);
+typedef VOID (WINAPI *HostWakeByAddress)(PVOID);
+static inline HMODULE host_synch_module(void) {
+    HMODULE m = GetModuleHandleW(L"api-ms-win-core-synch-l1-2-0.dll");
+    return m ? m : GetModuleHandleW(L"kernelbase.dll");
+}
+static inline HostWaitOnAddress host_wait_on_address(void) {
+    static HostWaitOnAddress fn;
+    HostWaitOnAddress f = __atomic_load_n(&fn, __ATOMIC_ACQUIRE);
+    if (!f) {
+        HMODULE m = host_synch_module();
+        f = m ? (HostWaitOnAddress)(void *)GetProcAddress(m, "WaitOnAddress") : NULL;
+        __atomic_store_n(&fn, f, __ATOMIC_RELEASE);
+    }
+    return f;
+}
+static inline HostWakeByAddress host_wake_by_address(int all) {
+    static HostWakeByAddress single, every;
+    HostWakeByAddress *slot = all ? &every : &single;
+    HostWakeByAddress f = __atomic_load_n(slot, __ATOMIC_ACQUIRE);
+    if (!f) {
+        HMODULE m = host_synch_module();
+        f = m ? (HostWakeByAddress)(void *)GetProcAddress(m, all ? "WakeByAddressAll" : "WakeByAddressSingle") : NULL;
+        __atomic_store_n(slot, f, __ATOMIC_RELEASE);
+    }
+    return f;
+}
+static inline int host_park(volatile uint32_t *word, uint32_t expected, uint64_t ns) {
+    DWORD ms = INFINITE;
+    if (ns) {
+        const uint64_t m = (ns + 999999) / 1000000;
+        ms = m >= INFINITE ? INFINITE - 1 : (DWORD)m;
+    }
+    if (host_wait_on_address()((volatile VOID *)word, &expected, sizeof expected, ms)) return 0;
+    return GetLastError() == ERROR_TIMEOUT ? ETIMEDOUT : 0;
+}
+static inline void host_unpark_one(volatile uint32_t *word) { host_wake_by_address(0)((PVOID)word); }
+static inline void host_unpark_all(volatile uint32_t *word) { host_wake_by_address(1)((PVOID)word); }
 #else
 #include <pthread.h>
 #include <sched.h>
@@ -76,6 +125,7 @@ typedef pthread_mutex_t HostMutex;
 static inline void host_mutex_init(HostMutex *m) { pthread_mutex_init(m, NULL); }
 static inline void host_lock(HostMutex *m) { pthread_mutex_lock(m); }
 static inline void host_unlock(HostMutex *m) { pthread_mutex_unlock(m); }
+static inline int host_trylock(HostMutex *m) { return pthread_mutex_trylock(m) == 0; }
 
 typedef pthread_mutex_t HostRecursiveMutex;
 #define HOST_RECURSIVE_MUTEX_INIT PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP
@@ -88,6 +138,8 @@ static inline void host_read_lock(HostRwlock *l) { pthread_rwlock_rdlock(l); }
 static inline void host_read_unlock(HostRwlock *l) { pthread_rwlock_unlock(l); }
 static inline void host_write_lock(HostRwlock *l) { pthread_rwlock_wrlock(l); }
 static inline void host_write_unlock(HostRwlock *l) { pthread_rwlock_unlock(l); }
+static inline int host_try_read_lock(HostRwlock *l) { return pthread_rwlock_tryrdlock(l) == 0; }
+static inline int host_try_write_lock(HostRwlock *l) { return pthread_rwlock_trywrlock(l) == 0; }
 
 typedef pthread_cond_t HostCond;
 #define HOST_COND_INIT PTHREAD_COND_INITIALIZER
@@ -102,6 +154,29 @@ static inline void host_yield(void) { sched_yield(); }
 /* Raising a thread's priority needs privileges on Linux: left to the scheduler. */
 static inline void host_thread_set_high_priority(int high) { (void)high; }
 typedef pthread_t HostThread;
+
+/* 0.4.6 beta 18: parking on a word (see the Windows half): a private futex. */
+#include <linux/futex.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+static inline int host_park(volatile uint32_t *word, uint32_t expected, uint64_t ns) {
+    struct timespec relative, *limit = NULL;
+    if (ns) {
+        relative.tv_sec = (time_t)(ns / 1000000000);
+        relative.tv_nsec = (long)(ns % 1000000000);
+        limit = &relative;
+    }
+    if (syscall(SYS_futex, (uint32_t *)word, FUTEX_WAIT_PRIVATE, expected, limit, NULL, 0) == -1 &&
+        errno == ETIMEDOUT)
+        return ETIMEDOUT;
+    return 0;
+}
+static inline void host_unpark_one(volatile uint32_t *word) {
+    syscall(SYS_futex, (uint32_t *)word, FUTEX_WAKE_PRIVATE, 1, NULL, NULL, 0);
+}
+static inline void host_unpark_all(volatile uint32_t *word) {
+    syscall(SYS_futex, (uint32_t *)word, FUTEX_WAKE_PRIVATE, 0x7fffffff, NULL, NULL, 0);
+}
 #endif
 
 /* A thread of the runtime (not a guest thread: runtime_thread.c creates those). stack: bytes,

@@ -15,7 +15,15 @@
 // before exec; Vulkan calls failing then are not errors: this thread waits for the exec instead.
 extern "C" __attribute__((weak)) volatile int runtime_restarting; // absent in the tests
 
+// 0.4.6 beta 17: set while this thread runs a shader translation queued ahead (PipelineCache::RunAhead).
+// Its inputs are a draw-prep worker's view, which can differ from the GPU thread's: a failed assertion
+// there ends the job, not the game (the job is thrown out and the GPU thread translates as before).
+thread_local bool bb_assert_throws = false;
+
 void assert_fail_impl() {
+    if (bb_assert_throws) {
+        throw std::runtime_error("assertion failed in a translation queued ahead");
+    }
     if (&runtime_restarting && runtime_restarting) {
         for (;;) {
             std::this_thread::sleep_for(std::chrono::seconds(1));

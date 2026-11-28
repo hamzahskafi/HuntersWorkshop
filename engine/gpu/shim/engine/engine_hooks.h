@@ -21,6 +21,18 @@ struct Hook {
 // All hooks are prepared and checked before any entry is changed. Called at loader startup.
 bool Prepare(Hook& hook, std::uint8_t* image, std::size_t size, std::size_t offset,
              std::span<const std::uint8_t> expected, Callback callback);
+// As Prepare, with `displaced` run in the stub in place of the `expected` bytes the site loses (the
+// same instructions re-encoded, e.g. a rip-relative lea as a movabs of its absolute target); the stub
+// resumes after the expected bytes.
+bool PrepareDisplaced(Hook& hook, std::uint8_t* image, std::size_t size, std::size_t offset,
+                      std::span<const std::uint8_t> expected, std::span<const std::uint8_t> displaced,
+                      Callback callback);
+// A return trampoline (0.4.5 beta 15): a Prepare callback that wants the hooked method's result sets
+// the method's return address (saved[6]) to this stub, after keeping the real one. When the method
+// returns, `after` is called with its result and returns the real return address, where the stub goes
+// on (rax and rdx as the method left them). Null when no page could be had.
+using After = std::uint64_t (__attribute__((sysv_abi)) *)(std::uint64_t);
+std::uint8_t* ReturnStub(After after);
 // The site jumps straight to `target`, a host function with the game's calling convention
 // (sysv_abi) that takes the game function's place whole: no stub, no registers saved, for a
 // function the game calls too often for the stub's cost. Committed and discarded as Prepare's.

@@ -42,6 +42,7 @@ public:
         gpu.Clear();
         writeable.Fill();
         readable.Fill();
+        calls.Clear();
     }
     explicit RegionManager() = default;
 
@@ -81,7 +82,10 @@ public:
      * @param dirty_addr    Base address to mark or unmark as modified
      * @param size          Size in bytes to mark or unmark as modified
      */
-    template <Type type, bool enable>
+    /// 0.4.6 beta 5: `count` false for the cache's own marking (its VRAM copy left, the pages handed
+    /// back to the game): not a write of the game's, so not counted as its write faults or as a
+    /// rewrite of pre-uploaded data (beta 4 logs: those were most of the "write faults" at loads).
+    template <Type type, bool enable, bool count = true>
     void ChangeRegionState(u64 dirty_addr, u64 size) noexcept(type == Type::GPU) {
         RENDERER_TRACE;
         const size_t offset = dirty_addr - cpu_addr;
@@ -93,7 +97,7 @@ public:
         }
 
         RegionBits& bits = GetRegionBits<type>();
-        if constexpr (type == Type::CPU && enable) {
+        if constexpr (type == Type::CPU && enable && count) {
             CountWriteFaults(start_page, end_page);
             last_cpu_write_frame = BbStats::frame_number.load(std::memory_order_relaxed);
             NotePreuploadChurn();
@@ -105,8 +109,14 @@ public:
         }
         if constexpr (type == Type::CPU) {
             UpdateProtection<!enable, false>();
-        } else if (EmulatorSettings.GetReadbacksMode() == GpuReadbacksMode::Precise) {
-            UpdateProtection<enable, true>();
+        } else {
+            if (EmulatorSettings.GetReadbacksMode() == GpuReadbacksMode::Precise) {
+                UpdateProtection<enable, true>();
+            }
+            // 0.4.6 beta 12: a page the GPU wrote leaves the calls' writable set (and comes back).
+            if (calls.Any()) {
+                ApplyWriteProtection();
+            }
         }
     }
 
@@ -165,8 +175,13 @@ public:
             if constexpr (type == Type::CPU) {
                 KeepHotPagesModified(start_page, end_page);
                 UpdateProtection<true, false>();
-            } else if (EmulatorSettings.GetReadbacksMode() != GpuReadbacksMode::Disabled) {
-                UpdateProtection<false, true>();
+            } else {
+                if (EmulatorSettings.GetReadbacksMode() != GpuReadbacksMode::Disabled) {
+                    UpdateProtection<false, true>();
+                }
+                if (calls.Any()) {
+                    ApplyWriteProtection(); // 0.4.6 beta 12: back to writable once the GPU's data is down
+                }
             }
         }
 
@@ -221,9 +236,166 @@ public:
         preupload_frame = 0;
     }
 
+    /// 0.4.6 beta 12 (BB_WATCH_GAME_BUFFERS): the pages of a live GX buffer are watched by the game's
+    /// calls (`calls`), not by protection: writable after an upload (WriteTarget: cpu | (calls & ~gpu)),
+    /// but for pages the GPU wrote. Only pages wholly inside the buffer; one it shares with other memory
+    /// stays watched. The caller holds `lock`.
+    ///
+    /// Marks [offset, offset + size) to upload, but for pages the GPU wrote (they keep their handling:
+    /// a CPU write there faults, the GPU's data is read back first). Never counted as the game's write
+    /// faults. Safe on its own: a page to upload only costs an upload at its next use.
+    void MarkToUploadButGpu(u64 offset, u64 size) {
+        const auto [start, end] = Span(offset, size, false);
+        if (start >= end) {
+            return;
+        }
+        RegionBits range{};
+        range.SetRange(start, end);
+        cpu |= range & ~gpu;
+        ApplyWriteProtection();
+    }
+    /// 0.4.6 beta 13: the engine stored at [offset, offset + size) through the backing view (a label),
+    /// which never faults: its pages holding an uploaded copy (neither to upload nor the GPU's) are
+    /// marked to upload, as a fault would have marked them. Returns the pages marked and the pages the
+    /// GPU wrote there (left as they are: an upload would put older bytes over the GPU's).
+    std::pair<u32, u32> MarkStoreUploaded(u64 offset, u64 size) {
+        const auto [start, end] = Span(offset, size, false);
+        if (start >= end) {
+            return {0, 0};
+        }
+        RegionBits range{};
+        range.SetRange(start, end);
+        const RegionBits uploaded = range & ~cpu & ~gpu;
+        const u32 gpu_pages = static_cast<u32>(CountPages(range & gpu));
+        if (!uploaded.Any()) {
+            return {0, gpu_pages};
+        }
+        cpu |= uploaded;
+        ApplyWriteProtection();
+        return {static_cast<u32>(CountPages(uploaded)), gpu_pages};
+    }
+    /// 0.4.6 beta 13 (diagnostics, the write fault breakdown): this cache's watch on the page at
+    /// `offset`: 2 the GPU's data (a write faults to read it back first), 1 an uploaded copy, 0 none (a
+    /// page to upload is writable). Read without the lock: the faulting thread may hold it.
+    u8 PageWatch(u64 offset) const noexcept {
+        const size_t page = std::min<size_t>(SanitizeAddress(offset) / TRACKER_BYTES_PER_PAGE,
+                                             NUM_PAGES_PER_REGION - 1);
+        if (gpu.Get(page)) {
+            return 2;
+        }
+        return cpu.Get(page) ? 0 : 1;
+    }
+    /// A GX buffer made at [offset, offset + size): marked to upload (MarkToUploadButGpu), and its inside
+    /// pages kept writable. Made with its data, the GPU's older data on its inside pages is dropped (the
+    /// creation's copy overwrote it). Returns how many pages became `calls`.
+    s64 CallsCreate(u64 offset, u64 size, bool with_data) {
+        const auto [start, end] = Span(offset, size, false);
+        if (start >= end) {
+            return 0;
+        }
+        RegionBits range{};
+        range.SetRange(start, end);
+        RegionBits inner{};
+        if (const auto [inner_start, inner_end] = Span(offset, size, true); inner_start < inner_end) {
+            inner.SetRange(inner_start, inner_end);
+        }
+        if (with_data && (gpu & inner).Any()) {
+            gpu &= ~inner;
+            if (EmulatorSettings.GetReadbacksMode() != GpuReadbacksMode::Disabled) {
+                UpdateProtection<false, true>();
+            }
+        }
+        cpu |= range & ~gpu;
+        const s64 added = CountPages(inner & ~calls);
+        calls |= inner;
+        ApplyWriteProtection();
+        return added;
+    }
+    /// 0.4.6 beta 15 part 4: a create call is about to copy over [offset, offset + size), whole pages
+    /// (the copy writes every byte of them): the GPU's older data there is dropped without a readback
+    /// and the pages are to upload, so writable, as a write fault on each would have left them (less
+    /// its readback). Returns {pages whose GPU data was dropped, pages made writable}.
+    std::pair<u32, u32> CopyComing(u64 offset, u64 size) {
+        const auto [start, end] = Span(offset, size, true);
+        if (start >= end) {
+            return {0, 0};
+        }
+        RegionBits inner{};
+        inner.SetRange(start, end);
+        const RegionBits dropped = gpu & inner;
+        const RegionBits watched = inner & ~cpu & ~calls;
+        if (dropped.Any()) {
+            gpu &= ~inner;
+            if (EmulatorSettings.GetReadbacksMode() != GpuReadbacksMode::Disabled) {
+                UpdateProtection<false, true>();
+            }
+        }
+        cpu |= inner;
+        ApplyWriteProtection();
+        return {static_cast<u32>(CountPages(dropped)), static_cast<u32>(CountPages(watched))};
+    }
+    /// The buffer no longer owns [offset, offset + size) (released, unmapped, or something newer made
+    /// over it): its pages (`all`: every page in range, else the inside ones) leave `calls`, and the
+    /// range is marked to upload but for pages the GPU wrote. Returns how many pages left `calls`.
+    s64 CallsRelease(u64 offset, u64 size, bool all) {
+        const auto [start, end] = Span(offset, size, false);
+        if (start >= end) {
+            return 0;
+        }
+        RegionBits range{};
+        range.SetRange(start, end);
+        RegionBits leave{};
+        if (all) {
+            leave = range;
+        } else if (const auto [inner_start, inner_end] = Span(offset, size, true); inner_start < inner_end) {
+            leave.SetRange(inner_start, inner_end);
+        }
+        const s64 removed = CountPages(calls & leave);
+        calls &= ~leave;
+        cpu |= range & ~gpu;
+        ApplyWriteProtection();
+        return removed;
+    }
+
     LockType lock;
 
 private:
+    /// 0.4.6 beta 12: the pages [offset, offset + size) touches (`inside`: only those wholly in it).
+    static std::pair<size_t, size_t> Span(u64 offset, u64 size, bool inside) {
+        const u64 first = SanitizeAddress(offset);
+        const u64 last = SanitizeAddress(offset + size);
+        size_t start = inside ? Common::DivCeil(first, TRACKER_BYTES_PER_PAGE) : first / TRACKER_BYTES_PER_PAGE;
+        size_t end = inside ? last / TRACKER_BYTES_PER_PAGE : Common::DivCeil(last, TRACKER_BYTES_PER_PAGE);
+        end = std::min<size_t>(end, NUM_PAGES_PER_REGION);
+        start = std::min(start, end);
+        return {start, end};
+    }
+    static s64 CountPages(const RegionBits& bits) {
+        s64 pages = 0;
+        for (const auto& [first, last] : bits) {
+            pages += static_cast<s64>(last - first);
+        }
+        return pages;
+    }
+    /// 0.4.6 beta 12: the writable pages: those to upload, and the calls' that hold no GPU data (a CPU
+    /// write on a page the GPU wrote still faults, its data read back first).
+    RegionBits WriteTarget() const {
+        return cpu | (calls & ~gpu);
+    }
+    /// 0.4.6 beta 12: protection brought to WriteTarget both ways (pages opened and closed).
+    void ApplyWriteProtection() {
+        const RegionBits target = WriteTarget();
+        RegionBits open = target & ~writeable;
+        RegionBits close = writeable & ~target;
+        writeable = target;
+        if (open.Any()) {
+            tracker->UpdatePageWatchersForRegion<false, false>(cpu_addr, open);
+        }
+        if (close.Any()) {
+            tracker->UpdatePageWatchersForRegion<true, false>(cpu_addr, close);
+        }
+    }
+
     /**
      * Notify tracker about changes in the CPU tracking state of a word in the buffer
      *
@@ -236,14 +408,15 @@ private:
     template <bool track, bool is_read>
     void UpdateProtection() {
         RENDERER_TRACE;
-        RegionBits mask = is_read ? (~gpu ^ readable) : (cpu ^ writeable);
+        // 0.4.6 beta 12: pages the game's calls watch stay writable (`calls`), unless the GPU wrote them.
+        RegionBits mask = is_read ? (~gpu ^ readable) : (WriteTarget() ^ writeable);
         if (mask.None()) {
             return;
         }
         if constexpr (is_read) {
             readable = ~gpu;
         } else {
-            writeable = cpu;
+            writeable = WriteTarget();
         }
         tracker->UpdatePageWatchersForRegion<track, is_read>(cpu_addr, mask);
     }
@@ -352,6 +525,8 @@ private:
     RegionBits gpu;
     RegionBits writeable;
     RegionBits readable;
+    /// 0.4.6 beta 12: pages the game's calls watch (CallsCreate), writable whatever `cpu` says.
+    RegionBits calls{};
 };
 
 } // namespace VideoCore

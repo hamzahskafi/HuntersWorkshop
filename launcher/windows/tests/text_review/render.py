@@ -44,8 +44,8 @@ DETAIL = ['effect_dynamic_shadows', 'effect_ssao', 'effect_ssr']; LOOK = ['effec
 EXTRAS = ['skip_intro', 'debug_camera', 'debug_menu']
 FIXES = ['BB_RESPAWN_DELAY_FIX', 'BB_SOUND_HACK', 'BB_OPTISCALER_COMPAT', 'BB_EFFECT_FIXES', 'BB_PS4_FPU', 'BB_RED_ZONE_FUNCTIONS',
          'BB_INTEL_TONEMAP_FIX', 'BB_SKIP_GAME_CHECK']
-EXTRA_NOW = {('Graphics', 'Sharpening (RCAS)'): "Line set by the upscaler: DLSS \"After DLSS (it has none of its own)\", AMD FSR \"FSR's own sharpening\", TAA \"After TAA\", none \"Needs an upscaler or TAA\"",
-             ('Graphics', 'Sharpening strength'): "Line set by the upscaler: AMD FSR \"Above 1 adds a second pass\", otherwise \"Higher is sharper\"",
+EXTRA_NOW = {('Graphics', 'Sharpening (RCAS)'): "\"Brings back detail that upscaling softens\", or \"Needs an upscaler or TAA\" with neither",
+             ('Graphics', 'Sharpening strength'): "\"Higher brings back more detail; too high halos edges\"",
              ('Graphics', 'DLSS model'): "Status line with Auto: \"Auto: model K at this quality\" (the model Auto picks)",
              ('Graphics', 'Anti-aliasing'): "With an upscaler the box shows \"Upscaler (DLSS)\" (or AMD FSR), greyed",
              ('Graphics', 'Upscaler'): "Status line when an upscaler is unavailable on this PC"}

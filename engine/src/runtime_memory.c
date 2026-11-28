@@ -5,6 +5,7 @@
  * encode 40-bit addresses, so host-default 0x7f... addresses would not fit. */
 #define _GNU_SOURCE
 #include "runtime.h"
+#include "gpu/bbgpu.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -70,13 +71,37 @@ static HostRwlock lock=HOST_RWLOCK_INIT;
 static __thread unsigned exclusive_depth, shared_depth;
 /* Odd while a writer holds the lock; readers' region caches are valid for one even value. */
 static uint64_t table_generation;
+/* 0.4.6 beta 20 (docs/chain-waits.md, item 3): the writer's role record. The GPU command thread
+ * (the render chain) reads the table for every constant binding; the game's threads (a lower role)
+ * write it when they map memory. A reader that finds a writer in raises it to its own priority for
+ * the rest of the write, and the wait is counted in the Roles: line. */
+static void *lock_holder;
 static void write_lock(void) {
-    if (!exclusive_depth++) { host_write_lock(&lock); __atomic_add_fetch(&table_generation,1,__ATOMIC_ACQ_REL); }
+    if (!exclusive_depth++) {
+        if (!host_try_write_lock(&lock)) {
+            bbgpu_role_contended("runtime memory map",__atomic_load_n(&lock_holder,__ATOMIC_ACQUIRE));
+            host_write_lock(&lock);
+            bbgpu_role_acquired();
+        }
+        __atomic_store_n(&lock_holder,bbgpu_role_locked(),__ATOMIC_RELEASE);
+        __atomic_add_fetch(&table_generation,1,__ATOMIC_ACQ_REL);
+    }
 }
 static void write_unlock(void) {
-    if (!--exclusive_depth) { __atomic_add_fetch(&table_generation,1,__ATOMIC_RELEASE); host_write_unlock(&lock); }
+    if (!--exclusive_depth) {
+        __atomic_add_fetch(&table_generation,1,__ATOMIC_RELEASE);
+        __atomic_store_n(&lock_holder,NULL,__ATOMIC_RELAXED);
+        host_write_unlock(&lock);
+        bbgpu_role_unlocked();
+    }
 }
-static void read_lock(void) { if (!exclusive_depth && !shared_depth++) host_read_lock(&lock); }
+static void read_lock(void) {
+    if (!exclusive_depth && !shared_depth++ && !host_try_read_lock(&lock)) {
+        bbgpu_role_contended("runtime memory map",__atomic_load_n(&lock_holder,__ATOMIC_ACQUIRE));
+        host_read_lock(&lock);
+        bbgpu_role_acquired();
+    }
+}
 static void read_unlock(void) { if (!exclusive_depth && !--shared_depth) host_read_unlock(&lock); }
 static Block blocks[LIMIT];
 static Vma *vmas; static size_t vma_count, vma_capacity;

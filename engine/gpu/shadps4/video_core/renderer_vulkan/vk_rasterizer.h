@@ -18,6 +18,7 @@
 #include "video_core/renderer_vulkan/vk_scene_resolution.h"
 #include "video_core/renderer_vulkan/vk_object_motion.h"
 #include "video_core/renderer_vulkan/vk_draw_pipe.h"
+#include "video_core/renderer_vulkan/vk_pending.h"
 #include "video_core/renderer_vulkan/vk_draw_prep.h"
 #include "video_core/renderer_vulkan/vk_temporal_upscaler.h"
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
@@ -128,6 +129,32 @@ public:
     bool InvalidateMemory(VAddr addr, u64 size, bool assume_locks = false);
     /// bbport: data written into GPU memory by a path we hear of (file reads into it): invalidated.
     void NoteAssetWrite(VAddr addr, u64 size);
+    /// 0.4.6 beta 15 part 4 (BB_COPY_NOTICE): a create call of the game's copies `size` bytes to
+    /// `addr` next (the game's thread, before the copy): its whole pages are made writable without a
+    /// readback, the images watching them told once; the first and last page keep their watch.
+    void NoteCopyComing(VAddr addr, u64 size);
+    /// 0.4.6 beta 12: guest memory this thread wrote for a GPU command (BufferCache::NoteEngineStore).
+    void NoteEngineStore(VAddr addr, u64 size) {
+        buffer_cache.NoteEngineStore(addr, size);
+    }
+    /// 0.4.6 beta 13: guest memory the engine wrote through the backing view (BufferCache::NoteBackingStore).
+    void NoteBackingStore(VAddr addr, u64 size) {
+        buffer_cache.NoteBackingStore(addr, size);
+    }
+    /// 0.4.6 beta 12: the game's calls about memory (GxResources::MemoryEvent), on the game's thread.
+    void NoteGameMemory(VAddr addr, u64 size, u8 event) {
+        buffer_cache.NoteGameMemory(addr, size, event);
+    }
+    /// 0.4.5 beta 16 (the game's thread): the game destroyed its texture at [addr, addr + size): its
+    /// images stop watching their pages before the game writes the next texture there.
+    void ReleaseDestroyedTexture(VAddr addr, u64 size) {
+        texture_cache.ReleaseDestroyed(addr, size);
+    }
+    /// 0.4.6 beta 4: a texture the game created with its data (engine/gx_resources.h, the game's
+    /// thread): its image made now (TextureCache::PrepareCreated).
+    void PrepareCreatedTexture(const BbEngine::GxResources::Ahead& job) {
+        texture_cache.PrepareCreated(job);
+    }
     /// bbport (stage A, BB_CONSTRAM_PIPE, default on): before the command processor writes guest
     /// memory with the CPU (a constant RAM dump), waits until the recording thread has run the
     /// queued packets that read those bytes (their buffer bindings, DMA), not all of them.
@@ -184,6 +211,13 @@ public:
     [[nodiscard]] bool DrawPipeIdle() const {
         return !draw_pipe || draw_pipe->Idle();
     }
+    /// Stage A, before it stops making packets for a while (idle, or a wait stage B's work may
+    /// end): every packet handed over with the fence (DrawPipe::Publish; 0.4.6 beta 19).
+    void PublishDrawPipe() {
+        if (draw_pipe && OnStageA()) {
+            draw_pipe->Publish();
+        }
+    }
     /// Stage A, end of a submission: its prepared draws stay alive until the recording thread
     /// has recorded them (instead of a drain).
     void RetireSubmission();
@@ -194,12 +228,14 @@ public:
     void NotePendingRead(VAddr address, u64 size);
     /// Before a guest-visible write: fences deferred earlier are written first.
     void WaitDeferredSignals(u32 site = BbStats::WaitOther) {
+        PublishDrawPipe(); // the deferred fences come after packets stage B may not have yet
         scheduler.WaitDeferredSignals(site);
     }
     /// bbport: before a CPU write of the command processor (WriteData, DMA): only the deferred
     /// fences it must follow (Scheduler::WaitDeferredSignalsFor, BB_FENCE_ORDER).
     void WaitDeferredSignalsFor(u32 site, VAddr address, u64 size, VAddr src = 0,
                                 u64 src_size = 0) {
+        PublishDrawPipe();
         scheduler.WaitDeferredSignalsFor(site, address, size, src, src_size);
     }
     /// bbport (stage A): a WaitRegMem was met by a fence still deferred: the command processor
@@ -785,6 +821,21 @@ private:
     };
     PendingReads pending_reads;
     PendingReads pending_write_table; ///< the same per granule for GPU writes queued (NotePendingGpuWrite)
+    /// 0.4.6 beta 19 (docs/stage-a-cost.md, item 3). The read
+    /// table answers one question, for the constant engine's dumps (WaitForPendingReads): those
+    /// write a small, fixed set of pages (the constant ring), so a read is noted only where it
+    /// touches bytes a dump has written. A dump into bytes no dump wrote before waits once for every
+    /// queued packet, and its pages join the set. Stage A only: no race.
+    DumpPages dump_pages; ///< vk_pending.h
+    /// The GPU writes stage B hasn't reached yet (vk_pending.h): a constant binding checks these
+    /// (PendingWriteOverlaps); the hashed table above holds the ones that come while it is full.
+    PendingWriteList pending_writes;
+    u64 pending_write_table_newest = 0; ///< the newest packet noted in the table (0: none)
+    /// Statistics (stage A, BB_FRAME_STATS): what the tables were asked and given.
+    struct PendingStats {
+        u64 reads_noted = 0, reads_skipped = 0, dump_ranges_new = 0;
+        u64 writes_listed = 0, writes_tabled = 0, write_lookups = 0;
+    } pending_stats;
     u64 untracked_reads_packet = 0; ///< newest packet reading guest memory it does not list
     u64 constram_waits_skipped = 0; ///< statistics: CPU writes that did not have to wait
     u64 proxy_samples = 0; ///< texture bindings that read a scene proxy (statistics)
@@ -862,6 +913,7 @@ private:
     std::atomic<u64> signals_published_upto{0};
     std::atomic<bool> signal_flush_requested{false};
     std::jthread gpu_signal_thread;
+    bool gpu_signal_started = false; ///< under gpu_signals_mutex
     void SubmitForSignalsNow();
     /// The submission whose end puts the GPU on its last one while work is held for it (0: none):
     /// set by a submission queued behind unfinished work (Flush) and by a decision to hold

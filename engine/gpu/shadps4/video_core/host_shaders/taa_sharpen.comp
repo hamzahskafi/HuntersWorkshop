@@ -1,17 +1,20 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// RCAS on the resolved scene only. The unsharpened history and HUD are untouched.
-// Strength 0..2: above 1 the RCAS change is extrapolated (stronger than AMD's maximum). The
-// same pass sharpens AMD FSR output beyond its own RCAS.
+// RCAS on the resolved scene only. The unsharpened history and HUD are untouched. The same pass
+// sharpens the scaled path's output after AMD FSR and DLSS (rcas_extra.glsl; 0.4.6 beta 16:
+// strength 0..1, AMD's own range, and what the image holds).
 #version 450
 #extension GL_GOOGLE_include_directive : require
 layout(local_size_x = 8, local_size_y = 8) in;
 layout(binding = 0, rgba32f) uniform readonly image2D resolved_img;
 layout(binding = 1, rgba16f) uniform writeonly image2D result_img;
-layout(push_constant) uniform Params { float strength; };
+layout(push_constant) uniform Params {
+    float strength;
+    uint encoding; // rcas_extra.glsl: 0 the HDR scene, 1 linear 0..1, 2 display-encoded
+};
 #define RCAS_SOURCE resolved_img
 #include "rcas_extra.glsl" // 0.4.4 beta 20: shared with upscale_merge.comp
 void main() {
     ivec2 p = ivec2(gl_GlobalInvocationID.xy);
     if (any(greaterThanEqual(p, imageSize(result_img)))) return;
-    imageStore(result_img, p, vec4(ExtraSharpen(p, strength), 1));
+    imageStore(result_img, p, vec4(ExtraSharpen(p, strength, encoding), 1));
 }

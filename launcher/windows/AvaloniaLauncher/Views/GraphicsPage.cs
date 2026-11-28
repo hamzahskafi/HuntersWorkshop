@@ -15,7 +15,7 @@ namespace BloodborneLauncher.Views
         private bool _syncing;
 
         public GraphicsPage() : base(L.T("Graphics"),
-            L.T("Stored in config.ini; the upscaler can also be changed in game (Insert or L3 + R3)."))
+            L.T("Stored in config.ini; the upscaler can also be changed in game (F1 or L3 + R3)."))
         {
             Add(Card(SymbolRegular.Gauge24, L.T("Best settings for this PC"), Hardware.Detect().Summary,
                 SmallButton(L.T("Recommend…"), SymbolRegular.Sparkle24, (_, _) => MainWindow.Instance!.OfferBestSettings(firstRun: false)), out _));
@@ -36,8 +36,11 @@ namespace BloodborneLauncher.Views
 
             IniToggle(SymbolRegular.Eyedropper24, L.T("Sharpening (RCAS)"), L.T("Works with every option above, TAA included: turn it up if the picture looks soft"), "sharpen");
             _sharpenCard = (SettingRow)Body.Children[^1];
-            SliderRow(SymbolRegular.SlideSize24, L.T("Sharpening strength"), L.T("Up to 1: the upscaler's own sharpening. Above 1: an extra pass"), 0, 2, 0.05,
-                () => ParseDouble(Ini.Get("sharpness"), 0.5), v => Ini.Set("sharpness", Fmt(v)));
+            // 0.4.6 beta 16 (the tester): a percentage of RCAS's maximum, 25% by default, as the engine
+            // (was 0..2 from 0.5).
+            SliderRow(SymbolRegular.SlideSize24, L.T("Sharpening strength"), L.T("100% is the strongest. High values can halo edges and show grain.") + " " + L.T("The default is 25%."), 0, 100, 1,
+                () => ParseDouble(Ini.Get("sharpening"), 25),
+                v => Ini.Set("sharpening", ((int)Math.Round(v)).ToString(System.Globalization.CultureInfo.InvariantCulture)), "0'%'");
             _sharpnessCard = (SettingRow)Body.Children[^1];
 
             IniCombo(SymbolRegular.FastForward24, L.T("Frame generation"),
@@ -51,15 +54,15 @@ namespace BloodborneLauncher.Views
             IniToggle(SymbolRegular.ArrowMove24, L.T("Object motion vectors"), L.T("Less ghosting on characters; costs about 10% FPS"), "object_motion");
             IniToggle(SymbolRegular.DataUsage24, L.T("Show FPS"), null, "show_fps");
             IniToggle(SymbolRegular.Wrench24, L.T("Note while shaders build"),
-                L.T("\"Building shaders\" in a corner while the game builds shaders for a place it shows for the first time. Also in game: Insert or L3 + R3"),
+                L.T("\"Building shaders\" in a corner while the game builds shaders for a place it shows for the first time. Also in game: F1 or L3 + R3"),
                 "compile_note");
-            // The FPS counter's look (live in game too: Insert or L3 + R3 › Other).
+            // The FPS counter's look (live in game too: F1 or L3 + R3 › Other).
             IniCombo(SymbolRegular.PositionToFront24, L.T("FPS counter position"), null, new Choice[]
             {
                 new(L.T("Top right"), "0"), new(L.T("Top left"), "1"), new(L.T("Bottom right"), "2"), new(L.T("Bottom left"), "3"), new(L.T("Top centre"), "4"),
             }, "fps_position");
             IniSlider(SymbolRegular.TextFontSize24, L.T("FPS counter size"), 0.75, 2.0, "fps_scale");
-            IniCombo(SymbolRegular.Color24, L.T("FPS counter text colour"), L.T("Any colour in game: Insert or L3 + R3 › Other"), new Choice[]
+            IniCombo(SymbolRegular.Color24, L.T("FPS counter text colour"), L.T("Any colour in game: F1 or L3 + R3 › Other"), new Choice[]
             {
                 new(L.T("White"), "#FFFFFF"), new(L.T("Yellow"), "#FFD54A"), new(L.T("Green"), "#7CFC8A"), new(L.T("Cyan"), "#6FE3FF"),
                 new(L.T("Red"), "#FF5A5A"), new(L.T("Orange"), "#FFA040"), new(L.T("Pink"), "#FF8AD8"), new(L.T("Black"), "#000000"),
@@ -93,7 +96,7 @@ namespace BloodborneLauncher.Views
             // The engine's picture and camera controls (bbport_settings.cpp clamps the same ranges).
             Group(L.T("Picture"));
             var picture = new StackPanel();
-            IniToggle(SymbolRegular.Color24, L.T("Picture tuning"), L.T("Turns the settings below on, live. Also in the game's System menu (PC Graphics, PC Effects, PC Colour) and the Insert menu"), "graphics_controls");
+            IniToggle(SymbolRegular.Color24, L.T("Picture tuning"), L.T("Turns the settings below on, live. Also in the game's System menu (PC Graphics, PC Effects, PC Colour) and the F1 menu"), "graphics_controls");
             IniToggle(SymbolRegular.CircleHalfFill24, L.T("Vignette"), null, "graphics_vignette", picture);
             IniSlider(SymbolRegular.DarkTheme24, L.T("Ambient occlusion strength"), 0, 3, "graphics_ao_strength", picture);
             IniSlider(SymbolRegular.WeatherSunny24, L.T("Shadow distance"), 0.5, 4, "graphics_shadow_scale", picture);
@@ -122,9 +125,6 @@ namespace BloodborneLauncher.Views
             SettingToggle(SymbolRegular.Code24, L.T("Legacy shader compiler"),
                 L.T("Off by default: the native compiler reads constant data through the GPU's constant cache. On compiles the game's shaders the way 0.9.33 did: try it if something draws wrong. Switching recompiles every shader once"),
                 "legacy_shaders", exp);
-            SettingToggle(SymbolRegular.Broom24, L.T("VRAM cleanup"),
-                L.T("Frees video memory held by textures the GPU drew, so long sessions don't fill up VRAM and slow down. Recommended: on"),
-                "exp_vram_cleanup", exp);
             SettingToggle(SymbolRegular.Timer24, L.T("Precise frame pacing"),
                 L.T("A high-resolution timer and even spacing between frames: steadier frame times and less VRR flicker. Uses a little CPU. On by default"),
                 "exp_frame_pacing", exp);
@@ -134,9 +134,11 @@ namespace BloodborneLauncher.Views
             SettingToggle(SymbolRegular.Shield24, L.T("Particle work safety cap"),
                 L.T("Checks the size of the game's GPU particle work before the graphics card runs it, and caps it to what the card supports. Only for games that crash with \"device lost\" in effect-heavy scenes. It costs smoothness in busy scenes. Off by default"),
                 "exp_particle_cap", exp);
-            Feature(SymbolRegular.Storage24, L.T("Use more VRAM for textures"),
-                L.T("Keeps textures in video memory up to 80% of the card instead of about 40%, so they aren't thrown out and loaded again (the cause of most stutters on 8 GB cards)"),
-                "exp_vram_budget", exp);
+            // 0.4.5 beta 14: one VRAM manager (the engine's vram_policy.h); replaces VRAM cleanup and
+            // Use more VRAM for textures, as the Windows launcher.
+            SettingToggle(SymbolRegular.Storage24, L.T("Use less VRAM"),
+                L.T("The engine frees the textures and game data that have gone unused longest once the game uses 65% of the graphics card's memory, instead of 80%. Only if the game runs out of video memory: freeing sooner can cost some stutter. Off by default"),
+                "less_vram", exp);
             SettingToggle(SymbolRegular.TopSpeed24, L.T("Graphics threads first"),
                 L.T("Runs the engine's graphics threads at a higher CPU priority than the game's other threads, so a frame isn't held up behind them. On by default"),
                 "exp_thread_priority", exp);

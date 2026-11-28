@@ -18,6 +18,8 @@
 #include "bbport_free_check.h"
 #include "bbport_guest_memory.h"
 #include "bbport_gx_ring.h"
+#include "engine/gx_resources.h"
+#include <xxhash.h>
 #include "common/alignment.h"
 #include "core/memory.h"
 #include "video_core/amdgpu/liverpool.h"
@@ -26,11 +28,14 @@
 #include "video_core/buffer_cache/memory_tracker.h"
 #include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
+#include "video_core/renderer_vulkan/vk_optiscaler.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
 #include "video_core/renderer_vulkan/vk_gpu_savings.h"
 #include "video_core/renderer_vulkan/vk_runtime.h"
 #include "video_core/renderer_vulkan/vk_scene_resolution.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
+#include "video_core/load_work.h"
+#include "video_core/vram_policy.h"
 #include "video_core/texture_cache/texture_cache.h"
 
 #include <mutex>
@@ -211,7 +216,16 @@ public:
             .commandBufferInfoCount = 1,
             .pCommandBufferInfos = &command,
         };
-        if (queue.submit2(submit, *fence) != vk::Result::eSuccess) {
+        vk::Result submitted;
+        {
+            // 0.4.6 beta 17: with OptiScaler loaded, under the lock every other queue's submits and
+            // presents take: its calls may wait for the whole device (vkDeviceWaitIdle), which needs
+            // every queue held. The fence wait below stays outside it.
+            const auto lock = Vulkan::OptiScaler::Compat() ? std::unique_lock{Vulkan::Scheduler::submit_mutex}
+                                                           : std::unique_lock<std::mutex>{};
+            submitted = queue.submit2(submit, *fence);
+        }
+        if (submitted != vk::Result::eSuccess) {
             return nullptr;
         }
         const auto result = device.waitForFences(*fence, vk::True, UINT64_MAX);
@@ -1388,6 +1402,23 @@ void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_
         });
         if (!restored.Empty()) {
             evicted_blocks.Subtract(from, to);
+            // Beta 15: freed less than 5 minutes ago and needed again (a refault).
+            const u32 now = BbStats::coarse_second.load(std::memory_order_relaxed);
+            for (u64 group = from >> group_shift; group < (to >> group_shift); ++group) {
+                if (const auto it = evicted_group_second.find(group); it != evicted_group_second.end()) {
+                    if (now - it->second <= 300) {
+                        u64 bytes = 0;
+                        restored.ForEachInRange(group << group_shift, (group + 1) << group_shift,
+                                                [&](const Interval& r) {
+                                                    const u64 a = std::max(r.start, group << group_shift);
+                                                    const u64 b = std::min(r.end, (group + 1) << group_shift);
+                                                    bytes += (b - a) * block_size;
+                                                });
+                        VramPolicy::NoteRefault(bytes);
+                    }
+                    evicted_group_second.erase(it);
+                }
+            }
         }
     }
     if (bind_ranges.Empty()) {
@@ -1571,17 +1602,17 @@ std::pair<vk::DeviceMemory, u64> BufferCache::AllocateResidency(u64 bytes) {
         return memory;
     };
     // bbport: out of VRAM is no longer the end of the game. VRAM while there is room; while it is
-    // tight (vram_level) or once an allocation failed (full for 30 s), system memory. Without
+    // tight (vram_level) or once an allocation failed (full for 30 s: the VRAM manager's
+    // NoteAllocationFailed), system memory where this GPU can bind the game's data to it. Without
     // that, the empty chunks go back to the driver and VRAM is tried once more; only a failure
     // then stops, as before.
     const auto allocate = [this, &try_allocate](u64 size) {
-        const u32 now = BbStats::coarse_second.load(std::memory_order_relaxed);
         const bool tight = vram_level.load(std::memory_order_relaxed) >= 1;
         if (!tight || !system_memory_type_index) {
             if (const auto memory = try_allocate(size, arena_memory_type_index)) {
                 return memory;
             }
-            vram_full_until = now + 30;
+            VramPolicy::NoteAllocationFailed();
             vram_level.store(2, std::memory_order_relaxed);
             std::printf("Guest memory: out of VRAM for %llu MiB of the game's data\n",
                         (unsigned long long)(size >> 20));
@@ -1668,40 +1699,12 @@ std::pair<vk::DeviceMemory, u64> BufferCache::AllocateResidency(u64 bytes) {
     return {residency_memory, offset};
 }
 
-void BufferCache::UpdateVramLevel(u32 now) {
-    static const u64 percent = [] {
-        const char* env = std::getenv("BB_VRAM_PRESSURE_PERCENT");
-        return std::min<u64>(env ? std::strtoull(env, nullptr, 10) : 85, 95);
-    }();
-    int level = 0;
-    u64 used = 0, budget = 0;
-    if (percent != 0 && instance.CanReportMemoryUsage()) {
-        used = instance.GetDeviceMemoryUsage();
-        budget = instance.GetDeviceMemoryBudgetNow();
-        if (budget != 0) {
-            level = used * 100 >= budget * (percent + 5) ? 2 : used * 100 >= budget * percent ? 1 : 0;
-        }
-    }
-    if (now < vram_full_until) {
-        level = 2;
-    }
-    const int was = vram_level.exchange(level, std::memory_order_relaxed);
-    if (level != was && vram_level_reports < 40) {
-        ++vram_level_reports;
-        static constexpr const char* kCopies[] = {
-            "room again: the game's data stays in VRAM",
-            "tight: the game's data unused for 30 s leaves VRAM, new blocks go to system memory",
-            "full: the game's data unused for 10 s leaves VRAM, new blocks go to system memory",
-        };
-        static constexpr const char* kCopiesVram[] = {
-            "room again: the game's data stays in VRAM",
-            "tight: the game's data unused for 30 s leaves VRAM",
-            "full: the game's data unused for 10 s leaves VRAM",
-        };
-        const char* what = system_memory_type_index ? kCopies[level] : kCopiesVram[level];
-        std::printf("Guest memory: VRAM %llu of %llu MiB, %s\n", (unsigned long long)(used >> 20),
-                    (unsigned long long)(budget >> 20), what);
-    }
+void BufferCache::UpdateVramLevel() {
+    // 0.4.5 beta 14: one VRAM manager for this cache and the texture cache (vram_policy.h). Until
+    // beta 13 this cache had marks of its own: tight from 85% (BB_VRAM_PRESSURE_PERCENT), full
+    // from 90%.
+    VramPolicy::Update(instance);
+    vram_level.store(int(VramPolicy::CurrentLevel()), std::memory_order_relaxed);
 }
 
 vk::DeviceMemory BufferCache::TakeSpareResidency() {
@@ -1729,14 +1732,6 @@ void BufferCache::NoteResidencyUnused() {
     BbStats::residency_chunk_count.store(residency_chunks.size(), std::memory_order_relaxed);
 }
 
-u32 BufferCache::VramIdleSeconds() {
-    static const u32 seconds = [] {
-        const char* env = std::getenv("BB_VRAM_IDLE_SECONDS");
-        return env ? u32(std::strtoul(env, nullptr, 10)) : 60u;
-    }();
-    return seconds;
-}
-
 void BufferCache::NoteUse(VAddr address, u64 size) {
     const u32 now = BbStats::coarse_second.load(std::memory_order_relaxed);
     const u64 last = std::min<u64>((address + size - 1) >> USE_GROUP_BITS, group_use.size() - 1);
@@ -1761,33 +1756,74 @@ void BufferCache::ReleaseResidencySlot(vk::DeviceMemory memory, u64 offset) {
     NoteResidencyUnused();
 }
 
-void BufferCache::EvictVramBlock(u64 block) {
+bool BufferCache::EvictVramBlock(u64 block, bool watch, bool unbind) {
     const auto old = resident_ranges.Find(block);
     if (old == resident_ranges.end() || in_place_blocks.Contains(block) ||
         !residency_chunks.contains(static_cast<VkDeviceMemory>(old->memory))) {
-        return;
+        return false;
     }
     const vk::DeviceMemory memory = old->memory;
     const u64 offset = (old->offset + (block - old->start)) << block_shift;
     const VAddr address = block << block_shift;
+    if (unbind) {
+        UnbindRange(address, block_size);
+    }
+    resident_ranges.Subtract(block, block + 1);
+    if (watch) {
+        memory_tracker->UnmarkRegionAsGpuModified(address, block_size);
+        gpu_modified_ranges.Subtract(address, block_size);
+        memory_tracker->MarkRegionAsCpuModifiedQuiet(address, block_size);
+    }
+    ReleaseResidencySlot(memory, offset);
+    // After the work submitted so far: it may still read the block.
+    bind_wait_tick = std::max(bind_wait_tick, scheduler.CurrentTick() - 1);
+    BbStats::vram_unmapped_bytes.fetch_add(block_size, std::memory_order_relaxed);
+    return true;
+}
+
+void BufferCache::UnbindRange(VAddr address, u64 bytes) {
     for (const auto& arena : arenas) {
-        if (arena.cpu_addr <= address && address - arena.cpu_addr < arena.size_bytes) {
+        const VAddr a = std::max<VAddr>(address, arena.cpu_addr);
+        const VAddr b = std::min<VAddr>(address + bytes, arena.cpu_addr + arena.size_bytes);
+        if (a < b) {
             BindsForArena(&arena)->binds.emplace_back(vk::SparseMemoryBind{
-                .resourceOffset = address - arena.cpu_addr,
-                .size = block_size,
+                .resourceOffset = a - arena.cpu_addr,
+                .size = b - a,
                 .memory = {},
                 .memoryOffset = 0,
             });
         }
     }
-    resident_ranges.Subtract(block, block + 1);
-    memory_tracker->UnmarkRegionAsGpuModified(address, block_size);
-    gpu_modified_ranges.Subtract(address, block_size);
-    memory_tracker->MarkRegionAsCpuModified(address, block_size);
-    ReleaseResidencySlot(memory, offset);
-    // After the work submitted so far: it may still read the block.
-    bind_wait_tick = std::max(bind_wait_tick, scheduler.CurrentTick() - 1);
-    BbStats::vram_unmapped_bytes.fetch_add(block_size, std::memory_order_relaxed);
+}
+
+void BufferCache::EvictVramBlocks(std::vector<u64>& blocks) {
+    std::sort(blocks.begin(), blocks.end());
+    blocks.erase(std::unique(blocks.begin(), blocks.end()), blocks.end());
+    size_t kept = 0;
+    for (const u64 block : blocks) {
+        if (EvictVramBlock(block, false, false)) {
+            blocks[kept++] = block;
+        }
+    }
+    blocks.resize(kept);
+    // Their page table entries are cleared: a shader reading one through it reports a fault and
+    // the block is bound again (ProcessFaultBuffer) instead of the shader reading unbound memory.
+    for (size_t i = 0; i < blocks.size();) {
+        size_t j = i + 1;
+        while (j < blocks.size() && blocks[j] == blocks[j - 1] + 1) {
+            ++j;
+        }
+        const VAddr address = blocks[i] << block_shift;
+        const u64 bytes = u64(j - i) << block_shift;
+        UnbindRange(address, bytes);
+        memory_tracker->UnmarkRegionAsGpuModified(address, bytes);
+        gpu_modified_ranges.Subtract(address, bytes);
+        memory_tracker->MarkRegionAsCpuModifiedQuiet(address, bytes);
+        evicted_blocks.Add({blocks[i], blocks[j - 1] + 1});
+        runtime.FillBuffer(bda_pagetable_buffer.get(), blocks[i] * sizeof(vk::DeviceAddress),
+                           (j - i) * sizeof(vk::DeviceAddress), 0u);
+        i = j;
+    }
 }
 
 void BufferCache::ProcessIdleBlocks() {
@@ -1796,67 +1832,122 @@ void BufferCache::ProcessIdleBlocks() {
         return;
     }
     idle_scan_second = now;
-    UpdateVramLevel(now);
+    UpdateVramLevel();
     // bbport: the game's GX region comes from the engine's hook on its init (engine/gx_region.cpp)
     // when the game makes its graphics device; a minute on without it, the log says so once.
     if (gx_state.load(std::memory_order_relaxed) == u8(GxState::Waiting) && !BbGxRing::Known() &&
         ++gx_ring_looks == 60) {
         BbGxRing::ReportMissing();
     }
-    if (VramIdleSeconds() == 0) {
-        return;
-    }
     EvictIdleCopies(now);
     FreeEmptyChunks(now);
+    // Beta 15: what the game's data in VRAM is, once a minute (the VRAM manager's line).
+    if (now - minute_second >= 60) {
+        minute_second = now;
+        u64 in_use = 0, cache = 0;
+        for (const auto& range : resident_ranges) {
+            for (u64 block = range.start; block < range.end; ++block) {
+                const u64 group = std::min<u64>((block << block_shift) >> USE_GROUP_BITS, group_use.size() - 1);
+                (now - group_use[group] <= 10 ? in_use : cache) += block_size;
+            }
+        }
+        VramPolicy::PublishData(in_use, cache, BbStats::residency_unused_bytes.load(std::memory_order_relaxed));
+    }
+    // Beta 17-19: the game's data of the buffers the game released leaves VRAM by the VRAM manager's
+    // rules, once a second (0.4.6 beta 4: taken at every Maintain, FollowGxReleases; with the manager
+    // off, freed there).
+    if (BbEngine::GxResources::Following() && !VramPolicy::Off()) {
+        ReleaseGxBuffers();
+    }
 }
 
-void BufferCache::EvictIdleCopies(u32 now) {
-    // bbport: every block of the game's memory the GPU used kept its VRAM copy, and a 4 GB card
-    // ran out (exit 23). While VRAM is tight the copies unused for a while go. Kept: blocks with
-    // data the GPU wrote (only VRAM has it), and all of them while shaders read the game's memory
-    // through the page table (dma_second).
-    const int level = vram_level.load(std::memory_order_relaxed);
-    if (TwinsEnabled()) {
+void BufferCache::FollowGxReleases() {
+    if (!BbEngine::GxResources::Active()) {
         return;
     }
-    // Unused for 30 s while tight, 10 s when full: an evicted block costs an upload and can show
-    // as late geometry when it comes back.
-    // bbport: with room in VRAM too, copies unused for BB_VRAM_CLEANUP_SECONDS (default 180; 0:
-    // only while VRAM is tight) go: without it every block the game's GPU work ever touched kept
-    // its copy, and long sessions on 8 GB cards (laptops, RTX 4060) went from 2.6 to 5 GB of VRAM
-    // in 90 minutes until a crash or a lost device. A block is used again within seconds of its
-    // area loading, so three minutes unused is an area left behind.
-    static const u32 cleanup = [] {
-        const char* env = std::getenv("BB_VRAM_CLEANUP_SECONDS");
-        return env && env[0] ? u32(std::strtoul(env, nullptr, 10)) : 180u;
-    }();
-    if (level == 0 && (cleanup == 0 || now - last_cleanup_scan < 10)) {
-        return;
-    }
-    if (level == 0) {
-        last_cleanup_scan = now;
-    }
-    const u32 idle = level == 0 ? std::max(cleanup, VramIdleSeconds())
-                                : std::min(VramIdleSeconds(), level >= 2 ? 10u : 30u);
-    const u32 dma = dma_second.load(std::memory_order_relaxed);
-    if (dma != 0 && now - dma < idle) {
-        if (dma_kept_reports < 10 && now - dma_kept_second >= 60) {
-            ++dma_kept_reports;
-            dma_kept_second = now;
-            std::printf("Guest memory: VRAM tight, but shaders read the game's memory directly: "
-                        "its unused data stays in VRAM\n");
+    if (BbEngine::GxResources::ReleasedWaiting()) {
+        // Beta 16-17: the buffers the game released, against its data in VRAM at their memory.
+        BbEngine::GxResources::TakeReleased(gx_released);
+        for (const auto& released : gx_released) {
+            const u64 bytes = std::max<u64>(released.bytes, 1);
+            const u64 first = released.memory >> block_shift, end = ((released.memory + bytes - 1) >> block_shift) + 1;
+            u64 gaps = 0;
+            resident_ranges.ForEachGap(first, end, [&](u64 a, u64 b) { gaps += b - a; });
+            BbEngine::GxResources::NoteReleasedBuffer(
+                std::min<u64>((end - first - gaps) * block_size, Common::AlignUp(bytes, block_size)));
+            // 0.4.6 beta 5: a release frees nothing (beta 4 unbound its data as the GPU was done
+            // with it: 82-201 ms frames at loading screens, the unbinds and protection changes
+            // of ~12,000 blocks). As on the PS4, the memory stays the game's, its VRAM copy
+            // reused in place by what the game puts there next; it leaves VRAM when the game
+            // unmaps the memory (ProcessPendingUnmaps), or by the VRAM manager when VRAM is
+            // tight, released data first (ReleaseGxBuffers).
+            if (BbEngine::GxResources::Following() && !VramPolicy::Off()) {
+                if (released_pending.size() >= 65536) {
+                    released_pending.pop_front();
+                }
+                released_pending.push_back(released);
+            }
         }
+        gx_released.clear();
+    }
+}
+
+void BufferCache::ReleaseGxBuffers() {
+    // 0.4.5 beta 17-18: the game released these buffers: the blocks wholly inside one leave VRAM, as
+    // the VRAM manager's evictions do (EvictVramBlock: unbound after the work submitted so far, the
+    // page table entries cleared, the pages handed back to the game unwatched; uploaded again
+    // should the memory be used). Kept: blocks shared with a neighbour (partly outside the buffer),
+    // blocks the GPU wrote (only VRAM has them), blocks of a 2 MiB group used after the release
+    // (the memory reused already), and all of them while shaders read the game's memory through
+    // the page table or twins are on.
+    // Beta 18: only above the VRAM manager's comfortable line, and paced. Beta 17 freed all of them
+    // at once whatever the room: a loading screen releases up to 1 GB, and unwatching its pages
+    // took 2,200-6,700 protection calls in one go (55-195 ms frames on loading screens; 138 ms in
+    // play, the game's threads waiting in their write faults). With room nothing leaves VRAM (beta
+    // 14's rule); the released buffers wait here (released_pending, 10 minutes), the first data to
+    // go once VRAM is tight.
+    // 0.4.6 beta 3-4 freed them with the manager off too (BB_VRAM_MANAGER=0), as the game released
+    // them; 0.4.6 beta 5: not (FollowGxReleases): with the manager off nothing leaves VRAM on a
+    // release, as on the PS4.
+    if (TwinsEnabled() || VramPolicy::Off()) {
+        return;
+    }
+    const u32 now = BbStats::coarse_second.load(std::memory_order_relaxed);
+    while (!released_pending.empty() &&
+           now - u32(released_pending.front().ns / 1'000'000'000ull) > 600) {
+        released_pending.pop_front();
+    }
+    const u32 dma = dma_second.load(std::memory_order_relaxed);
+    if (released_pending.empty() || VramPolicy::Comfortable() ||
+        (dma != 0 && now - dma < VramPolicy::CacheSeconds)) {
         return;
     }
     std::vector<u64> blocks;
-    for (const auto& range : resident_ranges) {
-        if (!residency_chunks.contains(static_cast<VkDeviceMemory>(range.memory))) {
-            continue;
+    // A second's share: 2048 blocks (128 MiB of 64 KiB blocks) at a loading screen or when full, 512
+    // while tight (only when frames have slack) or between the comfortable and tight lines.
+    using VramPolicy::Mode;
+    const bool loading = BbEngine::Loading::ScreenUp();
+    const Mode mode = VramPolicy::CurrentMode();
+    if (mode == Mode::Tight && !VramPolicy::Allowed()) {
+        return;
+    }
+    const size_t budget = loading || mode == Mode::Full ? 2048 : 512;
+    while (!released_pending.empty() && blocks.size() < budget) {
+        const auto released = released_pending.front();
+        // Beta 19: released at least 2 s ago, so a reuse of the memory in the release's own second
+        // shows in its group's last use (seconds) before the block goes.
+        if (now - u32(released.ns / 1'000'000'000ull) < 2) {
+            break;
         }
-        for (u64 block = range.start; block < range.end; ++block) {
+        released_pending.pop_front();
+        const u64 first = (released.memory + block_size - 1) >> block_shift;
+        const u64 end = (released.memory + released.bytes) >> block_shift;
+        const u32 second = u32(released.ns / 1'000'000'000ull);
+        for (u64 block = first; block < end; ++block) {
             const VAddr address = block << block_shift;
             const u64 group = std::min<u64>(address >> USE_GROUP_BITS, group_use.size() - 1);
-            if (now - group_use[group] < idle || gpu_modified_ranges.Intersects(address, block_size) ||
+            if (!resident_ranges.Contains(block) || in_place_blocks.Contains(block) || group_use[group] >= second ||
+                gpu_modified_ranges.Intersects(address, block_size) ||
                 memory_tracker->IsRegionGpuModified(address, block_size)) {
                 continue;
             }
@@ -1866,21 +1957,133 @@ void BufferCache::EvictIdleCopies(u32 now) {
     if (blocks.empty()) {
         return;
     }
-    for (const u64 block : blocks) {
-        EvictVramBlock(block);
-        evicted_blocks.Add({block, block + 1});
+    const auto start = std::chrono::steady_clock::now();
+    EvictVramBlocks(blocks);
+    VramPolicy::NoteFreed(VramPolicy::Freed::Released, u64(blocks.size()) * block_size, 0);
+    VramPolicy::NoteWork(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                             std::chrono::steady_clock::now() - start)
+                             .count());
+}
+
+void BufferCache::EvictIdleCopies(u32 now) {
+    // bbport: every block of the game's memory the GPU used kept its VRAM copy, and a 4 GB card
+    // ran out (exit 23). Kept: blocks with data the GPU wrote (only VRAM has it), and all of them
+    // while shaders read the game's memory through the page table (dma_second).
+    // 0.4.5 beta 14-15: only when the VRAM manager trims (vram_policy.h): at a loading screen over the
+    // comfortable line, while tight (with slack, one chunk a second) or when full. Until beta 13 copies
+    // unused for 3 minutes went with room in VRAM too (BB_VRAM_CLEANUP_SECONDS): behind most long
+    // frames at 60 FPS on 8 GB, and write faults as they came back (performance.md). Beta 14 freed
+    // single blocks: their memory stayed in partly used 64 MiB chunks, so nothing went back to the
+    // driver (its first tight minute: 417 MiB freed, the chunks' 1,472 MiB unchanged).
+    if (TwinsEnabled()) {
+        return;
     }
-    // Their page table entries are cleared: a shader reading one through it reports a fault and
-    // the block is bound again (ProcessFaultBuffer) instead of the shader reading unbound memory.
-    for (size_t i = 0; i < blocks.size();) {
-        size_t j = i + 1;
-        while (j < blocks.size() && blocks[j] == blocks[j - 1] + 1) {
-            ++j;
+    using VramPolicy::Mode;
+    const Mode mode = VramPolicy::CurrentMode();
+    if (mode == Mode::None || !VramPolicy::WantBytes() || !VramPolicy::Allowed()) {
+        return;
+    }
+    const u32 dma = dma_second.load(std::memory_order_relaxed);
+    if (dma != 0 && now - dma < VramPolicy::CacheSeconds) {
+        if (dma_kept_reports < 10 && now - dma_kept_second >= 60) {
+            ++dma_kept_reports;
+            dma_kept_second = now;
+            std::printf("Guest memory: VRAM tight, but shaders read the game's memory directly: "
+                        "its unused data stays in VRAM\n");
         }
-        runtime.FillBuffer(bda_pagetable_buffer.get(), blocks[i] * sizeof(vk::DeviceAddress),
-                           (j - i) * sizeof(vk::DeviceAddress), 0u);
-        i = j;
+        return;
     }
+    const auto start = std::chrono::steady_clock::now();
+    const u32 full_age = VramPolicy::FullAgeSeconds();
+    // Per 64 MiB chunk: its blocks, its newest use, and whether any of them is GPU-written.
+    struct Chunk {
+        std::vector<u64> blocks;
+        u32 newest = 0;
+        bool gpu = false;
+    };
+    std::unordered_map<VkDeviceMemory, Chunk> chunks;
+    for (const auto& range : resident_ranges) {
+        const auto memory = static_cast<VkDeviceMemory>(range.memory);
+        if (!residency_chunks.contains(memory)) {
+            continue;
+        }
+        Chunk& chunk = chunks[memory];
+        for (u64 block = range.start; block < range.end; ++block) {
+            const VAddr address = block << block_shift;
+            const u64 group = std::min<u64>(address >> USE_GROUP_BITS, group_use.size() - 1);
+            chunk.blocks.push_back(block);
+            chunk.newest = std::max(chunk.newest, group_use[group]);
+            chunk.gpu = chunk.gpu || gpu_modified_ranges.Intersects(address, block_size) ||
+                        memory_tracker->IsRegionGpuModified(address, block_size);
+        }
+    }
+    // Whole chunks, so their memory goes back to the driver: unused for 30 s, the longest unused first
+    // (when full: unused for the full step's time).
+    std::vector<std::pair<VkDeviceMemory, Chunk*>> order;
+    for (auto& [memory, chunk] : chunks) {
+        if (chunk.gpu || chunk.blocks.empty() || memory == static_cast<VkDeviceMemory>(residency_memory)) {
+            continue;
+        }
+        const u32 idle = now - chunk.newest;
+        const bool ok = mode == Mode::Full ? idle >= full_age : idle >= VramPolicy::CacheSeconds;
+        if (ok) {
+            order.emplace_back(memory, &chunk);
+        }
+    }
+    std::sort(order.begin(), order.end(),
+              [](const auto& a, const auto& b) { return a.second->newest < b.second->newest; });
+    std::vector<u64> blocks;
+    u32 taken = 0;
+    for (const auto& [memory, chunk] : order) {
+        if (!VramPolicy::WantBytes() || (mode == Mode::Tight && taken >= 1)) {
+            break;
+        }
+        ++taken;
+        blocks.insert(blocks.end(), chunk->blocks.begin(), chunk->blocks.end());
+        // The chunk goes back to the driver once its blocks are unbound (FreeEmptyChunks).
+        VramPolicy::NoteFreed(VramPolicy::Freed::Data, u64(chunk->blocks.size()) * block_size,
+                              residency_chunks[memory].size);
+    }
+    // Full: single blocks too, oldest first, where whole chunks were not enough.
+    if (mode == Mode::Full && VramPolicy::WantBytes()) {
+        std::vector<std::pair<u32, u64>> singles;
+        for (const auto& entry : chunks) {
+            for (const u64 block : entry.second.blocks) {
+                const VAddr address = block << block_shift;
+                const u64 group = std::min<u64>(address >> USE_GROUP_BITS, group_use.size() - 1);
+                if (now - group_use[group] < full_age || gpu_modified_ranges.Intersects(address, block_size) ||
+                    memory_tracker->IsRegionGpuModified(address, block_size)) {
+                    continue;
+                }
+                singles.emplace_back(group_use[group], block);
+            }
+        }
+        std::sort(singles.begin(), singles.end());
+        std::sort(blocks.begin(), blocks.end());
+        for (const auto& [last_use, block] : singles) {
+            if (!VramPolicy::WantBytes()) {
+                break;
+            }
+            if (std::binary_search(blocks.begin(), blocks.end(), block)) {
+                continue;
+            }
+            blocks.push_back(block);
+            VramPolicy::NoteFreed(VramPolicy::Freed::Data, block_size, 0);
+        }
+    }
+    if (blocks.empty()) {
+        return;
+    }
+    EvictVramBlocks(blocks);
+    for (const u64 block : blocks) {
+        const u64 group = std::min<u64>((block << block_shift) >> USE_GROUP_BITS, group_use.size() - 1);
+        if (evicted_group_second.size() < 65536) {
+            evicted_group_second[group] = now;
+        }
+    }
+    VramPolicy::NoteWork(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                             std::chrono::steady_clock::now() - start)
+                             .count());
     const u64 bytes = u64(blocks.size()) * block_size;
     evicted_bytes += bytes;
     // Once the first whole MiB is out, then at each 256 MiB (a first block under a MiB said "0 MiB").
@@ -1888,24 +2091,23 @@ void BufferCache::EvictIdleCopies(u32 now) {
     if (evict_reports < 20 && (((before >> 20) == 0 && (evicted_bytes >> 20) != 0) ||
                                (evicted_bytes >> 28) != (before >> 28))) {
         ++evict_reports;
-        std::printf("Guest memory: %s%llu MiB of the game's data unused for %u s left VRAM "
-                    "so far (uploaded again when used)\n",
-                    level == 0 ? "cleanup, " : "VRAM tight, ",
-                    (unsigned long long)(evicted_bytes >> 20), idle);
+        static constexpr const char* kMode[] = {"", "loading screen trim", "tight", "full"};
+        std::printf("Guest memory: %s, %llu MiB of the game's data left VRAM so far (%u whole chunks this "
+                    "time; uploaded again when used)\n",
+                    kMode[u32(mode)], (unsigned long long)(evicted_bytes >> 20), taken);
     }
 }
 
 void BufferCache::FreeEmptyChunks(u32 now) {
     // Chunks without blocks for 5 s, the rebinds away from them long done: back to the driver.
-    // bbport: with room in VRAM, BB_VRAM_CHUNK_KEEP_SECONDS (30) instead, and the 64 MiB chunk
-    // emptied last stays: blocks coming back (an area entered again) take its slots instead of
-    // new memory the driver clears first. While VRAM is tight, or with 0: 5 s, none kept.
-    static const u32 keep_seconds = [] {
-        const char* env = std::getenv("BB_VRAM_CHUNK_KEEP_SECONDS");
-        return env && env[0] ? u32(std::strtoul(env, nullptr, 10)) : 30u;
-    }();
-    const bool room = keep_seconds != 0 && vram_level.load(std::memory_order_relaxed) == 0;
-    const u32 wait = room ? std::max(keep_seconds, 5u) : 5u;
+    // bbport: with room in VRAM, 30 s instead, and the 64 MiB chunk emptied last stays: blocks
+    // coming back (an area entered again) take its slots instead of new memory the driver clears
+    // first. While VRAM is tight: 5 s, none kept. (0.4.5 beta 14: BB_VRAM_CHUNK_KEEP_SECONDS
+    // removed, its 30 s kept.)
+    // Beta 15: at a loading screen trim, at once (the chunks were emptied to go back now).
+    const bool load = VramPolicy::CurrentMode() == VramPolicy::Mode::Load;
+    const bool room = !load && vram_level.load(std::memory_order_relaxed) == 0;
+    const u32 wait = load ? 0u : room ? 30u : 5u;
     VkDeviceMemory spare = VK_NULL_HANDLE;
     if (room) {
         u32 newest = 0;
@@ -2030,12 +2232,223 @@ void BufferCache::UnmapInPlace(VAddr addr, u64 size) {
     unmaps_pending.store(true, std::memory_order_release);
 }
 
+namespace {
+// 0.4.6 beta 12 (BB_WATCH_GAME_BUFFERS=1: off; off in safe mode): the pages of the game's GX buffers are
+// watched by its calls (their creation and release), not by protection (RegionManager::CallsCreate).
+bool GameBuffersByCalls() {
+    static const bool on = [] {
+        const char* env = std::getenv("BB_WATCH_GAME_BUFFERS");
+        return !(env && env[0] == '1');
+    }();
+    return on;
+}
+u64 SteadyNs() {
+    return u64(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                   std::chrono::steady_clock::now().time_since_epoch())
+                   .count());
+}
+} // namespace
+
+namespace {
+// 0.4.6 beta 15 part 2 (BB_LOAD_UPLOAD=0: off).
+bool LoadUploadEnabled() {
+    static const bool on = [] {
+        const char* env = std::getenv("BB_LOAD_UPLOAD");
+        return !(env && env[0] == '0');
+    }();
+    return on;
+}
+u64 LoadUploadBudget(bool screen_up) {
+    static const u64 during = [] {
+        const char* env = std::getenv("BB_LOAD_UPLOAD_MB");
+        return (env && env[0] ? std::strtoull(env, nullptr, 10) : 64ull) << 20;
+    }();
+    return screen_up ? during : 16ull << 20;
+}
+} // namespace
+
+void BufferCache::NoteLoadUpload(VAddr addr, u64 size, BbEngine::GxResources::MemoryEvent e) {
+    using BbEngine::GxResources::MemoryEvent;
+    if (!LoadUploadEnabled()) {
+        return;
+    }
+    if (e == MemoryEvent::BufferMadeWithData) {
+        // The GX region is read in place: nothing to upload there.
+        if (!BbEngine::Loading::ScreenUp() || GxOverlaps(addr, size)) {
+            return;
+        }
+        std::scoped_lock lk{load_upload_mutex};
+        auto [it, added] = load_upload_ranges.try_emplace(addr, size);
+        if (!added) {
+            it->second = std::max(it->second, size);
+        }
+        LoadWork::counters.made_bytes.fetch_add(size, std::memory_order_relaxed);
+    } else if (e == MemoryEvent::BufferGone) {
+        std::scoped_lock lk{load_upload_mutex};
+        if (load_upload_ranges.empty()) {
+            return;
+        }
+        // Queued buffers inside the released range: the game is done with them before any upload.
+        auto it = load_upload_ranges.lower_bound(addr);
+        if (it != load_upload_ranges.begin()) {
+            const auto prev = std::prev(it);
+            if (prev->first + prev->second > addr) {
+                it = prev;
+            }
+        }
+        while (it != load_upload_ranges.end() && it->first < addr + size) {
+            LoadWork::counters.released_bytes.fetch_add(it->second, std::memory_order_relaxed);
+            it = load_upload_ranges.erase(it);
+        }
+    }
+}
+
+void BufferCache::NoteGameMemory(VAddr addr, u64 size, u8 event) {
+    using BbEngine::GxResources::MemoryEvent;
+    if (!GameBuffersByCalls() || size == 0) {
+        return;
+    }
+    // Now, on the game's thread: what the creation wrote, or the memory a destroy hands back (the next
+    // resource's creation copy takes no fault there). Regions not made yet are all to upload already.
+    memory_tracker->MarkToUploadButGpu(addr, size);
+    const auto e = MemoryEvent(event);
+    NoteLoadUpload(addr, size, e);
+    if (e == MemoryEvent::TextureGone) {
+        return; // textures are not watched by the calls
+    }
+    const u8 op = (e == MemoryEvent::BufferMade || e == MemoryEvent::BufferMadeWithData) ? 0
+                  : e == MemoryEvent::BufferGone                                         ? 1
+                                                                                         : 2;
+    std::scoped_lock lk{calls_mutex};
+    calls_events.push_back({addr, size, op, e == MemoryEvent::BufferMadeWithData});
+    calls_waiting.store(true, std::memory_order_release);
+}
+
+std::pair<u32, u32> BufferCache::CopyComing(VAddr addr, u64 size) {
+    return memory_tracker->CopyComing(addr, size);
+}
+
+void BufferCache::NoteGameMemoryUnmapped(VAddr addr, u64 size) {
+    if (!GameBuffersByCalls() || size == 0) {
+        return;
+    }
+    std::scoped_lock lk{calls_mutex};
+    calls_events.push_back({addr, size, 2, false});
+    calls_waiting.store(true, std::memory_order_release);
+}
+
+void BufferCache::NoteEngineStore(VAddr addr, u64 size) {
+    if (GameBuffersByCalls() && size != 0) {
+        memory_tracker->MarkToUploadButGpu(addr, size);
+    }
+}
+
+void BufferCache::NoteBackingStore(VAddr addr, u64 size) {
+    if (size == 0) {
+        return;
+    }
+    BbStats::backing_stores.fetch_add(1, std::memory_order_relaxed);
+    const auto [marked, gpu_pages] = memory_tracker->MarkStoreUploaded(addr, size);
+    if (marked != 0) {
+        BbStats::backing_stores_marked.fetch_add(1, std::memory_order_relaxed);
+    }
+    if (gpu_pages != 0) {
+        BbStats::backing_stores_gpu.fetch_add(1, std::memory_order_relaxed);
+    }
+}
+
+u8 BufferCache::PageWatch(VAddr addr) const noexcept {
+    return memory_tracker->PageWatch(addr);
+}
+
+void BufferCache::ProcessCallsEvents() {
+    if (!calls_waiting.load(std::memory_order_acquire)) {
+        return;
+    }
+    {
+        std::scoped_lock lk{calls_mutex};
+        calls_taken.swap(calls_events);
+        calls_waiting.store(false, std::memory_order_relaxed);
+    }
+    s64 pages = 0;
+    for (const CallsEvent& e : calls_taken) {
+        if (e.op == 0) {
+            pages += memory_tracker->CallsCreate(e.addr, e.size, e.with_data);
+        } else {
+            pages -= memory_tracker->CallsRelease(e.addr, e.size, e.op == 2);
+        }
+    }
+    calls_taken.clear();
+    if (pages != 0) {
+        BbEngine::GxResources::NoteCallsPages(pages);
+    }
+}
+
+void BufferCache::CheckGameBuffers() {
+    if (!GameBuffersByCalls()) {
+        return;
+    }
+    // A slice a second (about 0.1 ms on this thread), not one pass a minute: a buffer comes round again
+    // after the others, its hash then compared with the one kept.
+    const u64 now = SteadyNs();
+    if (net_next_ns == 0) {
+        net_next_ns = now + 10'000'000'000ull;
+        return;
+    }
+    if (now < net_next_ns) {
+        return;
+    }
+    net_next_ns = now + 1'000'000'000ull;
+    constexpr u64 Budget = 1_MB, Chunk = 256_KB, Page = 4_KB;
+    std::vector<BbEngine::GxResources::BufferSample> samples;
+    BbEngine::GxResources::SampleBuffers(samples, Budget);
+    net_scratch.resize(Chunk);
+    u64 hashed = 0, bytes = 0, budget = Budget;
+    for (const auto& s : samples) {
+        // The inside pages only: those are the calls' (a page shared with other memory stays watched).
+        const VAddr first = Common::AlignUp(s.memory, Page);
+        const VAddr last = Common::AlignDown(s.memory + s.bytes, Page);
+        if (first >= last || budget == 0) {
+            continue;
+        }
+        const u64 size = std::min<u64>(last - first, budget);
+        if (IsInPlace(first, size) || IsRegionGpuModified(first, size)) {
+            net_entries.erase(first); // the GPU's to write, or read in place: not the net's
+            continue;
+        }
+        const u64 version = GpuWriteVersion(first, size);
+        u64 hash = 0;
+        for (u64 done = 0; done < size; done += Chunk) {
+            const u64 n = std::min(Chunk, size - done);
+            memory->CopySparseMemory(first + done, net_scratch.data(), n);
+            hash = XXH3_64bits_withSeed(net_scratch.data(), n, hash);
+        }
+        budget -= size;
+        ++hashed;
+        bytes += size;
+        const auto it = net_entries.find(first);
+        if (it != net_entries.end() && it->second.key == s.key && it->second.told == s.told &&
+            it->second.gpu_version == version && it->second.size == size && it->second.hash != hash) {
+            BbEngine::GxResources::NoteUntoldWrite(first, size, s.key);
+            memory_tracker->MarkRegionAsCpuModifiedQuiet(first, size);
+        }
+        net_entries[first] = NetEntry{s.key, s.told, version, hash, size};
+    }
+    if (net_entries.size() > 65536) {
+        net_entries.clear();
+    }
+    BbEngine::GxResources::NoteNet(hashed, bytes);
+}
+
 void BufferCache::Maintain() {
     maintained_epoch = packet_epoch;
+    ProcessCallsEvents();
+    CheckGameBuffers();
     if (gx_state.load(std::memory_order_acquire) == u8(GxState::Waiting) && BbGxRing::Known()) {
         PollGxRegion(0, 0);
     }
     ProcessPendingUnmaps();
+    FollowGxReleases();
     ProcessIdleBlocks();
 }
 
@@ -2325,11 +2738,17 @@ void BufferCache::ProcessPendingUnmaps() {
             in_place_blocks.Subtract(range.start, range.end);
         }
         // bbport: blocks wholly unmapped that have a VRAM copy leave VRAM too (their slots go
-        // to the next blocks moved there; uploaded again if mapped and used).
+        // to the next blocks moved there; uploaded again if mapped and used). 0.4.6 beta 5: as the
+        // PS4's memory goes when the game unmaps it; together (one unbind and one protection
+        // change per run of blocks).
+        std::vector<u64> blocks;
         for (u64 block = (addr + block_size - 1) >> block_shift; block < (addr + size) >> block_shift;
              ++block) {
-            EvictVramBlock(block);
+            if (resident_ranges.Contains(block)) {
+                blocks.push_back(block);
+            }
         }
+        EvictVramBlocks(blocks);
     }
     if (gx_unmapped.load(std::memory_order_relaxed) && gx_ready.exchange(false)) {
         gx_state.store(u8(GxState::Failed), std::memory_order_release);
@@ -2794,6 +3213,65 @@ void BufferCache::Preupload(u64 budget) {
         std::memory_order_relaxed);
 }
 
+void BufferCache::LoadUpload() {
+    if (!LoadUploadEnabled()) {
+        return;
+    }
+    const bool up = BbEngine::Loading::ScreenUp();
+    std::vector<std::pair<VAddr, u64>> take;
+    {
+        std::scoped_lock lk{load_upload_mutex};
+        if (load_upload_ranges.empty()) {
+            return;
+        }
+        if (!up && !BbEngine::Loading::EndedWithin(SteadyNs(), 2'000'000'000ull)) {
+            // 2 s after the load: what is left uploads at its first draw, as before.
+            u64 left = 0;
+            for (const auto& [at, bytes] : load_upload_ranges) {
+                left += bytes;
+            }
+            load_upload_ranges.clear();
+            LoadWork::counters.dropped_bytes.fetch_add(left, std::memory_order_relaxed);
+            return;
+        }
+        // With the VRAM manager on, its comfortable line decides (they wait, or go at their draw).
+        if (!VramPolicy::Off() && !VramPolicy::Comfortable()) {
+            LoadWork::counters.frames_held.fetch_add(1, std::memory_order_relaxed);
+            return;
+        }
+        const u64 budget = LoadUploadBudget(up);
+        u64 taken = 0;
+        for (auto it = load_upload_ranges.begin(); it != load_upload_ranges.end() && taken < budget;) {
+            taken += it->second;
+            take.emplace_back(it->first, it->second);
+            it = load_upload_ranges.erase(it);
+        }
+    }
+    BB_SECTION(Preupload);
+    for (const auto& [addr, size] : take) {
+        const u64 before = BbStats::buffer_upload_bytes.load(std::memory_order_relaxed);
+        // In pieces within a 4 MiB region (an arena request spans at most two arena pages).
+        for (VAddr at = addr; at < addr + size;) {
+            const VAddr region = at & ~(TRACKER_HIGHER_PAGE_SIZE - 1);
+            const VAddr stop = std::min<VAddr>(addr + size, region + TRACKER_HIGHER_PAGE_SIZE);
+            const u64 first_block = at >> block_shift;
+            const u64 last_block = (stop - 1) >> block_shift;
+            const auto* arena = GetArena(first_block, last_block);
+            EnsureResident(arena, first_block, last_block);
+            SynchronizeMemory(arena, at, static_cast<u32>(stop - at), false, false);
+            at = stop;
+        }
+        const u64 copied = BbStats::buffer_upload_bytes.load(std::memory_order_relaxed) - before;
+        if (copied != 0) {
+            LoadWork::counters.ahead_bytes.fetch_add(size, std::memory_order_relaxed);
+            LoadWork::counters.ahead_copied.fetch_add(copied, std::memory_order_relaxed);
+        } else {
+            // Nothing left to upload: a draw used it first.
+            LoadWork::counters.drawn_bytes.fetch_add(size, std::memory_order_relaxed);
+        }
+    }
+}
+
 void BufferCache::SubmitPendingArenaBinds(Vulkan::SubmitInfo& info) {
     if (pending_binds.empty()) {
         return;
@@ -2815,12 +3293,14 @@ void BufferCache::SubmitPendingArenaBinds(Vulkan::SubmitInfo& info) {
     info.before_submit.push_back([this, binds, wait_tick, wait_sema, signal_tick, signal_sema] {
         std::vector<vk::SparseBufferMemoryBindInfo> buffer_binds;
         buffer_binds.reserve(binds->size());
+        u64 ranges = 0;
         for (const auto& arena_binds : *binds) {
             buffer_binds.emplace_back(vk::SparseBufferMemoryBindInfo{
                 .buffer = arena_binds.arena->Handle(),
                 .bindCount = static_cast<u32>(arena_binds.binds.size()),
                 .pBinds = arena_binds.binds.data(),
             });
+            ranges += arena_binds.binds.size();
         }
         const vk::TimelineSemaphoreSubmitInfo timeline_si = {
             .waitSemaphoreValueCount = wait_tick ? 1u : 0u,
@@ -2837,7 +3317,19 @@ void BufferCache::SubmitPendingArenaBinds(Vulkan::SubmitInfo& info) {
             .signalSemaphoreCount = 1u,
             .pSignalSemaphores = &signal_sema,
         };
+        // 0.4.6 beta 5: timed (hitch reports): the call itself, on the thread that submits.
+        const auto bind_start = std::chrono::steady_clock::now();
         auto submit_result = instance.GetGraphicsQueue().bindSparse(sparse_info);
+        const u64 bind_ns = u64(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                    std::chrono::steady_clock::now() - bind_start)
+                                    .count());
+        BbStats::sparse_bind_calls.fetch_add(1, std::memory_order_relaxed);
+        BbStats::sparse_bind_ranges.fetch_add(ranges, std::memory_order_relaxed);
+        BbStats::sparse_bind_ns.fetch_add(bind_ns, std::memory_order_relaxed);
+        u64 longest = BbStats::sparse_bind_max_ns.load(std::memory_order_relaxed);
+        while (bind_ns > longest &&
+               !BbStats::sparse_bind_max_ns.compare_exchange_weak(longest, bind_ns, std::memory_order_relaxed)) {
+        }
         if (submit_result == vk::Result::eErrorDeviceLost) {
             Vulkan::Breadcrumbs::ReportDeviceLost("submit");
         }

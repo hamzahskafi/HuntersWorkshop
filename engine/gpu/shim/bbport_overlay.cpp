@@ -79,10 +79,11 @@ extern "C" void runtime_restart(void); // bb-probe (probe.c)
 extern "C" void bbnet_exit_begin(int timeout_ms); // bbnet_glue.cpp: out of a co-op room at exit
 extern "C" void bbnet_exit_wait(void);
 
-namespace Vulkan {
-extern std::atomic<u64> g_bb_compile_ns_total; // vk_pipeline_cache.cpp
-extern std::atomic<u32> g_bb_compiles_total;
-} // namespace Vulkan
+namespace Libraries::VideoOut {
+// driver.cpp (NoteShaderStutter): a frame came late while shaders were being prepared.
+extern std::atomic<s64> g_shader_late_until_ns;
+extern std::atomic<u32> g_shader_late_count;
+} // namespace Libraries::VideoOut
 
 namespace BbOverlay {
 
@@ -1025,38 +1026,35 @@ void UpscalerSection() {
     }
     ImGui::Unindent();
     const bool temporal = s.upscaler != BbSettings::UpscalerOff; // an upscaler or TAA
-    // Sharpening after an upscaler or TAA, its strength under it. 0.4.4 beta 27d (the tester): their
-    // hints say where it runs for what runs, as the launcher's lines: FSR sharpens up to 1 itself and an
-    // RCAS pass adds the rest; DLSS has none of its own, so the pass does it all; TAA's runs after it.
-    const bool fsr = s.upscaler == BbSettings::UpscalerFsr;
-    const char* where = s.upscaler == BbSettings::UpscalerDlss
-                            ? BbSettings::MenuText("After DLSS (it has none of its own).", "После DLSS (своей у него нет).")
-                        : fsr ? BbSettings::MenuText("FSR's own sharpening.", "Собственная резкость FSR.")
-                        : s.upscaler == BbSettings::UpscalerTaa ? BbSettings::MenuText("After TAA.", "После TAA.")
-                                                                : BbSettings::MenuText("Needs an upscaler or TAA.",
-                                                                                       "Нужен апскейлер или TAA.");
+    // Sharpening after an upscaler or TAA, its strength under it: 0.4.6 beta 16, the engine's RCAS after
+    // each of them (rcas_extra.glsl), a percentage. The tester: no line per upscaler, no vendor named;
+    // only why the row is off without one.
     ImGui::BeginDisabled(!temporal);
     if (const char* label = Item("Sharpening (RCAS)")) {
         Checkbox(label, s.sharpen);
         char hint[384];
-        std::snprintf(hint, sizeof(hint), "%s %s", where,
-                      BbSettings::MenuText("AMD's RCAS: brings back detail that upscaling softens.",
-                                           "RCAS от AMD: возвращает детали, которые смягчает апскейлинг."));
+        std::snprintf(hint, sizeof(hint), "%s%s%s",
+                      temporal ? "" : BbSettings::MenuText("Needs an upscaler or TAA.", "Нужен апскейлер или TAA."),
+                      temporal ? "" : " ",
+                      BbSettings::MenuText("Brings back detail that upscaling softens.",
+                                           "Возвращает детали, которые смягчает апскейлинг."));
         Hint(hint);
     }
     ImGui::Indent();
     if (const char* label = Item("Sharpening strength", "Сила резкости")) {
         ImGui::BeginDisabled(!s.sharpen);
-        Slider(label, s.sharpness, 0.0f, 2.0f);
+        // 0.4.6 beta 16 (the tester): a percentage of RCAS's maximum (25% by default: a starting point).
+        int percent = std::clamp(s.sharpening.load(), 0, 100);
+        const bool changed = ImGui::SliderInt(label, &percent, 0, 100, "%d%%", ImGuiSliderFlags_AlwaysClamp);
+        Store(s.sharpening, std::clamp(percent, 0, 100), changed);
         ImGui::EndDisabled();
         char hint[384];
-        std::snprintf(hint, sizeof(hint), "%s %s",
-                      fsr ? BbSettings::MenuText("Above 1 adds a second pass.", "Выше 1 добавляется второй проход.")
-                          : BbSettings::MenuText("Higher is sharper.", "Чем выше, тем резче."),
-                      BbSettings::MenuText("0.20 is light; high values can halo edges and show grain. Ctrl+click to "
-                                           "type a value.",
-                                           "0.20 — слегка; высокие значения дают ореолы по краям и зерно. Ctrl+щелчок — "
-                                           "ввести значение."));
+        std::snprintf(hint, sizeof(hint), "%s %s %s", BbSettings::MenuText("Higher is sharper.", "Чем выше, тем резче."),
+                      BbSettings::MenuText("100% is the strongest; high values can halo edges and show grain. "
+                                           "Ctrl+click to type a value.",
+                                           "100% — максимум; высокие значения дают ореолы по краям и зерно. "
+                                           "Ctrl+щелчок — ввести значение."),
+                      BbSettings::MenuText("The default is 25%.", "По умолчанию 25%."));
         Hint(hint);
     }
     ImGui::Unindent();
@@ -1183,15 +1181,36 @@ void MaskSection() {
         Hint(BbSettings::MenuText(
             "Marks transparent effects (particles, haze) so the upscaler relies less on past "
             "frames. Fewer trails behind effects, but shimmer returns underneath them."));
-        // What the selected upscaler does with it.
-        const char* use = s.upscaler == BbSettings::UpscalerFsr
-                              ? BbSettings::MenuText("AMD FSR takes it as its reactive mask (FSR 3.1 uses it; FSR 4 "
-                                                     "may).",
-                                                     "AMD FSR берёт её как реактивную маску (FSR 3.1 её использует; "
-                                                     "FSR 4 может).")
-                          : dlss
-                              ? BbSettings::MenuText("DLSS does not use it.", "DLSS её не использует.")
-                              : BbSettings::MenuText("TAA does not use it.", "TAA её не использует.");
+        // What the selected upscaler does with it. 0.4.6 beta 16: for AMD FSR, the running version's own
+        // answer (AMD's resource query, asked as its context is made), not a guess by version.
+        char use[256];
+        if (s.upscaler == BbSettings::UpscalerFsr) {
+            const char* fsr = s.fsr_running.load();
+            const char* name = fsr ? fsr : "AMD FSR";
+            switch (s.fsr_reactive.load()) {
+            case BbSettings::FsrReactiveNeeded:
+            case BbSettings::FsrReactiveRead:
+                std::snprintf(use, sizeof(use), BbSettings::MenuText("%s reads it as its reactive mask.",
+                                                                     "%s читает её как реактивную маску."),
+                              name);
+                break;
+            case BbSettings::FsrReactiveUnread:
+                std::snprintf(use, sizeof(use),
+                              BbSettings::MenuText("%s does not read it (it says so itself).",
+                                                   "%s её не читает (так говорит он сам)."),
+                              name);
+                break;
+            default:
+                std::snprintf(use, sizeof(use), "%s",
+                              BbSettings::MenuText("Whether AMD FSR reads it shows here while it runs.",
+                                                   "Читает ли её AMD FSR, видно здесь, пока он работает."));
+                break;
+            }
+        } else {
+            std::snprintf(use, sizeof(use), "%s",
+                          dlss ? BbSettings::MenuText("DLSS does not use it.", "DLSS её не использует.")
+                               : BbSettings::MenuText("TAA does not use it.", "TAA её не использует."));
+        }
         ImGui::PushTextWrapPos();
         ImGui::TextDisabled("%s", use);
         ImGui::PopTextWrapPos();
@@ -1238,13 +1257,28 @@ void MaskSection() {
             "Движущийся предмет без синего и без красного/зелёного апскейлер считает "
             "неподвижным, отсюда шлейф."));
     }
+    // 0.4.6 beta 16 (the tester): AMD's own debug view, as BB_AMD_FSR_DEBUG_VIEW=1 gives it. AMD FSR only.
+    if (s.upscaler == BbSettings::UpscalerFsr || Searching()) {
+        if (const char* label = Item("Show AMD FSR's own view (debug)", "Показать собственный вид AMD FSR (отладка)")) {
+            bool show_amd = s.debug_view == BbSettings::DebugAmdFsr;
+            if (ImGui::Checkbox(label, &show_amd)) {
+                s.debug_view = show_amd ? BbSettings::DebugAmdFsr : BbSettings::DebugNone;
+            }
+            Hint(BbSettings::MenuText(
+                "AMD's diagnostic view in place of the picture: how FSR reads the motion vectors, where it "
+                "finds newly uncovered areas and how much it trusts its history. Turning it on or off "
+                "restarts FSR in the background (the picture at full size for a moment). Not saved.",
+                "Диагностический вид AMD вместо картинки: как FSR читает векторы движения, где находит "
+                "открывшиеся области и насколько доверяет накопленной истории. Включение и выключение "
+                "перезапускает FSR в фоне (картинка на миг в полном размере). Не сохраняется."));
+        }
+    }
     ImGui::EndDisabled(); // upscaler off
 }
 
-// bbport: OptiScaler (vk_optiscaler.h): what was found at start, and the engine's compatibility
-// mode for it (optiscaler_compat in config.ini, applied on restart).
+// bbport: OptiScaler (vk_optiscaler.h): what was found at start. With it loaded the engine always
+// works in its compatibility mode (0.4.6 beta 17: no longer a switch; the tester's call).
 void OptiScalerSection() {
-    auto& s = BbSettings::Get();
     const auto& opti = Vulkan::OptiScaler::Detect();
     Section("OptiScaler");
     if (WholeSection() && Shown("OptiScaler")) {
@@ -1252,18 +1286,13 @@ void OptiScalerSection() {
         if (!opti.loaded) {
             ImGui::TextDisabled("%s", BbSettings::MenuText(
                                           "Not loaded. OptiScaler is a DLL put next to the engine (often as winmm.dll "
-                                          "or dxgi.dll) with its OptiScaler.ini; it takes over DLSS. The switches below "
-                                          "apply when it is there.",
+                                          "or dxgi.dll) with its OptiScaler.ini; it takes over DLSS.",
                                           "Не загружен. OptiScaler — это DLL рядом с движком (обычно winmm.dll или "
-                                          "dxgi.dll) с файлом OptiScaler.ini; он перехватывает DLSS. Переключатели ниже "
-                                          "действуют, когда он есть."));
+                                          "dxgi.dll) с файлом OptiScaler.ini; он перехватывает DLSS."));
         } else {
             ImGui::Text(BbSettings::MenuText("Loaded: %s as %s", "Загружен: %s как %s"),
                         opti.version.empty() ? "OptiScaler" : ("v" + opti.version).c_str(), opti.module.c_str());
-            ImGui::Text("%s",
-                        Vulkan::OptiScaler::Compat()
-                            ? BbSettings::MenuText("Compatibility mode in this run: on", "Режим совместимости сейчас: вкл.")
-                            : BbSettings::MenuText("Compatibility mode in this run: off", "Режим совместимости сейчас: выкл."));
+            ImGui::Text("%s", BbSettings::MenuText("Compatibility mode in this run: on", "Режим совместимости сейчас: вкл."));
             if (!opti.frame_generation.empty()) {
                 ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f),
                                    BbSettings::MenuText(
@@ -1275,26 +1304,6 @@ void OptiScalerSection() {
             }
         }
         ImGui::PopTextWrapPos();
-    }
-    if (const char* label = Item("Compatibility mode (restart required)", "Режим совместимости (после перезапуска)")) {
-        Checkbox(label, s.optiscaler_compat);
-        Hint(BbSettings::MenuText(
-            "Keeps the engine on the paths OptiScaler's hooks handle: DLSS calls wait for the GPU queue, "
-            "the Vulkan device is created where OptiScaler can prepare it, and one thread sends the GPU "
-            "work while its frame generation is on (a little FPS). Off: the engine runs as without "
-            "OptiScaler. OptiScaler's own settings (its upscaler, its frame generation) are in its own "
-            "overlay and OptiScaler.ini. Applies after restarting the game.",
-            "Держит движок на путях, которые выдерживают хуки OptiScaler: вызовы DLSS ждут очередь GPU, "
-            "устройство Vulkan создаётся там, где OptiScaler может его подготовить, а работу GPU "
-            "отправляет один поток, пока включена его генерация кадров (немного FPS). Выкл.: движок "
-            "работает как без OptiScaler. Собственные настройки OptiScaler (его апскейлер, его генерация "
-            "кадров) — в его оверлее и OptiScaler.ini. Применяется после перезапуска игры."));
-        if (const char* env = std::getenv("BB_OPTISCALER_COMPAT"); env && env[0] == '0') {
-            ImGui::TextDisabled("%s", BbSettings::MenuText(
-                                          "Off for this run: the launcher's Engine > OptiScaler compatibility is off.",
-                                          "Выключен в этом запуске: в лаунчере выключено Engine > OptiScaler "
-                                          "compatibility."));
-        }
     }
 }
 
@@ -1646,8 +1655,8 @@ void Menu() {
                              ImGuiCond_Appearing);
     bool keep_open = true;
     if (!ImGui::Begin(
-            BbSettings::MenuText("Bloodborne - Graphics  (Insert / L3+R3)###bbport_settings",
-                                 "Bloodborne — настройки  (Insert / L3+R3)###bbport_settings"),
+            BbSettings::MenuText("Bloodborne - Graphics  (F1 / L3+R3)###bbport_settings",
+                                 "Bloodborne — настройки  (F1 / L3+R3)###bbport_settings"),
             &keep_open, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
         ImGui::End();
         return;
@@ -1746,8 +1755,6 @@ void Menu() {
     // 0.4.4 beta 27b: the game's own anti-aliasing, patched at start, applies only without an upscaler.
     restart |= BbSettings::GameAaApplies(s.effects[BbSettings::EffectGameAa], s.upscaler) !=
                BbSettings::GameAaApplies(s.startup_effects[BbSettings::EffectGameAa], s.startup_upscaler);
-    // OptiScaler's switches matter only with it loaded.
-    restart |= Vulkan::OptiScaler::Detect().loaded && s.optiscaler_compat != s.startup_optiscaler_compat;
     if (restart) {
         ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "%s",
                            BbSettings::MenuText("Changes apply after restarting the game",
@@ -1806,68 +1813,67 @@ void Menu() {
 // bbport: the FPS counter's box this frame (the compile note sits next to it); zero: not drawn.
 ImVec2 fps_box_min{}, fps_box_max{};
 
-// bbport: "Building shaders" while pipelines are built in play (a place seen for the first time):
-// a hitch with the note was shader building, one without it loading (Linux report, 0.9.37 beta
-// 6). A burst of compiles (gaps under 2 s) shows it once it took 30 ms, until 1.5 s after its last.
-std::mutex compile_note_mutex;
-bool compile_note_primed = false;
-u64 compile_note_seen_ns = 0, compile_note_burst_ns = 0;
-u32 compile_note_seen = 0, compile_note_burst = 0;
-std::chrono::steady_clock::time_point compile_note_last{};
-
+// bbport: "Building shaders" while shaders are prepared in play (a place seen for the first time):
+// a hitch with the note was shader building, one without it loading (Linux report, 0.9.37 beta 6).
+// 0.4.5 beta 14: for 2 s after a frame that came late while shaders were being prepared, decided
+// at each flip (driver.cpp, NoteShaderStutter); until then once a burst of that work added up to
+// 30 ms, late frame or not.
 bool CompileNoteActive() {
     if (!BbSettings::Get().show_compile_note) {
         return false;
     }
-    const u64 ns = Vulkan::g_bb_compile_ns_total.load(std::memory_order_relaxed);
-    const u32 count = Vulkan::g_bb_compiles_total.load(std::memory_order_relaxed);
-    const auto now = std::chrono::steady_clock::now();
-    std::scoped_lock lock{compile_note_mutex};
-    if (!compile_note_primed) {
-        // The start's warm-up is not a hitch in play.
-        compile_note_primed = true;
-        compile_note_seen_ns = ns;
-        compile_note_seen = count;
+    const s64 until = Libraries::VideoOut::g_shader_late_until_ns.load(std::memory_order_relaxed);
+    if (until == 0) {
         return false;
     }
-    if (ns != compile_note_seen_ns) {
-        if (now - compile_note_last > std::chrono::seconds(2)) {
-            compile_note_burst_ns = 0;
-            compile_note_burst = 0;
-        }
-        compile_note_burst_ns += ns - compile_note_seen_ns;
-        compile_note_burst += count - compile_note_seen;
-        compile_note_seen_ns = ns;
-        compile_note_seen = count;
-        compile_note_last = now;
+    const s64 now = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        std::chrono::steady_clock::now().time_since_epoch())
+                        .count();
+    return now < until;
+}
+
+// A small arc turning once every second, the size of a text line, at the cursor (the compile note's
+// "still working": 0.4.6 beta 17, the tester).
+void Spinner(ImU32 color) {
+    const float size = ImGui::GetTextLineHeight();
+    const ImVec2 at = ImGui::GetCursorScreenPos();
+    ImGui::Dummy(ImVec2(size, size));
+    const float radius = size * 0.36f;
+    const ImVec2 center(at.x + size * 0.5f, at.y + size * 0.5f);
+    constexpr float pi = 3.14159265f;
+    const float start = float(ImGui::GetTime()) * 2.0f * pi;
+    constexpr int segments = 20;
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    draw->PathClear();
+    for (int i = 0; i <= segments; ++i) {
+        const float angle = start + float(i) / float(segments) * pi * 1.5f;
+        draw->PathLineTo(ImVec2(center.x + std::cos(angle) * radius, center.y + std::sin(angle) * radius));
     }
-    return compile_note_burst_ns >= 30'000'000ull &&
-           now - compile_note_last < std::chrono::milliseconds(1500);
+    draw->PathStroke(color, ImDrawFlags_None, std::max(1.5f, size * 0.12f));
 }
 
 void CompileNote() {
-    u32 burst;
-    {
-        std::scoped_lock lock{compile_note_mutex};
-        burst = compile_note_burst;
-    }
-    // Under the FPS counter (above it at the bottom), else in the top right corner, where the
-    // game's HUD has nothing.
+    const u32 burst = Libraries::VideoOut::g_shader_late_count.load(std::memory_order_relaxed);
+    // 0.4.6 beta 17 (the tester: where most games put it): in the bottom right corner, above the FPS
+    // counter when the counter is there too; a spinner at the end of the line.
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     const float pad = 12.0f * base_scale;
-    const bool beside_counter = fps_box_max.x > fps_box_min.x;
-    const bool bottom = beside_counter && fps_box_min.y > viewport->WorkPos.y + viewport->WorkSize.y * 0.5f;
-    const float x = beside_counter ? fps_box_max.x : viewport->WorkPos.x + viewport->WorkSize.x - pad;
-    const float y = !beside_counter ? viewport->WorkPos.y + pad
-                    : bottom        ? fps_box_min.y - pad * 0.5f
-                                    : fps_box_max.y + pad * 0.5f;
-    ImGui::SetNextWindowPos(ImVec2(x, y), ImGuiCond_Always, ImVec2(1.0f, bottom ? 1.0f : 0.0f));
+    const float right = viewport->WorkPos.x + viewport->WorkSize.x - pad;
+    const float bottom = viewport->WorkPos.y + viewport->WorkSize.y - pad;
+    const bool counter_below = fps_box_max.x > fps_box_min.x &&
+                               fps_box_min.y > viewport->WorkPos.y + viewport->WorkSize.y * 0.5f &&
+                               fps_box_min.x > viewport->WorkPos.x + viewport->WorkSize.x * 0.5f;
+    const float x = counter_below ? fps_box_max.x : right;
+    const float y = counter_below ? fps_box_min.y - pad * 0.5f : bottom;
+    ImGui::SetNextWindowPos(ImVec2(x, y), ImGuiCond_Always, ImVec2(1.0f, 1.0f));
     ImGui::SetNextWindowBgAlpha(0.55f);
     ImGui::Begin("##compile_note", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
                      ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav |
                      ImGuiWindowFlags_NoFocusOnAppearing);
     ImGui::Text("%s (%u)", BbSettings::MenuText("Building shaders", "Сборка шейдеров"), burst);
+    ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x);
+    Spinner(ImGui::GetColorU32(ImGuiCol_Text));
     ImGui::End();
 }
 
@@ -2005,14 +2011,20 @@ void SetTextPrompt(bool active, const std::string& prompt, const std::string& te
 }
 
 /// bbport: what opens this menu (BB_OVERLAY_KEYS, the launcher's "In-game menu shortcut"): "both"
-/// (Insert and L3+R3, the default), "insert" (a controller can't open it by accident: L3 and R3
-/// pressed together in a fight did) or "off" (only the game's own PC menus).
-enum class OverlayKeys { Both, Insert, Off };
+/// (F1 and L3+R3, the default), "keyboard" (a controller can't open it by accident: L3 and R3
+/// pressed together in a fight did; "insert" before 0.4.6 beta 17) or "off" (only the game's own PC
+/// menus). 0.4.6 beta 17: F1, not Insert (the tester's call): OptiScaler's own keys are Insert (its
+/// menu), End (its frame generation), Page Up and Page Down (its FPS counter), ReShade's Home; F1 is
+/// none of theirs, not one of the game's default bindings, and no key a text field types with.
+enum class OverlayKeys { Both, Keyboard, Off };
+constexpr SDL_Keycode kMenuKey = SDLK_F1;
 static OverlayKeys MenuKeys() {
     static const OverlayKeys keys = [] {
         const char* env = std::getenv("BB_OVERLAY_KEYS");
         const std::string value = env ? env : "";
-        return value == "off" ? OverlayKeys::Off : value == "insert" ? OverlayKeys::Insert : OverlayKeys::Both;
+        return value == "off"                             ? OverlayKeys::Off
+               : value == "keyboard" || value == "insert" ? OverlayKeys::Keyboard
+                                                          : OverlayKeys::Both;
     }();
     return keys;
 }
@@ -2084,8 +2096,8 @@ void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count) 
         return;
     }
     initialized = true;
-    std::printf("Overlay: menu ready (%s)\n", MenuKeys() == OverlayKeys::Both     ? "Insert or L3+R3"
-                                             : MenuKeys() == OverlayKeys::Insert ? "Insert; L3+R3 off"
+    std::printf("Overlay: menu ready (%s)\n", MenuKeys() == OverlayKeys::Both       ? "F1 or L3+R3"
+                                             : MenuKeys() == OverlayKeys::Keyboard ? "F1; L3+R3 off"
                                                                                  : "shortcuts off");
 }
 
@@ -2116,10 +2128,10 @@ bool HandleEvent(const SDL_Event& event) {
     case SDL_EVENT_KEY_UP: {
         const bool down = event.type == SDL_EVENT_KEY_DOWN;
         if (down && !event.key.repeat &&
-            ((event.key.key == SDLK_INSERT && (is_open || MenuKeys() != OverlayKeys::Off)) ||
+            ((event.key.key == kMenuKey && (is_open || MenuKeys() != OverlayKeys::Off)) ||
              // Esc in a text field (the search, a typed value) is the field's: it clears, or leaves.
              (is_open && event.key.key == SDLK_ESCAPE && !io.WantTextInput))) {
-            SetOpen(event.key.key == SDLK_INSERT ? !is_open : false);
+            SetOpen(event.key.key == kMenuKey ? !is_open : false);
             return true;
         }
         if (!is_open) {

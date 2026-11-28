@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cstdio>
 #include "shader_recompiler/native/tone_curve.h"
 #include <condition_variable>
 #include <cstdlib>
@@ -16,7 +19,11 @@
 #include <boost/container/small_vector.hpp>
 #include <boost/container/static_vector.hpp>
 
+#include "bbport_cpu_layout.h"
+#include "bbport_log_level.h"
+#include "bbport_roles.h"
 #include "bbport_threads.h"
+#include "engine/frame_window.h"
 #include "common/thread.h"
 #include "common/serdes.h"
 #include "common/assert.h"
@@ -78,6 +85,9 @@ struct PendingPipeline {
 /// Compile threads (BB_PIPELINE_THREADS, default a third of the hardware threads, 1-4), first
 /// in, first out: the draw that needs a pipeline first gets it first. Never stopped: pipelines
 /// destroyed at exit wait for their job (Pipeline::WaitReady).
+/// 0.4.6 beta 15 part 1: burst threads beside them (BB_PIPELINE_BURST, bbport_cpu_layout.h): at
+/// idle priority, on the efficiency cores where there are any, taking
+/// jobs only in a backlog, raised while a thread waits for theirs.
 class PipelineCompiler {
 public:
     static PipelineCompiler& Get() {
@@ -87,21 +97,120 @@ public:
 
     PipelineJobQueue queue;
     u32 threads = 0;
+    u32 burst_threads = 0;
+    /// Burst thread i's handle (written by it before its first job, read under the queue's lock).
+    void* burst_handles[PipelineJobQueue::kMaxBurstThreads]{};
+    /// 0.4.6 beta 20: standing thread i's, the same way.
+    void* standing_handles[PipelineJobQueue::kMaxStandingThreads]{};
+    /// Since start, for the line on each load's first frames (part 5).
+    std::atomic<u64> jobs_total{0}, compile_ns_total{0}, bursts_total{0}, burst_wall_ns_total{0};
+    std::atomic<u32> burst_threads_most{0};
+
+    static u64 NowNs() {
+        return PipelineJobQueue::SteadyNs();
+    }
+
+    /// A job ended after `ns` on burst thread `burst_index` (-1: another thread).
+    void Finish(int burst_index, u64 ns) {
+        jobs_total.fetch_add(1, std::memory_order_relaxed);
+        compile_ns_total.fetch_add(ns, std::memory_order_relaxed);
+        if (const auto burst = queue.Done(burst_index, ns, NowNs())) {
+            Report(*burst);
+        }
+    }
 
 private:
     PipelineCompiler() {
-        threads = std::clamp<u32>(BbThreads::Available() / 3, 1, 4);
-        if (const char* env = std::getenv("BB_PIPELINE_THREADS"); env && env[0]) {
-            threads = std::clamp(std::atoi(env), 1, 16);
-        }
+        threads = BbRoles::PoolSize(BbRoles::Pool::Compile); // BB_PIPELINE_THREADS
         for (u32 i = 0; i < threads; ++i) {
             std::thread([this, i] {
                 Common::SetCurrentThreadName(("bb:Pipeline" + std::to_string(i)).c_str());
+                const unsigned slot = i < PipelineJobQueue::kMaxStandingThreads ? i : PipelineJobQueue::kNoSlot;
+                if (slot != PipelineJobQueue::kNoSlot) {
+                    standing_handles[slot] = BbThreads::SelfHandle();
+                }
                 for (;;) {
-                    queue.Pop()();
+                    auto job = queue.Pop(slot);
+                    const u64 start = NowNs();
+                    job();
+                    // 0.4.6 beta 20: raised for a render chain thread that waited on its job.
+                    if (queue.StandingDone(slot)) {
+                        BbThreads::EndRaise();
+                    }
+                    Finish(-1, NowNs() - start);
                 }
             }).detach();
         }
+        // A burst's flips counted from its first job to its end (under the queue's lock).
+        queue.edge = [](PipelineJobQueue::Burst* ended) {
+            if (!ended) {
+                BbEngine::Frames::Open(BbEngine::Frames::kBurst);
+                return;
+            }
+            const BbEngine::Frames::Window w = BbEngine::Frames::Close(BbEngine::Frames::kBurst);
+            ended->frames = w.frames;
+            ended->frames_over_25 = w.over_25;
+            ended->worst_ms = w.worst_ms;
+        };
+        StartBursts();
+    }
+
+    void StartBursts() {
+        const BbCpu::Summary cpu = BbCpu::Summarize(BbCpu::Read());
+        int forced = -1;
+        if (const char* env = std::getenv("BB_PIPELINE_BURST"); env && env[0]) {
+            forced = std::max(0, std::atoi(env));
+        }
+        const char* why = "";
+        const bool reversible = BbCpu::PrioritiesReversible(&why);
+        const BbCpu::BurstPlan plan = BbCpu::PlanBursts(cpu, threads, forced, reversible, why);
+        std::printf("%s\n", BbCpu::Describe(cpu, threads, plan).c_str());
+        std::fflush(stdout);
+        burst_threads = std::min<u32>(plan.threads, PipelineJobQueue::kMaxBurstThreads);
+        const std::vector<u32> sets = plan.on_efficiency ? cpu.efficiency_sets : std::vector<u32>{};
+        for (u32 i = 0; i < burst_threads; ++i) {
+            std::thread([this, i, sets] {
+                Common::SetCurrentThreadName(("bb:PipelineBurst" + std::to_string(i)).c_str());
+                // 0.4.6 beta 18: under roles the Background role keeps them on the efficiency
+                // cores (and off them while loading).
+                if (!BbRoles::On() && !sets.empty() && !BbCpu::SteerCurrentThread(sets) && i == 0) {
+                    std::printf("Pipelines: burst threads could not be kept on the efficiency cores\n");
+                }
+                burst_handles[i] = BbThreads::SelfHandle();
+                for (;;) {
+                    // At normal priority while at the queue (its lock), idle for the compile.
+                    auto job = queue.PopBurst(i);
+                    BbThreads::MakeBackground();
+                    if (const auto to = queue.RaisedTo(i)) {
+                        BbThreads::SetPriority(burst_handles[i], *to); // raised before the lowering
+                    }
+                    const u64 start = NowNs();
+                    job();
+                    const u64 ns = NowNs() - start;
+                    BbThreads::MakeNormal();
+                    Finish(static_cast<int>(i), ns);
+                }
+            }).detach();
+        }
+    }
+
+    /// A burst's line: from detailed logs on, and at the standard level for bursts of 8 or more.
+    void Report(const PipelineJobQueue::Burst& b) {
+        bursts_total.fetch_add(1, std::memory_order_relaxed);
+        burst_wall_ns_total.fetch_add(b.wall_ns, std::memory_order_relaxed);
+        const u32 used = threads + b.burst_threads;
+        for (u32 most = burst_threads_most.load(); used > most &&
+                                                   !burst_threads_most.compare_exchange_weak(most, used);) {
+        }
+        if (b.jobs < 8 && BbLogLevel() < 1) {
+            return;
+        }
+        std::printf("Pipelines: a backlog of %u compiled in %.2f s (%.0f ms of compiling): burst threads %u "
+                    "of %u took %u, waiting draws took %u, burst threads raised for a waiting draw %u times; "
+                    "frames over 25 ms during it %u of %u (worst %.1f ms)\n",
+                    b.jobs, b.wall_ns / 1e9, b.compile_ns / 1e6, b.burst_threads, burst_threads, b.burst_jobs,
+                    b.taken, b.raised, b.frames_over_25, b.frames, b.worst_ms);
+        std::fflush(stdout);
     }
 };
 
@@ -110,6 +219,22 @@ private:
 void SubmitPipelineJob(const void* owner, std::function<void()> job) {
     pipeline_compile_stats.background.fetch_add(1, std::memory_order_relaxed);
     PipelineCompiler::Get().queue.Push(owner, std::move(job));
+}
+
+void SubmitTranslationJob(const void* owner, std::function<void()> job) {
+    PipelineCompiler::Get().queue.Push(owner, std::move(job));
+}
+
+std::function<void()> TakeTranslationJob(const void* owner) {
+    auto job = PipelineCompiler::Get().queue.Take(owner);
+    if (!job) {
+        return {};
+    }
+    return [job = std::move(job)] {
+        const u64 start = PipelineCompiler::NowNs();
+        job();
+        PipelineCompiler::Get().Finish(-1, PipelineCompiler::NowNs() - start);
+    };
 }
 
 std::function<void()> TakePipelineJob(const void* owner) {
@@ -122,7 +247,47 @@ std::function<void()> TakePipelineJob(const void* owner) {
     if (!enabled) {
         return {};
     }
-    return PipelineCompiler::Get().queue.Take(owner);
+    auto job = PipelineCompiler::Get().queue.Take(owner);
+    if (!job) {
+        return {};
+    }
+    return [job = std::move(job)] {
+        const u64 start = PipelineCompiler::NowNs();
+        job();
+        PipelineCompiler::Get().Finish(-1, PipelineCompiler::NowNs() - start);
+    };
+}
+
+unsigned RaisePipelineBursts() {
+    auto& compiler = PipelineCompiler::Get();
+    // The waiting thread's priority, at least normal (the render chain runs above normal).
+    const int priority = std::max(BbThreads::CurrentPriority(), 0);
+    // 0.4.6 beta 20 (docs/chain-waits.md, item 4): the standing threads (normal) too, for a waiter
+    // above them: the render chain waiting on a compile it cannot take itself.
+    const bool standing = priority > 0 && compiler.threads != 0 && BbRoles::RaiseOnWait();
+    if (compiler.burst_threads == 0 && !standing) {
+        return 0;
+    }
+    return compiler.queue.RaiseRunning(
+        priority,
+        [&](unsigned i, int to) {
+            void* handle = i < PipelineJobQueue::kMaxBurstThreads
+                               ? compiler.burst_handles[i]
+                               : compiler.standing_handles[i - PipelineJobQueue::kMaxBurstThreads];
+            BbThreads::SetPriority(handle, to);
+        },
+        standing);
+}
+
+PipelineBurstTotals PipelineBurstTotalsNow(bool reset_most) {
+    auto& c = PipelineCompiler::Get();
+    return {c.jobs_total.load(), c.compile_ns_total.load(), c.bursts_total.load(),
+            c.burst_wall_ns_total.load(),
+            reset_most ? c.burst_threads_most.exchange(0) : c.burst_threads_most.load()};
+}
+
+u32 PipelineBurstThreads() {
+    return PipelineCompiler::Get().burst_threads;
 }
 
 u32 PipelineCompileThreads() {

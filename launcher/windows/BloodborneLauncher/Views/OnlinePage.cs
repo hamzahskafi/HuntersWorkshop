@@ -18,10 +18,12 @@ namespace BloodborneLauncher.Views
 
         public OnlinePage()
         {
-            // How to get online (0.4.4 beta 28: the page's subtitle, never shown before).
-            Body.Children.Add(Text(L.T("1. Turn on Play online. 2. Connect your Hunter's Dream account below (with Discord, or without it). ") +
-                L.T("3. In the game, choose online at the title screen: The Hunter's Dream's welcome message means you are online. ") +
-                L.T("Everyone needs game version 1.09."), "Faint"));
+            // How to get online (0.4.4 beta 28: the page's subtitle, never shown before). 0.4.6 beta 17 (the
+            // tester): one step a line.
+            Body.Children.Add(Text(L.T("1. Turn on Play online.") + "\n" +
+                L.T("2. Connect your Hunter's Dream account below (with Discord, or without it).") + "\n" +
+                L.T("3. In the game, choose online at the title screen: The Hunter's Dream's welcome message means you are online.") +
+                "\n\n" + L.T("Everyone needs game version 1.09."), "Faint"));
             // One server: The Hunter's Dream (0.4.4 beta 28: the engine's shadNet path, custom servers with an
             // account password, went). Their keys are cleared from config.ini.
             foreach (var key in new[] { "online_host", "online_port", "online_webapi", "online_game_api", "online_thd_account" })

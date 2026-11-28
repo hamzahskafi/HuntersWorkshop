@@ -40,6 +40,21 @@ static std::int64_t __attribute__((sysv_abi)) Instead(std::int64_t a, std::int64
     return 10 * (a + b + c + d + e + f);
 }
 
+// A creator's return through ReturnStub (gx_resources.cpp): the callback keeps the caller's return
+// address and points the method's return at the stub, which hands the result to After and goes on
+// to the address it returns, with the result intact.
+static std::uint8_t* return_stub;
+static std::uint64_t kept_return, seen_result;
+static std::int64_t __attribute__((sysv_abi)) Redirect(std::uint64_t, const std::uint64_t* saved) {
+    kept_return = saved[6];
+    const_cast<std::uint64_t*>(saved)[6] = reinterpret_cast<std::uint64_t>(return_stub);
+    return 0;
+}
+static std::uint64_t __attribute__((sysv_abi)) After(std::uint64_t result) {
+    seen_result = result;
+    return kept_return;
+}
+
 // Writes test code into the image. Commit leaves a page it wrote read and execute only on Linux (WriteCode),
 // as the loader's protections will; the test's own writes open it again first.
 static void Put(std::uint8_t* at, const void* bytes, std::size_t n) {
@@ -146,10 +161,80 @@ int main() {
     assert(BbEngine::Call(reinterpret_cast<std::uint64_t>(image + 0x200), 1,2,3,4,5,6) == 21);
     assert(calls == 1 && arguments == (std::array<std::uint64_t,6>{1,2,3,4,5,6}));
     BbEngine::FreeStub(stub);
+
+    // A method's return through a return stub (the GX creators).
+    Put(image, expected.data(), expected.size());
+    Put(image + 16, sum, sizeof sum);
+    return_stub = BbEngine::ReturnStub(After);
+    assert(return_stub);
+    BbEngine::Hook returned;
+    assert(BbEngine::Prepare(returned, image, 4096, 0, expected, Redirect));
+    BbEngine::Commit(std::span{&returned, 1});
+    assert(BbEngine::Call(reinterpret_cast<std::uint64_t>(image), 1,2,3,4,5,6) == 21 && seen_result == 21);
+    assert(BbEngine::Call(reinterpret_cast<std::uint64_t>(image), 10,2,3,4,5,6) == 30 && seen_result == 30);
+    BbEngine::Discard(returned);
+    BbEngine::FreeStub(return_stub);
+    Put(image, expected.data(), expected.size());
+
+    // A site that starts with a rip-relative lea (the GX texture destructors): the displaced bytes
+    // re-encode it as movabs of the same address, so the stub computes what the site did.
+    // lea rax,[rip+disp] (to image+0x400); 9 nops; mov rax,[rax]; ret
+    std::uint8_t site[20] = {0x48, 0x8d, 0x05};
+    const std::int32_t disp = 0x400 - (0x300 + 7);
+    std::memcpy(site + 3, &disp, 4);
+    std::memset(site + 7, 0x90, 9);
+    site[16] = 0x48; site[17] = 0x8b; site[18] = 0x00; site[19] = 0xc3;
+    Put(image + 0x300, site, sizeof site);
+    const std::uint64_t value = 77;
+    Put(image + 0x400, &value, 8);
+    std::uint8_t moved[19] = {0x48, 0xb8};
+    const auto address = reinterpret_cast<std::uint64_t>(image + 0x400);
+    std::memcpy(moved + 2, &address, 8);
+    std::memset(moved + 10, 0x90, 9);
+    BbEngine::Hook displaced;
+    calls = 0;
+    assert(!BbEngine::PrepareDisplaced(displaced, image, 4096, 0x300, expected, moved, Observe));
+    assert(BbEngine::PrepareDisplaced(displaced, image, 4096, 0x300, std::span{site, 16}, moved, Observe));
+    BbEngine::Commit(std::span{&displaced, 1});
+    assert(BbEngine::Call(reinterpret_cast<std::uint64_t>(image + 0x300), 1,2,3,4,5,6) == 77 && calls == 1);
+    BbEngine::Discard(displaced);
+
+    // 0.4.6 beta 16 (written for the heap core's allocate, a research hook since removed; the way stays in
+    // PrepareDisplaced): a prologue whose first bytes hold a relative jb, run re-encoded as jae over an
+    // absolute jump to the jb's target. The function: push rbx; xor eax, eax; cmp [rdi + 0x18], rsi; jb fail;
+    // mov r9d, 0x18; then mov rax, r9; pop rbx; ret. fail: mov rax, -1; pop rbx; ret. Both ways, with the
+    // callback seeing the heap (rdi) each time.
+    {
+        std::uint8_t core_site[19] = {0x53, 0x31, 0xc0, 0x48, 0x39, 0x77, 0x18, 0x0f, 0x82, 0, 0, 0, 0,
+                                      0x41, 0xb9, 0x18, 0x00, 0x00, 0x00};
+        const std::int32_t rel = 0x600 - (0x500 + 13); // from the jb's end to fail
+        std::memcpy(core_site + 9, &rel, 4);
+        Put(image + 0x500, core_site, sizeof core_site);
+        const std::uint8_t rest[] = {0x4c, 0x89, 0xc8, 0x5b, 0xc3};                      // mov rax, r9; pop rbx; ret
+        Put(image + 0x500 + sizeof core_site, rest, sizeof rest);
+        const std::uint8_t fail[] = {0x48, 0xc7, 0xc0, 0xff, 0xff, 0xff, 0xff, 0x5b, 0xc3}; // mov rax, -1; pop rbx; ret
+        Put(image + 0x600, fail, sizeof fail);
+        std::uint8_t moved_core[29] = {0x53, 0x31, 0xc0, 0x48, 0x39, 0x77, 0x18, 0x73, 0x0e, 0xff, 0x25, 0, 0, 0, 0};
+        const auto fail_at = reinterpret_cast<std::uint64_t>(image + 0x600);
+        std::memcpy(moved_core + 15, &fail_at, 8);
+        const std::uint8_t mov_r9[6] = {0x41, 0xb9, 0x18, 0x00, 0x00, 0x00};
+        std::memcpy(moved_core + 23, mov_r9, 6);
+        BbEngine::Hook core;
+        calls = 0;
+        assert(BbEngine::PrepareDisplaced(core, image, 4096, 0x500, std::span{core_site, sizeof core_site}, moved_core,
+                                          Observe));
+        BbEngine::Commit(std::span{&core, 1});
+        std::uint64_t heap[4] = {0, 0, 0, 100}; // [heap + 0x18]: the largest block
+        const auto at = reinterpret_cast<std::uint64_t>(image + 0x500);
+        assert(BbEngine::Call(at, heap, 50) == 0x18 && calls == 1 && arguments[0] == reinterpret_cast<std::uint64_t>(heap));
+        assert(BbEngine::Call(at, heap, 200) == -1 && calls == 2);
+        assert(BbEngine::Call(at, heap, 100) == 0x18 && calls == 3); // equal: not below
+        BbEngine::Discard(core);
+    }
 #ifdef _WIN32
     VirtualFree(image, 0, MEM_RELEASE);
 #else
     munmap(image, 4096);
 #endif
-    std::puts("PASS: guest ABI arguments (seven with a stack argument), XMM preservation, return slot, byte/range guards, staged hook installation, the game's function run from a callback, a replaced function, a cave and a redirected tail call");
+    std::puts("PASS: guest ABI arguments (seven with a stack argument), XMM preservation, return slot, byte/range guards, staged hook installation, the game's function run from a callback, a replaced function, a cave, a redirected tail call, a return stub, a displaced rip-relative prologue and a relative jb re-encoded");
 }

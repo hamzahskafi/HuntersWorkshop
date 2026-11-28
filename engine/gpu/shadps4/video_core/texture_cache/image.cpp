@@ -12,6 +12,7 @@
 #include "video_core/renderer_vulkan/vk_runtime.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/texture_cache/blit_helper.h"
+#include "video_core/texture_cache/ready_surfaces.h"
 #include "video_core/texture_cache/image.h"
 
 #include <vk_mem_alloc.h>
@@ -113,22 +114,24 @@ static vk::FormatFeatureFlags2 FormatFeatureFlags(const vk::ImageUsageFlags usag
 }
 
 UniqueImage::~UniqueImage() {
-    if (image) {
-        BbStats::vk_image_bytes.fetch_sub(size_bytes, std::memory_order_relaxed);
-        vmaDestroyImage(allocator, image, allocation);
-    }
+    Destroy();
 }
 
 void UniqueImage::Destroy() {
     if (image) {
         BbStats::vk_image_bytes.fetch_sub(size_bytes, std::memory_order_relaxed);
+        if (in_system_memory) {
+            BbStats::system_images.fetch_sub(1, std::memory_order_relaxed);
+            BbStats::system_image_bytes.fetch_sub(size_bytes, std::memory_order_relaxed);
+            in_system_memory = false;
+        }
         vmaDestroyImage(allocator, image, allocation);
         image = vk::Image{};
         allocation = {};
     }
 }
 
-void UniqueImage::Create(const vk::ImageCreateInfo& image_ci) {
+bool UniqueImage::Create(const vk::ImageCreateInfo& image_ci, bool may_fail) {
     this->image_ci = image_ci;
     ASSERT(!image);
     // bbport: images of BB_VMA_DEDICATED_MB (4) or more get memory of their own, given back to
@@ -160,16 +163,44 @@ void UniqueImage::Create(const vk::ImageCreateInfo& image_ci) {
     VmaAllocationInfo alloc_info{};
     VkResult result = vmaCreateImage(allocator, &image_ci_unsafe, &alloc_ci, &unsafe_image,
                                      &allocation, &alloc_info);
+    if (may_fail && result != VK_SUCCESS) {
+        allocation = {};
+        return false;
+    }
+    if (result != VK_SUCCESS) {
+        // 0.4.6 beta 5 (bbhost's host-memory fallback): every memory type within its budget refused
+        // it (VRAM full, the rest of the budget too): system memory first, over its budget, which
+        // the GPU reads over the bus, rather than stopping the game here. Counted (the VRAM line).
+        VmaAllocationCreateInfo over_ci = alloc_ci;
+        over_ci.flags = dedicated;
+        over_ci.usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST;
+        allocation = {};
+        result = vmaCreateImage(allocator, &image_ci_unsafe, &over_ci, &unsafe_image, &allocation, &alloc_info);
+        if (result == VK_SUCCESS) {
+            BbStats::image_over_budget.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
     ASSERT_MSG(result == VK_SUCCESS, "Failed allocating image with error {}",
                vk::to_string(vk::Result{result}));
     image = vk::Image{unsafe_image};
     size_bytes = alloc_info.size;
     BbStats::vk_image_bytes.fetch_add(size_bytes, std::memory_order_relaxed);
+    // Where VMA put it: VRAM normally; system memory when VRAM had no room within its budget (VMA
+    // tries the other types an image may use) or by the fallback above.
+    VkMemoryPropertyFlags memory_flags = 0;
+    vmaGetMemoryTypeProperties(allocator, alloc_info.memoryType, &memory_flags);
+    in_system_memory = (memory_flags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) == 0;
+    if (in_system_memory) {
+        BbStats::system_images.fetch_add(1, std::memory_order_relaxed);
+        BbStats::system_image_bytes.fetch_add(size_bytes, std::memory_order_relaxed);
+    }
     BbStats::image_allocs.fetch_add(1, std::memory_order_relaxed);
+    return true;
 }
 
 Image::Image(const Vulkan::Instance& instance, Vulkan::Runtime& runtime_,
-             Common::SlotVector<ImageView>& slot_image_views_, const ImageInfo& info_)
+             Common::SlotVector<ImageView>& slot_image_views_, const ImageInfo& info_,
+             bool may_fail)
     : guest_begin{info_.guest_address}, guest_end{info_.guest_address + info_.guest_size},
       info{info_}, runtime{&runtime_}, slot_image_views{&slot_image_views_} {
     BbStats::Timer timer{BbStats::t_image_create};
@@ -251,8 +282,20 @@ Image::Image(const Vulkan::Instance& instance, Vulkan::Runtime& runtime_,
 
     backing = &backing_images.emplace_back();
     backing->num_samples = info.num_samples;
-    backing->image = UniqueImage{instance.GetDevice(), instance.GetAllocator()};
-    backing->image.Create(image_ci);
+    if (t_adopt_image && t_adopt_image->image && t_adopt_image->image_ci == image_ci) {
+        // 0.4.6 beta 8 (part 3): a dead target's image of the same creation info, the GPU done with it.
+        // Its contents are no one's: it starts in the undefined layout (backing->state) and is cleared
+        // or filled at its first use as a new image is.
+        backing->image = std::move(*t_adopt_image);
+    } else if (t_ready_take && ReadySurfaces::Take(image_ci, backing->image)) {
+        // 0.4.6 beta 15 part 3: an image of its shape made during the loading screen; never used.
+        t_ready_taken = true;
+    } else {
+        backing->image = UniqueImage{instance.GetDevice(), instance.GetAllocator()};
+        if (!backing->image.Create(image_ci, may_fail)) {
+            return; // VRAM refused it (HasMemory: false)
+        }
+    }
 
     Vulkan::SetObjectName(instance.GetDevice(), GetImage(),
                           "Image {}x{}x{} {} {} {:#x}:{:#x} L:{} M:{} S:{}", info.size.width,

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <string>
@@ -17,9 +18,11 @@
 #endif
 #include "common/assert.h"
 #include "bbport_platform.h"
+#include "bbport_roles.h"
 #include "precise_pacing.h"
 #include "bbport_toggles.h"
 #include "bbport_heap_sites.h"
+#include "bbport_timeline.h"
 #include "bbport_wait_trace.h"
 #include "bbport_freeze.h"
 #include "video_core/renderer_vulkan/vk_frame_capture.h"
@@ -46,6 +49,12 @@ extern "C" uint64_t runtime_heap_growths(void);
 #include "video_core/amdgpu/liverpool.h"
 #include "video_core/renderer_vulkan/pipeline_compile_queue.h"
 #include "video_core/renderer_vulkan/vk_breadcrumbs.h"
+#include "video_core/load_work.h"
+#include "video_core/vram_policy.h"
+#include "engine/gx_resources.h"
+#include "engine/frame_window.h"
+#include "engine/job_barrier.h"
+#include "engine/loading.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
@@ -365,7 +374,7 @@ static void PrintMemory() {
     std::printf("Memory: VRAM %llu MiB, GTT %llu MiB, RSS %llu MiB; Vulkan memory %llu MiB "
                 "allocated (VMA blocks %llu MiB, %llu MiB of them used); Vulkan images %llu MiB; "
                 "cached images %llu MiB in %llu; guest blocks in VRAM %llu MiB allocated, "
-                "%llu MiB of it unused (%llu MiB moved back idle, %llu MiB unmapped, %llu MiB freed; %llu chunks, %llu emptied, blocks kept: %llu GPU-written, %llu not direct memory); texture collector: usage %llu MiB, starts at %llu MiB, %llu images freed, %llu GPU-written kept\n",
+                "%llu MiB of it unused (%llu MiB moved back idle, %llu MiB unmapped, %llu MiB freed; %llu chunks, %llu emptied, blocks kept: %llu GPU-written, %llu not direct memory); VRAM manager: usage %llu MiB, tight from %llu MiB; texture collector: %llu images freed, %llu GPU-written kept\n",
                 (unsigned long long)(vram_kib >> 10), (unsigned long long)(gtt_kib >> 10),
                 (unsigned long long)(rss >> 20), (unsigned long long)(device >> 20),
                 (unsigned long long)(vma_blocks >> 20), (unsigned long long)(vma_used >> 20),
@@ -411,15 +420,37 @@ static void LogRam() {
     Vulkan::VmaDeviceUsage(vma_blocks, vma_used);
     if (vram_budget != 0) {
         std::printf("VRAM: %llu of %llu MiB in use (the driver's count); Vulkan memory %llu MiB: VMA "
-                    "blocks %llu MiB (%llu MiB of them used), images %llu MiB, the game's data %llu MiB "
-                    "(%llu MiB of it unused)\n",
+                    "blocks %llu MiB (%llu MiB of them used), images %llu MiB (%llu in system memory, "
+                    "%llu MiB; %llu placed over the budget so far), the game's data %llu MiB (%llu MiB of "
+                    "it unused)\n",
                     mib(vram_used), mib(vram_budget),
                     mib(BbStats::device_alloc_bytes.load() - BbStats::device_free_bytes.load()),
                     mib(vma_blocks), mib(vma_used), mib(BbStats::vk_image_bytes.load()),
+                    (unsigned long long)BbStats::system_images.load(), mib(BbStats::system_image_bytes.load()),
+                    (unsigned long long)BbStats::image_over_budget.load(),
                     mib(BbStats::residency_alloc_bytes.load()),
                     mib(BbStats::residency_unused_bytes.load()));
     }
 #endif
+    // 0.4.6 beta 5: the buffer cache's sparse binds this minute (the game's data in and out of VRAM).
+    {
+        static u64 last_calls = 0, last_ranges = 0, last_ns = 0;
+        const u64 calls = BbStats::sparse_bind_calls.load(), ranges = BbStats::sparse_bind_ranges.load(),
+                  ns = BbStats::sparse_bind_ns.load(), longest = BbStats::sparse_bind_max_ns.exchange(0);
+        if (calls != last_calls) {
+            std::printf("Game data in VRAM this minute: %llu sparse bind calls, %llu ranges bound or unbound, "
+                        "%.1f ms in the driver (longest call %.1f ms)\n",
+                        (unsigned long long)(calls - last_calls), (unsigned long long)(ranges - last_ranges),
+                        double(ns - last_ns) / 1e6, double(longest) / 1e6);
+        }
+        last_calls = calls;
+        last_ranges = ranges;
+        last_ns = ns;
+    }
+    // 0.4.5 beta 14-16: the VRAM manager's minute (vram_policy.h) and the game's own resource calls the
+    // texture cache follows (engine/gx_resources.h).
+    VideoCore::VramPolicy::LogMinute();
+    BbEngine::GxResources::LogMinute();
     // Where that RAM is: on the first report, then every five minutes. Listing every resident page
     // takes a while, so not on this (the presenting) thread.
     static int reports = 0;
@@ -440,6 +471,55 @@ static void LogRam() {
 /// "Memory:" line, without BB_FRAME_STATS: FPS falling over a session (90 to 50 after a few
 /// deaths, players 2026-10) shows here as one of them climbing with it. `flips` and
 /// `worst_ms`, `slow` (frames over 33 ms) since the last call, `seconds` ago.
+/// 0.4.5 beta 14: the "Building shaders" note (bbport_overlay.cpp) shows for 2 s after a frame that
+/// came late while shaders were being prepared: the time since the previous flip over 1.5 times
+/// the median of the last 64 (a missed refresh), and shader work in it (translation, pipelines
+/// built on the spot, waits for a pipeline: g_bb_compile_ns_total) at least half of how late it
+/// was. Until beta 13 it showed once a burst of that work added up to 30 ms: it missed the
+/// stutters of 10 to 17 ms of it in one frame and showed for longer bursts that made none late.
+std::atomic<s64> g_shader_late_until_ns{0};
+std::atomic<u32> g_shader_late_count{0};
+/// 0.4.5 beta 15: the frame limit's period (0: none), for the VRAM manager's slack.
+static std::atomic<u64> g_cap_period_ns{0};
+
+static void NoteShaderStutter(double flip_ms) {
+    static std::array<double, 64> recent{};
+    static u32 flips = 0;
+    static u64 last_ns = Vulkan::g_bb_compile_ns_total.load(std::memory_order_relaxed);
+    static u32 last_count = Vulkan::g_bb_compiles_total.load(std::memory_order_relaxed);
+    const u64 ns = Vulkan::g_bb_compile_ns_total.load(std::memory_order_relaxed);
+    const u32 count = Vulkan::g_bb_compiles_total.load(std::memory_order_relaxed);
+    const double work_ms = double(ns - last_ns) / 1e6;
+    const u32 items = count - last_count;
+    last_ns = ns;
+    last_count = count;
+    double median = 0.0;
+    if (flips >= 16) {
+        std::array<double, 64> sorted = recent;
+        const size_t n = std::min<size_t>(flips, sorted.size());
+        std::nth_element(sorted.begin(), sorted.begin() + n / 2, sorted.begin() + n);
+        median = sorted[n / 2];
+    }
+    recent[flips++ % recent.size()] = flip_ms;
+    // 0.4.5 beta 15: the VRAM manager's slack (BbStats::flips_on_time): flips in a row that came on
+    // time and at the frame limit (the game waiting for it, so work beside it does not show). No
+    // frame limit, or frames slower than it (the GPU or the CPU the limit): no slack.
+    const double cap_ms = double(g_cap_period_ns.load(std::memory_order_relaxed)) / 1e6;
+    if (median > 0.0 && cap_ms > 0.0 && median <= cap_ms * 1.03 && flip_ms <= 1.5 * median) {
+        BbStats::flips_on_time.fetch_add(1, std::memory_order_relaxed);
+    } else if (median > 0.0) {
+        BbStats::flips_on_time.store(0, std::memory_order_relaxed);
+    }
+    if (median > 0.0 && flip_ms > 1.5 * median && work_ms > 0.0 &&
+        work_ms >= (flip_ms - median) / 2.0) {
+        const s64 now = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            std::chrono::steady_clock::now().time_since_epoch())
+                            .count();
+        g_shader_late_count.store(std::max(items, 1u), std::memory_order_relaxed);
+        g_shader_late_until_ns.store(now + 2'000'000'000, std::memory_order_relaxed);
+    }
+}
+
 static void LogLoad(double seconds, u64 flips, double worst_ms, u64 slow) {
     struct Snapshot {
         u64 draws, dispatches, cpu_us, faults, tracker_faults, protects, protect_pages;
@@ -506,10 +586,13 @@ static void LogLoad(double seconds, u64 flips, double worst_ms, u64 slow) {
 
 void VideoOutDriver::Flip(const Request& req) {
     BbFreeze::NoteFlip();
+    BbTimeline::Note(BbTimeline::FlipTaken, u64(std::max(req.index, -1) + 1));
     // Update HDR status before presenting, then present the frame (bbport: on the swap thread).
     RunPresenter([this, frame = req.frame, hdr = req.port->is_hdr] {
+        BbTimeline::Note(BbTimeline::PresentBegin);
         presenter->SetHDR(hdr);
         presenter->Present(frame);
+        BbTimeline::Note(BbTimeline::PresentEnd);
     });
     Vulkan::FrameCapture::OnFlip(req.index >= 0 ? req.port->buffer_slots[req.index].address_left
                                                 : 0);
@@ -536,6 +619,9 @@ void VideoOutDriver::Flip(const Request& req) {
         const double flip_ms =
             std::chrono::duration<double, std::milli>(flip_time - load_last).count();
         load_last = flip_time;
+        NoteShaderStutter(flip_ms);
+        BbEngine::Frames::NoteFlip(flip_ms); // 0.4.6 beta 15: compile bursts, each load's first frames
+        VideoCore::LoadWork::OnFlip();       // 0.4.6 beta 15: the load clock (parts 3 and 5)
         ++load_flips;
         load_slow += flip_ms > 33.0;
         load_worst_ms = std::max(load_worst_ms, flip_ms);
@@ -576,7 +662,15 @@ void VideoOutDriver::Flip(const Request& req) {
         static u64 last_proc_flt, last_copy_ns, last_copy_bytes, last_rf, last_trf, last_twf;
         const u64 rf = BbStats::read_faults.load(), trf = BbStats::t_read_faults.load(),
                   twf = BbStats::t_write_faults.load();
-        if (frame_ms > 40.0 && last_gpu_ns != 0) {
+        // 0.4.6 beta 13: a long frame from 40 ms, from 25 ms in the 2 s after a loading screen (the
+        // frames of 27-32 ms after some loads had no breakdown).
+        const double stall_ms =
+            BbEngine::Loading::EndedWithin(
+                static_cast<u64>(std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count()),
+                2'000'000'000ull)
+                ? 25.0
+                : 40.0;
+        if (frame_ms > stall_ms && last_gpu_ns != 0) {
             std::printf("       fault handlers: %llu read faults %.1f ms, write faults %.1f ms\n",
                         static_cast<unsigned long long>(rf - last_rf), (trf - last_trf) / 1e6,
                         (twf - last_twf) / 1e6);
@@ -610,7 +704,7 @@ void VideoOutDriver::Flip(const Request& req) {
         static u32 last_compiles_total;
         const u64 compile_ns_total = Vulkan::g_bb_compile_ns_total.load();
         const u32 compiles_total = Vulkan::g_bb_compiles_total.load();
-        if (frame_ms > 40.0 && last_gpu_ns != 0) {
+        if (frame_ms > stall_ms && last_gpu_ns != 0) {
             const double frame_compile_ms = (compile_ns_total - last_compile_ns_total) / 1e6;
             std::printf("Stall: %.1f ms frame (%s); GPU thread on CPU %.1f ms; %u pipelines "
                         "built, %.1f ms; %llu images registered, %.1f MB image uploads, %.1f MB "
@@ -634,12 +728,13 @@ void VideoOutDriver::Flip(const Request& req) {
         // bbport: the parts of image create and refresh (texture loading), and how many images
         // were given memory or had their guest data checked. Taken every frame: a long frame's
         // figures are its own, not everything since the last.
-        static u64 last_parts[5], last_allocs, last_checks;
+        static u64 last_parts[5], last_allocs, last_checks, last_bind_calls, last_bind_ns;
+        const u64 bind_calls = BbStats::sparse_bind_calls.load(), bind_ns = BbStats::sparse_bind_ns.load();
         const u64 parts[5] = {BbStats::t_image_query.load(), BbStats::t_image_alloc.load(),
                               BbStats::t_refresh_hash.load(), BbStats::t_refresh_obtain.load(),
                               BbStats::t_refresh_detile.load()};
         const u64 allocs = BbStats::image_allocs.load(), checks = BbStats::image_checks.load();
-        if (frame_ms > 40.0 && last_gpu_ns != 0) {
+        if (frame_ms > stall_ms && last_gpu_ns != 0) {
             std::printf("       ms in: resident %.1f, protect %.1f, image create %.1f, "
                         "image refresh %.1f, staging %.1f, waiting for host copies %.1f\n",
                         (t_now[0] - last_t[0]) / 1e6, (t_now[1] - last_t[1]) / 1e6,
@@ -661,16 +756,21 @@ void VideoOutDriver::Flip(const Request& req) {
                         static_cast<unsigned long long>(pp - last_pp),
                         static_cast<unsigned long long>(rc - last_rc),
                         static_cast<unsigned long long>(rp - last_rp));
+            std::printf("       sparse binds (the game's data in and out of VRAM): %llu calls, %.1f ms\n",
+                        static_cast<unsigned long long>(bind_calls - last_bind_calls),
+                        (bind_ns - last_bind_ns) / 1e6);
         }
         std::copy(std::begin(parts), std::end(parts), std::begin(last_parts));
         last_allocs = allocs;
         last_checks = checks;
+        last_bind_calls = bind_calls;
+        last_bind_ns = bind_ns;
         last_pc = pc;
         last_pp = pp;
         last_rc = rc;
         last_rp = rp;
         last_minflt = minflt;
-        if (frame_ms > 40.0 && last_gpu_ns != 0 && copy_ns > last_copy_ns) {
+        if (frame_ms > stall_ms && last_gpu_ns != 0 && copy_ns > last_copy_ns) {
             std::printf("       guest copies %.1f MB in %.1f thread-ms, %.1f ms on CPU (kernel %.1f ms, "
                         "%llu page faults in large copies) (%.2f GB/s per thread)\n",
                         (copy_bytes - last_copy_bytes) / 1e6, (copy_ns - last_copy_ns) / 1e6,
@@ -890,13 +990,17 @@ void VideoOutDriver::Flip(const Request& req) {
                 const u64 updates = BbStats::gpu_data_updates.exchange(0);
                 const u64 copied_back = BbStats::copied_back_blocks.exchange(0);
                 const u64 readbacks = BbStats::readbacks.exchange(0);
-                const u64 late = BbStats::late_vram_writes.exchange(0);
-                if (updates + copied_back + readbacks + late != 0) {
-                    std::printf("GPU data in VRAM: %.1f command writes/s put into it, %.1f exact writes/s "
-                                "(labels, CPU bytes beside GPU data), %.1f blocks/s copied back, "
-                                "%.1f readbacks/s\n",
-                                updates / window, late / window, copied_back / window,
-                                readbacks / window);
+                // 0.4.6 beta 13: the engine's stores through the backing view (labels, occlusion results)
+                // checked against the VRAM copies (BufferCache::NoteBackingStore).
+                const u64 stores = BbStats::backing_stores.exchange(0);
+                const u64 marked = BbStats::backing_stores_marked.exchange(0);
+                const u64 on_gpu = BbStats::backing_stores_gpu.exchange(0);
+                if (updates + copied_back + readbacks + stores != 0) {
+                    std::printf("GPU data in VRAM: %.1f command writes/s put into it, %.1f blocks/s copied "
+                                "back, %.1f readbacks/s; labels and occlusion results stored %.1f/s, %.1f/s "
+                                "over a VRAM copy (marked to upload), %.1f/s on pages the GPU wrote\n",
+                                updates / window, copied_back / window, readbacks / window, stores / window,
+                                marked / window, on_gpu / window);
                 }
             }
             Libraries::Kernel::ReportEqueueWaits(frames);
@@ -962,6 +1066,8 @@ void VideoOutDriver::Flip(const Request& req) {
                                 sleep_ns / (frames * 1e6));
                 }
             }
+            BbRoles::Report(window); // 0.4.6 beta 18: per role, threads, CPU time, where they woke
+            BbEngine::JobBarrier::Report(frames, window); // 0.4.6 beta 18: the game's fork-join waits
             if (const u64 allocs = BbStats::gpu_range_allocs.exchange(0)) {
                 std::printf("Guest GPU memory: %.0f ranges/s handed out, %.2f MB/s\n", allocs / window,
                             BbStats::gpu_range_alloc_bytes.exchange(0) / (window * 1e6));
@@ -1036,6 +1142,7 @@ void VideoOutDriver::Flip(const Request& req) {
                                         (req.flip_arg << 16)));
         }
     }
+    BbTimeline::Note(BbTimeline::FlipShown, u64(std::max(req.index, -1) + 1));
 }
 
 void VideoOutDriver::DrawBlankFrame() {
@@ -1146,6 +1253,7 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
     }
     auto frame_period = frame_limit ? std::chrono::nanoseconds(1000000000 / frame_limit)
                                     : std::chrono::nanoseconds(0);
+    g_cap_period_ns.store(u64(frame_period.count()), std::memory_order_relaxed);
     auto next_flip = std::chrono::steady_clock::now();
     // A flip waits for its slot, a frame period after the one before: on time (within a quarter of a period)
     // the slots keep their cadence, so a sleep's overshoot never adds up. After a late flip they start again from

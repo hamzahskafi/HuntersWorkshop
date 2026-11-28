@@ -41,10 +41,12 @@ public:
     /// Starts making the context for an output size and its inputs on a worker thread (making it
     /// builds the upscaler's shaders: seconds the first time); nothing when one is made or being made
     /// for them. `version`: "auto" (the newest AMD's SDK runs here) or a version AMD lists for this GPU
-    /// by its name (BbSettings::FsrVersionMatch; 0.4.4 beta 27c, was FSR 3.1 or not).
-    void Prepare(u32 output_width, u32 output_height, bool hdr, const std::string& version);
+    /// by its name (BbSettings::FsrVersionMatch; 0.4.4 beta 27c, was FSR 3.1 or not). `debug_view`: AMD's
+    /// debug view allowed and drawn (0.4.6 beta 16: the menu's row or BB_AMD_FSR_DEBUG_VIEW=1).
+    void Prepare(u32 output_width, u32 output_height, bool hdr, const std::string& version, bool debug_view);
     /// A context for these is made: Record can run.
-    [[nodiscard]] bool Ready(u32 output_width, u32 output_height, bool hdr, const std::string& version) const;
+    [[nodiscard]] bool Ready(u32 output_width, u32 output_height, bool hdr, const std::string& version,
+                             bool debug_view) const;
     /// A context is being made on the worker thread.
     [[nodiscard]] bool Preparing() const noexcept;
 
@@ -57,6 +59,12 @@ public:
     void Tune(float velocity_factor, float reactiveness_scale, float shading_change_scale,
               float accumulation, float min_disocclusion);
 
+    /// 0.4.6 beta 16: AMD's jitter for the version that runs (its queries, its own rule): the phase count
+    /// for these widths, 0 while no context is ready (the engine's own rule then); the sub-pixel offset of
+    /// `index` (0-based) in a sequence of `phases`.
+    u32 JitterPhases(u32 render_width, u32 output_width);
+    bool JitterOffset(u32 index, u32 phases, float& x, float& y);
+
     /// Why the last call failed, or null.
     [[nodiscard]] const char* Problem() const noexcept;
     /// AMD FSR will not run in this session (its DLLs, this GPU, or a failed dispatch).
@@ -67,6 +75,9 @@ public:
     [[nodiscard]] bool RunsFsr31() const noexcept;
     /// The version that runs is one AMD's driver provides (" *" in AMD's list).
     [[nodiscard]] bool RunsDriverVersion() const noexcept;
+    /// 0.4.6 beta 16: what the version that runs says of the reactive mask (AMD's resource query):
+    /// BbSettings::FsrReactive*.
+    [[nodiscard]] int ReactiveUse() const noexcept;
     /// A user retry (a menu change): failures forgotten, the context made again when next needed.
     void ClearFailure() noexcept;
 

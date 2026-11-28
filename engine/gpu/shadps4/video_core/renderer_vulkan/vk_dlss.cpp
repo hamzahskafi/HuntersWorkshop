@@ -290,6 +290,9 @@ struct DlssUpscaler::Impl {
     PFN_Shutdown1 shutdown = nullptr;
 
     bool initialized = false;
+    /// 0.4.6 beta 17: the NGX calls go to OptiScaler's module (OptiScaler::DlssThrough), on any GPU;
+    /// it runs the upscaler chosen in its own menu. Otherwise NVIDIA's driver core, on NVIDIA alone.
+    const bool through_optiscaler = OptiScaler::DlssThrough();
     NgxParameter* capabilities = nullptr;
     NgxParameter* params = nullptr;
     NgxHandle* feature = nullptr;
@@ -331,6 +334,38 @@ struct DlssUpscaler::Impl {
     }
 
     bool LoadCore() {
+        if (through_optiscaler) {
+            // Its module, as Detect found it loaded: its own reference, never freed here.
+#ifdef _WIN32
+            core = static_cast<HMODULE>(OptiScaler::Detect().handle);
+#else
+            core = OptiScaler::Detect().handle;
+#endif
+        } else {
+            LoadDriverCore();
+        }
+        if (!core) {
+            Fail("NVIDIA NGX core not found (an NVIDIA driver with DLSS support is needed)", true);
+            return false;
+        }
+        if (!Load(init, "NVSDK_NGX_VULKAN_Init_Ext2") ||
+            !Load(get_capability_parameters, "NVSDK_NGX_VULKAN_GetCapabilityParameters") ||
+            !Load(allocate_parameters, "NVSDK_NGX_VULKAN_AllocateParameters") ||
+            !Load(destroy_parameters, "NVSDK_NGX_VULKAN_DestroyParameters") ||
+            !Load(create_feature, "NVSDK_NGX_VULKAN_CreateFeature1") ||
+            !Load(evaluate_feature, "NVSDK_NGX_VULKAN_EvaluateFeature") ||
+            !Load(release_feature, "NVSDK_NGX_VULKAN_ReleaseFeature") ||
+            !Load(shutdown, "NVSDK_NGX_VULKAN_Shutdown1")) {
+            Fail(through_optiscaler ? "OptiScaler lacks NGX's Vulkan entry points (an older or different build)"
+                                    : "the NVIDIA NGX core lacks the Vulkan entry points",
+                 true);
+            return false;
+        }
+        return true;
+    }
+
+    /// NVIDIA's NGX core, from its driver.
+    void LoadDriverCore() {
 #ifdef _WIN32
         // The driver records its NGX core under this key (nvsdk_ngx_loader.h does the same).
         wchar_t dir[MAX_PATH];
@@ -369,22 +404,6 @@ struct DlssUpscaler::Impl {
 #else
         core = dlopen("libnvidia-ngx.so.1", RTLD_NOW);
 #endif
-        if (!core) {
-            Fail("NVIDIA NGX core not found (an NVIDIA driver with DLSS support is needed)", true);
-            return false;
-        }
-        if (!Load(init, "NVSDK_NGX_VULKAN_Init_Ext2") ||
-            !Load(get_capability_parameters, "NVSDK_NGX_VULKAN_GetCapabilityParameters") ||
-            !Load(allocate_parameters, "NVSDK_NGX_VULKAN_AllocateParameters") ||
-            !Load(destroy_parameters, "NVSDK_NGX_VULKAN_DestroyParameters") ||
-            !Load(create_feature, "NVSDK_NGX_VULKAN_CreateFeature1") ||
-            !Load(evaluate_feature, "NVSDK_NGX_VULKAN_EvaluateFeature") ||
-            !Load(release_feature, "NVSDK_NGX_VULKAN_ReleaseFeature") ||
-            !Load(shutdown, "NVSDK_NGX_VULKAN_Shutdown1")) {
-            Fail("the NVIDIA NGX core lacks the Vulkan entry points", true);
-            return false;
-        }
-        return true;
     }
 
     /// Directories searched for nvngx_dlss: BB_DLSS_DIR, then the executable's directory.
@@ -422,7 +441,7 @@ struct DlssUpscaler::Impl {
     }
 
     void Initialize() {
-        if (!instance.IsDlssCapable()) {
+        if (!through_optiscaler && !instance.IsDlssCapable()) {
             Fail("the Vulkan device lacks VK_NVX_binary_import / VK_NVX_image_view_handle "
                  "(DLSS needs an NVIDIA RTX GPU)",
                  true);
@@ -452,16 +471,20 @@ struct DlssUpscaler::Impl {
                  dispatcher.vkGetInstanceProcAddr, dispatcher.vkGetDeviceProcAddr, kNgxApiVersion,
                  &info);
         if (Failed(r)) {
-            Fail(fmt_hex("NGX initialization failed", r), true);
+            Fail(fmt_hex(through_optiscaler ? "OptiScaler's NGX initialization failed" : "NGX initialization failed", r),
+                 true);
             return;
         }
         initialized = true;
         if (Failed(get_capability_parameters(&capabilities)) || !capabilities) {
-            Fail("NGX capability query failed", true);
+            Fail(through_optiscaler ? "OptiScaler's NGX capability query failed" : "NGX capability query failed", true);
             return;
         }
         if (!ParameterAbiOk(capabilities)) {
-            Fail("NGX parameter interface mismatch (unexpected vtable layout)", true);
+            Fail(through_optiscaler ? "OptiScaler's NGX parameters do not read back (an interface the engine does not "
+                                      "know)"
+                                    : "NGX parameter interface mismatch (unexpected vtable layout)",
+                 true);
             return;
         }
         int dlss_available = 0, needs_driver = 0;
@@ -470,10 +493,12 @@ struct DlssUpscaler::Impl {
             !dlss_available) {
             int init_result = 0;
             GetI(capabilities, "SuperSampling.FeatureInitResult", &init_result);
-            Fail(needs_driver ? "DLSS needs a newer NVIDIA driver"
-                              : fmt_hex("DLSS unavailable (nvngx_dlss not found next to the "
-                                        "executable or in BB_DLSS_DIR; tools/fetch_dlss.sh)",
-                                        unsigned(init_result)),
+            Fail(through_optiscaler ? fmt_hex("OptiScaler answered that DLSS is unavailable (its log says why)",
+                                              unsigned(init_result))
+                 : needs_driver     ? "DLSS needs a newer NVIDIA driver"
+                                    : fmt_hex("DLSS unavailable (nvngx_dlss not found next to the "
+                                              "executable or in BB_DLSS_DIR; tools/fetch_dlss.sh)",
+                                              unsigned(init_result)),
                  true);
             return;
         }
@@ -482,6 +507,15 @@ struct DlssUpscaler::Impl {
             return;
         }
         available = true;
+        if (through_optiscaler) {
+            // The upscaler that runs is OptiScaler's choice (its menu, VulkanUpscaler); no DLSS file
+            // version is claimed for it.
+            BbSettings::Get().dlss_through_optiscaler.store(true, std::memory_order_relaxed);
+            std::printf("DLSS: Super Resolution available through OptiScaler (%s); the upscaler that runs is "
+                        "chosen in its menu\n",
+                        OptiScaler::Detect().module.c_str());
+            return;
+        }
         // 0.4.4 beta 27c: the DLSS file's version, for the menu and the FPS counter.
         static const std::string version = DlssFileVersion(paths);
         if (!version.empty()) {

@@ -6,7 +6,10 @@
 // queue has finished). On device lost the last value says which command never finished, and the
 // notes kept here say what it was. BB_BREADCRUMBS=0 turns them off. 0.4.4 beta 21: only 2n+1 by
 // default (the marker before a command repeats the one after the command before it, but for the
-// work recorded between them); BB_BREADCRUMBS=both writes 2n too.
+// work recorded between them); BB_BREADCRUMBS=both writes 2n too. 0.4.6 beta 21 (engine id 144):
+// by default only every 32nd command writes its marker (one after each cost 1.3-2.3% of the frame
+// rate on the RX 9070 XT); every command is still noted, so a hang report names the stretch of up
+// to 32 the GPU stopped in. BB_BREADCRUMBS=all: a marker after each command, as before.
 #pragma once
 
 #include "common/types.h"
@@ -38,6 +41,11 @@ u32 Note(u32 stream, const Crumb& crumb);
 /// Recorded right before (`after` false; only with BB_BREADCRUMBS=both) and right after the
 /// command numbered `id`.
 void Mark(vk::CommandBuffer cmdbuf, u32 stream, u32 id, bool after);
+/// Engine id 144: the number of the last command noted on `stream` (0: none), and its marker after
+/// it written whatever the stride: recorded at each submission's end, so a stream that finished its
+/// work reads as finished in a report, short ones included.
+u32 LastNoted(u32 stream);
+void MarkLast(vk::CommandBuffer cmdbuf, u32 stream, u32 id);
 /// Indirect dispatches: a slot of a host-visible buffer for the arguments the GPU reads (the
 /// report and the statistics show them), ~0u when off. CopyArgs is recorded before the dispatch.
 u32 ArgsSlot();

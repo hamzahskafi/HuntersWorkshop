@@ -30,8 +30,7 @@ struct UpscaleInput {
         int preset; ///< BbSettings::Preset
         std::array<float, 2> jitter;
         float frame_ms, near_plane, far_plane, vertical_fov;
-        float sharpness;
-        bool sharpen, reset;
+        bool reset;
         /// The colour is the HDR scene (1920x1080 output); otherwise the game's frame in linear light.
         bool hdr = true;
     };

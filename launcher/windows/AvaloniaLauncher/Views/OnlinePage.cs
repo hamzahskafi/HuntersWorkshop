@@ -15,9 +15,11 @@ namespace BloodborneLauncher.Views
         private readonly AppButton _test;
 
         public OnlinePage() : base(L.T("Online"),
-            L.T("1. Turn on Play online. 2. Connect your Hunter's Dream account below (with Discord, or without it). ") +
-            L.T("3. In the game, choose online at the title screen: The Hunter's Dream's welcome message means you are online. ") +
-            L.T("Everyone needs game version 1.09."))
+            // 0.4.6 beta 17 (the tester): one step a line.
+            L.T("1. Turn on Play online.") + "\n" +
+            L.T("2. Connect your Hunter's Dream account below (with Discord, or without it).") + "\n" +
+            L.T("3. In the game, choose online at the title screen: The Hunter's Dream's welcome message means you are online.") +
+            "\n\n" + L.T("Everyone needs game version 1.09."))
         {
             // One server now: the bbbridge pool and custom servers are gone (scripts/online.py defaults).
             foreach (var key in new[] { "online_host", "online_port", "online_webapi", "online_game_api", "online_thd_account" })
