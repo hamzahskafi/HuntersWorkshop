@@ -1,4 +1,4 @@
-# Hunter's Workshop 0.4.6 (release candidate)
+# Hunter's Workshop 0.4.6
 
 What changed since 0.4.5, for the release page. 0.4.6 beta 1 holds what was tested as 0.4.5 betas 14
 to 19 (the VRAM and texture work); 0.4.5 itself shipped from beta 13. The engine work behind each line
@@ -392,7 +392,7 @@ without thread support although the movie player uses it from three threads.
   change. It works however you start the game: the launcher, the Steam shortcut or Linux.
   `BB_SPLASH=0` in Extra variables turns it off.
 - **Shaders built before you play, on any graphics card.** The engine now ships a shader catalog
-  (1,416 pipelines of 608 shader programs, from Lantern's community catalogs for AMD and NVIDIA and
+  (1,536 pipelines of 682 shader programs, from Lantern's community catalogs for AMD and NVIDIA and
   the tester's own caches of a month's play on both): at the first start it is
   prepared for your graphics card and its pipelines are built before the game starts, so places you
   have never visited no longer stutter the first time, whatever card you have. Changing graphics card
@@ -490,7 +490,7 @@ priority on to the thread holding the lock.
   (`docs/gpu-fences.md`).
 - The shader cache is rebuilt once on the first start of this build (its identity changed).
 
-## The release candidate: switches settled, research taken out
+## Settled for the release: switches, research taken out, the shader catalog
 
 - **Safe mode** (the run after a crash) now also turns off beta 18's thread roles and handoffs
   (`BB_THREAD_ROLES=0`, `BB_RUNTIME_SYNC=0`), so a crash in them can be told apart from the rest.
@@ -501,6 +501,12 @@ priority on to the thread holding the lock.
   and the fence timing of engine id 139.
 - **The log reads plainer:** the minute lines no longer carry the beta they came from, and the line
   that counted the game's shaders and released buffers is no longer called research.
+- **The shader catalog carries the shaders built into the game's executable.** The tool that prepares
+  the catalog for your PC looked for shader programs only at every fourth byte, and most of those in
+  the game's executable start two bytes off that, so a catalog could never carry them: every merge of
+  the tester's caches lost 50 to 80 of their shaders this way, among them post-processing passes drawn
+  in every frame. It now finds them all, and the catalog gained 64 programs. Merging a player's own
+  cache into a catalog no longer fails either.
 - The shader cache is rebuilt once on the first start (its identity changed).
 
 ## Sharpening: one meaning, off by default (beta 16)
