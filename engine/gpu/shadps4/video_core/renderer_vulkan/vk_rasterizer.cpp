@@ -157,46 +157,9 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_, Runtime
                 DrawPipe::SleepEnabled() ? "sleep after a spin (stage B wakes them)" : "spin",
                 FaultSkipsTextureCache() ? "leave the texture cache alone"
                                          : "take the texture cache's lock");
-    // 0.4.6 beta 21 (docs/gpu-fences.md): the GPU's progress word, where the device has buffer
-    // markers; BB_GPU_FENCES=cpu keeps today's path (fences at their submission's end, and the
-    // hand-over when the GPU gets to its last submission).
-    {
-        const char* env = std::getenv("BB_GPU_FENCES");
-        const bool cpu = env && std::string_view{env} == "cpu";
-        if (HonestLabels()) {
-            gpu_queue = !cpu && progress.Init(instance);
-            BbGpuQueue::active.store(gpu_queue, std::memory_order_relaxed);
-            std::printf("GPU: %s\n",
-                        gpu_queue ? "fences written as the GPU passes the game's submissions, and "
-                                    "the work handed over when the GPU starts its last unit (the "
-                                    "GPU's progress word; BB_GPU_FENCES=cpu: as before)"
-                        : cpu ? "fences written when their submission is done, the work handed "
-                                "over when the GPU gets to its last submission (BB_GPU_FENCES=cpu)"
-                              : "fences written when their submission is done, the work handed "
-                                "over when the GPU gets to its last submission (no buffer "
-                                "markers on this device)");
-        }
-    }
     scheduler.SetSubmitCallback([this](Vulkan::SubmitInfo& info) {
         runtime.FlushBarriers();
         buffer_cache.SubmitPendingArenaBinds(info);
-        // 0.4.6 beta 21: on the thread that submits, in order with the marks recorded.
-        if (gpu_queue) {
-            const u32 recorded = recorded_marks.load(std::memory_order_relaxed);
-            const u32 before = submitted_marks.exchange(recorded, std::memory_order_relaxed);
-            handover_mark.store(GpuQueueLogic::HandOverMark(recorded, before),
-                                std::memory_order_relaxed);
-            // Engine id 142 (docs/gpu-fences.md): every submission (the presenter's included) that
-            // found the GPU done with everything given before it (the tick it knows, no query):
-            // each one the GPU waited for, for work held or for the game. The tick being submitted
-            // is CurrentTick() - 1 here (taken already).
-            if (BbStats::enabled) {
-                const u64 next = scheduler.CurrentTick();
-                if (next >= 3 && scheduler.GetWorkSemaphore()->IsFree(next - 2)) {
-                    BbStats::queue_found_idle.fetch_add(1, std::memory_order_relaxed);
-                }
-            }
-        }
         // bbport BB_HONEST_LABELS: the signal thread waits on submitted work only (GpuSignalLoop),
         // so every submission wakes it, the scheduler's own (Finish) included.
         if (HonestLabels()) {
@@ -275,32 +238,10 @@ u64 Rasterizer::SignalTick() const {
 }
 
 void Rasterizer::SignalAfterGpu(std::function<void()> signal, VAddr label, u64 value,
-                                u32 size, bool known, SignalKind kind) {
-    // 0.4.6 beta 21 (docs/gpu-fences.md): the mark the GPU writes at the end of this game
-    // submission (recorded after everything before this point), and whether the fence may be
-    // written once it has. Not after a GPU write into the game's memory in place: those writes
-    // are visible to the CPU when the submission ends.
-    const u32 mark = recorded_marks.load(std::memory_order_relaxed) + 1;
-    bool early = false;
-    if (gpu_queue) {
-        const u64 writes = BbGpuQueue::in_place_writes.load(std::memory_order_relaxed);
-        const bool after_write =
-            in_place_writes_seen.exchange(writes, std::memory_order_relaxed) != writes;
-        early = (kind == SignalKind::Plain || kind == SignalKind::Idle) && !after_write;
-        if (BbStats::enabled) {
-            if (kind == SignalKind::Interrupt) {
-                BbStats::fences_late_irq.fetch_add(1, std::memory_order_relaxed);
-            } else if (kind == SignalKind::Clock) {
-                BbStats::fences_late_clock.fetch_add(1, std::memory_order_relaxed);
-            } else if (kind == SignalKind::Plain && after_write) {
-                BbStats::fences_late_in_place.fetch_add(1, std::memory_order_relaxed);
-            }
-        }
-    }
+                                u32 size, bool known) {
     if (DrawPipe::OnStageB()) {
         // Kept here until the end of the guest submission or the next flush (in tick order).
-        local_signals.push_back(
-            {SignalTick(), std::move(signal), label, value, size, known, mark, early, kind});
+        local_signals.push_back({SignalTick(), std::move(signal), label, value, size, known});
         local_signal_count.store(u32(local_signals.size()), std::memory_order_release);
         return;
     }
@@ -318,8 +259,7 @@ void Rasterizer::SignalAfterGpu(std::function<void()> signal, VAddr label, u64 v
                 std::jthread([this](std::stop_token token) { GpuSignalLoop(token); });
         }
         was_empty = gpu_signals.empty();
-        gpu_signals.push_back(
-            {SignalTick(), std::move(signal), label, value, size, known, mark, early, kind});
+        gpu_signals.push_back({SignalTick(), std::move(signal), label, value, size, known});
     }
     // The signal thread waits on the condition only with nothing queued (else it waits for the
     // GPU and takes the rest when it gets back): no notify per fence (~60 a frame).
@@ -388,7 +328,6 @@ bool Rasterizer::WriteDataOnGpu(VAddr address, const void* data, u32 size) {
         return false;
     }
     runtime.UpdateBuffer(target->first, target->second, {static_cast<const u8*>(data), size});
-    BbGpuQueue::in_place_writes.fetch_add(1, std::memory_order_relaxed);
     if (size <= sizeof(u64) && HonestLabels()) {
         u64 value = 0;
         std::memcpy(&value, data, size);
@@ -421,10 +360,6 @@ void Rasterizer::SubmitForSignals() {
 }
 
 void Rasterizer::SubmitForSignalsNow() {
-    if (gpu_queue) {
-        QueueUnitEnd();
-        return;
-    }
     PublishSignals(); // the end of a guest submission
     if (!HasUnsubmittedSignals()) {
         return;
@@ -447,120 +382,6 @@ void Rasterizer::SubmitForSignalsNow() {
     Flush();
 }
 
-void Rasterizer::RecordUnitMark() {
-    // Only after work of its own: a mark alone would make a submission of nothing, and with
-    // nothing recorded since the last submission the fences before this point are that one's.
-    if (!gpu_queue || !scheduler.RecordedSinceSubmit()) {
-        return;
-    }
-    const u32 mark = recorded_marks.load(std::memory_order_relaxed) + 1;
-    scheduler.Record([buffer = progress.Buffer(), mark](vk::CommandBuffer cmdbuf) {
-        GpuProgress::Write(cmdbuf, buffer, mark);
-    });
-    recorded_marks.store(mark, std::memory_order_release);
-    if (BbStats::enabled) {
-        BbStats::progress_marks.fetch_add(1, std::memory_order_relaxed);
-    }
-}
-
-void Rasterizer::QueueUnitEnd() {
-    // 0.4.6 beta 21 (docs/gpu-fences.md, plan part 3): a queue with one consumer. The work waits
-    // while the GPU has more than one unit ahead of it, and goes when it has started the last unit
-    // it was given (the word has passed the mark before it) or has finished everything. Nothing
-    // to estimate: with the GPU as the limit a frame's units collect behind the frame it runs and
-    // go when the frame ends (FrameEndTask); when it catches up, in pieces as large as it can take
-    // without waiting.
-    RecordUnitMark();
-    PublishSignals(); // the end of a guest submission
-    if (!scheduler.RecordedSinceSubmit()) {
-        return;
-    }
-    const u64 tick = scheduler.CurrentTick();
-    // The word may lag the GPU's last write by a moment: also the tick it knows, without a query.
-    const bool last_done = tick >= 2 && scheduler.GetWorkSemaphore()->IsFree(tick - 1);
-    // Engine id 142: counted by the GPU's state (finished everything, or on its last unit); the
-    // decision takes either. 140 and 141 counted a GPU out of work as on its last unit.
-    switch (GpuQueueLogic::Decide(tick < 2, progress.Read(),
-                                  handover_mark.load(std::memory_order_relaxed), last_done)) {
-    case GpuQueueLogic::HandOver::OnLastUnit:
-    case GpuQueueLogic::HandOver::OutOfWork:
-        (last_done ? BbStats::idle_flushes : BbStats::ahead_flushes)
-            .fetch_add(1, std::memory_order_relaxed);
-        Flush();
-        return;
-    case GpuQueueLogic::HandOver::Hold:
-        // If the game pauses for longer than the GPU's remaining work, the signal thread sees the
-        // GPU finish and announces it (Announce, SubmitForGpu), and the work goes then.
-        ArmWatch(tick - 1);
-        return;
-    }
-}
-
-void Rasterizer::RequestHandOver() {
-    if (!gpu_queue) {
-        return;
-    }
-    if (!PipeSignals() || DrawPipeIdle()) {
-        HandOverNow();
-        return;
-    }
-    static constexpr u8 none = 0;
-    RunInOrder([](Rasterizer& self, const u8*) { self.HandOverNow(); }, &none, 0,
-               BbToggle::PipelinedTasks, false, "HandOver");
-}
-
-void Rasterizer::HandOverNow() {
-    // A queue closes its batch when the producer stops: the game stops here until the GPU retires
-    // its previous frame, so nothing would look at the queue again before the GPU ran out.
-    RecordUnitMark();
-    PublishSignals();
-    if (!scheduler.RecordedSinceSubmit()) {
-        return;
-    }
-    BbStats::queue_wait_flushes.fetch_add(1, std::memory_order_relaxed);
-    Flush();
-}
-
-int Rasterizer::RunReadySignals(bool wait) {
-    auto* semaphore = scheduler.GetWorkSemaphore();
-    const u32 word = gpu_queue ? progress.Read() : 0;
-    SignalKind kind = SignalKind::Other;
-    return GpuQueueLogic::RunReady(
-        gpu_signals, gpu_signals_mutex, signal_run_mutex, wait,
-        [&](const GpuSignal& front) -> int {
-            kind = front.kind;
-            if (semaphore->IsFree(front.tick)) {
-                return GpuQueueLogic::ByTick;
-            }
-            if (front.early && GpuQueueLogic::Passed(word, front.mark)) {
-                return GpuQueueLogic::ByMark;
-            }
-            return GpuQueueLogic::NotReady;
-        },
-        [&](int how) {
-            if (!BbStats::enabled || kind == SignalKind::Other || kind == SignalKind::Idle) {
-                return;
-            }
-            (how == GpuQueueLogic::ByTick ? BbStats::fences_by_tick
-             : wait                       ? BbStats::fences_by_mark_signal
-                                          : BbStats::fences_by_mark_a)
-                .fetch_add(1, std::memory_order_relaxed);
-        });
-}
-
-void Rasterizer::ForwardPassedSignals() {
-    if (!gpu_queue) {
-        return;
-    }
-    const u32 word = progress.Read();
-    if (word == forwarded_word) {
-        return; // the GPU has finished no game submission since the last look
-    }
-    if (RunReadySignals(false) >= 0) {
-        forwarded_word = word;
-    }
-}
-
 void Rasterizer::ArmWatch(u64 tick) {
     {
         std::scoped_lock lk{gpu_signals_mutex};
@@ -571,8 +392,7 @@ void Rasterizer::ArmWatch(u64 tick) {
 
 void Rasterizer::Announce(u64 tick) {
     // Stale once a submission came since: it gave the GPU its next one (and set its own watch).
-    // 0.4.6 beta 21: with the GPU queue the watch is on the last submission (the GPU out of work).
-    if (scheduler.CurrentTick() != tick + (gpu_queue ? 1 : 2)) {
+    if (scheduler.CurrentTick() != tick + 2) {
         return;
     }
     gpu_wants_work.store(tick, std::memory_order_release);
@@ -603,7 +423,7 @@ void Rasterizer::SubmitForGpu(bool nothing_coming) {
     if (announced == 0) {
         return;
     }
-    if (scheduler.CurrentTick() != announced + (gpu_queue ? 1 : 2)) {
+    if (scheduler.CurrentTick() != announced + 2) {
         gpu_wants_work.compare_exchange_strong(announced, 0, std::memory_order_acq_rel);
         return; // a submission since gave the GPU its next one
     }
@@ -615,9 +435,8 @@ void Rasterizer::SubmitForGpu(bool nothing_coming) {
     // (SubmitForSignalsNow: the GPU is on its last submission, so it submits), a game submission
     // away (60 to 70 a frame); acting here as well added 5 to 10 submissions a frame at the 120
     // cap and up to 17 at 60 (0.4.4 beta 11), for what the next end did a moment later. With
-    // nothing more on its way (the game waiting), at once. 0.4.6 beta 21: with the GPU queue the
-    // GPU is out of work, so at once in any case.
-    if (!nothing_coming && !gpu_queue) {
+    // nothing more on its way (the game waiting), at once.
+    if (!nothing_coming) {
         return;
     }
     BbStats::announced_flushes.fetch_add(1, std::memory_order_relaxed);
@@ -704,10 +523,20 @@ void Rasterizer::GpuSignalLoop(std::stop_token token) {
         }
         semaphore->Refresh();
         BbTimeline::Note(BbTimeline::GpuDone, semaphore->KnownGpuTick());
-        // Kept queued while each runs: PendingSignalWord still sees the fence. 0.4.6 beta 21: with
-        // the GPU queue also those whose game submission the GPU has passed, and in turn with the
-        // GPU command thread (ForwardPassedSignals).
-        RunReadySignals(true);
+        while (true) {
+            std::function<void()> signal;
+            {
+                std::scoped_lock lk{gpu_signals_mutex};
+                if (gpu_signals.empty() || !semaphore->IsFree(gpu_signals.front().tick)) {
+                    break;
+                }
+                signal = std::move(gpu_signals.front().signal);
+                // Kept queued while it runs: PendingSignalWord still sees the fence.
+            }
+            signal();
+            std::scoped_lock lk{gpu_signals_mutex};
+            gpu_signals.pop_front();
+        }
         // The GPU has finished the submission before its last one, with work held for it.
         if (u64 watch = watch_tick.load(std::memory_order_acquire);
             watch != 0 && semaphore->IsFree(watch) &&
@@ -1782,9 +1611,8 @@ void Rasterizer::RunDrawPacket(void* context, const u8* data, u32 size) {
     // bbport BB_HONEST_LABELS: the GPU has got to its last submission and nothing more is on its
     // way (this thread's last packet, the GPU command thread waiting for the game): the work
     // recorded since goes now (SubmitForGpu).
-    // 0.4.6 beta 21: with the GPU queue the GPU is out of work: what is recorded goes now.
     if (self.gpu_wants_work.load(std::memory_order_relaxed) != 0) [[unlikely]] {
-        if (self.gpu_queue || (!self.draw_pipe->PeekNext() && self.liverpool->DecoderIdle())) {
+        if (!self.draw_pipe->PeekNext() && self.liverpool->DecoderIdle()) {
             self.SubmitForGpu(true);
         }
     }
@@ -3885,8 +3713,7 @@ u64 Rasterizer::Flush() {
     scheduler.Flush(info);
     if (HonestLabels()) {
         gpu_wants_work.store(0, std::memory_order_release); // this submission answers it
-        // 0.4.6 beta 21: with the GPU queue nothing is held after a submission (no watch).
-        ArmWatch(behind && !gpu_queue ? current_tick - 1 : 0);
+        ArmWatch(behind ? current_tick - 1 : 0);
     }
     BbTimeline::Note(BbTimeline::VulkanSubmit, current_tick, DrawPipe::OnStageB() ? 1 : 0);
     return current_tick;
@@ -6364,11 +6191,6 @@ bool Rasterizer::DmaWritesOnCpu(VAddr dst, u32 num_bytes, bool fill, VAddr src, 
     }
     if (BbStats::enabled) {
         (on_cpu ? BbStats::dma_on_cpu : BbStats::dma_on_gpu).fetch_add(1, std::memory_order_relaxed);
-    }
-    // 0.4.6 beta 21: a DMA the GPU does may write the game's memory in place: the fence after it
-    // keeps to its submission's end (docs/gpu-fences.md).
-    if (!on_cpu) {
-        BbGpuQueue::in_place_writes.fetch_add(1, std::memory_order_relaxed);
     }
     return on_cpu;
 }

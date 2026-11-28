@@ -202,14 +202,6 @@ static void WaitPreviousFrame() {
     BbTimeline::Note(BbTimeline::GuestWaitBegin, u64(frames_submitted));
     const auto start = std::chrono::steady_clock::now();
     g_waiting_for_frame.store(true, std::memory_order_relaxed);
-    // 0.4.6 beta 21 (engine id 141, docs/gpu-fences.md): nothing more comes from the game until the
-    // GPU retires its previous frame: the engine hands the work waiting to the GPU now (outside
-    // this lock: the GPU command thread's lock is taken there). The wait looks again after it.
-    if (liverpool) {
-        lock.unlock();
-        liverpool->GuestWaits();
-        lock.lock();
-    }
     cv_lock.wait(lock, [] { return frames_retired >= u64(frames_submitted); });
     g_waiting_for_frame.store(false, std::memory_order_relaxed);
     BbStats::gnm_frame_waits.fetch_add(1, std::memory_order_relaxed);

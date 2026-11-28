@@ -1,7 +1,9 @@
 # Beta 21 research: the GPU writes the game's fences
 
 Status: research (2026-11-27), counted in engine id 139, the plan approved by the tester (2026-11-28),
-built in engine id 140 ("As built", the last section).
+built in engine ids 140 to 142, measured, and **taken out in engine id 143** (the last section): level
+with the old path with the GPU as the limit, about 1% behind with the CPU nearer it. Kept from it: the
+cuts at pass ends and the pending write list's 64 wide writes. The rest of this document is the record.
 
 ## Why
 
@@ -511,4 +513,23 @@ The tester's runs on 142, frame statistics on, the process held to 8 logical pro
 - `20261128_022802` (the queue, 60 FPS preset, a cutscene save): pacing exact (median 16.67 ms, stddev
   0.02-0.03 ms, no frame over 1.5 times the median), 6-11 submissions a frame (the GPU idle under the cap,
   taking the work as it comes), a clean exit.
+
+
+
+## Taken out (engine id 143, 2026-11-28)
+
+The tester's choice after the runs above: back to the old path. Removed: the progress word
+(`vk_gpu_progress.{h,cpp}`), the queue's logic (`vk_gpu_queue_logic.h`), its test
+(`tests/test_gpu_queue.cpp`, `gpu-queue-test`), the fences written by mark, the hand-over at the game's
+wait, `BB_GPU_FENCES` and the `GPU queue:` statistics line; the files it touched are as in engine id
+139. Kept: the cuts only where a pass ends (`BB_CUT_IN_PASS=1` for the old cuts) and the 64 wide writes.
+What was learned and stays useful:
+- A queued switch between submissions costs nothing measurable on the RX 9070 XT: the GPU profile's
+  "between submissions" time is mostly the profiler's own work at each submission.
+- The game waits for its previous frame after its third submission of a frame (`BB_SUBMIT_AHEAD=2`), not
+  at its frame's end: the CPU is two submissions ahead of the GPU, not a frame.
+- With the GPU as the limit, the GPU at the test spots is busy all the time with work; the frame rate
+  comes from making that work cheaper ("The GPU's time that is not the game's work" above).
+- `VK_AMD_buffer_marker` is on both of the tester's GPUs (AMD and NVIDIA on Windows).
+- The GPU cache's identity is 139's again: `ce835392748d8a45`.
 

@@ -457,28 +457,17 @@ priority on to the thread holding the lock.
   `BB_LOCK_INHERIT=0`, `BB_RAISE_ON_WAIT=0`, `BB_PENDING_FILTER=0`, `BB_STATS_USAGE_EVERY=1` and
   `BB_PIPE_COUNT=fenced` each turn one change off.
 
-## The GPU gets each frame in one piece (beta 21)
+## Render passes kept whole across the recording threads (beta 21)
 
-The GPU was idle between its submissions for 4-15% of each frame in a profile (55-90 microseconds at
-each switch, 3-8 switches a frame), though the game was always a frame ahead. The engine had to send
-work in many small pieces because the game only saw its fences (the "this work is done" notes it
-reuses memory by) when a whole piece had finished on the GPU.
-- **The GPU now reports how far it has got.** At the end of each of the game's submissions it writes
-  that submission's number into one word of memory (a buffer marker; AMD and NVIDIA drivers both have
-  it). The game's fences are written as soon as the GPU has passed them, sooner than before and never
-  too early, so the work no longer has to be cut up for them.
-- **The work is handed to the GPU as a queue:** it waits while the GPU has more than one piece ahead of
-  it, and goes when the GPU starts its last piece, when the game stops to wait for its previous frame,
-  or when it finishes a frame. Each frame goes in two or three pieces, queued behind the one the GPU is
-  drawing (engine id 141: the first build waited for the game's frame end, which comes after that wait,
-  so the GPU ran out once a frame).
-- **Render passes are cut between the recording threads only where they end** (+0.6-0.8% measured on
-  beta 20). `BB_CUT_IN_PASS=1` cuts inside them too, as before.
+- **Render passes are cut between the recording threads only where they end** (+0.3 to +1.1% at the
+  test spots against beta 20). `BB_CUT_IN_PASS=1` cuts inside them too, as before.
 - The quick check of the memory the queued draws write keeps working with up to 64 large writes live
   (16 before).
-- Devices without buffer markers, and `BB_GPU_FENCES=cpu` on any device, keep beta 20's way; the log
-  says which runs.
-- The shader cache is rebuilt once on the first start of this beta (its identity changed).
+- Tried and taken out again: a new way of handing the work to the GPU, with the game's fences written as
+  the GPU passes them (engine ids 140 to 142). It worked as built, but measured level with the way
+  before with the GPU as the limit and about 1% behind with fewer CPU threads, so it is gone
+  (`docs/gpu-fences.md`).
+- The shader cache is rebuilt once on the first start of this build (its identity changed).
 
 ## Sharpening: one meaning, off by default (beta 16)
 

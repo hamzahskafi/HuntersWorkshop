@@ -147,15 +147,6 @@ public:
         WakeDecoder();
     }
 
-    /// 0.4.6 beta 21 (engine id 141, docs/gpu-fences.md): the game waits for its previous frame
-    /// (GnmDriver's WaitPreviousFrame, after its third submission of a frame): nothing more comes
-    /// from it until the GPU retires that frame, so the work waiting goes to the GPU now, queued
-    /// behind the frame it runs, once this thread has decoded what came before.
-    void GuestWaits() noexcept {
-        guest_waits.store(true, std::memory_order_release);
-        WakeForGpu();
-    }
-
     /// bbport: this thread is waiting for the game's next submission, everything before decoded.
     bool DecoderIdle() const noexcept {
         return decoder_idle.load(std::memory_order_acquire);
@@ -381,8 +372,6 @@ private:
     void WakeDecoder();
     /// bbport BB_HONEST_LABELS: set by WakeForGpu (under submit_mutex), taken by the idle wait.
     std::atomic<bool> gpu_wants_work{false};
-    /// 0.4.6 beta 21: set by GuestWaits, taken by this thread with nothing left to decode.
-    std::atomic<bool> guest_waits{false};
     std::atomic<bool> decoder_idle{false};
     std::queue<Common::UniqueFunction<void>> command_queue{};
     std::thread::id gpu_id;
