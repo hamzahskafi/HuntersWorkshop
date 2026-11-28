@@ -95,7 +95,6 @@ bool WaitRun(u64 number, int ms) {
 } // namespace
 
 int main() {
-    check(Vulkan::DrawPipe::BatchedHandover(), "the hand-over is batched by default");
     Vulkan::DrawPipe pipe(&Handler, nullptr);
     std::mt19937 rng{12345};
 
@@ -161,7 +160,7 @@ int main() {
     // a wait to its end: none may take much longer than the packets it waits for.
     std::printf("  stage B's count %s\n", Vulkan::DrawPipe::PlainCount()
                                                ? "without a fence (a process-wide fence when stage A sleeps)"
-                                               : "fenced (BB_PIPE_COUNT=fenced, or no process-wide fence here)");
+                                               : "fenced (no process-wide fence here)");
     const u64 sleeps_before = pipe.sleeps;
     long long worst_extra_us = 0;
     for (int round = 0; round < 300; ++round) {

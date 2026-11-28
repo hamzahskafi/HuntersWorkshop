@@ -5,8 +5,14 @@ to date 2026-10-31 (0.4.4 beta 21). This file records what was found, how to fix
 that has been done. Paths are relative to `engine/`; shadPS4's (`video_core/...`, `core/...`) to
 `engine/gpu/shadps4/`.
 
-## Status (0.4.4)
+## Status (0.4.4 to 0.4.6)
 
+- **0.4.6 (release candidate, engine id 146, 2026-11-28): the memory model**
+  ([memory-model.md](memory-model.md), "Where it stands at the release candidate"). The caches follow
+  the game's create, destroy, Map and release calls instead of the game's memory: GPU-owned surfaces
+  start empty or from their predecessor (no fill, no hash), images belong to the game's resources,
+  and pages are write-protected only where no call tells. YEBIS's rebuild stalls (59-84 ms in beta
+  7's log) were gone in beta 8's runs, and beta 12's run had 76% fewer write faults.
 - **The PC memory model (`BB_GUEST_IN_PLACE`) was removed in 0.4.4 beta 28**, with its switches
   and the launcher option (`exp_guest_in_place`); it had been off by default since 0.4.0 beta 4.
   What this file says of it is history now: causes 1 and 2, step 2 and step 3.3 went with it.

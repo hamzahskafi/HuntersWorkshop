@@ -40,7 +40,33 @@ What stays from the generic model, on purpose: detiling textures made with data 
 in the console's tiled layout), translating the game's shaders, and replaying the game's command
 stream (see "After 0.4.6").
 
-## Where it stands after beta 7
+## Where it stands at the release candidate (engine id 146, 2026-11-28)
+
+The five rules above, as 0.4.6 ships them (each beta's detail below and in [changelog.md](changelog.md)):
+
+1. **Images belong to their resources** (beta 11; `BB_IMAGE_OWNERS=0` keeps the old guesses, safe
+   mode sets it). Beta 10's count of the old guesses was removed in engine id 130.
+2. **GPU-owned surfaces never read the game's memory** (beta 8): they start from their predecessor or
+   empty (`BB_EMPTY_SURFACES`, kept for safe mode).
+3. **Writes are learned from the calls** (betas 9, 12, 16): the game's textures, YEBIS's and
+   Scaleform's are left to their calls; pages are protected only where no call tells (the engine's
+   data rings, YEBIS's shared vertex buffer). The texture net (`BB_TEXTURE_NET`) stays on as the check
+   for writes no call tells: it found 3 small ones in engine id 140's log.
+4. **The game's buffers the same way** (beta 12; `BB_WATCH_GAME_BUFFERS=1` watches as before, safe mode
+   sets it).
+5. **Shaders and pipelines:** translations queued ahead onto the compile threads (beta 17,
+   `BB_TRANSLATE_AHEAD`), pipelines built during loading screens (beta 15), and a shipped catalog for
+   the areas a PC has never drawn (engine id 121). The GPU cache is kept across engine updates that
+   change nothing it stores.
+
+Not done, by the tester's calls: the depth items (2026-11-09), the small-card run and the NVIDIA
+checks (left for now, 2026-11-28). The generic model's parts kept on purpose are as above. Betas 18
+to 21 were the engine's threads, not memory ([handoffs-and-placement.md](handoffs-and-placement.md),
+[stage-a-cost.md](stage-a-cost.md), [chain-waits.md](chain-waits.md), [gpu-fences.md](gpu-fences.md));
+the measured result of the whole release is at the top of
+[release-notes-0.4.6.md](release-notes-0.4.6.md).
+
+## Where it stood after beta 7
 
 Already following the game's calls (betas 4 to 7; [plan.md](plan.md)'s history is in
 [archive/plan-0.4.5.md](archive/plan-0.4.5.md)):

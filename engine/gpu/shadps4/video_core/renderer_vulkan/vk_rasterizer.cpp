@@ -111,10 +111,6 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_, Runtime
       guest_markers_enabled{EmulatorSettings.IsVkGuestMarkersEnabled()} {
     // Before the rasterizer is bound: Liverpool enqueues buffers only once it sees it.
     draw_prep = std::make_unique<DrawPreparation>(pipeline_cache);
-    // 0.4.6 beta 20 (docs/chain-waits.md, item 5): BB_PENDING_FILTER=0, every write lookup scans.
-    if (const char* env = std::getenv("BB_PENDING_FILTER"); env && env[0] == '0') {
-        pending_writes.use_filter = false;
-    }
     scene_targets = std::make_unique<SceneTargets>(instance, scheduler, runtime, texture_cache);
     // Allocation is independent of shader compilation, including constructor-time precache.
     object_motion = std::make_unique<ObjectMotion>(instance, scheduler);
@@ -963,81 +959,13 @@ bool Rasterizer::IsGpuSideThread() const {
     return OnStageA() || DrawPipe::OnStageB() || BbCopy::ForGpuSide();
 }
 
-bool Rasterizer::NewPendingTables() {
-    static const bool on = [] {
-        const char* env = std::getenv("BB_PENDING_TABLES");
-        return !(env && std::strcmp(env, "old") == 0);
-    }();
-    return on;
-}
-
-void Rasterizer::NoteFenceDecoded(u32 kind, VAddr address, u32 value_bytes, bool irq) {
-    auto& f = fence_research;
-    (kind == 0 ? f.eop : kind == 1 ? f.eos : f.release_mem) += 1;
-    (value_bytes == 0 ? f.no_value : value_bytes == 4 ? f.value32 : value_bytes == 8 ? f.value64 : f.clock) += 1;
-    f.irq += irq;
-    if (value_bytes != 0 && address != 0) {
-        const u32 size = value_bytes == 4 ? 4u : 8u;
-        (buffer_cache.GpuWritesInPlace(address, size) ? f.in_place : f.outside) += 1;
-        f.unaligned += (address & 3) != 0;
-        // Distinct addresses this frame: a small table, the frame's generation in each slot.
-        u32 slot = static_cast<u32>((address * 0x9E3779B97F4A7C15ull) >> 52);
-        for (u32 probe = 0; probe < 16; ++probe, slot = (slot + 1) & 4095) {
-            auto& [at, generation] = f.seen[slot];
-            if (generation == f.generation && at == address) {
-                break;
-            }
-            if (generation != f.generation) {
-                at = address;
-                generation = f.generation;
-                ++f.distinct;
-                break;
-            }
-        }
-    }
-    f.after_gpu_writes += f.gpu_write_since_fence;
-    f.gpu_write_since_fence = false;
-    const u64 packet = draw_pipe ? draw_pipe->NextPacket() : 0;
-    f.back_to_back += packet == f.last_fence_packet + 1;
-    f.last_fence_packet = packet;
-}
-
-void Rasterizer::NoteFenceFrameEnd() {
-    ++fence_research.frames;
-    ++fence_research.generation;
-}
-
-void Rasterizer::NoteDecoderPause(u64 ns, bool mid_frame) {
-    if (!mid_frame) {
-        return;
-    }
-    auto& f = fence_research;
-    ++f.pauses[ns < 50'000 ? 0 : ns < 200'000 ? 1 : ns < 1'000'000 ? 2 : 3];
-    f.pause_ns += ns;
-    // A pause long enough to matter: did the GPU finish everything submitted meanwhile? (In the
-    // queue design such a pause hands the waiting work to the GPU when it runs out.)
-    if (ns >= 50'000) {
-        const u64 tick = scheduler.CurrentTick();
-        if (tick >= 2 && scheduler.IsFree(tick - 1)) {
-            ++f.empty;
-            f.empty_ns += ns;
-        }
-    }
-}
-
 void Rasterizer::NotePendingGpuWrite(VAddr address, u64 size) {
     if (!draw_pipe || !size) {
         return;
     }
-    fence_research.gpu_write_since_fence = true;
     // Numbered by packet (a position, the packet's start, counted as reached once the packet
     // before it had run, while this one was not recorded yet).
     const u64 packet = draw_pipe->NextPacket();
-    if (!NewPendingTables()) {
-        // In hashed granules: a lookup per constant binding instead of a scan of every write.
-        pending_write_table.Note(address, size, packet);
-        return;
-    }
     // 0.4.6 beta 19: the list of the writes stage B hasn't reached (the hashed table's notes were
     // about 2.5% of this thread, its lookups 4%).
     pending_writes.Prune([this](u64 p) { return draw_pipe->ReachedPacket(p); });
@@ -1052,7 +980,7 @@ void Rasterizer::NotePendingGpuWrite(VAddr address, u64 size) {
 
 void Rasterizer::NotePendingRead(VAddr address, u64 size) {
     if (draw_pipe && size && OnStageA()) {
-        if (NewPendingTables() && !dump_pages.Touches(address, size)) {
+        if (!dump_pages.Touches(address, size)) {
             ++pending_stats.reads_skipped; // no dump writes there (WaitForPendingReads)
             return;
         }
@@ -1073,7 +1001,7 @@ void Rasterizer::WaitForPendingReads(VAddr address, u64 size) {
         DrainDrawPipe(DrawPipe::ReasonConstRam);
         return;
     }
-    if (NewPendingTables() && !dump_pages.Covers(address, size)) {
+    if (!dump_pages.Covers(address, size)) {
         // 0.4.6 beta 19: bytes no dump wrote before: reads of them were not noted. Every queued
         // packet is waited for once; from now on reads of these pages are noted.
         ++pending_stats.dump_ranges_new;
@@ -1093,18 +1021,16 @@ bool Rasterizer::PendingWriteOverlaps(VAddr address, u64 size) {
     if (!draw_pipe || size == 0) {
         return false;
     }
-    if (NewPendingTables()) {
-        ++pending_stats.write_lookups;
-        pending_writes.Prune([this](u64 p) { return draw_pipe->ReachedPacket(p); });
-        if (pending_writes.Overlaps(address, size)) {
-            return true;
-        }
-        if (pending_write_table_newest == 0 ||
-            draw_pipe->ReachedPacket(pending_write_table_newest)) {
-            pending_write_table_newest = 0; // every write the table holds has been reached
-            return false;
-        }
+    ++pending_stats.write_lookups;
+    pending_writes.Prune([this](u64 p) { return draw_pipe->ReachedPacket(p); });
+    if (pending_writes.Overlaps(address, size)) {
+        return true;
     }
+    if (pending_write_table_newest == 0 || draw_pipe->ReachedPacket(pending_write_table_newest)) {
+        pending_write_table_newest = 0; // every write the table holds has been reached
+        return false;
+    }
+    // The writes the list had no room for (it was full).
     const u64 packet = pending_write_table.Newest(address, size);
     return packet != 0 && !draw_pipe->ReachedPacket(packet);
 }
@@ -1878,14 +1804,14 @@ void Rasterizer::PrintPipeStats() {
                 (draw_pipe->sleeps - last_sleeps) / seconds,
                 100.0 * (draw_pipe->drain_cycles - last_drain_cycles) / cycles,
                 100.0 * (busy - last_busy) / cycles,
-                DrawPipe::BatchedHandover() ? "fenced every 8 packets" : "fenced every packet",
+                "fenced every 8 packets",
                 static_cast<unsigned long long>(draw_pipe->late_wakes.exchange(0)),
                 DrawPipe::PlainCount() ? "plain (a process-wide fence when stage A sleeps)"
                                        : "fenced",
                 static_cast<unsigned long long>(draw_pipe->stage_a_missed_wakes.exchange(0)));
     last_sleeps = draw_pipe->sleeps;
     // 0.4.6 beta 19: what the pending tables were given and asked (item 3).
-    if (NewPendingTables()) {
+    {
         auto& p = pending_stats;
         std::printf("  pending tables/s: reads noted %.0f, skipped %.0f (no dump writes there; the "
                     "dumps' pages: %zu ranges, %llu new%s); GPU writes listed %.0f, to the table "
@@ -1905,38 +1831,6 @@ void Rasterizer::PrintPipeStats() {
         p = {};
         pending_writes.filtered = pending_writes.scanned = 0;
         pending_writes.scanned_wide = pending_writes.scanned_entries = 0;
-    }
-    // 0.4.6 beta 21 research (docs/gpu-fences.md): the game's fences and its pauses mid-frame.
-    {
-        auto& f = fence_research;
-        const double frames = f.frames ? double(f.frames) : 1.0;
-        const u64 fences = f.eop + f.eos + f.release_mem;
-        const u64 valued = f.in_place + f.outside;
-        std::printf("  fences a frame (beta 21 research): %.1f (end-of-pipe %.1f, end-of-shader %.1f, "
-                    "compute %.1f); writing no value %.1f, 32-bit %.1f, 64-bit %.1f, a clock or counter "
-                    "%.1f; with an interrupt %.1f; their values in the GX region in place %.1f%% "
-                    "(outside %.1f a frame, unaligned %.1f); after GPU writes into the game's memory "
-                    "%.1f; right after another %.1f; distinct addresses %.1f\n",
-                    fences / frames, f.eop / frames, f.eos / frames, f.release_mem / frames,
-                    f.no_value / frames, f.value32 / frames, f.value64 / frames, f.clock / frames,
-                    f.irq / frames, valued ? 100.0 * f.in_place / valued : 0.0, f.outside / frames,
-                    f.unaligned / frames, f.after_gpu_writes / frames, f.back_to_back / frames,
-                    f.distinct / frames);
-        std::printf("  the game's pauses mid-frame a frame: under 50 us %.1f, 50-200 us %.1f, "
-                    "200 us-1 ms %.1f, 1 ms and more %.2f (%.3f ms in all); of those of 50 us or more, "
-                    "ended with the GPU out of work %.2f (%.3f ms)\n",
-                    f.pauses[0] / frames, f.pauses[1] / frames, f.pauses[2] / frames,
-                    f.pauses[3] / frames, f.pause_ns / 1e6 / frames, f.empty / frames,
-                    f.empty_ns / 1e6 / frames);
-        const auto seen = f.seen;
-        const u32 generation = f.generation;
-        const bool written = f.gpu_write_since_fence;
-        const u64 last = f.last_fence_packet;
-        f = {};
-        f.seen = seen;
-        f.generation = generation;
-        f.gpu_write_since_fence = written;
-        f.last_fence_packet = last;
     }
     std::printf("  drains by reason/s:");
     for (u32 r = 0; r < DrawPipe::NumReasons; ++r) {

@@ -137,7 +137,8 @@ int RunProbe(const fs::path& probe, const std::vector<std::wstring>& arguments, 
 // draws and compile skipping off (BB_FAST_DRAWS=0, BB_COMPILE_SKIP=0) turn off their parts, except a
 // part set on its own (0.4.5 beta 14: BB_VRAM_BUDGET went with the one VRAM manager); 0.4.6 beta 5: safe mode turns
 // the VRAM manager on (off by default while the game's own calls are tested alone); BB_SYNC=legacy puts back the synchronisation of
-// before the GPU work's fences were honest (every fallback the A/B tests kept, the GX region tracked). The same table is in run.sh (switch groups);
+// before the GPU work's fences were honest (every fallback the A/B tests kept, the GX region tracked). 0.4.6 beta 21: safe mode
+// also turns off the thread roles and the runtime's rebuilt semaphores and read/write locks (beta 18). The same table is in run.sh (switch groups);
 // tests/test_switch_groups.py checks they agree.
 // switch-groups-begin
 struct SwitchGroup {
@@ -152,6 +153,7 @@ const SwitchGroup kSwitchGroups[] = {
          {"BB_FAST_LOADING", "0"}, {"BB_FRAME_FIXES", "0"}, {"BB_HOT_PAGES", "0"}, {"BB_GX_IN_PLACE", "0"},
          {"BB_NATIVE_CALLS", "0"}, {"BB_PRECISE_PACING", "0"}, {"BB_VBLANK_PACING", "0"},
          {"BB_INDIRECT_CLAMP", "1"}, {"BB_GPU_THREAD_PRIORITY", "0"},
+         {"BB_THREAD_ROLES", "0"}, {"BB_RUNTIME_SYNC", "0"},
          {"BB_AUDIO_THREAD_PRIORITY", "0"}, {"BB_NATIVE_SHADERS", "0"}, {"BB_SLEEP_SPIN_US", "600"},
          {"BB_ASYNC_PIPELINES", "0"}, {"BB_OCCLUSION", "0"}, {"BB_MODS_ENABLED", "0"},
          {"BB_FAST_DRAWS", "0"}, {"BB_COMPILE_SKIP", "0"}, {"BB_VRAM_MANAGER", "1"},

@@ -257,7 +257,7 @@ private:
     }
 
     /// Under `mutex`: each copy thread running a task, raised to the calling thread's priority
-    /// when that is above normal (BB_RAISE_ON_WAIT=0: none).
+    /// when that is above normal (with roles on).
     void RaiseBusy() {
         if (!BbRoles::RaiseOnWait()) {
             return;

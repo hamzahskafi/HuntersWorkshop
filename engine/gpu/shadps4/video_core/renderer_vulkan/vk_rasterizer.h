@@ -821,7 +821,7 @@ private:
     };
     PendingReads pending_reads;
     PendingReads pending_write_table; ///< the same per granule for GPU writes queued (NotePendingGpuWrite)
-    /// 0.4.6 beta 19 (docs/stage-a-cost.md, item 3; BB_PENDING_TABLES=old: as before). The read
+    /// 0.4.6 beta 19 (docs/stage-a-cost.md, item 3). The read
     /// table answers one question, for the constant engine's dumps (WaitForPendingReads): those
     /// write a small, fixed set of pages (the constant ring), so a read is noted only where it
     /// touches bytes a dump has written. A dump into bytes no dump wrote before waits once for every
@@ -831,33 +831,6 @@ private:
     /// (PendingWriteOverlaps); the hashed table above holds the ones that come while it is full.
     PendingWriteList pending_writes;
     u64 pending_write_table_newest = 0; ///< the newest packet noted in the table (0: none)
-    static bool NewPendingTables();
-    /// 0.4.6 beta 21 research (docs/gpu-fences.md; counted only, nothing changes): the game's fences
-    /// as stage A decodes them, and its pauses mid-frame. Stage A writes them (the pauses from the
-    /// GPU command thread's idle wait, the same thread); PrintPipeStats prints and clears them.
-    struct FenceResearch {
-        u64 eop = 0, eos = 0, release_mem = 0;              ///< by packet
-        u64 no_value = 0, value32 = 0, value64 = 0, clock = 0; ///< what they write
-        u64 irq = 0;                                         ///< with an interrupt
-        u64 in_place = 0, outside = 0, unaligned = 0;        ///< where a value goes
-        u64 after_gpu_writes = 0; ///< GPU writes into the game's memory noted since the fence before
-        u64 back_to_back = 0;     ///< nothing in the draw pipe between it and the fence before
-        u64 frames = 0, distinct = 0; ///< distinct addresses a frame, summed
-        u64 pauses[4] = {};       ///< mid-frame pauses: under 50 us, 50-200, 200-1000, 1 ms and more
-        u64 pause_ns = 0;         ///< their total
-        u64 empty = 0, empty_ns = 0; ///< pauses of 50 us or more that ended with the GPU out of work
-        bool gpu_write_since_fence = false;
-        u64 last_fence_packet = ~0ull;
-        u32 generation = 1;
-        std::array<std::pair<u64, u32>, 4096> seen{}; ///< address, frame generation (a frame's set)
-    } fence_research;
-
-public:
-    void NoteFenceDecoded(u32 kind, VAddr address, u32 value_bytes, bool irq);
-    void NoteFenceFrameEnd();
-    void NoteDecoderPause(u64 ns, bool mid_frame);
-
-private:
     /// Statistics (stage A, BB_FRAME_STATS): what the tables were asked and given.
     struct PendingStats {
         u64 reads_noted = 0, reads_skipped = 0, dump_ranges_new = 0;

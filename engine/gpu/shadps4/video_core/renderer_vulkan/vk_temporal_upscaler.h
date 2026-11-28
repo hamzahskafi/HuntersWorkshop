@@ -250,11 +250,6 @@ private:
     /// 0.4.6 beta 16: a storage view of the UI image (its sRGB format's UNORM twin, `srgb` set), or
     /// null where its format has no storage support (the blit then, and ExtraSharpen).
     vk::ImageView UiStorageView(bool& srgb);
-    /// 0.4.6 beta 16 (research, for the sharpening's encoding of the HDR scene): once a second, how
-    /// much of the 1080p path's upscaled scene is above 1, 2, 4 and 16 (scene_range.comp), read
-    /// when the GPU is past it (ReadSceneRange); one line a minute of such frames.
-    void RecordSceneRange(vk::CommandBuffer cmdbuf, u32 w, u32 h);
-    void ReadSceneRange();
     /// 0.4.4 beta 20: Run's profiler label for one of its steps (GPU profile).
     void MarkRunStep(const char* label);
     /// bbport: the menu's mask / motion debug view over the scaled path's output, in place;
@@ -408,26 +403,6 @@ private:
     vk::UniquePipeline sharpen_copy_pipeline;
     vk::UniqueImageView ui_storage_view;
     bool ui_storage_checked = false, ui_storage_srgb = false;
-    /// 0.4.6 beta 16: RecordSceneRange's pass, its counts (host memory, scene_range.comp's Counts)
-    /// and this minute's sums.
-    vk::UniqueDescriptorSetLayout range_desc_layout;
-    vk::UniquePipelineLayout range_pipeline_layout;
-    vk::UniquePipeline range_pipeline;
-    vk::Buffer range_buffer{};
-    VmaAllocation range_allocation{};
-    const u32* range_counts = nullptr;
-    bool range_failed = false;  ///< no host memory for the counts: not measured
-    /// A pass the GPU may not have run yet. ReadSceneRange runs where the scheduler runs deferred
-    /// operations (at a submission), which may not be Run's thread; `range` is its alone.
-    std::atomic<bool> range_pending{false};
-    std::chrono::steady_clock::time_point range_next{};
-    struct SceneRange {
-        u32 frames = 0;
-        u64 sampled = 0, not_finite = 0;
-        std::array<u64, 4> above{}; ///< above 1, 2, 4 and 16
-        double most_above_one = 0;  ///< the largest share above 1 in one frame
-        float brightest = 0;
-    } range;
     // ExtraSharpen: a copy of the upscaled frame (RCAS reads neighbours).
     // 0.4.4 beta 21: the copy is released by EnsureResources (made again when next needed).
     VideoCore::UniqueImage extra_sharpen_image;

@@ -48,8 +48,8 @@ bool Raise(void* handle, int priority);
 /// 0.4.6 beta 20 (docs/chain-waits.md, item 4): the calling thread, raised (Raise) while a waiter
 /// depended on its job, back at its role now that the job is done. False without roles.
 bool EndRaise();
-/// BB_RAISE_ON_WAIT=0 (this beta only): a render chain thread waiting on a standing compile
-/// thread's or a copy thread's job does not raise it (the burst threads' raise stays).
+/// A render chain thread waiting on a standing compile thread's or a copy thread's job raises it:
+/// with roles on (BB_THREAD_ROLES=0 turns both off).
 bool RaiseOnWait();
 
 /// A game thread woke from a wait in the runtime (statistics on): on which kind of core.

@@ -28,7 +28,6 @@
 #include "video_core/host_shaders/taa_sharpen_comp.h"
 #include "video_core/host_shaders/fsr4_decode_comp.h"
 #include "video_core/host_shaders/fsr4_encode_comp.h"
-#include "video_core/host_shaders/scene_range_comp.h"
 #include "video_core/host_shaders/sharpen_copy_comp.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
 #include "video_core/renderer_vulkan/vk_camera_motion.h"
@@ -381,12 +380,6 @@ TemporalUpscaler::TemporalUpscaler(const Instance& instance_, Scheduler& schedul
 
 TemporalUpscaler::~TemporalUpscaler() {
     if (resources_ready) scheduler.Finish();
-    if (range_buffer) {
-        if (range_pending) {
-            scheduler.Finish();
-        }
-        vmaDestroyBuffer(instance.GetAllocator(), VkBuffer(range_buffer), range_allocation);
-    }
 }
 
 bool TemporalUpscaler::Active() const {
@@ -980,21 +973,6 @@ void TemporalUpscaler::CreatePipelines() {
         debug_pipeline = compute(UPSCALE_DEBUG_COMP, *debug_pipeline_layout);
     }
     fsr4_encode_pipeline = compute(FSR4_ENCODE_COMP, *fsr4_encode_pipeline_layout);
-    {
-        // 0.4.6 beta 16: RecordSceneRange: the scene (storage image) and its counts (buffer).
-        const std::array<vk::DescriptorSetLayoutBinding, 2> bindings{{
-            {.binding = 0, .descriptorType = vk::DescriptorType::eStorageImage,
-             .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eCompute},
-            {.binding = 1, .descriptorType = vk::DescriptorType::eStorageBuffer,
-             .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eCompute},
-        }};
-        range_desc_layout = Check(device.createDescriptorSetLayoutUnique({
-            .flags = vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptorKHR,
-            .bindingCount = u32(bindings.size()), .pBindings = bindings.data()}));
-        range_pipeline_layout = Check(device.createPipelineLayoutUnique({
-            .setLayoutCount = 1, .pSetLayouts = &*range_desc_layout}));
-        range_pipeline = compute(SCENE_RANGE_COMP, *range_pipeline_layout);
-    }
     {
         const std::array<vk::DescriptorSetLayoutBinding, 2> bindings{{
             {.binding = 0, .descriptorType = vk::DescriptorType::eSampledImage,
@@ -1824,104 +1802,6 @@ void TemporalUpscaler::Run() {
                     vk::AccessFlagBits2::eShaderRead | vk::AccessFlagBits2::eShaderWrite);
     runtime.FlushBarriers();
     RecordMerge(cmdbuf, merge_pass(merge_sharpen));
-    RecordSceneRange(cmdbuf, ow, oh);
-}
-
-void TemporalUpscaler::RecordSceneRange(vk::CommandBuffer cmdbuf, u32 w, u32 h) {
-    const auto now = std::chrono::steady_clock::now();
-    if (range_failed || range_pending || now < range_next || !range_pipeline) {
-        return;
-    }
-    range_next = now + std::chrono::seconds(1);
-    constexpr VkDeviceSize kSize = 7 * sizeof(u32);
-    if (!range_buffer) {
-        const VkBufferCreateInfo buffer_ci{
-            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-            .size = kSize,
-            .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        };
-        const VmaAllocationCreateInfo alloc_ci{
-            .flags = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT,
-            .usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST,
-        };
-        VkBuffer buffer{};
-        VmaAllocationInfo info{};
-        if (vmaCreateBuffer(instance.GetAllocator(), &buffer_ci, &alloc_ci, &buffer,
-                            &range_allocation, &info) != VK_SUCCESS || !info.pMappedData) {
-            if (buffer) {
-                vmaDestroyBuffer(instance.GetAllocator(), buffer, range_allocation);
-            }
-            std::printf("Upscaler: the scene's range is not measured (no host memory)\n");
-            range_failed = true;
-            return;
-        }
-        range_buffer = buffer;
-        range_counts = static_cast<const u32*>(info.pMappedData);
-    }
-    // The output image is read in General by the merge already; only the counts need ordering.
-    cmdbuf.fillBuffer(range_buffer, 0, kSize, 0);
-    const vk::MemoryBarrier2 zeroed{
-        .srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
-        .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
-        .dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-        .dstAccessMask = vk::AccessFlagBits2::eShaderStorageRead |
-                         vk::AccessFlagBits2::eShaderStorageWrite};
-    cmdbuf.pipelineBarrier2({.memoryBarrierCount = 1, .pMemoryBarriers = &zeroed});
-    const vk::DescriptorImageInfo scene_info{.imageView = *output_view,
-                                             .imageLayout = vk::ImageLayout::eGeneral};
-    const vk::DescriptorBufferInfo counts_info{.buffer = range_buffer, .offset = 0, .range = kSize};
-    const std::array<vk::WriteDescriptorSet, 2> writes{{
-        {.dstBinding = 0, .descriptorCount = 1, .descriptorType = vk::DescriptorType::eStorageImage,
-         .pImageInfo = &scene_info},
-        {.dstBinding = 1, .descriptorCount = 1, .descriptorType = vk::DescriptorType::eStorageBuffer,
-         .pBufferInfo = &counts_info},
-    }};
-    cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, *range_pipeline);
-    cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute, *range_pipeline_layout, 0, writes);
-    // One pixel in 16: a thread for every fourth of every fourth row, 16 x 16 to a group.
-    cmdbuf.dispatch(((w + 3) / 4 + 15) / 16, ((h + 3) / 4 + 15) / 16, 1);
-    const vk::MemoryBarrier2 counted{
-        .srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-        .srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
-        .dstStageMask = vk::PipelineStageFlagBits2::eHost,
-        .dstAccessMask = vk::AccessFlagBits2::eHostRead};
-    cmdbuf.pipelineBarrier2({.memoryBarrierCount = 1, .pMemoryBarriers = &counted});
-    range_pending = true;
-    // On this thread once the GPU is past this frame's work (at a submission).
-    scheduler.DeferOperation([this] { ReadSceneRange(); });
-}
-
-void TemporalUpscaler::ReadSceneRange() {
-    vmaInvalidateAllocation(instance.GetAllocator(), range_allocation, 0, VK_WHOLE_SIZE);
-    std::array<u32, 7> c{};
-    std::memcpy(c.data(), range_counts, sizeof(c));
-    range_pending.store(false, std::memory_order_release); // the counts are read: free for the next pass
-    if (c[0] == 0) {
-        return;
-    }
-    ++range.frames;
-    range.sampled += c[0];
-    for (u32 i = 0; i < range.above.size(); ++i) {
-        range.above[i] += c[1 + i];
-    }
-    range.not_finite += c[5];
-    range.most_above_one = std::max(range.most_above_one, double(c[1]) / c[0]);
-    float brightest;
-    std::memcpy(&brightest, &c[6], sizeof(brightest));
-    range.brightest = std::max(range.brightest, brightest);
-    if (range.frames < 60) {
-        return;
-    }
-    const double n = double(range.sampled);
-    std::printf("Upscaler: the 1080p scene's light, the last %u frames measured (beta 16, research for "
-                "the sharpening; one pixel in 16 of the upscaled scene, a frame a second): the "
-                "brightest channel above 1 in %.2f%% of pixels (in one frame at most %.2f%%), above "
-                "2 in %.2f%%, above 4 in %.3f%%, above 16 in %.4f%%; the brightest %.1f; not "
-                "finite %llu\n",
-                range.frames, 100.0 * range.above[0] / n, 100.0 * range.most_above_one,
-                100.0 * range.above[1] / n, 100.0 * range.above[2] / n, 100.0 * range.above[3] / n,
-                range.brightest, static_cast<unsigned long long>(range.not_finite));
-    range = {};
 }
 
 vk::ImageView TemporalUpscaler::CachedView(const VideoCore::Image& image, vk::Format format,

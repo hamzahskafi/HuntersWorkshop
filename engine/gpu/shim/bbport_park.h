@@ -34,16 +34,6 @@ void WakeAll(std::atomic<std::uint32_t>& word);
 bool HeavyFenceAvailable();
 void HeavyFence();
 
-/// BB_ENGINE_PARK=0 (0.4.6 beta 19 only): the recording threads and the GPU command thread wait on
-/// condition variables as before.
-inline bool EngineWaits() {
-    static const bool on = [] {
-        const char* env = std::getenv("BB_ENGINE_PARK");
-        return !(env && env[0] == '0');
-    }();
-    return on;
-}
-
 /// The usual pairing: a waiter reads the word, checks its condition, and waits on the value it
 /// read; a waker changes its condition, bumps the word and wakes. A bump between the waiter's read
 /// and its wait makes the wait return at once.

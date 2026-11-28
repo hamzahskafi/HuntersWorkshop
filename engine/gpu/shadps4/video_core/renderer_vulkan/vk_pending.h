@@ -94,7 +94,7 @@ public:
     /// live, not the limit, so the limit costs nothing until they are that many.
     static constexpr std::uint32_t kMaxWide = 64;
 
-    /// BB_PENDING_FILTER=0 (this beta only): every lookup scans the list.
+    /// False: every lookup scans the list (tests/test_pending.cpp compares the two).
     bool use_filter = true;
     /// Statistics: lookups answered without the scan (by the filter, after the wide ones), those
     /// that scanned because a page held a write or because more than kMaxWide wide writes were

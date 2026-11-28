@@ -1,4 +1,4 @@
-# Hunter's Workshop 0.4.6 (in beta)
+# Hunter's Workshop 0.4.6 (release candidate)
 
 What changed since 0.4.5, for the release page. 0.4.6 beta 1 holds what was tested as 0.4.5 betas 14
 to 19 (the VRAM and texture work); 0.4.5 itself shipped from beta 13. The engine work behind each line
@@ -424,9 +424,9 @@ without thread support although the movie player uses it from three threads.
   waiting for a core have this one.
 - New log lines with the frame statistics: `Roles:` (each role's threads, CPU time and, on a CPU with
   two kinds of core, where they woke) and `Fork-join waits:`.
-- For this beta's measurements only, `BB_THREAD_ROLES=0`, `BB_RUNTIME_SYNC=0` and
-  `BB_GAME_FIXES_SKIP=job_barrier` turn each part off, and `BB_TEST_CPUS=8` runs the game as on a CPU
-  with 8 hardware threads.
+- `BB_THREAD_ROLES=0` and `BB_RUNTIME_SYNC=0` in Extra variables turn the roles and the new handoffs
+  off (safe mode turns both off from the release candidate on), `BB_GAME_FIXES_SKIP=job_barrier` the
+  main thread's new wait, and `BB_TEST_CPUS=8` runs the game as on a CPU with 8 hardware threads.
 
 ## The GPU command thread, lighter on every draw (beta 19)
 
@@ -444,8 +444,8 @@ at the tested spots. A profile of it showed where its time went, and beta 19 cut
   threads do since beta 18.
 - The `Roles:` log line now also shows the game's main thread and render thread on their own.
 - The shader cache is rebuilt once on the first start of this beta (its identity changed).
-- For this beta's measurements only, `BB_STATS_EVERY_PACKET=1`, `BB_PIPE_HANDOVER=each`,
-  `BB_PENDING_TABLES=old`, `BB_FRAME_POOL=0` and `BB_ENGINE_PARK=0` each turn one change off.
+- Beta 19's measurement switches (`BB_STATS_EVERY_PACKET`, `BB_PIPE_HANDOVER`, `BB_PENDING_TABLES`,
+  `BB_FRAME_POOL`, `BB_ENGINE_PARK`) are gone in the release candidate: each change stays.
 
 ## The render chain no longer waits on slower threads (beta 20)
 
@@ -469,14 +469,14 @@ priority on to the thread holding the lock.
   fence does nothing), and a waiting thread looks again every 2 ms, so a missed wake-up can never freeze
   the game (engine id 137).
 - The shader cache is rebuilt once on the first start of this beta (its identity changed).
-- For this beta's measurements only, `BB_PREP_HANDOVER=old`, `BB_SUBMIT_QUEUE=locked`,
-  `BB_LOCK_INHERIT=0`, `BB_RAISE_ON_WAIT=0`, `BB_PENDING_FILTER=0`, `BB_STATS_USAGE_EVERY=1` and
-  `BB_PIPE_COUNT=fenced` each turn one change off.
+- Beta 20's measurement switches (`BB_PREP_HANDOVER`, `BB_SUBMIT_QUEUE`, `BB_LOCK_INHERIT`,
+  `BB_RAISE_ON_WAIT`, `BB_PENDING_FILTER`, `BB_STATS_USAGE_EVERY`, `BB_PIPE_COUNT`) are gone in the
+  release candidate: each change stays.
 
 ## Render passes kept whole across the recording threads (beta 21)
 
 - **Render passes are cut between the recording threads only where they end** (+0.3 to +1.1% at the
-  test spots against beta 20). `BB_CUT_IN_PASS=1` cuts inside them too, as before.
+  test spots against beta 20).
 - The quick check of the memory the queued draws write keeps working with up to 64 large writes live
   (16 before).
 - **The GPU hang markers cost less** (engine id 144): the GPU writes one after every 32nd draw or
@@ -489,6 +489,19 @@ priority on to the thread holding the lock.
   before with the GPU as the limit and about 1% behind with fewer CPU threads, so it is gone
   (`docs/gpu-fences.md`).
 - The shader cache is rebuilt once on the first start of this build (its identity changed).
+
+## The release candidate: switches settled, research taken out
+
+- **Safe mode** (the run after a crash) now also turns off beta 18's thread roles and handoffs
+  (`BB_THREAD_ROLES=0`, `BB_RUNTIME_SYNC=0`), so a crash in them can be told apart from the rest.
+- **The measurement switches of betas 19 to 21 are gone**, along with the code paths they kept: what
+  they turned off stays on. Kept: `BB_THREAD_ROLES`, `BB_RUNTIME_SYNC`, `BB_TEST_CPUS`,
+  `BB_GPU_THREAD_PRIORITY`, `BB_BREADCRUMBS` and `BB_TEXTURE_NET`.
+- **Research taken out:** the 1080p picture's brightness count (a small GPU pass once a second, beta 16)
+  and the fence timing of engine id 139.
+- **The log reads plainer:** the minute lines no longer carry the beta they came from, and the line
+  that counted the game's shaders and released buffers is no longer called research.
+- The shader cache is rebuilt once on the first start (its identity changed).
 
 ## Sharpening: one meaning, off by default (beta 16)
 
@@ -522,9 +535,8 @@ mask, by FSR's own answer (FSR 4.1.2 does not), instead of "FSR 4 may".
 - **Sharpening for comparison** (beta 16): `BB_SHARPEN_FSR_OWN=1` in Extra variables has FSR sharpen
   with its own sharpening instead, at the same percentage, for side-by-side comparisons.
 
-- **For the sharpening** (beta 16): a line says how much of the 1080p picture is brighter than
-  white, and a line says how strong the sharpening is and where it runs, once a change has held for a
-  second.
+- **For the sharpening** (beta 16): a line says how strong the sharpening is and where it runs, once a
+  change has held for a second.
 
 - **The "Building shaders" note** shows when a frame was late while shaders were being
   prepared, for 2 seconds, rather than once 30 ms of that work had added up: it missed the short

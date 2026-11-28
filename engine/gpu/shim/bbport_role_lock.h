@@ -7,8 +7,8 @@
 // it held looks: a holder of a lower role than the waiter's is raised to the waiter's priority (high
 // QoS, any core: the roles' raise) for the rest of its hold, and goes back to its role when it lets
 // go. Every such wait is counted per lock and printed with the `Roles:` line ("waited on lower
-// roles"), so a tester's log shows one on any CPU. BB_LOCK_INHERIT=0 (this beta only): count, don't
-// raise. Use it for every lock the chain shares with a lower role.
+// roles"), so a tester's log shows one on any CPU. Use it for every lock the chain shares with a
+// lower role.
 #pragma once
 
 #include <atomic>

@@ -1139,8 +1139,7 @@ private:
         std::deque<std::unique_ptr<RecordChunk>> queue; ///< guarded by recorder_mutex
         std::atomic<size_t> queued{0};                  ///< queue.size() for lock-free polling
         bool busy = false;     ///< running a chunk (guarded by recorder_mutex)
-        bool sleeping = false; ///< waiting on cv (guarded by recorder_mutex)
-        std::condition_variable_any cv;
+        bool sleeping = false; ///< waiting on wake_word (guarded by recorder_mutex)
         /// 0.4.6 beta 19: the word it sleeps on (BbPark), bumped by HandOver when it sleeps.
         std::atomic<u32> wake_word{0};
         std::jthread thread;

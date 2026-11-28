@@ -179,7 +179,7 @@ Scheduler::~Scheduler() {
     if (!workers.empty()) {
         SyncRecording();
         for (auto& worker : workers) {
-            worker->thread.request_stop(); // wakes its wait on worker->cv
+            worker->thread.request_stop(); // its stop callback bumps wake_word, ending its wait
         }
         for (auto& worker : workers) {
             worker->thread.join();
@@ -636,23 +636,12 @@ void Scheduler::MaybeSplit() {
         BbToggle::Disabled(BbToggle::ParallelRecording)) {
         return;
     }
-    // Cutting inside a render pass closes and reopens it: only after a longer stretch.
+    // Cutting inside a render pass closes and reopens it. 0.4.6 beta 21 (docs/gpu-fences.md): the
+    // recording threads cut only where a pass ends, and inside one only past 8 times the segment
+    // size (2 times before). Measured in engine id 139 without the profiler: +0.6-0.8% FPS at the
+    // tester's three spots, a sixth of the cuts, the recording keeping up.
     const size_t bytes = segment_bytes + CurrentChunk().Size();
-    if (bytes < (is_rendering ? 2 * split_bytes : split_bytes)) {
-        return;
-    }
-    // 0.4.6 beta 21 (docs/gpu-fences.md, plan part 4): the recording threads cut only where a pass
-    // ends (and inside one only past 8 times the segment size). Measured in engine id 139 without
-    // the profiler: +0.6-0.8% FPS at the tester's three spots, a sixth of the cuts, the recording
-    // keeping up. BB_CUT_IN_PASS=1: cut inside passes too, as before.
-    static const bool cut_in_pass = [] {
-        const char* env = std::getenv("BB_CUT_IN_PASS");
-        const bool on = env && env[0] == '1';
-        std::printf("GPU: passes cut between recording threads %s (BB_CUT_IN_PASS)\n",
-                    on ? "inside them too (=1)" : "only where they end");
-        return on;
-    }();
-    if (is_rendering && !cut_in_pass && bytes < 8 * split_bytes) {
+    if (bytes < (is_rendering ? 8 * split_bytes : split_bytes)) {
         return;
     }
     if (is_rendering) {
@@ -756,11 +745,7 @@ void Scheduler::HandOver() {
     ordered_full.clear();
     // A busy thread picks the new chunks up by itself: waking it is a syscall per draw.
     if (wake) {
-        if (BbPark::EngineWaits()) {
-            BbPark::Bump(worker.wake_word);
-        } else {
-            worker.cv.notify_one();
-        }
+        BbPark::Bump(worker.wake_word);
     }
     if (!record_chunk) {
         record_chunk = AcquireChunk();
@@ -907,17 +892,13 @@ void Scheduler::RecorderThread(std::stop_token stoken, u32 index) {
             std::unique_lock lk{recorder_mutex};
             if (!has_work()) {
                 worker.sleeping = true;
-                if (BbPark::EngineWaits()) {
-                    // The word read under the lock: a hand-over after it bumps the word, so the
-                    // wait below returns at once.
-                    while (!has_work() && !stoken.stop_requested()) {
-                        const u32 seen = worker.wake_word.load(std::memory_order_seq_cst);
-                        lk.unlock();
-                        BbPark::Wait(worker.wake_word, seen);
-                        lk.lock();
-                    }
-                } else {
-                    worker.cv.wait(lk, stoken, has_work);
+                // The word read under the lock: a hand-over after it bumps the word, so the wait
+                // below returns at once.
+                while (!has_work() && !stoken.stop_requested()) {
+                    const u32 seen = worker.wake_word.load(std::memory_order_seq_cst);
+                    lk.unlock();
+                    BbPark::Wait(worker.wake_word, seen);
+                    lk.lock();
                 }
                 worker.sleeping = false;
                 if (!has_work()) {

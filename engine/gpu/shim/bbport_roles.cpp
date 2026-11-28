@@ -312,7 +312,7 @@ bool On() {
         const char* env = std::getenv("BB_THREAD_ROLES");
         const bool roles = !(env && env[0] == '0');
         if (!roles) {
-            std::printf("Roles: off (BB_THREAD_ROLES=0): the thread priorities before 0.4.6 beta 18\n");
+            std::printf("Roles: off (BB_THREAD_ROLES=0): the thread priorities of 0.4.5\n");
             return false;
         }
 #ifdef _WIN32
@@ -436,11 +436,7 @@ bool EndRaise() {
 }
 
 bool RaiseOnWait() {
-    static const bool on = [] {
-        const char* env = std::getenv("BB_RAISE_ON_WAIT");
-        return On() && !(env && env[0] == '0'); // without roles nothing puts a thread back
-    }();
-    return on;
+    return On(); // without roles nothing puts a thread back
 }
 
 // ---- 0.4.6 beta 20: the lock that carries priority (bbport_role_lock.h) ----------------------------
@@ -460,14 +456,6 @@ constexpr std::size_t kMaxLocks = 96;
 Stats g_locks[kMaxLocks];
 std::atomic<std::size_t> g_lock_count{0};
 std::mutex g_register;
-
-bool InheritOn() {
-    static const bool on = [] {
-        const char* env = std::getenv("BB_LOCK_INHERIT");
-        return !(env && env[0] == '0');
-    }();
-    return on;
-}
 
 /// How important a role's work is, for "a lower role holds what a higher one waits for" (t.mutex
 /// held). A waiter that is raised (a burst thread a frame waits on, a holder of a lock the chain
@@ -562,7 +550,7 @@ std::uint64_t Contended(Stats* stats, void* holder, std::uint64_t& start) {
     }
     stats->inversions.fetch_add(1, std::memory_order_relaxed);
     start = __rdtsc();
-    if (!InheritOn() || !On()) {
+    if (!On()) {
         return 0;
     }
 #ifdef _WIN32

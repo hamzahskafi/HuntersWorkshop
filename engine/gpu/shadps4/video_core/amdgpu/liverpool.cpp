@@ -56,9 +56,7 @@ void GiveTaskFrame(void* frame, std::size_t size) {
 }
 
 void Liverpool::WakeDecoder() {
-    if (BbPark::EngineWaits()) {
-        BbPark::Bump(decoder_word);
-    }
+    BbPark::Bump(decoder_word);
 }
 
 }
@@ -133,15 +131,6 @@ static size_t UnreadableDwords(std::span<const u32> span) {
 
 namespace {
 bool ZpassInOrder(); // bbport: BB_ZPASS_IN_ORDER (RunZpassDump)
-/// BB_SUBMIT_QUEUE=locked (0.4.6 beta 20 only): the GPU command thread takes each queue's lock to
-/// read and pop it, as before (docs/chain-waits.md, item 2).
-bool LockedSubmitQueue() {
-    static const bool locked = [] {
-        const char* env = std::getenv("BB_SUBMIT_QUEUE");
-        return env && std::strcmp(env, "locked") == 0;
-    }();
-    return locked;
-}
 } // namespace
 
 Liverpool::Liverpool() : guest_markers_enabled{EmulatorSettings.IsVkGuestMarkersEnabled()} {
@@ -264,8 +253,6 @@ void Liverpool::Process(std::stop_token stoken) {
         {
             const auto idle_start = std::chrono::steady_clock::now();
             BbTimeline::Note(BbTimeline::DecoderIdleBegin);
-            // 0.4.6 beta 21 research: a pause within the game's frame, not its wait between frames.
-            const bool mid_frame = !Libraries::GnmDriver::GuestWaitingForFrame();
             // bbport: the game submits a frame in ~20 parts: waking from the condition variable for
             // each took tens of microseconds on the way to the GPU. Spins first, with cores to spare
             // (200 us with 12+ hardware threads, else 0; BB_SPIN_US lowers it).
@@ -289,7 +276,7 @@ void Liverpool::Process(std::stop_token stoken) {
                     std::memory_order_relaxed);
             }
             bool gpu_wants_work_now = false;
-            if (BbPark::EngineWaits()) {
+            {
                 // 0.4.6 beta 19: on its own word (BbPark). The word is read before the state is
                 // looked at: a submission after that bumps it, so the wait returns at once.
                 std::stop_callback on_stop{stoken, [this] { BbPark::Bump(decoder_word); }};
@@ -307,22 +294,12 @@ void Liverpool::Process(std::stop_token stoken) {
                     }
                     BbPark::Wait(decoder_word, seen);
                 }
-            } else {
-                std::unique_lock lk{submit_mutex};
-                Common::CondvarWait(submit_cv, lk, stoken, [this] {
-                    return num_commands || num_submits || submit_done ||
-                           gpu_wants_work.load(std::memory_order_relaxed);
-                });
-                gpu_wants_work_now = gpu_wants_work.exchange(false, std::memory_order_relaxed);
             }
             decoder_idle.store(false, std::memory_order_release);
-            const u64 idle_ns = static_cast<u64>(std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                                     std::chrono::steady_clock::now() - idle_start)
-                                                     .count());
-            BbStats::gpu_idle_ns.fetch_add(idle_ns, std::memory_order_relaxed);
-            if (rasterizer && BbStats::enabled) {
-                rasterizer->NoteDecoderPause(idle_ns, mid_frame && !Libraries::GnmDriver::GuestWaitingForFrame());
-            }
+            BbStats::gpu_idle_ns.fetch_add(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now() - idle_start).count(),
+                std::memory_order_relaxed);
             BbTimeline::Note(BbTimeline::DecoderIdleEnd);
             if (gpu_wants_work_now && rasterizer) {
                 // The GPU has got to its last submission: the work waiting for it goes now, as
@@ -350,15 +327,9 @@ void Liverpool::Process(std::stop_token stoken) {
             auto& queue = mapped_queues[curr_qid];
 
             Task::Handle task{};
-            {
-                // 0.4.6 beta 20 (docs/chain-waits.md, item 2): no lock on this side.
-                std::unique_lock lock{queue.m_access, std::defer_lock};
-                if (LockedSubmitQueue()) {
-                    lock.lock();
-                }
-                if (!queue.submits.Front(task)) {
-                    continue;
-                }
+            // 0.4.6 beta 20 (docs/chain-waits.md, item 2): no lock on this side.
+            if (!queue.submits.Front(task)) {
+                continue;
             }
             if (task.address() != last_decoded) {
                 last_decoded = task.address();
@@ -372,10 +343,6 @@ void Liverpool::Process(std::stop_token stoken) {
 
                 bool frame_end = false;
                 {
-                    std::unique_lock lock{queue.m_access, std::defer_lock};
-                    if (LockedSubmitQueue()) {
-                        lock.lock();
-                    }
                     queue.submits.Pop();
 
                     --num_submits;
@@ -1912,11 +1879,6 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                     BbFreeCheck::NoteFenceDecoded(reinterpret_cast<u64>(event_eos->Address()),
                                                   event_eos->DataDWord(), header, dcb.data(), seq);
                 }
-                if (rasterizer && BbStats::enabled) {
-                    const bool value = event_eos->command.Value() == PM4CmdEventWriteEos::Command::SignalFence;
-                    rasterizer->NoteFenceDecoded(1, reinterpret_cast<VAddr>(event_eos->Address()),
-                                                 value ? 4u : 0u, false);
-                }
                 if (rasterizer &&
                     rasterizer->RunInOrder(&RunEventWriteEos, event_eos, sizeof(*event_eos),
                                            BbToggle::PipelinedTasks, false, "EventWriteEos")) {
@@ -1932,15 +1894,6 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                         event_eop->data_sel.Value() == DataSelect::Data32Low ? event_eop->DataDWord()
                                                                              : event_eop->DataQWord(),
                         header, dcb.data(), seq);
-                }
-                if (rasterizer && BbStats::enabled) {
-                    const auto sel = event_eop->data_sel.Value();
-                    rasterizer->NoteFenceDecoded(
-                        0, reinterpret_cast<VAddr>(event_eop->Address<u8>()),
-                        sel == DataSelect::None ? 0u : sel == DataSelect::Data32Low ? 4u
-                                                     : sel == DataSelect::Data64   ? 8u
-                                                                                   : 9u,
-                        event_eop->int_sel.Value() != InterruptSelect::None);
                 }
                 if (rasterizer) {
                     if (rasterizer->RunInOrder(&RunEventWriteEop, event_eop, sizeof(*event_eop),
@@ -2194,15 +2147,11 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
     }
     // 0.4.6 beta 20 (docs/chain-waits.md, item 6): the thread's times (a system call) read 10 times
     // a second, not at every submission (1.5-1.7% of this thread with the statistics on).
-    static const bool usage_every_submission = [] {
-        const char* env = std::getenv("BB_STATS_USAGE_EVERY");
-        return env && env[0] == '1';
-    }();
     static std::chrono::steady_clock::time_point next_usage{};
     if (seq != NoSeq && BbStats::enabled) {
         BbStats::submissions.fetch_add(1, std::memory_order_relaxed);
         const auto now = std::chrono::steady_clock::now();
-        if (usage_every_submission || now >= next_usage) {
+        if (now >= next_usage) {
             next_usage = now + std::chrono::milliseconds(100);
             if (BbPlatform::Usage usage; BbPlatform::GetUsage(true, usage)) {
                 BbStats::gpu_user_us.store(usage.user_us, std::memory_order_relaxed);
@@ -2483,17 +2432,6 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
             // BB_HONEST_LABELS: written once the GPU has finished the work before it (not a GDS store,
             // which needs the GPU copy recorded here).
             if (const auto* rm = reinterpret_cast<const PM4CmdReleaseMem*>(header);
-                rasterizer && BbStats::enabled) {
-                const auto sel = rm->data_sel.Value();
-                rasterizer->NoteFenceDecoded(
-                    2, rm->Address<VAddr>(),
-                    sel == DataSelect::None || sel == DataSelect::GdsMemStore ? 0u
-                    : sel == DataSelect::Data32Low                           ? 4u
-                    : sel == DataSelect::Data64                              ? 8u
-                                                                             : 9u,
-                    rm->int_sel.Value() != InterruptSelect::None);
-            }
-            if (const auto* rm = reinterpret_cast<const PM4CmdReleaseMem*>(header);
                 rasterizer && Vulkan::Rasterizer::HonestLabels() &&
                 rm->data_sel.Value() != DataSelect::GdsMemStore) {
                 rasterizer->ProcessDownloadImages();
@@ -2658,9 +2596,6 @@ bool Liverpool::EndFrameAtBoundary() {
     rasterizer->RunInOrder(&FrameEndTask, &frame, sizeof(frame), BbToggle::PipelinedTasks, true,
                            "SubmitDone");
     VideoCore::StartCapture();
-    if (BbStats::enabled) {
-        rasterizer->NoteFenceFrameEnd();
-    }
     return true;
 }
 
@@ -2681,9 +2616,6 @@ void Liverpool::SignalDecodedFrames() {
             Libraries::GnmDriver::NoteFramesRetired(frame);
         }
         return;
-    }
-    if (BbStats::enabled) {
-        rasterizer->NoteFenceFrameEnd();
     }
     // Everything of the frame recorded (the draw pipe drained), then submitted: finished once the
     // GPU has executed it, whatever is decoded after it.

@@ -4,7 +4,7 @@
 // here and give them back when done, instead of the heap: a frame was allocated under the
 // submission queue's lock by the game's submit, and freed on the GPU command thread, both through
 // the process heap's lock. A few sizes (the coroutines' frames), a few frames each; the rest goes
-// to the heap as before. BB_FRAME_POOL=0: the heap always. 0.4.6 beta 20: its lock is role-aware
+// to the heap as before. 0.4.6 beta 20: its lock is role-aware
 // (bbport_role_lock.h): the game's submit (Frame) and the GPU command thread (Chain) share it.
 #pragma once
 
@@ -30,17 +30,10 @@ inline Pool& Get() {
     static Pool pool;
     return pool;
 }
-inline bool On() {
-    static const bool on = [] {
-        const char* env = std::getenv("BB_FRAME_POOL");
-        return !(env && env[0] == '0');
-    }();
-    return on;
-}
 } // namespace Detail
 
 inline void* Take(std::size_t size) {
-    if (Detail::On()) {
+    {
         auto& p = Detail::Get();
         std::scoped_lock lock{p.mutex};
         for (std::size_t i = 0; i < Detail::kSizes; ++i) {
@@ -53,7 +46,7 @@ inline void* Take(std::size_t size) {
 }
 
 inline void Give(void* frame, std::size_t size) {
-    if (frame && Detail::On()) {
+    if (frame) {
         auto& p = Detail::Get();
         std::scoped_lock lock{p.mutex};
         for (std::size_t i = 0; i < Detail::kSizes; ++i) {

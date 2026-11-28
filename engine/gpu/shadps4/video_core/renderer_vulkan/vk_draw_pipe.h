@@ -85,14 +85,13 @@ public:
     /// visible; the fence that pairs with stage B's announced sleep, and the sleep checks, come
     /// every kPublishEvery packets and wherever stage A stops making packets (Publish). A
     /// sequentially consistent store and two checks on every packet were about 4.6% of stage A.
-    /// BB_PIPE_HANDOVER=each: every packet, as before.
     void Commit(u32 payload_size) {
         reinterpret_cast<Header*>(ring.get() + head % Capacity)->payload = payload_size;
         head += pending_size;
         ++packets;
         // A plain look at whether stage B (or the lookahead thread) is already asleep: then the
         // fence and the wake at once, not up to 7 packets later.
-        if (BatchedHandover() && ++unpublished < kPublishEvery &&
+        if (++unpublished < kPublishEvery &&
             !sleeping.load(std::memory_order_relaxed) &&
             !ahead_sleeping.load(std::memory_order_relaxed)) {
             published.store(head, std::memory_order_release);
@@ -122,22 +121,11 @@ public:
         }
     }
 
-    /// Stage B's packet count without a fence (BB_PIPE_COUNT=fenced, this beta only: as before;
-    /// also where the system has no process-wide fence).
+    /// Stage B's packet count without a fence, where the system has a process-wide fence (not under
+    /// Wine or Proton, whose one is a stub: there it stays fenced).
     static bool PlainCount() {
-        static const bool plain = [] {
-            const char* env = std::getenv("BB_PIPE_COUNT");
-            return !(env && std::strcmp(env, "fenced") == 0) && BbPark::HeavyFenceAvailable();
-        }();
+        static const bool plain = BbPark::HeavyFenceAvailable();
         return plain;
-    }
-
-    static bool BatchedHandover() {
-        static const bool on = [] {
-            const char* env = std::getenv("BB_PIPE_HANDOVER");
-            return !(env && std::strcmp(env, "each") == 0);
-        }();
-        return on;
     }
     /// Statistics: stage B's and the lookahead thread's sleeps that ended at kSleepCheckMs with a
     /// packet there that stage A never published with the fence (a publish point it missed;

@@ -192,7 +192,7 @@ inline u64 Ticks() {
 /// 0.4.6 beta 19: the packets timed, about one in 16: a countdown reloaded at random from 8 to 24
 /// (no fixed stride a command buffer's pattern could line up with), each timed packet counting as
 /// 16. Two clock reads a packet were about 10% of the GPU command thread with the statistics on
-/// (the tester's stage A profile, 2026-11-27). BB_STATS_EVERY_PACKET=1: every packet, as before.
+/// (the tester's stage A profile, 2026-11-27).
 extern u32 sample_countdown;
 extern u32 sample_weight;
 u32 NextSampleGap();

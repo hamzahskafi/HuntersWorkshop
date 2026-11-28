@@ -998,7 +998,7 @@ void VideoOutDriver::Flip(const Request& req) {
                 if (updates + copied_back + readbacks + stores != 0) {
                     std::printf("GPU data in VRAM: %.1f command writes/s put into it, %.1f blocks/s copied "
                                 "back, %.1f readbacks/s; labels and occlusion results stored %.1f/s, %.1f/s "
-                                "over a VRAM copy (marked to upload), %.1f/s on pages the GPU wrote (beta 13)\n",
+                                "over a VRAM copy (marked to upload), %.1f/s on pages the GPU wrote\n",
                                 updates / window, copied_back / window, readbacks / window, stores / window,
                                 marked / window, on_gpu / window);
                 }

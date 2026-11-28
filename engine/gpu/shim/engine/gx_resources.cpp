@@ -474,7 +474,7 @@ struct Counts {
     std::array<char, 1024> stale_top{};
     std::mutex stale_top_mutex;
     std::atomic<std::uint64_t> dead_freed{0}, dead_freed_bytes{0};
-    // Research (beta 16).
+    // The minute line "GX this minute" (beta 16).
     std::atomic<std::uint64_t> released_checked{0}, released_resident{0}, released_resident_bytes{0};
     std::array<std::atomic<std::uint64_t>, 4> shaders{};
     std::atomic<std::uint64_t> shaders_loading{0};
@@ -1535,7 +1535,7 @@ void NoteImageWatchFault(const WatchedImage& w) {
     } else {
         std::snprintf(where, sizeof(where), "; YEBIS's pool not known");
     }
-    host_log("GX memory: a write fault at %#llx on the page of a watched image (beta 16): %s, the image at %#llx "
+    host_log("GX memory: a write fault at %#llx on the page of a watched image: %s, the image at %#llx "
              "(%llu bytes, %ux%u, format %u), %s%s%s, the write %s it%s%s",
              (unsigned long long)w.fault, OwnerName(w.owner), (unsigned long long)w.memory,
              (unsigned long long)w.bytes, w.width, w.height, w.format,
@@ -1746,7 +1746,7 @@ void NoteAheadPhantom(std::uint64_t hash, unsigned stage, bool variant, bool fou
     if (named.fetch_add(1, std::memory_order_relaxed) < 8) {
         static constexpr const char* kStages[] = {"vertex", "pixel", "compute", "other"};
         host_log("Shaders: a %s shader %016llx%s queued ahead was never taken by the GPU command thread (a draw "
-                 "the prep workers see differently): not queued ahead again (beta 17)",
+                 "the prep workers see differently): not queued ahead again",
                  kStages[std::min(stage, 3u)], (unsigned long long)hash, variant ? "'s variant" : "");
     }
 }
@@ -2022,7 +2022,7 @@ void NoteUntoldWrite(std::uint64_t address, std::uint64_t bytes, std::uint64_t k
             told = it->second.told;
         }
     }
-    host_log("GX memory: the CPU wrote a live GX buffer with no call telling it (beta 12's net): [0x%llx, +0x%llx) "
+    host_log("GX memory: the CPU wrote a live GX buffer with no call telling it: [0x%llx, +0x%llx) "
              "of a buffer of %u bytes made %.1f s before (%u writes told); marked to upload",
              (unsigned long long)address, (unsigned long long)bytes, size, age, told);
 }
@@ -2222,7 +2222,7 @@ void LogMinute() {
              g_counts.gone_dropped.load(std::memory_order_relaxed) ? " (some destroyed textures not checked)" : "");
     if (g_follow) {
         host_log("GX follow this minute: %llu textures prepared at creation (made with their data, or sampled only "
-                 "without it: beta 7) (%llu without a T#, %llu with no "
+                 "without it) (%llu without a T#, %llu with no "
                  "renderer yet, %llu over the worker's queue), %llu built (%.0f MiB), %llu refreshed in place (the "
                  "same texture again), %llu left to their draw (an image there: %llu of a texture not destroyed, "
                  "%llu used since its texture was destroyed, %llu drawn by the GPU under a live texture), %llu "
@@ -2413,12 +2413,12 @@ void LogMinute() {
                      described.c_str(), homes.empty() ? "(none)" : homes.c_str());
         }
     }
-    host_log("GX research this minute: buffers released with the game's data in VRAM at their memory %llu of %llu "
-             "(%.0f MiB); shaders created: vertex %llu + %llu, pixel %llu, compute %llu (%llu during loading screens)",
-             (unsigned long long)take(g_counts.released_resident), (unsigned long long)take(g_counts.released_checked),
-             Mib(take(g_counts.released_resident_bytes)), (unsigned long long)take(g_counts.shaders[0]),
-             (unsigned long long)take(g_counts.shaders[1]), (unsigned long long)take(g_counts.shaders[2]),
-             (unsigned long long)take(g_counts.shaders[3]), (unsigned long long)take(g_counts.shaders_loading));
+    host_log("GX this minute: the game created shaders: vertex %llu + %llu, pixel %llu, compute %llu (%llu during "
+             "loading screens); it released %llu buffers, %llu with its data still in VRAM (%.0f MiB)",
+             (unsigned long long)take(g_counts.shaders[0]), (unsigned long long)take(g_counts.shaders[1]),
+             (unsigned long long)take(g_counts.shaders[2]), (unsigned long long)take(g_counts.shaders[3]),
+             (unsigned long long)take(g_counts.shaders_loading), (unsigned long long)take(g_counts.released_checked),
+             (unsigned long long)take(g_counts.released_resident), Mib(take(g_counts.released_resident_bytes)));
     // 0.4.6 beta 8: surfaces, first fills, CPU writes, the pool and the unwatched images; then shaders.
     static const char* const kStartNames[] = {"empty", "depth cleared", "depth cleared under the game's clear",
                                               "taken from the GPU's writes as a buffer",
@@ -2478,7 +2478,7 @@ void LogMinute() {
             written += part;
         }
     }
-    host_log("GX memory, surfaces this minute (beta 8): first uses of surfaces the game made without data for the "
+    host_log("GX memory, surfaces this minute: first uses of surfaces the game made without data for the "
              "GPU: %s; first fills from memory, by the resource there: %s; CPU writes that landed on images, by the "
              "live resource there: %s%s%s; on the game's buffers %llu (%.0f MiB); new surfaces that took a dead "
              "target's Vulkan image of their shape %llu (%.0f MiB), found none %llu; images left unwatched (the "
@@ -2502,7 +2502,7 @@ void LogMinute() {
             translated += part;
         }
     }
-    host_log("GX memory, write calls this minute (beta 9): YEBIS's Unmaps of its 2D textures %llu; Scaleform's "
+    host_log("GX memory, write calls this minute: YEBIS's Unmaps of its 2D textures %llu; Scaleform's "
              "unmaps of planes with memory of their own %llu; written textures told to the texture cache %llu "
              "(%llu dropped)",
              (unsigned long long)take(g_counts.yebis_unmaps), (unsigned long long)take(g_counts.sf_unmaps),
@@ -2523,7 +2523,7 @@ void LogMinute() {
             }
         }
     }
-    host_log("GX memory, the owner rule this minute (beta 11): images handed to a texture other than YEBIS's made "
+    host_log("GX memory, the owner rule this minute: images handed to a texture other than YEBIS's made "
              "over them without data, of their shape, %llu (%.0f MiB)",
              (unsigned long long)take(g_counts.owner_handed), Mib(take(g_counts.owner_handed_bytes)));
     {
@@ -2536,7 +2536,7 @@ void LogMinute() {
         const unsigned long long covered = ev(MemoryEvent::Covered);
         const double covered_mib = evb(MemoryEvent::Covered);
         const std::int64_t pages = g_counts.calls_pages.load(std::memory_order_relaxed);
-        host_log("GX memory, the game's buffers by the calls this minute (beta 12): buffers made %llu (%.0f MiB) and "
+        host_log("GX memory, the game's buffers by the calls this minute: buffers made %llu (%.0f MiB) and "
                  "%llu with their data (%.0f MiB), released %llu (%.0f MiB); textures destroyed, their memory handed "
                  "back %llu (%.0f MiB); live buffers' memory a new resource was made over %llu (%.0f MiB); pages kept "
                  "writable for the calls now %lld (%.0f MiB); writes told over live buffers %llu; the net: %llu buffers "
@@ -2568,7 +2568,7 @@ void LogMinute() {
             for (const auto& [n, what] : cells) {
                 out += (out.empty() ? "" : "; ") + what + " " + std::to_string(n);
             }
-            host_log("GX memory, write faults by what watched the page this minute (beta 13): %llu; %s; an image "
+            host_log("GX memory, write faults by what watched the page this minute: %llu; %s; an image "
                      "watched the page besides the buffer cache %llu",
                      (unsigned long long)total, out.c_str(), (unsigned long long)image_too);
         }
@@ -2619,7 +2619,7 @@ void LogMinute() {
                 faults += part;
             }
         }
-        host_log("GX memory, textures by their calls this minute (beta 16): images watched by page protection: %s; "
+        host_log("GX memory, textures by their calls this minute: images watched by page protection: %s; "
                  "left to the calls: %s; write faults on images by the image's resource: %s (an image reaching past "
                  "its resource's bytes %llu); YEBIS's takes from its pool told %llu, marking %llu images written; the "
                  "engine's DMA stores told %llu, marking %llu images written; images handed to a texture the calls do "
@@ -2635,12 +2635,13 @@ void LogMinute() {
                  (unsigned long long)take(g_counts.tnet_untold), Mib(take(g_counts.tnet_untold_bytes)),
                  round_text.c_str());
     }
-    host_log("GX memory, owners this minute (beta 10): new textures over a live texture's memory, at its base: %s; "
+    host_log("GX memory, owners this minute: new textures over a live texture's memory, at its base: %s; "
              "partly: %s; images marked written by a creation with data over them %llu (%.0f MiB), live surfaces "
              "reaching past one kept %llu; dead images a draw took again: %llu after their texture's destroy, %llu "
              "after something newer was made over them (%.0f MiB in all), of which the owner rule would hand over "
-             "%llu (a texture made without data and as large lives there) and refuse %llu; today's guesses it would replace by retiring: dead images kept because another "
-             "live texture overlaps %llu (%.0f MiB), because used just before the new resource %llu (%.0f MiB), "
+             "%llu (a texture made without data and as large lives there) and refuse %llu; dead images kept "
+             "because another live texture overlaps %llu (%.0f MiB), because a draw used them just before the new "
+             "resource was made %llu (%.0f MiB), "
              "stale images freed that had an owner %llu (%.0f MiB); copies run through memory %llu, to an owned "
              "image %llu, owned to owned %llu",
              base_pairs.empty() ? "none" : base_pairs.c_str(), part_pairs.empty() ? "none" : part_pairs.c_str(),
@@ -2668,9 +2669,9 @@ void LogMinute() {
             ahead_used += part;
         }
     }
-    host_log("Shaders this minute (beta 8): input layouts the game created %llu (%llu during loading screens, %llu "
+    host_log("Shaders this minute: input layouts the game created %llu (%llu during loading screens, %llu "
              "vertex elements); translated for draws on the GPU command thread: %s; translated ahead on the "
-             "compile threads (beta 17): stages queued %llu (%llu more already queued), used %s (%.1f ms "
+             "compile threads: stages queued %llu (%llu more already queued), used %s (%.1f ms "
              "translating; the GPU command thread waited for %llu, %.1f ms, and ran %llu jobs itself), refused or "
              "failed %llu, never taken %llu (their requests since not queued %llu)",
              (unsigned long long)take(g_counts.input_layouts), (unsigned long long)take(g_counts.input_layouts_loading),

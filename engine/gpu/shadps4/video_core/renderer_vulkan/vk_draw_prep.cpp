@@ -57,16 +57,6 @@ void ForEachPacket(std::span<const u32> commands, Func&& func) {
     }
 }
 
-/// BB_PREP_HANDOVER=old (0.4.6 beta 20 only): the GPU thread takes the draw preparation's lock at
-/// each submission's start (waiting for a rebase) and end (collecting) as before.
-bool OldHandover() {
-    static const bool old = [] {
-        const char* env = std::getenv("BB_PREP_HANDOVER");
-        return env && std::strcmp(env, "old") == 0;
-    }();
-    return old;
-}
-
 u32 DefaultWorkerCount() {
     // BB_PREP_WORKERS. Workers are idle priority (the Assist role) and claim whole buffers.
     return BbRoles::PoolSize(BbRoles::Pool::DrawPrep);
@@ -315,13 +305,11 @@ void DrawPreparation::BeginSubmission(u64 seq, const AmdGpu::Regs& regs, u64 reg
     // them from the GPU thread's own state (one register copy) once the scanner lags. 0.4.6 beta
     // 20: only if the lock is free now; else at a later submission (the helpers hold it).
     constexpr u64 MaxScanLag = 64;
-    if (seq <= scan_next.load(std::memory_order_acquire) + MaxScanLag && !OldHandover()) {
+    if (seq <= scan_next.load(std::memory_order_acquire) + MaxScanLag) {
         return;
     }
     std::unique_lock lk{mutex, std::defer_lock};
-    if (OldHandover()) {
-        lk.lock();
-    } else if (!lk.try_lock()) {
+    if (!lk.try_lock()) {
         return;
     }
     if (seq > tail_seq + MaxScanLag && !submissions.empty() && submissions.front()->seq < seq &&
@@ -345,10 +333,6 @@ void DrawPreparation::EndSubmission() {
         Submission* const done = current.get();
         current.reset();
         done->gpu_done.store(true, std::memory_order_release);
-    }
-    if (Enabled() && OldHandover()) {
-        std::scoped_lock lk{mutex};
-        Collect();
     }
 }
 

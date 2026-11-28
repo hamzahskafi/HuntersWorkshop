@@ -289,7 +289,7 @@ private:
     struct GpuQueue {
         /// 0.4.6 beta 20 (docs/chain-waits.md, item 2): the game's submitting threads' lock among
         /// themselves (numbering, the draw preparation's queue and the push in one order); the GPU
-        /// command thread reads `submits` without it (BB_SUBMIT_QUEUE=locked: with it, as before).
+        /// command thread reads `submits` without it.
         std::mutex m_access{};
         SubmitQueue<Task::Handle> submits{};
         ComputeProgram cs_state{};
@@ -367,7 +367,7 @@ private:
     std::condition_variable_any submit_cv;
     /// bbport 0.4.6 beta 19: the word the GPU command thread's idle wait sleeps on (BbPark,
     /// liverpool.cpp), bumped wherever submit_cv is notified for it; submit_cv stays for
-    /// WaitGpuIdle. BB_ENGINE_PARK=0: the condition variable, as before.
+    /// WaitGpuIdle.
     std::atomic<u32> decoder_word{0};
     void WakeDecoder();
     /// bbport BB_HONEST_LABELS: set by WakeForGpu (under submit_mutex), taken by the idle wait.

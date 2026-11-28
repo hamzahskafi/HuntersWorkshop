@@ -185,15 +185,9 @@ bool TimingEnabled() {
 }
 
 u32 sample_countdown = 1;
-u32 sample_weight = [] {
-    const char* env = std::getenv("BB_STATS_EVERY_PACKET");
-    return env && env[0] == '1' ? 1u : 16u;
-}();
+u32 sample_weight = 16;
 
 u32 NextSampleGap() {
-    if (sample_weight == 1) {
-        return 1;
-    }
     sample_state = sample_state * 6364136223846793005ull + 1442695040888963407ull;
     return 8 + static_cast<u32>((sample_state >> 33) % 17); // 8 to 24, 16 on average
 }
