@@ -6,7 +6,10 @@
 // queue has finished). On device lost the last value says which command never finished, and the
 // notes kept here say what it was. BB_BREADCRUMBS=0 turns them off. 0.4.4 beta 21: only 2n+1 by
 // default (the marker before a command repeats the one after the command before it, but for the
-// work recorded between them); BB_BREADCRUMBS=both writes 2n too.
+// work recorded between them); BB_BREADCRUMBS=both writes 2n too. 0.4.6 beta 21 (engine id 144):
+// by default only every 32nd command writes its marker (one after each cost 1.3-2.3% of the frame
+// rate on the RX 9070 XT); every command is still noted, so a hang report names the stretch of up
+// to 32 the GPU stopped in. BB_BREADCRUMBS=all: a marker after each command, as before.
 #pragma once
 
 #include "common/types.h"

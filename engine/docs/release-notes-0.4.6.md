@@ -463,6 +463,10 @@ priority on to the thread holding the lock.
   test spots against beta 20). `BB_CUT_IN_PASS=1` cuts inside them too, as before.
 - The quick check of the memory the queued draws write keeps working with up to 64 large writes live
   (16 before).
+- **The GPU hang markers cost less** (engine id 144): the GPU writes one after every 32nd draw or
+  dispatch instead of after each (+1.3 to +2.3% measured with them off on the RX 9070 XT). A hang report
+  names the stretch of up to 32 commands the GPU stopped in, each of them listed. `BB_BREADCRUMBS=all`
+  puts one after each command again, to name the one.
 - Tried and taken out again: a new way of handing the work to the GPU, with the game's fences written as
   the GPU passes them (engine ids 140 to 142). It worked as built, but measured level with the way
   before with the GPU as the limit and about 1% behind with fewer CPU threads, so it is gone
