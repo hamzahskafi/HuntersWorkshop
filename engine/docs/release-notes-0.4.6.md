@@ -17,6 +17,8 @@ engine id 145 (`_030936`).
 | Busy view (about 1,785 draws) | 187.6 FPS | 204.0 FPS | +8.7% |
 | Slow area (about 1,230-1,270 draws) | 191.7 FPS | 227.0 FPS | +18.4% |
 
+Against Lantern 0.9.37, the version Hunter's Workshop forked from, on the same PC with the same save and settings (`lantern-20261128_060100`): the lamp spot 177.6 FPS (0.4.6 +32%), the busy view 162.9 FPS (+25%); the slow area was not run.
+
 In 0.4.5 the slow area was held by the engine's threads (the game waited for its previous frame
 0.05-0.1 ms a frame, 20 submissions a frame); in 0.4.6 all three are held by the GPU. The tester's CPU
 usage is 5-10% lower in 0.4.6 (Task Manager), at the higher frame rates.
