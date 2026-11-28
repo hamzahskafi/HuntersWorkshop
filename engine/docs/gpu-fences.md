@@ -482,3 +482,33 @@ and 1,544 draws a frame), so not compared.
   submission. Handing over what is recorded at the moment the game waits would close it, but with the
   old path level with the queue there and switches costing nothing measurable, the gain would be small.
 
+## With the CPU closer to the limit: `BB_TEST_CPUS=8` (2026-11-28)
+
+The tester's runs on 142, frame statistics on, the process held to 8 logical processors:
+`20261128_023105` (the queue) and `_023323` (`BB_GPU_FENCES=cpu`).
+
+| | The queue | The old path |
+|---|---|---|
+| Lamp spot | 225.5 FPS, 3.9-4.3 submissions a frame | 225.6, 5.8-6.6 |
+| Busy view | 182.8, 9.6-9.8 | 185.2, 9.4-9.7 |
+| Slow area | 203.1, 11.4-13.3 | 205.0, 13.1-13.9 |
+
+- **The queue is behind where the CPU nears the limit:** busy view -1.3%, slow area -0.9%, the lamp spot
+  level. Its own counts say why: the GPU ran out with work waiting 1.7 times a frame in the busy view and
+  1.5 in the slow area (0.3-0.4 at the lamp spot), and submissions found it done with everything 2.7-3.2
+  times a frame. The hand-over at the game's wait fired 0.1 a frame at the lamp spot (0.9 with 20
+  threads): with fewer threads the GPU command thread decodes the third submission after the game has
+  stopped waiting.
+- **Why the old path does better there:** it never holds work while the GPU is down to its last
+  submission, and while it holds, the signal thread watches for the GPU reaching its last submission (an
+  event on the timeline) and hands over then, before the GPU runs out. The queue holds while the GPU's
+  last submission has more than one unit left, and between the game's submissions nothing can see the
+  GPU reach its last unit: when the game is slower, the GPU runs out first and waits a round trip. Its
+  saving, a submission less, is worth nothing on this GPU (142's runs above).
+- **Conclusion:** the queue's hand-over is not more optimal than the old path's: level with the GPU as
+  the limit, behind with the CPU nearer it. The early fences showed no effect on the frame rate either.
+  Measured on the RX 9070 XT and the i5-14600KF only.
+- `20261128_022802` (the queue, 60 FPS preset, a cutscene save): pacing exact (median 16.67 ms, stddev
+  0.02-0.03 ms, no frame over 1.5 times the median), 6-11 submissions a frame (the GPU idle under the cap,
+  taking the work as it comes), a clean exit.
+
